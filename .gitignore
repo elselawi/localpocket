@@ -1,0 +1,27 @@
+# Analysis / build artifacts
+.dart_tool/
+build/
+*.iml
+.idea/
+.vscode/
+
+# Generated code
+**/*.g.dart
+
+# Scratch/probing code — NOT part of the library or test suite.
+probe/
+
+# Benchmark result artifacts (persisted locally for reference, not committed).
+# Basename patterns have no slash, so they keep matching even if a result file
+# is moved outside benchmark/results/.
+benchmark/results/
+localpocket_benchmark_*.json
+localpocket_comparative_*.json
+benchmark/*.dll
+
+# auditing and planning documents
+_*.md
+probe_*.dart
+
+# secrets
+secret.dart

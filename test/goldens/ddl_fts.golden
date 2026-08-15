@@ -1,0 +1,15 @@
+CREATE VIRTUAL TABLE "widgets_fts" USING fts5(
+  name, meta,
+  content = 'widgets',
+  content_rowid = 'rowid'
+);
+CREATE TRIGGER "widgets_ai" AFTER INSERT ON "widgets" BEGIN
+  INSERT INTO "widgets_fts"(rowid, name, meta) VALUES (new.rowid, new."name", new."meta");
+END;
+CREATE TRIGGER "widgets_ad" AFTER DELETE ON "widgets" BEGIN
+  INSERT INTO "widgets_fts"("widgets_fts", rowid, name, meta) VALUES ('delete', old.rowid, old."name", old."meta");
+END;
+CREATE TRIGGER "widgets_au" AFTER UPDATE ON "widgets" WHEN new."name" IS NOT old."name" OR new."meta" IS NOT old."meta" BEGIN
+  INSERT INTO "widgets_fts"("widgets_fts", rowid, name, meta) VALUES ('delete', old.rowid, old."name", old."meta");
+  INSERT INTO "widgets_fts"(rowid, name, meta) VALUES (new.rowid, new."name", new."meta");
+END;

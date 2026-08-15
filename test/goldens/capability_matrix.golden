@@ -1,0 +1,6 @@
+3.35.0 native: strict=false wal=true mmap=true fts5=true
+3.37.0 native: strict=true wal=true mmap=true fts5=true
+3.39.4 native: strict=true wal=true mmap=true fts5=true
+3.44.2 native: strict=true wal=true mmap=true fts5=true
+3.35.0 web: strict=false wal=false mmap=false fts5=true
+3.44.2 web: strict=true wal=false mmap=false fts5=true

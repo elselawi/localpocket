@@ -1,0 +1,227 @@
+import 'dart:convert';
+
+import 'package:localpocket/localpocket.dart';
+import 'package:test/test.dart';
+
+import '../../support/helpers.dart';
+
+/// Query builder tests.
+void main() {
+  group('query builder', () {
+    late LocalPocket pocket;
+    late Collection col;
+
+    setUp(() async {
+      pocket = await openPocket();
+      col = pocket.collection('widgets');
+    });
+
+    test('distinct and countDistinct aggregates', () async {
+      await col.put(record(id: generateRecordId(), name: 'Apple', qty: 10));
+      await col.put(record(id: generateRecordId(), name: 'Banana', qty: 20));
+      await col.put(record(id: generateRecordId(), name: 'Apple', qty: 30));
+      await col.put(record(id: generateRecordId(), name: 'Orange', qty: 20));
+      await col.put(record(id: generateRecordId(), name: 'Apple', qty: 10));
+
+      final q = col.query();
+      expect(await q.countDistinct('name'), 3);
+      expect(await q.countDistinct('qty'), 3);
+
+      final distinctNames = await q.distinct('name');
+      expect(distinctNames.toSet(), {'Apple', 'Banana', 'Orange'});
+
+      final distinctQtys = await q.distinct('qty');
+      expect(distinctQtys.toSet(), {10, 20, 30});
+
+      final scopedDistinct =
+          await col.query().where('qty', gte: 20).distinct('name');
+      expect(scopedDistinct.toSet(), {'Banana', 'Apple', 'Orange'});
+    });
+    tearDown(() => pocket.close());
+
+    test('predicate compilation goldens', () async {
+      final golden = await readGolden('test/goldens/predicate_sql.golden');
+
+      QueryBuilder build(String name) {
+        final q = col.query();
+        switch (name) {
+          case 'eq':
+            return q.where('qty', eq: 1).limit(10);
+          case 'starts_with':
+            return q.where('name', startsWith: 'A').orderBy('name').limit(5);
+          case 'between':
+            return q.where('made_on', between: (100, 200)).limit(10);
+          case 'in_values':
+            return q.where('qty', inValues: [1, 2, 3]).limit(10);
+          case 'or_group':
+            return q.orWhere([
+              {'name': 'a'},
+              {'qty': 1}
+            ]).limit(10);
+          case 'multiple_and':
+            return q.where('name', eq: 'x').where('active', eq: true).limit(10);
+          case 'range_sort_desc':
+            return q.where('qty', gte: 10).orderBy('qty', desc: true).limit(10);
+          case 'include_archived':
+            return q.where('qty', eq: 1).includeArchived().limit(10);
+          default:
+            throw ArgumentError(name);
+        }
+      }
+
+      for (final line in golden.split('\n')) {
+        final trimmed = line.trim();
+        if (trimmed.isEmpty) continue;
+        final sep = trimmed.indexOf(' | ');
+        final name = trimmed.substring(0, trimmed.indexOf(':'));
+        final sql = trimmed.substring(trimmed.indexOf(':') + 2, sep);
+        final argsJson = trimmed.substring(sep + 3);
+
+        final (actualSql, actualArgs) = build(name).debugCompile();
+        expect(actualSql, sql, reason: '$name SQL golden');
+        expect(jsonEncode(actualArgs), argsJson, reason: '$name args golden');
+      }
+    });
+
+    test('like escaping percent underscore', () async {
+      final (sql, args) = col
+          .query()
+          .where('name', startsWith: r'A%_B')
+          .limit(5)
+          .debugCompile();
+      expect(args.first, r'A\%\_B%');
+      expect(sql, contains(r"ESCAPE '\'"));
+
+      final (sql2, args2) =
+          col.query().where('name', contains: '50%').limit(5).debugCompile();
+      expect(args2.first, r'%50\%%');
+
+      final (sql3, args3) =
+          col.query().where('name', endsWith: r'\_').limit(5).debugCompile();
+      // literal backslash + literal underscore are both escaped
+      expect(args3.first, r'%\\\_');
+    });
+
+    test('keyset tuple cursor sql and pagination', () async {
+      final ids = <String>[];
+      for (var i = 0; i < 30; i++) {
+        final id = generateRecordId();
+        ids.add(id);
+        await col.put(record(id: id, name: 'n$i', qty: i % 7));
+      }
+
+      final page1 =
+          await col.query().orderBy('qty', desc: true).limit(10).fetch();
+      expect(page1.items, hasLength(10));
+      expect(page1.hasMore, isTrue);
+      expect(page1.nextCursor, isNotNull);
+
+      final page2 = await col
+          .query()
+          .orderBy('qty', desc: true)
+          .limit(10)
+          .keysetAfter(page1.nextCursor!);
+      final page3 = await col
+          .query()
+          .orderBy('qty', desc: true)
+          .limit(10)
+          .keysetAfter(page2.nextCursor!);
+      expect(page3.hasMore, isFalse);
+
+      final walked = [...page1.items, ...page2.items, ...page3.items];
+      expect(walked.map((r) => r['id']).toSet(), hasLength(30),
+          reason: 'no duplicates, no skips');
+
+      final expected =
+          await col.query().orderBy('qty', desc: true).all().fetch();
+      expect([
+        for (final r in walked) r['id']
+      ], [
+        for (final r in expected.items) r['id']
+      ], reason: 'keyset order matches full fetch');
+    });
+
+    test('cursor rejected across sort shapes', () async {
+      for (var i = 0; i < 10; i++) {
+        await col.put(record(id: generateRecordId(), name: 'n$i', qty: i));
+      }
+      final desc =
+          await col.query().orderBy('qty', desc: true).limit(5).fetch();
+      expect(desc.nextCursor, isNotNull);
+
+      // Reversed sort direction: rejected.
+      await expectLater(
+          col.query().orderBy('qty').limit(5).keysetAfter(desc.nextCursor!),
+          throwsA(isA<StaleCursorError>()));
+
+      // Different sort column: rejected.
+      await expectLater(
+          col.query().orderBy('name').limit(5).keysetAfter(desc.nextCursor!),
+          throwsA(isA<StaleCursorError>()));
+    });
+
+    test('limit mandatory except all', () async {
+      for (var i = 0; i < 5; i++) {
+        await col.put(record(id: generateRecordId(), name: 'n$i', qty: i));
+      }
+      await expectLater(col.query().fetch(), throwsA(isA<MissingLimitError>()));
+      final all = await col.query().all().fetch();
+      expect(all.items, hasLength(5));
+      final limited = await col.query().limit(2).fetch();
+      expect(limited.items, hasLength(2));
+    });
+
+    test('projections never read doc', () async {
+      await col.put(record(id: generateRecordId(), name: 'x', qty: 1));
+      final plan = await col
+          .query()
+          .select(['id', 'name', 'qty'])
+          .where('name', eq: 'x')
+          .orderBy('name')
+          .limit(10)
+          .explain();
+      expect(plan, contains('COVERING INDEX'),
+          reason:
+              'projection + partial index should be index-only, got:\n$plan');
+      expect(plan, isNot(contains('SCAN')));
+    });
+
+    test('aggregates count sum min max avg', () async {
+      for (var i = 1; i <= 10; i++) {
+        await col.put(record(id: generateRecordId(), name: 'n$i', qty: i));
+      }
+      final q = col.query();
+      expect(await q.count(), 10);
+      expect(await q.sum('qty'), 55);
+      expect(await q.min('qty'), 1);
+      expect(await q.max('qty'), 10);
+      expect(await q.avg('qty'), 5.5);
+    });
+
+    test('empty and single row results', () async {
+      final empty = await col.query().limit(5).fetch();
+      expect(empty.items, isEmpty);
+      expect(empty.hasMore, isFalse);
+      expect(empty.nextCursor, isNull);
+
+      await col.put(record(id: generateRecordId(), name: 'only'));
+      final one = await col.query().limit(5).fetch();
+      expect(one.items, hasLength(1));
+      expect(one.hasMore, isFalse);
+    });
+
+    test('date range millisecond boundary inclusive exclusive', () async {
+      for (final d in [100, 199, 200, 201]) {
+        await col.put(record(id: generateRecordId(), name: 'n$d', madeOn: d));
+      }
+      final page = await col
+          .query()
+          .where('made_on', between: (100, 200))
+          .orderBy('made_on')
+          .limit(10)
+          .fetch();
+      expect(page.items.map((r) => r['made_on']).toList(), [100, 199],
+          reason: '[start, end) semantics');
+    });
+  });
+}

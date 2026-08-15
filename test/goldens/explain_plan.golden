@@ -1,0 +1,23 @@
+=== SELECT * FROM "widgets" WHERE archived = 0 AND hidden = 0 AND "qty" >= ? ORDER BY "qty" ASC, "id" ASC LIMIT 51 ===
+  5|0|194|SEARCH widgets USING INDEX ix_widgets_live_qty (qty>?)
+
+=== SELECT * FROM "widgets" WHERE hidden = 0 AND "qty" >= ? ORDER BY "qty" ASC, "id" ASC LIMIT 51 ===
+  4|0|216|SCAN widgets
+  25|0|0|USE TEMP B-TREE FOR ORDER BY
+
+=== SELECT * FROM "widgets" WHERE archived = 0 AND hidden = 0 ORDER BY "qty" ASC, "id" ASC LIMIT 4 ===
+  5|0|214|SCAN widgets USING INDEX ix_widgets_live_qty
+
+=== SELECT * FROM "widgets" WHERE archived = 0 AND hidden = 0 AND ("qty", "id") > (?, ?) ORDER BY "qty" ASC, "id" ASC LIMIT 4 ===
+  5|0|194|SEARCH widgets USING INDEX ix_widgets_live_qty ((qty,id)>(?,?))
+
+=== SELECT b.id, rank AS score FROM "widgets_fts" JOIN "widgets" b ON b.rowid = "widgets_fts".rowid WHERE "widgets_fts" MATCH ? AND b.archived = 0 AND b.hidden = 0 ORDER BY rank LIMIT 50 ===
+  5|0|156|SCAN widgets_fts VIRTUAL TABLE INDEX 32:M2
+  10|0|45|SEARCH b USING INTEGER PRIMARY KEY (rowid=?)
+
+=== SELECT o.* FROM lp_outbox o JOIN lp_sync_row s ON o.store = s.store AND o.record_id = s.record_id WHERE s.sync_state NOT IN ('error','quarantine','conflict') AND (s.next_retry_at IS NULL OR s.next_retry_at <= ?) ORDER BY o.created_at ASC, o.rowid ASC LIMIT ? ===
+  8|0|221|SCAN o USING INDEX ix_outbox_drain
+  11|0|46|SEARCH s USING INDEX sqlite_autoindex_lp_sync_row_1 (store=? AND record_id=?)
+
+=== SELECT record_id FROM lp_sync_row WHERE store = ? AND record_id LIKE ? ===
+  2|0|54|SEARCH lp_sync_row USING COVERING INDEX sqlite_autoindex_lp_sync_row_1 (store=?)

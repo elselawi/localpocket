@@ -1,0 +1,25 @@
+name: localpocket
+description: >-
+  Local-first SQLite database for Dart/Flutter with eventually-consistent
+  PocketBase synchronization. Implements the plan in plan.md (Phases 1-2).
+version: 0.1.1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  sqlite3: ">=2.4.0 <4.0.0"
+  path: ^1.8.0
+  collection: ^1.17.0
+  crypto: ^3.0.0
+  meta: ^1.9.0
+  http: ^1.6.0
+  cryptography: ^2.9.0
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^3.0.0
+  sembast: ^3.8.6
+  hive: ^2.2.3
+  drift: ^2.34.3
+  isar: ^3.1.0+1

@@ -1,0 +1,3 @@
+CREATE INDEX "ix_widgets_live_name_qty" ON "widgets" ("name", "qty", "id") WHERE archived = 0 AND hidden = 0;
+CREATE INDEX "ix_widgets_live_owner_id" ON "widgets" ("owner_id", "id") WHERE archived = 0 AND hidden = 0;
+CREATE UNIQUE INDEX "ux_widgets_phone" ON "widgets" ("phone") WHERE "phone" IS NOT NULL AND archived = 0;

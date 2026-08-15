@@ -1,0 +1,11 @@
+# Test configuration.
+#
+# `real`-tagged tests hit the LIVE PocketBase server configured in
+# test/secret.dart (gitignored) and need network + valid credentials. They are
+# SKIPPED in the default run so the hermetic gate stays green offline.
+#
+# Run them explicitly with:
+#   dart test --tags real --run-skipped test/e2e/real/
+tags:
+  real:
+    skip: "Live PocketBase server tests — run with: dart test --tags real --run-skipped test/e2e/real/"

@@ -1,0 +1,29 @@
+/// PocketBase adapter: a [SyncBackend]
+/// implementation over the real PocketBase wire contract. Confined here — core
+/// and sync never import it (layering rule 3).
+///
+/// ```dart
+/// final backend = PocketBaseBackend(
+///   baseUrl: Uri.parse('https://pb.example.com'),
+///   tokenProvider: secureTokenProvider,
+///   stores: ['patients'],
+/// );
+/// final engine = SyncEngine(pocket: db, backend: backend);
+/// await engine.start();
+/// ```
+library;
+
+export 'src/pocketbase/backend.dart' show PocketBaseBackend;
+export 'src/pocketbase/auth.dart' show AuthManager, Token, TokenProvider;
+export 'src/pocketbase/filter_builder.dart'
+    show pullFilter, pullPageFilter, quote, sweepFilter;
+export 'src/pocketbase/transport.dart'
+    show
+        HttpRequest,
+        HttpMultipartFile,
+        HttpMultipartRequest,
+        HttpResponse,
+        HttpTransport,
+        HttpTransportException,
+        PackageHttpTransport,
+        StreamedHttpResponse;

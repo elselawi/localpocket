@@ -1,0 +1,410 @@
+import 'dart:async';
+import 'dart:convert';
+import '../core/database_adapter.dart';
+
+import '../core/change_bus.dart';
+import '../core/ids.dart';
+import '../core/local_pocket.dart';
+import '../core/sql_utils.dart';
+import 'blob_store.dart';
+import '../sync/sync_tables.dart';
+
+/// Representation of a file ref in `lp_file_refs`.
+class FileRef {
+  /// Stable local file-reference ID.
+  final String refId;
+
+  /// Collection containing the owning record.
+  final String store;
+
+  /// Record containing the attachment.
+  final String recordId;
+
+  /// Attachment field name.
+  final String field;
+
+  /// Content hash used to locate the blob.
+  final String hash;
+
+  /// Remote filename, when known.
+  final String? remoteName;
+
+  /// Lifecycle state: pending upload, synced, pending remove, remote-only, or orphaned.
+  final String state;
+
+  /// Persisted retry deadline.
+  final int nextRetryAt;
+
+  /// Number of attempted file operations.
+  final int attemptCount;
+
+  /// Most recent file-operation error.
+  final String? lastError;
+
+  /// Creates a file-reference value.
+  const FileRef({
+    required this.refId,
+    required this.store,
+    required this.recordId,
+    required this.field,
+    required this.hash,
+    this.remoteName,
+    required this.state,
+    this.nextRetryAt = 0,
+    this.attemptCount = 0,
+    this.lastError,
+  });
+
+  static FileRef fromRow(Map<String, Object?> row) {
+    return FileRef(
+      refId: row['ref_id'] as String,
+      store: row['store'] as String,
+      recordId: row['record_id'] as String,
+      field: row['field'] as String,
+      hash: row['hash'] as String,
+      remoteName: row['remote_name'] as String?,
+      state: row['state'] as String,
+      nextRetryAt: row['next_retry_at'] as int? ?? 0,
+      attemptCount: row['attempt_count'] as int? ?? 0,
+      lastError: row['last_error'] as String?,
+    );
+  }
+}
+
+/// App-facing Files API on LocalPocket.
+/// Application-facing attachment and blob lifecycle API.
+class LocalPocketFiles {
+  final LocalPocket _pocket;
+
+  /// Blob store used for attachment bytes.
+  final BlobStore? blobStore;
+
+  /// Internal constructor used by [LocalPocket].
+  LocalPocketFiles.internal(this._pocket, {this.blobStore});
+
+  BlobStore get _requireBlobStore {
+    final bs = blobStore;
+    if (bs == null) {
+      throw StateError('No BlobStore configured on LocalPocket');
+    }
+    return bs;
+  }
+
+  /// Lists file references attached to a record field.
+  ///
+  /// ```dart
+  /// final refs = await db.files.list(
+  ///   store: 'tasks',
+  ///   recordId: taskId,
+  /// );
+  /// ```
+  Future<List<FileRef>> list({
+    required String store,
+    required String recordId,
+    String field = 'imgs',
+  }) async {
+    final rows = await _pocket.db.query(
+      'lp_file_refs',
+      where: 'store = ? AND record_id = ? AND field = ?',
+      whereArgs: [store, recordId, field],
+    );
+    return rows.map(FileRef.fromRow).toList();
+  }
+
+  /// Attaches a file to a record.
+  ///
+  /// The input stream is hashed and stored before a durable file-reference and
+  /// upload operation are created. The record-first dependency ensures the
+  /// owning record is synchronized before its attachment.
+  ///
+  /// Streams bytes into BlobStore, records `lp_blobs` and `lp_file_refs` (pending_upload),
+  /// and enqueues a `file_upload` op in `lp_op_queue`.
+  Future<FileRef> attach({
+    required String store,
+    required String recordId,
+    required Stream<List<int>> bytes,
+    String field = 'imgs',
+    String? name,
+    int? expectedSize,
+    String? expectedSha256,
+  }) async {
+    final bs = _requireBlobStore;
+    final hash = await bs.put(
+      bytes,
+      expectedSha256: expectedSha256,
+      expectedSize: expectedSize,
+    );
+    final size = (await bs.size(hash)) ?? 0;
+    final refId = generateRecordId();
+
+    await _pocket.transaction((tx) async {
+      final exec = tx.executor;
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      // 1. Update lp_blobs (refcount++)
+      final existingBlob = await exec.query(
+        'lp_blobs',
+        columns: ['hash', 'refcount'],
+        where: 'hash = ?',
+        whereArgs: [hash],
+        limit: 1,
+      );
+      if (existingBlob.isEmpty) {
+        await exec.insert('lp_blobs', {
+          'hash': hash,
+          'size': size,
+          'state': 'local',
+          'refcount': 1,
+          'last_access': now,
+          'created_at': now,
+        });
+      } else {
+        await exec.execute(
+          'UPDATE lp_blobs SET refcount = refcount + 1, last_access = ? WHERE hash = ?',
+          [now, hash],
+        );
+      }
+
+      // Check if record has a pending create op in outbox (depends_on_op)
+      final outboxRows = await exec.query(
+        'lp_outbox',
+        columns: ['op_id', 'base_updated'],
+        where: 'store = ? AND record_id = ?',
+        whereArgs: [store, recordId],
+        limit: 1,
+      );
+      String? dependsOnOp;
+      if (outboxRows.isNotEmpty && outboxRows.first['base_updated'] == null) {
+        dependsOnOp = outboxRows.first['op_id'] as String?;
+      }
+
+      // 2. Insert lp_file_refs
+      await exec.insert('lp_file_refs', {
+        'ref_id': refId,
+        'store': store,
+        'record_id': recordId,
+        'field': field,
+        'hash': hash,
+        'remote_name': name,
+        'state': 'pending_upload',
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+      // 3. Enqueue file_upload in lp_op_queue
+      await exec.insert('lp_op_queue', {
+        'op_id': generateRecordId(),
+        'store': store,
+        'record_id': recordId,
+        'kind': OpQueueKind.fileUpload.name,
+        'payload_json': jsonEncode({
+          'ref_id': refId,
+          'field': field,
+          'hash': hash,
+          'name': name ?? '$hash.bin',
+        }),
+        'state': 'pending',
+        'depends_on_op': dependsOnOp,
+        'created_at': now,
+      });
+
+      tx.addChange(ChangeSet(store, {recordId}));
+    });
+
+    return FileRef(
+      refId: refId,
+      store: store,
+      recordId: recordId,
+      field: field,
+      hash: hash,
+      remoteName: name,
+      state: 'pending_upload',
+    );
+  }
+
+  /// Opens a byte stream for a local file reference.
+  ///
+  /// If the reference is `remote_only`, synchronize or download it before
+  /// opening. The returned stream is suitable for incremental consumption:
+  ///
+  /// ```dart
+  /// final stream = await db.files.open(
+  ///   store: 'tasks',
+  ///   recordId: taskId,
+  ///   refId: ref.refId,
+  /// );
+  /// await for (final chunk in stream) {
+  ///   sink.add(chunk);
+  /// }
+  /// ```
+  ///
+  /// If `remote_only`, the caller must download it first via sync or direct pull.
+  Future<Stream<List<int>>> open({
+    required String store,
+    required String recordId,
+    String field = 'imgs',
+    int index = 0,
+    String? refId,
+  }) async {
+    final bs = _requireBlobStore;
+    final refs = await list(store: store, recordId: recordId, field: field);
+    if (refs.isEmpty) {
+      throw StateError('No files found for $store/$recordId/$field');
+    }
+    final ref = refId != null
+        ? refs.firstWhere((r) => r.refId == refId,
+            orElse: () => throw StateError('FileRef $refId not found'))
+        : refs[index];
+
+    if (ref.state == 'remote_only') {
+      throw StateError('File is remote_only; download it before opening.');
+    }
+
+    // Update last_access
+    await _pocket.db.execute(
+      'UPDATE lp_blobs SET last_access = ? WHERE hash = ?',
+      [DateTime.now().millisecondsSinceEpoch, ref.hash],
+    );
+
+    return bs.open(ref.hash);
+  }
+
+  /// Removes a file reference from a record.
+  ///
+  /// A not-yet-uploaded reference is removed locally. A remote reference is
+  /// marked pending removal and handled by the file sync lane.
+  Future<void> remove({
+    required String store,
+    required String recordId,
+    String field = 'imgs',
+    int index = 0,
+    String? refId,
+  }) async {
+    final refs = await list(store: store, recordId: recordId, field: field);
+    if (refs.isEmpty) return;
+    final ref = refId != null
+        ? refs.firstWhere((r) => r.refId == refId,
+            orElse: () => throw StateError('FileRef $refId not found'))
+        : refs[index];
+
+    await _pocket.transaction((tx) async {
+      final exec = tx.executor;
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      if (ref.state == 'pending_upload' && ref.remoteName == null) {
+        // Was never uploaded remotely -> vanish immediately
+        await exec.delete('lp_file_refs', where: 'ref_id = ?', whereArgs: [ref.refId]);
+        await exec.execute(
+          'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
+          [ref.hash],
+        );
+      } else {
+        // Mark pending_remove and queue file_remove
+        await exec.update(
+          'lp_file_refs',
+          {'state': 'pending_remove'},
+          where: 'ref_id = ?',
+          whereArgs: [ref.refId],
+        );
+        await exec.insert('lp_op_queue', {
+          'op_id': generateRecordId(),
+          'store': store,
+          'record_id': recordId,
+          'kind': OpQueueKind.fileRemove.name,
+          'payload_json': jsonEncode({
+            'ref_id': ref.refId,
+            'field': field,
+            'remote_name': ref.remoteName,
+            'hash': ref.hash,
+          }),
+          'state': 'pending',
+          'created_at': now,
+        });
+      }
+
+      tx.addChange(ChangeSet(store, {recordId}));
+    });
+  }
+
+  /// Garbage collection.
+  ///
+  /// - Blobs with `refcount == 0` and `last_access > grace` -> delete from BlobStore and SQLite.
+  /// - Temp files in BlobStore > 24h -> delete.
+  /// - Orphaned file refs whose record disappeared -> clean up.
+  Future<int> gc({
+    Duration blobGrace = const Duration(days: 7),
+    Duration tmpGrace = const Duration(hours: 24),
+  }) async {
+    final bs = blobStore;
+    var count = 0;
+
+    // 1. Clean tmp files
+    if (bs != null) {
+      count += await bs.cleanTmp(olderThan: tmpGrace);
+    }
+
+    // 2. Clean blobs with refcount = 0 and last_access older than grace
+    final cutoff = DateTime.now().millisecondsSinceEpoch - blobGrace.inMilliseconds;
+    const pageSize = 250;
+    while (true) {
+      final deadBlobs = await _pocket.db.query(
+        'lp_blobs',
+        columns: ['hash'],
+        where: 'refcount <= 0 AND last_access <= ?',
+        whereArgs: [cutoff],
+        orderBy: 'hash ASC',
+        limit: pageSize,
+      );
+      if (deadBlobs.isEmpty) break;
+      for (final b in deadBlobs) {
+        final hash = b['hash'] as String;
+        if (bs != null) await bs.delete(hash);
+        await _pocket.db.delete('lp_blobs', where: 'hash = ?', whereArgs: [hash]);
+        count++;
+      }
+    }
+
+    return count;
+  }
+
+  /// Enforces storage cap via LRU eviction of synced-only blobs.
+  Future<int> enforceStorageCap({required int maxBytes}) async {
+    final bs = blobStore;
+    if (bs == null) return 0;
+
+    final totalSizeRow = await _pocket.db.rawQuery('SELECT SUM(size) as total FROM lp_blobs');
+    var currentSize = firstIntValue(totalSizeRow) ?? 0;
+    if (currentSize <= maxBytes) return 0;
+
+    // Get synced-only blobs ordered by last_access ASC (LRU)
+    // Never evict blobs that have pending_upload refs.
+    var evicted = 0;
+    while (currentSize > maxBytes) {
+      final candidates = await _pocket.db.rawQuery('''
+        SELECT b.hash, b.size FROM lp_blobs b
+        WHERE b.hash NOT IN (
+          SELECT hash FROM lp_file_refs WHERE state = 'pending_upload'
+        )
+        ORDER BY b.last_access ASC
+        LIMIT 250
+      ''');
+      if (candidates.isEmpty) break;
+      for (final row in candidates) {
+        if (currentSize <= maxBytes) break;
+        final hash = row['hash'] as String;
+        final size = row['size'] as int;
+
+        await bs.delete(hash);
+        await _pocket.db.update(
+          'lp_file_refs',
+          {'state': 'remote_only'},
+          where: 'hash = ? AND state = ?',
+          whereArgs: [hash, 'synced'],
+        );
+        await _pocket.db.delete('lp_blobs', where: 'hash = ?', whereArgs: [hash]);
+        currentSize -= size;
+        evicted++;
+      }
+    }
+
+    return evicted;
+  }
+}

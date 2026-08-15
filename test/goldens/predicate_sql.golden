@@ -1,0 +1,8 @@
+eq: SELECT * FROM "widgets" WHERE archived = 0 AND hidden = 0 AND "qty" = ? ORDER BY "id" ASC LIMIT 10 | [1]
+starts_with: SELECT * FROM "widgets" WHERE archived = 0 AND hidden = 0 AND "name" LIKE ? ESCAPE '\' ORDER BY "name" ASC, "id" ASC LIMIT 5 | ["A%"]
+between: SELECT * FROM "widgets" WHERE archived = 0 AND hidden = 0 AND "made_on" >= ? AND "made_on" < ? ORDER BY "id" ASC LIMIT 10 | [100,200]
+in_values: SELECT * FROM "widgets" WHERE archived = 0 AND hidden = 0 AND "qty" IN (?, ?, ?) ORDER BY "id" ASC LIMIT 10 | [1,2,3]
+or_group: SELECT * FROM "widgets" WHERE archived = 0 AND hidden = 0 AND (("name" = ?) OR ("qty" = ?)) ORDER BY "id" ASC LIMIT 10 | ["a",1]
+multiple_and: SELECT * FROM "widgets" WHERE archived = 0 AND hidden = 0 AND "name" = ? AND "active" = ? ORDER BY "id" ASC LIMIT 10 | ["x",true]
+range_sort_desc: SELECT * FROM "widgets" WHERE archived = 0 AND hidden = 0 AND "qty" >= ? ORDER BY "qty" DESC, "id" ASC LIMIT 10 | [10]
+include_archived: SELECT * FROM "widgets" WHERE hidden = 0 AND "qty" = ? ORDER BY "id" ASC LIMIT 10 | [1]
