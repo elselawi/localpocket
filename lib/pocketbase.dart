@@ -17,6 +17,8 @@ export 'src/pocketbase/backend.dart' show PocketBaseBackend;
 export 'src/pocketbase/auth.dart' show AuthManager, Token, TokenProvider;
 export 'src/pocketbase/filter_builder.dart'
     show pullFilter, pullPageFilter, quote, sweepFilter;
+export 'src/pocketbase/pb_client.dart' show PbClient;
+export 'src/pocketbase/sse.dart' show PbRealtime, PbRealtimeEvent;
 export 'src/pocketbase/transport.dart'
     show
         HttpRequest,

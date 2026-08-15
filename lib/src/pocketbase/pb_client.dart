@@ -15,7 +15,8 @@ class PbClient {
   final Uri baseUrl;
   final AuthManager auth;
 
-  PbClient({required this.transport, required this.baseUrl, required this.auth});
+  PbClient(
+      {required this.transport, required this.baseUrl, required this.auth});
 
   Future<Token> authToken() => auth.token();
 
@@ -33,8 +34,7 @@ class PbClient {
     if (idPrefix != null) {
       filter = sweepFilter(store, idPrefix, fromId: fromId);
     } else {
-      final base =
-          pullFilter(store, fromUpdated ?? '1970-01-01 00:00:00.000Z');
+      final base = pullFilter(store, fromUpdated ?? '1970-01-01 00:00:00.000Z');
       filter = fromId == null ? base : pullPageFilter(base, fromId);
     }
     final query = <String, String>{
@@ -150,7 +150,8 @@ class PbClient {
     final base = baseUrl.resolve(
         '/api/files/data/${Uri.encodeComponent(recordId)}/${Uri.encodeComponent(filename)}');
     final uri = query.isEmpty ? base : base.replace(queryParameters: query);
-    final response = await _openStreamAuth(HttpRequest(method: 'GET', url: uri));
+    final response =
+        await _openStreamAuth(HttpRequest(method: 'GET', url: uri));
     _expectStatus(
         HttpResponse(response.status, response.headers, ''), [200], uri);
     return response.stream;
@@ -174,8 +175,8 @@ class PbClient {
           },
         },
     ];
-    final res = await _sendAuth('POST', uri,
-        body: jsonEncode({'requests': requests}));
+    final res =
+        await _sendAuth('POST', uri, body: jsonEncode({'requests': requests}));
     if (res.status == 403) throw ForbiddenError(_errorMessage(res));
     if (res.status == 400) throw BatchFailedError(_errorMessage(res));
     _expectStatus(res, [200], uri);
@@ -205,15 +206,22 @@ class PbClient {
     ];
   }
 
-  /// Batch capability probe: 403 = the batch API is disabled; 200 (valid) or
-  /// 400 (empty/invalid batch rejected by an ENABLED server) both mean the
-  /// batch endpoint is alive -> enabled (live pb.apexo.app returns 400 for an
-  /// empty batch).
+  /// Batch capability probe: 403 = the batch API is disabled; 200/3xx/400
+  /// (a server that answers the empty batch, e.g. 400 = rejected by an ENABLED
+  /// server) = enabled. A still-401 after the refresh-retry is an auth
+  /// failure; 408/429/5xx are transient. Both are surfaced as typed errors so
+  /// `prepare()` can re-probe on the next start instead of caching a wrong
+  /// capability.
   Future<bool> probeBatch() async {
     final uri = baseUrl.resolve('/api/batch');
-    final res =
-        await _sendAuth('POST', uri, body: jsonEncode({'requests': <Object?>[]}));
-    return res.status != 403;
+    final res = await _sendAuth('POST', uri,
+        body: jsonEncode({'requests': <Object?>[]}));
+    if (res.status == 403) return false;
+    if (res.status == 401) throw AuthError(_errorMessage(res));
+    if (res.status == 408 || res.status == 429 || res.status >= 500) {
+      throw TransientNetworkError('batch probe status ${res.status}');
+    }
+    return true;
   }
 
   // --------------------------------------------------------------- helpers --
@@ -222,8 +230,8 @@ class PbClient {
 
   /// NOTE: must build the full path — `_records().resolve(id)` would resolve
   /// against the last segment and drop `records`.
-  Uri _record(String id) =>
-      baseUrl.resolve('/api/collections/data/records/${Uri.encodeComponent(id)}');
+  Uri _record(String id) => baseUrl
+      .resolve('/api/collections/data/records/${Uri.encodeComponent(id)}');
 
   /// Sends with the bearer token; on 401 refreshes once and retries.
   /// Transport failures map to [TransientNetworkError] for the engine.
@@ -257,7 +265,10 @@ class PbClient {
         authorized = HttpMultipartRequest(
           method: request.method,
           url: request.url,
-          headers: {...request.headers, 'Authorization': 'Bearer ${fresh.value}'},
+          headers: {
+            ...request.headers,
+            'Authorization': 'Bearer ${fresh.value}'
+          },
           fields: request.fields,
           files: request.files,
         );
@@ -284,7 +295,10 @@ class PbClient {
         authorized = HttpRequest(
           method: request.method,
           url: request.url,
-          headers: {...request.headers, 'Authorization': 'Bearer ${fresh.value}'},
+          headers: {
+            ...request.headers,
+            'Authorization': 'Bearer ${fresh.value}'
+          },
           body: request.body,
         );
         res = await transport.openStream(authorized);
@@ -343,7 +357,12 @@ class PbClient {
   }
 
   Map<String, Object?> _decode(HttpResponse res) {
-    final decoded = jsonDecode(res.body);
+    Object? decoded;
+    try {
+      decoded = jsonDecode(res.body);
+    } on FormatException catch (e) {
+      throw ProtocolError('Response is not valid JSON: ${e.message}');
+    }
     if (decoded is Map) return Map<String, Object?>.from(decoded);
     throw ProtocolError('Expected a JSON object, got ${decoded.runtimeType}.');
   }
@@ -370,7 +389,7 @@ class PbClient {
       store: storeStr,
       updated: updated,
       data: dataMap,
-      imgs: imgs is List ? imgs.cast<String>() : const <String>[],
+      imgs: imgs is List ? imgs.whereType<String>().toList() : const <String>[],
     );
   }
 

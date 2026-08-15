@@ -11,6 +11,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import '../sync/sync_backend.dart';
 import 'auth.dart';
@@ -72,7 +73,10 @@ class PbRealtime {
     _running = false;
     await _sub?.cancel();
     _sub = null;
-    _sessionDone?.complete();
+    final session = _sessionDone;
+    if (session != null && !session.isCompleted) {
+      session.complete();
+    }
   }
 
   Future<void> _runLoop() async {
@@ -98,6 +102,13 @@ class PbRealtime {
     if (res.status != 200) {
       throw HttpTransportException('realtime connect status ${res.status}');
     }
+    // A stop() raced in while the connect was in flight: close the stream
+    // without leaving a dangling subscription or a session that never ends.
+    if (!_running) {
+      final orphan = res.stream.listen((_) {});
+      await orphan.cancel();
+      return;
+    }
     _connectCount++;
     _sessionDone = Completer<void>();
 
@@ -107,17 +118,18 @@ class PbRealtime {
       (chunk) {
         final frames = parser.feed(chunk);
         for (final f in frames) {
-          // Serialize frame handling (the subscribe POST must precede any
-          // event processing).
-          _frameTail = _frameTail.then((_) async {
-            await _handleFrame(f, token);
-            // A gap has just closed the moment the handshake completes —
-            // every store must be re-pulled.
+          // Frame handling is serialized so the subscribe POST always
+          // precedes any event processing. A bad frame or a throwing callback
+          // must never poison the tail with an unhandled rejection.
+          _frameTail = _frameTail
+              .then((_) => _handleFrame(f, token))
+              .catchError((Object _) {})
+              .then((_) {
             if (!handshaken && f.clientId != null) {
               handshaken = true;
               onGapClosed();
             }
-          });
+          }).catchError((Object _) {});
         }
       },
       onDone: () {
@@ -177,7 +189,7 @@ class PbRealtime {
       store: store is String ? store : '',
       updated: updated is String ? updated : '',
       data: data is Map ? Map<String, Object?>.from(data) : const {},
-      imgs: imgs is List ? imgs.cast<String>() : const [],
+      imgs: imgs is List ? imgs.whereType<String>().toList() : const [],
     );
   }
 }
@@ -192,26 +204,40 @@ class PbRealtime {
 /// data:{"clientId":"Gx9jhrjifrA0oYWdBaGVHEdbSLVPPDU4wWUyKEG9"}
 /// ```
 /// Older servers sent a bare `PB_CONNECT:<clientId>` line; both are handled.
+///
+/// Raw bytes are buffered and decoded LINE by line, so a multibyte UTF-8
+/// sequence split across chunk boundaries is reassembled before decoding —
+/// decoding each chunk independently would corrupt it into U+FFFD.
 class _SseParser {
-  final StringBuffer _buffer = StringBuffer();
+  final BytesBuilder _buffer = BytesBuilder();
   String? _event;
 
   List<_SseFrame> feed(List<int> bytes) {
-    _buffer.write(utf8.decode(bytes, allowMalformed: true));
-    final text = _buffer.toString();
+    _buffer.add(bytes);
+    final data = _buffer.takeBytes();
     final frames = <_SseFrame>[];
     var start = 0;
     while (true) {
-      final nl = text.indexOf('\n', start);
+      final nl = _indexOfNewline(data, start);
       if (nl < 0) break;
-      final line = text.substring(start, nl).trimRight();
+      final lineBytes = data.sublist(start, nl);
       start = nl + 1;
+      // A complete line: 0x0A is never a UTF-8 continuation byte, so a valid
+      // multibyte sequence never spans a line boundary. Whole-line decoding
+      // therefore preserves Unicode regardless of how the chunks were split.
+      final line = utf8.decode(lineBytes, allowMalformed: true).trimRight();
       final frame = _dispatchLine(line);
       if (frame != null) frames.add(frame);
     }
-    _buffer.clear();
-    if (start < text.length) _buffer.write(text.substring(start));
+    if (start < data.length) _buffer.add(data.sublist(start));
     return frames;
+  }
+
+  int _indexOfNewline(List<int> data, int start) {
+    for (var i = start; i < data.length; i++) {
+      if (data[i] == 0x0a) return i;
+    }
+    return -1;
   }
 
   _SseFrame? _dispatchLine(String line) {

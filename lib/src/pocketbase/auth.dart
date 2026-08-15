@@ -23,8 +23,7 @@ class Token {
       : issuedAt = issuedAt ?? DateTime.now();
 
   /// Whether the token has passed its expiration time.
-  bool get isExpired =>
-      expiresAt != null && DateTime.now().isAfter(expiresAt!);
+  bool get isExpired => expiresAt != null && DateTime.now().isAfter(expiresAt!);
 
   /// 1.0 (fresh) → 0.0 (expired). Used for the 75 % proactive refresh rule.
   double get remainingFraction {
@@ -80,6 +79,8 @@ class AuthManager {
   final TokenProvider provider;
   Token? _token;
   Future<Token>? _inflight;
+  Future<Token>? _initialLoad;
+
   /// Number of refresh operations performed; useful for diagnostics.
   int refreshCount = 0;
 
@@ -90,18 +91,35 @@ class AuthManager {
   AuthManager(this.provider);
 
   /// The token to use for the next request, refreshing proactively when
-  /// needed.
+  /// needed. The initial load is single-flight: a burst of concurrent callers
+  /// before any token is cached share one `currentToken()` call.
   Future<Token> token() async {
-    _token ??= await provider.currentToken();
-    if (_token!.needsProactiveRefresh) {
+    final cached = _token;
+    if (cached == null) {
+      final inflight = _initialLoad ??= provider.currentToken();
+      try {
+        final t = await inflight;
+        _token = t;
+        // A freshly loaded token may already be near expiry.
+        if (t.needsProactiveRefresh) await _refresh();
+        return _token!;
+      } finally {
+        _initialLoad = null;
+      }
+    }
+    if (cached.needsProactiveRefresh) {
       await _refresh();
     }
     return _token!;
   }
 
   /// Force a refresh now (401 path). Single-flight: concurrent callers share
-  /// one refresh.
-  Future<Token> refreshNow() => _refresh();
+  /// one refresh. When no token is cached yet, the current token is loaded
+  /// first so the provider always receives a non-null token to refresh.
+  Future<Token> refreshNow() async {
+    _token ??= await provider.currentToken();
+    return _refresh();
+  }
 
   Future<Token> _refresh() {
     final inflight = _inflight;

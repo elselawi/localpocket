@@ -121,7 +121,8 @@ abstract class HttpTransport {
   /// Each [HttpMultipartFile.streamFactory] must create a fresh stream so the
   /// request can be retried after authentication refresh.
   Future<HttpResponse> sendMultipart(HttpMultipartRequest request) =>
-      throw UnsupportedError('Streaming multipart is not supported by this transport.');
+      throw UnsupportedError(
+          'Streaming multipart is not supported by this transport.');
 
   /// Opens a request and returns headers plus a live response body stream.
   ///
@@ -153,36 +154,50 @@ class PackageHttpTransport implements HttpTransport {
   final Duration timeout;
 
   /// Creates an HTTP transport, optionally using [client].
-  PackageHttpTransport({http.Client? client, this.timeout = const Duration(seconds: 30)})
+  PackageHttpTransport(
+      {http.Client? client, this.timeout = const Duration(seconds: 30)})
       : _client = client ?? http.Client();
 
   @override
   Future<HttpResponse> send(HttpRequest request) async {
-    final streamed = await openStream(request);
-    final body = await streamed.stream.transform(utf8.decoder).join().timeout(timeout);
-    return HttpResponse(streamed.status, streamed.headers, body);
+    try {
+      final streamed = await openStream(request);
+      final body =
+          await streamed.stream.transform(utf8.decoder).join().timeout(timeout);
+      return HttpResponse(streamed.status, streamed.headers, body);
+    } on HttpTransportException {
+      rethrow;
+    } catch (e) {
+      // Body consumption failures (stream error, timeout, malformed UTF-8)
+      // surface as transport exceptions, never raw errors.
+      throw HttpTransportException(
+          'HTTP ${request.method} ${request.url} body failed', e);
+    }
   }
 
   @override
   Future<HttpResponse> sendMultipart(HttpMultipartRequest request) async {
-    final multipart = http.MultipartRequest(request.method, request.url)
-      ..headers.addAll(request.headers)
-      ..fields.addAll(request.fields);
-    for (final file in request.files) {
-      multipart.files.add(http.MultipartFile(
-        file.field,
-        await file.streamFactory(),
-        file.length,
-        filename: file.filename,
-      ));
-    }
     try {
+      final multipart = http.MultipartRequest(request.method, request.url)
+        ..headers.addAll(request.headers)
+        ..fields.addAll(request.fields);
+      for (final file in request.files) {
+        multipart.files.add(http.MultipartFile(
+          file.field,
+          await file.streamFactory(),
+          file.length,
+          filename: file.filename,
+        ));
+      }
       final response = await _client.send(multipart).timeout(timeout);
-      final body = await response.stream.transform(utf8.decoder).join().timeout(timeout);
+      final body =
+          await response.stream.transform(utf8.decoder).join().timeout(timeout);
       return HttpResponse(response.statusCode, response.headers, body);
     } on HttpTransportException {
       rethrow;
     } catch (e) {
+      // A throwing stream factory or a failing body decode is a transport
+      // failure, never a raw error.
       throw HttpTransportException(
           'HTTP multipart ${request.method} ${request.url} failed', e);
     }

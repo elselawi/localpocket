@@ -9,8 +9,16 @@
 /// ```
 library;
 
-/// Single-quote a string literal for a PB filter, escaping embedded quotes.
-String quote(String s) => "'${s.replaceAll("'", "\\'")}'";
+/// Single-quote a string literal for a PB filter, escaping embedded quotes
+/// and backslashes.
+///
+/// Backslashes are escaped FIRST (`\` → `\\`) so a value containing a
+/// backslash immediately before a quote (`a\'b`) cannot smuggle an unescaped
+/// quote through the escaping pass and terminate the literal early. Both
+/// escapes decode back to the original value under a parser that treats `\`
+/// as the escape character.
+String quote(String s) =>
+    "'${s.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'";
 
 /// `(store='{store}' && updated>='{fromUpdated}')` — the delta-pull filter.
 String pullFilter(String store, String fromUpdated) =>
