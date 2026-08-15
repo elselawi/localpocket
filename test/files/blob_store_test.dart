@@ -54,7 +54,7 @@ void main() {
       );
     });
 
-    test('interrupted put leaves only tmp', () async {
+    test('interrupted put leaves no published blob and no tmp file', () async {
       final controller = StreamController<List<int>>();
 
       final putFuture = store.put(controller.stream);
@@ -68,10 +68,11 @@ void main() {
       final hashes = await store.listHashes();
       expect(hashes, isEmpty);
 
-      // Tmp folder has orphaned tmp file
+      // Deterministic cleanup: the partially-written tmp file is removed.
       final tmpDir = Directory(p.join(tempDir.path, 'tmp'));
       final tmpFiles = await tmpDir.list().toList();
-      expect(tmpFiles, isNotEmpty);
+      expect(tmpFiles, isEmpty,
+          reason: 'a failed put never leaves a partial tmp file behind');
     });
 
     test('atomic publish no partial reads', () async {
@@ -226,6 +227,393 @@ void main() {
         totalRead += chunk.length;
       }
       expect(totalRead, 5 * 1024 * 1024);
+    });
+  });
+
+  group('BlobStore hash/key matrix', () {
+    late Directory groupTemp;
+
+    setUp(() async {
+      groupTemp = await Directory.systemTemp.createTemp('lp_blob_matrix_');
+    });
+
+    tearDown(() async {
+      if (await groupTemp.exists()) await groupTemp.delete(recursive: true);
+    });
+
+    for (final (label, make) in [
+      ('Native', (String root) => NativeBlobStore(root)),
+      ('Memory', (String root) => MemoryBlobStore()),
+    ]) {
+      BlobStore? bs;
+
+      setUp(() {
+        bs = make(groupTemp.path);
+      });
+
+      test('$label: empty stream roundtrips with the empty-SHA hash', () async {
+        final store = bs!;
+        final emptySha = sha256.convert(const []).toString();
+        final hash = await store.put(const Stream.empty());
+        expect(hash, emptySha);
+        expect(await store.exists(hash), isTrue);
+        expect(await store.size(hash), 0);
+        final open = await store.open(hash);
+        final bytes = await open.fold<List<int>>([], (a, b) => [...a, ...b]);
+        expect(bytes, isEmpty);
+        expect(await store.listHashes(), [hash]);
+      });
+
+      test('$label: chunked streams hash identically to a one-shot put',
+          () async {
+        final store = bs!;
+        final data = List<int>.generate(10000, (i) => i % 251);
+        final oneShot = await store.put(Stream.value(data));
+
+        final chunked = Stream.fromIterable([
+          data.sublist(0, 1000),
+          data.sublist(1000, 5000),
+          data.sublist(5000),
+        ]);
+        final chunkedHash = await store.put(chunked);
+
+        expect(chunkedHash, oneShot);
+        expect(chunkedHash, sha256.convert(data).toString());
+      });
+
+      test('$label: expected sha256 success/failure', () async {
+        final store = bs!;
+        final data = utf8.encode('digest check');
+        final good = sha256.convert(data).toString();
+        final h = await store.put(Stream.value(data), expectedSha256: good);
+        expect(h, good);
+        await expectLater(
+          store.put(Stream.value(data), expectedSha256: 'f' * 64),
+          throwsA(isA<StateError>()),
+        );
+      });
+
+      test('$label: expected size success/failure', () async {
+        final store = bs!;
+        final data = utf8.encode('size check payload');
+        final h =
+            await store.put(Stream.value(data), expectedSize: data.length);
+        expect(await store.size(h), data.length);
+        await expectLater(
+          store.put(Stream.value(data), expectedSize: data.length + 1),
+          throwsA(isA<StateError>()),
+        );
+      });
+
+      test('$label: explicit key is trusted as the blob identity', () async {
+        final store = bs!;
+        final data = utf8.encode('keyed content');
+        final contentHash = sha256.convert(data).toString();
+        final key = 'a' * 64;
+
+        final hash = await store.put(Stream.value(data), key: key);
+        // The key wins: the blob is addressed by it, not by the content hash.
+        expect(hash, key);
+        expect(await store.exists(key), isTrue);
+        expect(await store.exists(contentHash), isFalse,
+            reason:
+                'an explicit key is trusted; the digest is not re-verified');
+        final open = await store.open(key);
+        final bytes = await open.fold<List<int>>([], (a, b) => [...a, ...b]);
+        expect(bytes, equals(data));
+        expect(await store.listHashes(), [key]);
+      });
+
+      test('$label: explicit key with expectedSha256 must equal the key',
+          () async {
+        final store = bs!;
+        final key = 'b' * 64;
+        final h = await store.put(Stream.value([1, 2, 3]),
+            key: key, expectedSha256: key);
+        expect(h, key);
+        await expectLater(
+          store.put(Stream.value([1, 2, 3]),
+              key: key, expectedSha256: 'c' * 64),
+          throwsA(isA<StateError>()),
+        );
+      });
+
+      test('$label: invalid / short / non-hex / traversal hashes are rejected',
+          () async {
+        final store = bs!;
+        for (final bad in [
+          '../evil',
+          'abc',
+          'not-hex-at-all',
+          'A' * 64,
+          'z' * 64,
+          'a' * 63,
+          'a' * 65,
+        ]) {
+          await expectLater(store.open(bad), throwsA(isA<ArgumentError>()),
+              reason: 'open rejects "$bad"');
+          await expectLater(store.exists(bad), throwsA(isA<ArgumentError>()));
+          await expectLater(store.size(bad), throwsA(isA<ArgumentError>()));
+          await expectLater(store.delete(bad), throwsA(isA<ArgumentError>()));
+        }
+        // A put with a traversal key must never escape the shard layout.
+        await expectLater(
+          store.put(Stream.value([1]), key: '../evil'),
+          throwsA(isA<ArgumentError>()),
+        );
+        // Nothing was published outside the blobs directory.
+        expect(await store.listHashes(), isEmpty);
+      });
+    }
+
+    test('Memory and Native stores agree on hash, size, and content', () async {
+      final mem = MemoryBlobStore();
+      final native = NativeBlobStore(groupTemp.path);
+      final data = utf8.encode('cross-implementation consistency');
+      final memHash = await mem.put(Stream.value(data));
+      final nativeHash = await native.put(Stream.value(data));
+      expect(memHash, nativeHash);
+      expect(await mem.size(memHash), await native.size(nativeHash));
+      final nativeOpen = await native.open(nativeHash);
+      final nativeBytes =
+          await nativeOpen.fold<List<int>>([], (a, b) => [...a, ...b]);
+      expect(nativeBytes, equals(data));
+      expect(await mem.listHashes(), await native.listHashes());
+    });
+  });
+
+  group('NativeBlobStore concurrency and filesystem failures', () {
+    late Directory tempDir;
+    late NativeBlobStore store;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('lp_blob_native_');
+      store = NativeBlobStore(tempDir.path);
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) await tempDir.delete(recursive: true);
+    });
+
+    test('concurrent puts of the same hash dedup to one published blob',
+        () async {
+      final data = utf8.encode('concurrent identical bytes');
+      final results = await Future.wait([
+        for (var i = 0; i < 5; i++) store.put(Stream.value(data)),
+      ]);
+      expect(results.toSet().length, 1);
+      final hashes = await store.listHashes();
+      expect(hashes, [results.first],
+          reason: 'exactly one blob file, no partial publishes');
+      // No tmp files left behind.
+      final tmpFiles = Directory(p.join(tempDir.path, 'tmp')).listSync();
+      expect(tmpFiles, isEmpty);
+    });
+
+    test('concurrent puts with the same explicit key publish atomically',
+        () async {
+      final key = 'd' * 64;
+      final a = utf8.encode('first writer content');
+      final b = utf8.encode('second writer content');
+      final results = await Future.wait([
+        store.put(Stream.value(a), key: key),
+        store.put(Stream.value(b), key: key),
+      ]);
+      expect(results, everyElement(key));
+      // Exactly one blob exists, and it is a complete payload (never a mix).
+      expect(await store.listHashes(), [key]);
+      final open = await store.open(key);
+      final bytes = await open.fold<List<int>>([], (acc, c) => [...acc, ...c]);
+      expect(bytes, anyOf(equals(a), equals(b)),
+          reason: 'atomic publish: the winner is one full payload');
+    });
+
+    test('open/delete/size/exists on missing blobs behave predictably',
+        () async {
+      final missing = 'e' * 64;
+      expect(await store.exists(missing), isFalse);
+      expect(await store.size(missing), isNull);
+      await expectLater(store.open(missing), throwsA(isA<StateError>()));
+      // delete of a missing blob is a silent no-op.
+      await store.delete(missing);
+      expect(await store.listHashes(), isEmpty);
+    });
+
+    test('future-dated tmp files are never cleaned; old ones are', () async {
+      final now = DateTime.now();
+      final futureFile = File(p.join(tempDir.path, 'tmp', 'future.tmp'));
+      await futureFile.writeAsString('future');
+      await futureFile.setLastModified(now.add(const Duration(hours: 2)));
+
+      final oldFile = File(p.join(tempDir.path, 'tmp', 'old.tmp'));
+      await oldFile.writeAsString('old');
+      await oldFile.setLastModified(now.subtract(const Duration(hours: 48)));
+
+      // A future mtime makes now.difference negative -> not older than 24h.
+      final cleaned =
+          await store.cleanTmp(olderThan: const Duration(hours: 24));
+      expect(cleaned, 1, reason: 'only the old file is cleaned');
+      expect(await futureFile.exists(), isTrue,
+          reason: 'future-dated tmp is retained');
+      expect(await oldFile.exists(), isFalse);
+    });
+
+    test('malformed files in blob shards are ignored by listHashes', () async {
+      final data = utf8.encode('real blob');
+      final hash = await store.put(Stream.value(data));
+
+      // Drop a non-hash file directly into a shard directory.
+      final shard =
+          Directory(p.join(tempDir.path, 'blobs', hash.substring(0, 2)));
+      final junk = File(p.join(shard.path, 'not-a-hash.txt'));
+      await junk.writeAsString('junk');
+
+      final hashes = await store.listHashes();
+      expect(hashes, [hash],
+          reason: 'malformed shard files are never surfaced as blobs');
+    });
+
+    test('size mismatch cleans the tmp file (deterministic cleanup)', () async {
+      await expectLater(
+        store.put(Stream.value(utf8.encode('short')), expectedSize: 999),
+        throwsA(isA<StateError>()),
+      );
+      expect(await store.listHashes(), isEmpty, reason: 'no blob published');
+      final tmpFiles = Directory(p.join(tempDir.path, 'tmp')).listSync();
+      expect(tmpFiles, isEmpty,
+          reason: 'the partial tmp file was removed on failure');
+    });
+
+    test('an unexpected stream error leaves no blob and no tmp file', () async {
+      final controller = StreamController<List<int>>();
+      final put = store.put(controller.stream);
+      controller.add(utf8.encode('partial'));
+      controller.addError(StateError('boom'));
+      await controller.close();
+      await expectLater(put, throwsA(isA<StateError>()));
+      expect(await store.listHashes(), isEmpty);
+      expect(Directory(p.join(tempDir.path, 'tmp')).listSync(), isEmpty);
+    });
+  });
+
+  group('EncryptingBlobStore integrity and memory behavior', () {
+    late BlobStore inner;
+
+    setUp(() {
+      inner = MemoryBlobStore();
+    });
+
+    List<int> xorEnc(List<int> p) => p.map((b) => (b + 7) % 256).toList();
+    List<int> xorDec(List<int> c) => c.map((b) => (b - 7 + 256) % 256).toList();
+
+    EncryptingBlobStore encStore() =>
+        EncryptingBlobStore(inner, encrypt: xorEnc, decrypt: xorDec);
+
+    test('large chunked plaintext keeps plaintext hash/size and roundtrips',
+        () async {
+      final store = encStore();
+      final big = List<int>.generate(1 << 20, (i) => i % 256);
+      final expectedHash = sha256.convert(big).toString();
+
+      final chunks = <List<int>>[];
+      for (var i = 0; i < big.length; i += 16384) {
+        chunks.add(big.sublist(i, (i + 16384).clamp(0, big.length)));
+      }
+      final hash = await store.put(Stream.fromIterable(chunks),
+          expectedSha256: expectedHash, expectedSize: big.length);
+      expect(hash, expectedHash, reason: 'hash is the PLAINTEXT digest');
+      // The inner store holds ciphertext (content differs, though the XOR
+      // transform keeps the length).
+      final cipher = await (await inner.open(hash))
+          .fold<List<int>>([], (a, b) => [...a, ...b]);
+      expect(cipher, isNot(equals(big)),
+          reason: 'ciphertext at rest differs from the plaintext');
+
+      final open = await store.open(hash);
+      final out = await open.fold<List<int>>([], (a, b) => [...a, ...b]);
+      expect(out.length, big.length);
+      expect(out, equals(big));
+    });
+
+    test('expected plaintext hash/size are validated before encryption',
+        () async {
+      final store = encStore();
+      await expectLater(
+        store.put(Stream.value([1, 2, 3]), expectedSha256: 'f' * 64),
+        throwsA(isA<StateError>()),
+      );
+      await expectLater(
+        store.put(Stream.value([1, 2, 3]), expectedSize: 999),
+        throwsA(isA<StateError>()),
+      );
+      expect(await inner.listHashes(), isEmpty,
+          reason: 'no ciphertext published on a validation failure');
+    });
+
+    test('empty plaintext roundtrips', () async {
+      final store = encStore();
+      final hash = await store.put(const Stream.empty());
+      expect(hash, sha256.convert(const []).toString());
+      final open = await store.open(hash);
+      final out = await open.fold<List<int>>([], (a, b) => [...a, ...b]);
+      expect(out, isEmpty);
+    });
+
+    test('wrong decrypt key fails authentication', () async {
+      final keyA = AesGcmFieldCipher(List.filled(32, 1));
+      final keyB = AesGcmFieldCipher(List.filled(32, 2));
+      final encA = EncryptingBlobStore.withCipher(inner, keyA);
+      final encB = EncryptingBlobStore.withCipher(inner, keyB);
+
+      final hash = await encA.put(Stream.value(utf8.encode('secret')));
+      // Reading through a store configured with the wrong key must fail the
+      // AES-GCM MAC check rather than return garbage.
+      await expectLater(encB.open(hash), throwsA(isA<StateError>()));
+    });
+
+    test('ciphertext corruption fails authentication', () async {
+      final cipher = AesGcmFieldCipher(List.filled(32, 3));
+      final store = EncryptingBlobStore.withCipher(inner, cipher);
+      final plaintext = utf8.encode('tamper me');
+      final hash = await store.put(Stream.value(plaintext));
+
+      // Corrupt the stored ciphertext in place.
+      final cipherBytes = await (await inner.open(hash))
+          .fold<List<int>>([], (a, b) => [...a, ...b]);
+      final corrupted = List<int>.from(cipherBytes)..[5] ^= 0xff;
+      await inner.put(Stream.value(corrupted), key: hash);
+
+      await expectLater(store.open(hash), throwsA(isA<StateError>()));
+    });
+
+    test('memory behavior documented: full plaintext is buffered', () async {
+      // The decorator buffers the whole plaintext before encrypting (and the
+      // whole ciphertext before decrypting) — this is the documented contract;
+      // there is no bounded-memory streaming promise.
+      final store = encStore();
+      final streamed = Stream<List<int>>.fromIterable([
+        for (var i = 0; i < 100; i++) List<int>.filled(1000, i % 256),
+      ]);
+      final hash = await store.put(streamed);
+      final open = await store.open(hash);
+      // The decrypted result is emitted as a single buffered value.
+      final firstChunk = await open.first;
+      expect(firstChunk.length, 100 * 1000,
+          reason: 'open returns the buffered full plaintext as one value');
+    });
+
+    test('encrypted store always keys by the plaintext hash (key ignored)',
+        () async {
+      final store = encStore();
+      final data = utf8.encode('ignored-key data');
+      // The caller-supplied key is ignored: the encrypting store derives its
+      // storage identity from the plaintext SHA-256 (so dedup/refcount logic
+      // stays on the plaintext digest).
+      final hash = await store.put(Stream.value(data), key: 'bad/key');
+      expect(hash, sha256.convert(data).toString());
+      expect(await store.open(hash), isA<Stream<List<int>>>());
+      // The bad key was never used as a storage identity.
+      expect(await inner.listHashes(), isNot(contains('bad/key')));
     });
   });
 }
