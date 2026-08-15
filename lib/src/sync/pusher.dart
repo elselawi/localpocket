@@ -81,9 +81,11 @@ class Pusher {
 
   Future<PushReport> _pushOp(OutboxOp drained) async {
     // Re-read the current state: the op may have been coalesced while queued.
-    final op = await pocket.outbox.readOp(pocket.db, drained.store, drained.recordId);
+    final op =
+        await pocket.outbox.readOp(pocket.db, drained.store, drained.recordId);
     if (op == null) return const PushReport(); // vanished
-    final sr = await pocket.outbox.readSyncRow(pocket.db, op.store, op.recordId);
+    final sr =
+        await pocket.outbox.readSyncRow(pocket.db, op.store, op.recordId);
     if (sr == null) return const PushReport();
 
     if (op.baseUpdated == null) {
@@ -118,7 +120,8 @@ class Pusher {
     }
   }
 
-  Future<PushReport> _recoverDuplicateCreate(OutboxOp op, SyncRowState sr) async {
+  Future<PushReport> _recoverDuplicateCreate(
+      OutboxOp op, SyncRowState sr) async {
     final schema = pocket.requireTable(op.store).schema;
     try {
       final fetched = await backend.getRecord(op.recordId);
@@ -166,11 +169,16 @@ class Pusher {
       return _retry(op, sr, e);
     }
 
-    if (fetched!.updated == op.baseUpdated) {
+    if (fetched == null) {
+      // The record no longer exists remotely (a vanished target).
+      await _deadLetter(op, 'missing_target');
+      return const PushReport(deadLettered: 1);
+    }
+    if (fetched.updated == op.baseUpdated) {
       // No concurrent change: plain PATCH.
       try {
-        final rec =
-            await backend.updateRecord(id: op.recordId, dataJson: op.payloadJson);
+        final rec = await backend.updateRecord(
+            id: op.recordId, dataJson: op.payloadJson);
         await _settle(op, rec);
         return const PushReport(pushed: 1);
       } on AuthError {
@@ -207,13 +215,14 @@ class Pusher {
     }
 
     final policy = MergePolicy(
-      collectionResolver: schema.conflictPolicy.collectionResolver is ConflictResolver
-          ? schema.conflictPolicy.collectionResolver as ConflictResolver
-          : null,
+      collectionResolver:
+          schema.conflictPolicy.collectionResolver is ConflictResolver
+              ? schema.conflictPolicy.collectionResolver as ConflictResolver
+              : null,
       fieldOverrides: schema.conflictPolicy.fieldOverrides,
       editsUnarchive: schema.conflictPolicy.editsUnarchive,
     );
-    final outcome = merge3Way(
+    final outcome = await merge3WayAsync(
       base: _parsePayload(sr.baseJson),
       local: _parsePayload(op.payloadJson),
       remote: buildPayload(schema, fetchedLogical),
@@ -227,8 +236,10 @@ class Pusher {
     }
     final mergedJson = canonicalize(outcome.merged);
     try {
-      final rec = await backend.updateRecord(id: op.recordId, dataJson: mergedJson);
-      await _settle(op, rec, mergedLogical: outcome.merged, serverDataJson: mergedJson);
+      final rec =
+          await backend.updateRecord(id: op.recordId, dataJson: mergedJson);
+      await _settle(op, rec,
+          mergedLogical: outcome.merged, serverDataJson: mergedJson);
       return const PushReport(pushed: 1);
     } on AuthError {
       onAuthError();
@@ -257,10 +268,14 @@ class Pusher {
     var conflicted = 0;
 
     // Pre-flight GETs gate every write.
+    final outboxPayloadByOpId = <String, String>{};
     for (final drained in ops) {
-      final op = await pocket.outbox.readOp(pocket.db, drained.store, drained.recordId);
+      final op = await pocket.outbox
+          .readOp(pocket.db, drained.store, drained.recordId);
       if (op == null) continue;
-      final sr = await pocket.outbox.readSyncRow(pocket.db, op.store, op.recordId);
+      outboxPayloadByOpId[op.opId] = op.payloadJson;
+      final sr =
+          await pocket.outbox.readSyncRow(pocket.db, op.store, op.recordId);
       if (sr == null) continue;
       final schema = pocket.requireTable(op.store).schema;
 
@@ -292,7 +307,8 @@ class Pusher {
       }
 
       if (fetched != null) {
-        final fetchedHash = payloadHash(schema, normalizeRemote(schema, fetched));
+        final fetchedHash =
+            payloadHash(schema, normalizeRemote(schema, fetched));
         final pushedHash = sha256Hex(op.payloadJson);
         if (fetchedHash == pushedHash) {
           // Already applied (lost response).
@@ -346,29 +362,54 @@ class Pusher {
     }
 
     if (toSend.isNotEmpty) {
-      final report = await _sendBatch(toSend, mergedByOpId);
-      pushed += report.pushed;
-      dead += report.deadLettered;
-      conflicted += report.conflicted;
-      if (report.hadError) {
-        return PushReport(
-            pushed: pushed, deadLettered: dead, conflicted: conflicted, hadError: true);
+      // Clamp each request to the negotiated maximum: the backend advertises
+      // its ceiling via capabilities.maxBatch, so a config that requests more
+      // must never exceed it (a server may reject oversized batches).
+      final chunkSize = _batchLimit();
+      for (var i = 0; i < toSend.length; i += chunkSize) {
+        final end =
+            (i + chunkSize < toSend.length) ? i + chunkSize : toSend.length;
+        final chunk = toSend.sublist(i, end);
+        final report =
+            await _sendBatch(chunk, mergedByOpId, outboxPayloadByOpId);
+        pushed += report.pushed;
+        dead += report.deadLettered;
+        conflicted += report.conflicted;
+        if (report.hadError) {
+          return PushReport(
+              pushed: pushed,
+              deadLettered: dead,
+              conflicted: conflicted,
+              hadError: true);
+        }
       }
     }
-    return PushReport(pushed: pushed, deadLettered: dead, conflicted: conflicted);
+    return PushReport(
+        pushed: pushed, deadLettered: dead, conflicted: conflicted);
   }
 
-  Future<MergeOutcome?> _mergeForBatch(
-      OutboxOp op, SyncRowState sr, RemoteRecord fetched, CollectionSchema schema) async {
+  /// Maximum operations per remote batch request: min of the configured limit
+  /// and the backend's advertised capability (a non-positive capability means
+  /// "no explicit ceiling", so the configured limit applies).
+  int _batchLimit() {
+    var cap = backend.capabilities.maxBatch;
+    if (cap <= 0) cap = config.maxBatch;
+    if (config.maxBatch < cap) cap = config.maxBatch;
+    return cap < 1 ? 1 : cap;
+  }
+
+  Future<MergeOutcome?> _mergeForBatch(OutboxOp op, SyncRowState sr,
+      RemoteRecord fetched, CollectionSchema schema) async {
     final fetchedLogical = normalizeRemote(schema, fetched);
     final policy = MergePolicy(
-      collectionResolver: schema.conflictPolicy.collectionResolver is ConflictResolver
-          ? schema.conflictPolicy.collectionResolver as ConflictResolver
-          : null,
+      collectionResolver:
+          schema.conflictPolicy.collectionResolver is ConflictResolver
+              ? schema.conflictPolicy.collectionResolver as ConflictResolver
+              : null,
       fieldOverrides: schema.conflictPolicy.fieldOverrides,
       editsUnarchive: schema.conflictPolicy.editsUnarchive,
     );
-    final outcome = merge3Way(
+    final outcome = await merge3WayAsync(
       base: _parsePayload(sr.baseJson),
       local: _parsePayload(op.payloadJson),
       remote: buildPayload(schema, fetchedLogical),
@@ -385,7 +426,9 @@ class Pusher {
   }
 
   Future<PushReport> _sendBatch(
-      List<PushOp> toSend, Map<String, Map<String, Object?>> mergedByOpId) async {
+      List<PushOp> toSend,
+      Map<String, Map<String, Object?>> mergedByOpId,
+      Map<String, String> outboxPayloadByOpId) async {
     var pushed = 0;
     var dead = 0;
     try {
@@ -395,7 +438,8 @@ class Pusher {
       for (final r in results) {
         final sent = byOpId[r.opId];
         if (sent == null) {
-          throw ProtocolError('Batch response references unknown op ${r.opId}.');
+          throw ProtocolError(
+              'Batch response references unknown op ${r.opId}.');
         }
         if (r.ok && r.record != null) {
           settlements.add(PushSettlement(
@@ -403,7 +447,7 @@ class Pusher {
               store: sent.store,
               recordId: sent.id,
               kind: OutboxKind.upsert,
-              payloadJson: sent.dataJson,
+              payloadJson: outboxPayloadByOpId[sent.opId] ?? sent.dataJson,
               baseUpdated: sent.baseUpdated,
               baseHash: sha256Hex(sent.dataJson),
               opId: sent.opId,
@@ -430,8 +474,9 @@ class Pusher {
       await pocket.outbox.settlePushBatch(settlements);
       return PushReport(pushed: pushed, deadLettered: dead);
     } on BatchFailedError {
-      await _binarySplit(toSend, mergedByOpId);
-      return const PushReport();
+      // Binary split isolates the poison op; report its real effects so
+      // SyncReport counts match what actually happened.
+      return _binarySplit(toSend, mergedByOpId, outboxPayloadByOpId);
     } on ForbiddenError {
       // Server disabled batch: fall back to per-record for this session.
       batchEnabled = false;
@@ -454,8 +499,10 @@ class Pusher {
     } on AuthError {
       onAuthError();
       return const PushReport(hadError: true);
-    } on SyncError {
-      // Transient batch failure: retry each op with backoff.
+    } on SyncError catch (e) {
+      // Transient batch failure: retry each op with backoff, honoring a
+      // ServerBusyError's Retry-After when the batch endpoint was throttled.
+      final retryError = e is ServerBusyError ? e : TransientNetworkError();
       for (final op in toSend) {
         final sr = await pocket.outbox.readSyncRow(pocket.db, op.store, op.id);
         if (sr != null) {
@@ -472,7 +519,7 @@ class Pusher {
               updatedAt: 0,
             ),
             sr,
-            TransientNetworkError(),
+            retryError,
           );
           pushed += r.pushed;
           dead += r.deadLettered;
@@ -482,8 +529,10 @@ class Pusher {
     }
   }
 
-  Future<void> _binarySplit(
-      List<PushOp> ops, Map<String, Map<String, Object?>> mergedByOpId) async {
+  Future<PushReport> _binarySplit(
+      List<PushOp> ops,
+      Map<String, Map<String, Object?>> mergedByOpId,
+      Map<String, String> outboxPayloadByOpId) async {
     if (ops.length == 1) {
       final op = ops.single;
       await pocket.outbox.markDeadLetter(
@@ -493,9 +542,12 @@ class Pusher {
         error: 'batch_request_failed',
         payloadJson: op.dataJson,
       );
-      return;
+      return const PushReport(deadLettered: 1);
     }
     final mid = ops.length ~/ 2;
+    var pushed = 0;
+    var dead = 0;
+    var hadError = false;
     for (final half in [ops.sublist(0, mid), ops.sublist(mid)]) {
       try {
         final results = await backend.pushBatch(half);
@@ -507,7 +559,7 @@ class Pusher {
                 store: sent.store,
                 recordId: sent.id,
                 kind: OutboxKind.upsert,
-                payloadJson: sent.dataJson,
+                payloadJson: outboxPayloadByOpId[sent.opId] ?? sent.dataJson,
                 baseUpdated: sent.baseUpdated,
                 baseHash: sha256Hex(sent.dataJson),
                 opId: sent.opId,
@@ -518,6 +570,7 @@ class Pusher {
               mergedLogical: mergedByOpId[sent.opId],
               serverDataJson: r.pushedJson ?? sent.dataJson,
             );
+            pushed++;
           } else {
             await pocket.outbox.markDeadLetter(
               store: sent.store,
@@ -526,15 +579,22 @@ class Pusher {
               error: r.error ?? 'batch_poison',
               payloadJson: sent.dataJson,
             );
+            dead++;
           }
         }
       } on BatchFailedError {
-        await _binarySplit(half, mergedByOpId);
+        final sub = await _binarySplit(half, mergedByOpId, outboxPayloadByOpId);
+        pushed += sub.pushed;
+        dead += sub.deadLettered;
+        hadError = hadError || sub.hadError;
       } on SyncError {
-        // Transient: leave pending (retry later).
-        return;
+        // Transient: leave this half pending (retry later) and keep trying
+        // the other half — one flaky half must not block the healthy one.
+        hadError = true;
+        continue;
       }
     }
+    return PushReport(pushed: pushed, deadLettered: dead, hadError: hadError);
   }
 
   // ------------------------------------------------------------ bookkeeping --
@@ -543,21 +603,25 @@ class Pusher {
       {Map<String, Object?>? mergedLogical, String? serverDataJson}) async {
     final schema = pocket.requireTable(op.store).schema;
     final serverLogical = normalizeRemote(schema, server);
-    final storedJson = serverDataJson ?? canonicalPayload(schema, serverLogical);
-    await pocket.outbox.settlePush(
-      store: op.store,
-      id: op.recordId,
-      pushedPayloadHash: sha256Hex(serverDataJson ?? op.payloadJson),
-      serverDataJson: storedJson,
-      serverUpdated: server.updated,
-      mergedLogical: mergedLogical,
-    );
+    final storedJson =
+        serverDataJson ?? canonicalPayload(schema, serverLogical);
+    // The settlement op carries the live (pre-request) outbox payload so
+    // settlement can detect a newer edit and refuse to overwrite it with a
+    // stale merge.
+    await pocket.outbox.settlePushBatch([
+      PushSettlement(
+        op: op,
+        serverDataJson: storedJson,
+        serverUpdated: server.updated,
+        pushedPayloadHash: sha256Hex(serverDataJson ?? op.payloadJson),
+        mergedLogical: mergedLogical,
+      ),
+    ]);
   }
 
   Future<PushReport> _retry(OutboxOp op, SyncRowState sr, SyncError e) async {
     final attempts = sr.attemptCount + 1;
-    final retryAfter =
-        e is ServerBusyError ? e.retryAfter : null;
+    final retryAfter = e is ServerBusyError ? e.retryAfter : null;
     if (attempts >= config.maxAttempts) {
       await pocket.outbox.markDeadLetter(
         store: op.store,
@@ -590,30 +654,36 @@ class Pusher {
     );
   }
 
-  Future<void> _recordConflict(
-      OutboxOp op, SyncRowState sr, RemoteRecord fetched, MergeOutcome outcome) async {
+  Future<void> _recordConflict(OutboxOp op, SyncRowState sr,
+      RemoteRecord fetched, MergeOutcome outcome) async {
     final schema = pocket.requireTable(op.store).schema;
     final fetchedLogical = normalizeRemote(schema, fetched);
     final basePayload = _parsePayload(sr.baseJson);
     final localPayload = _parsePayload(op.payloadJson);
     final remotePayload = buildPayload(schema, fetchedLogical);
-    final dirtyLocal = computeDirtyFields(basePayload, localPayload).toList()..sort();
-    final dirtyRemote = computeDirtyFields(basePayload, remotePayload).toList()..sort();
+    final dirtyLocal = computeDirtyFields(basePayload, localPayload).toList()
+      ..sort();
+    final dirtyRemote = computeDirtyFields(basePayload, remotePayload).toList()
+      ..sort();
 
     await pocket.transaction((tx) async {
       final exec = tx.executor;
-      await exec.insert('lp_conflicts', {
-        'store': op.store,
-        'record_id': op.recordId,
-        'base_json': sr.baseJson ?? canonicalize(basePayload),
-        'local_json': canonicalize(localPayload),
-        'remote_json': canonicalize(remotePayload),
-        'dirty_local': jsonEncode(dirtyLocal),
-        'dirty_remote': jsonEncode(dirtyRemote),
-        'detected_at': _nowMs(),
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await exec.insert(
+          'lp_conflicts',
+          {
+            'store': op.store,
+            'record_id': op.recordId,
+            'base_json': sr.baseJson ?? canonicalize(basePayload),
+            'local_json': canonicalize(localPayload),
+            'remote_json': canonicalize(remotePayload),
+            'dirty_local': jsonEncode(dirtyLocal),
+            'dirty_remote': jsonEncode(dirtyRemote),
+            'detected_at': _nowMs(),
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace);
       await exec.update('lp_sync_row', {'sync_state': 'conflict'},
-          where: 'store = ? AND record_id = ?', whereArgs: [op.store, op.recordId]);
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [op.store, op.recordId]);
       tx.addChange(ChangeSet(op.store, {op.recordId}));
       tx.addChange(ChangeSet('lp_conflicts', {op.recordId}));
     });

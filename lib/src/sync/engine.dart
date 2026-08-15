@@ -49,16 +49,40 @@ class SyncEngine {
   bool _authInvalid = false;
   bool _paused = false;
 
-  final StreamController<SyncEngineState> _stateController =
+  // Re-created on restart: [stop] closes them, [start] opens fresh ones so a
+  // restarted engine keeps delivering state/status events.
+  StreamController<SyncEngineState> _stateController =
       StreamController<SyncEngineState>.broadcast();
-  final StreamController<SyncStatus> _statusController =
+  StreamController<SyncStatus> _statusController =
       StreamController<SyncStatus>.broadcast();
+
+  /// Most recent cycle error, surfaced via [SyncStatus.lastError]. Cleared on
+  /// the next error-free cycle.
+  String? _lastError;
+
+  /// When the most recent cycle completed (success or error).
+  DateTime? _lastSyncAt;
+
+  /// Set when the next full cycle must run a forced (full-scan) visibility
+  /// sweep — consumed by exactly one cycle so concurrent
+  /// [markAuthValid]/[invalidateVisibility] calls never double-sweep.
+  bool _forceSweepPending = false;
+
+  /// In-flight realtime fast-path applies are chained so [stop] can wait for
+  /// them and no DB work outlives the pocket (teardown race).
+  Future<void> _fastPathTail = Future.value();
 
   StreamSubscription<ChangeSet>? _changesSub;
   StreamSubscription<BackendHint>? _hintsSub;
   Timer? _syncTimer;
   Timer? _pushTimer;
   Timer? _settleTimer;
+
+  /// Debounced trigger bookkeeping: a pending full cycle, or the accumulated
+  /// stores of pending pull-only hints (merged so no hint is lost when two
+  /// stores hint inside one debounce window).
+  bool _pendingFull = false;
+  final Set<String> _pendingPullOnly = {};
 
   /// Cycles are chained so no two run concurrently.
   Future<SyncReport> _cycleTail = Future.value(const SyncReport());
@@ -82,8 +106,8 @@ class SyncEngine {
       config: this.config,
       blobStore: pocket.blobStore,
     );
-    puller = Puller(pocket, backend, this.config, syncStore,
-        fileLane: fileLane);
+    puller =
+        Puller(pocket, backend, this.config, syncStore, fileLane: fileLane);
     sweeper = Sweeper(pocket, backend, this.config, syncStore, puller);
     pusher = Pusher(pocket, backend, this.config, syncStore,
         onAuthError: _onAuthError);
@@ -104,9 +128,15 @@ class SyncEngine {
   // ---------------------------------------------------------------- lifecycle
 
   /// Opens the engine: subscribes to local writes and backend hints, starts the
-  /// periodic timer, and runs an initial cycle.
+  /// periodic timer, and runs an initial cycle. Restarting a stopped engine
+  /// re-opens fresh state/status streams.
   Future<void> start() async {
     if (_started) return;
+    // A restarted engine gets fresh streams: [stop] closed the previous ones.
+    if (_stateController.isClosed || _statusController.isClosed) {
+      _stateController = StreamController<SyncEngineState>.broadcast();
+      _statusController = StreamController<SyncStatus>.broadcast();
+    }
     _started = true;
     _transition(SyncEngineState.opening);
     // Adapter warm-up (batch probe etc.) before any push decision.
@@ -114,8 +144,15 @@ class SyncEngine {
       await backend.prepare();
       pusher.batchEnabled = backend.capabilities.batchEnabled;
     } catch (_) {}
-    _changesSub = pocket.changes.listen(handleLocalWrite);
-    _hintsSub = backend.hints().listen(handleHint);
+    try {
+      _changesSub = pocket.changes.listen(handleLocalWrite);
+      _hintsSub = backend.hints().listen(handleHint);
+    } catch (_) {
+      // A synchronous subscription failure must not leave a half-started
+      // engine: roll back to closed so [start] can be retried.
+      await stop();
+      rethrow;
+    }
     _syncTimer = Timer.periodic(config.syncInterval, (_) => handleTimer());
     _transition(_effectiveIdle());
     await syncNow();
@@ -131,11 +168,21 @@ class SyncEngine {
     // Drain any cycle already chained by a trigger that fired mid-shutdown so
     // no DB work outlives the pocket (teardown race).
     await _cycleTail;
+    // ... and any realtime fast-path apply that was still in flight.
+    await _fastPathTail;
     // ... and any status emission still querying the (soon-closed) DB.
     await _statusTail;
     await _changesSub?.cancel();
     await _hintsSub?.cancel();
-    if (!_stateController.isClosed) _stateController.close();
+    // Emit the final `closed` transition before closing the stream so
+    // subscribers observe the terminal state.
+    if (!_stateController.isClosed) {
+      _state = SyncEngineState.closed;
+      _stateController.add(SyncEngineState.closed);
+      _stateController.close();
+    } else {
+      _state = SyncEngineState.closed;
+    }
     if (!_statusController.isClosed) _statusController.close();
     _state = SyncEngineState.closed;
   }
@@ -166,17 +213,26 @@ class SyncEngine {
 
   Future<void> _doEmitStatus() async {
     if (!_started) return;
-    final counts = await syncStore.countAllStatus();
-    final pending = counts.pending;
-    final conflicts = counts.conflicts;
-    final hidden = counts.hidden;
+    int pending = 0;
+    int conflicts = 0;
+    int hidden = 0;
+    try {
+      final counts = await syncStore.countAllStatus();
+      pending = counts.pending;
+      conflicts = counts.conflicts;
+      hidden = counts.hidden;
+    } catch (_) {
+      // The status snapshot is best-effort: a failed count query must never
+      // poison the status chain or crash the engine.
+    }
     if (!_statusController.isClosed) {
       _statusController.add(SyncStatus(
         state: _state,
         pending: pending,
         conflicts: conflicts,
         hidden: hidden,
-        lastError: null,
+        lastError: _lastError,
+        lastSyncAt: _lastSyncAt,
       ));
     }
   }
@@ -201,7 +257,7 @@ class SyncEngine {
     final rec = hint.record;
     if (rec != null && hint.kind == BackendHintKind.changed) {
       debugActions.add('fast:${hint.store}');
-      unawaited(_fastPath(rec));
+      _fastPathTail = _fastPathTail.then((_) => _fastPath(rec));
       return;
     }
     debugActions.add('pull:${hint.store}');
@@ -240,11 +296,23 @@ class SyncEngine {
 
   void _scheduleCycle(Duration debounce, {List<String>? stores}) {
     _pushTimer?.cancel();
+    if (stores == null) {
+      // A full cycle is a superset of any pending pull-only hint: remember it
+      // so the accumulated hints are not lost when the full cycle fires.
+      _pendingFull = true;
+    } else {
+      // Merge stores so two hints in one debounce window both survive.
+      _pendingPullOnly.addAll(stores);
+    }
     _pushTimer = Timer(debounce, () {
-      if (stores == null) {
+      final full = _pendingFull;
+      final pullOnly = _pendingPullOnly.toList();
+      _pendingFull = false;
+      _pendingPullOnly.clear();
+      if (full || pullOnly.isEmpty) {
         _runExclusiveCycle();
       } else {
-        _runExclusiveCycle(pullOnly: stores);
+        _runExclusiveCycle(pullOnly: pullOnly);
       }
     });
   }
@@ -261,8 +329,8 @@ class SyncEngine {
   Future<void> markAuthValid() async {
     if (!_authInvalid) return;
     _authInvalid = false;
+    _forceSweepPending = true;
     _transition(_effectiveIdle());
-    await sweeper.sweepIfDue(force: true);
     await syncNow();
   }
 
@@ -307,7 +375,7 @@ class SyncEngine {
 
   /// The app knows permissions changed (e.g. user joined a clinic).
   Future<void> invalidateVisibility() async {
-    await sweeper.sweepIfDue(force: true);
+    _forceSweepPending = true;
     await syncNow();
   }
 
@@ -340,8 +408,9 @@ class SyncEngine {
       } on AuthError {
         _onAuthError();
         break;
-      } on SyncError {
+      } on SyncError catch (e) {
         hadError = true;
+        _lastError = e.message;
       }
     }
     if (_authInvalid) {
@@ -352,12 +421,15 @@ class SyncEngine {
 
     if (pullOnly == null) {
       try {
-        final reports = await sweeper.sweepIfDue();
+        final force = _forceSweepPending;
+        _forceSweepPending = false;
+        final reports = await sweeper.sweepIfDue(force: force);
         for (final s in reports) {
           swept[s.store] = (swept[s.store] ?? 0) + s.scanned;
         }
-      } on SyncError {
+      } on SyncError catch (e) {
         hadError = true;
+        _lastError = e.message;
       }
     }
 
@@ -365,24 +437,51 @@ class SyncEngine {
     var pushReport = const PushReport();
     try {
       pushReport = await pusher.pushPending();
+      if (pushReport.hadError && _lastError == null) {
+        // The pusher records the failure on the sync row; surface it so
+        // SyncStatus.lastError carries the real message.
+        final errRows =
+            await pocket.db.rawQuery('SELECT last_error FROM lp_sync_row '
+                'WHERE last_error IS NOT NULL '
+                'ORDER BY local_rev DESC, rowid DESC LIMIT 1');
+        if (errRows.isNotEmpty && errRows.first['last_error'] is String) {
+          _lastError = errRows.first['last_error'] as String;
+        } else {
+          _lastError = 'push failed';
+        }
+      }
     } on AuthError {
       _onAuthError();
-    } on SyncError {
+    } on SyncError catch (e) {
       hadError = true;
+      _lastError = e.message;
     }
 
     try {
-      await fileLane.syncFiles();
-    } catch (_) {
+      final fileReport = await fileLane.syncFiles();
+      hadError = hadError || fileReport.hadError;
+      if (fileReport.hadError && _lastError == null) {
+        _lastError = 'file sync failed';
+      }
+    } catch (e) {
       hadError = true;
+      _lastError = '$e';
     }
-    _transition(_effectiveIdle());
+    // A completed cycle is a sync heartbeat; a transient failure parks the
+    // engine in `backoff` until the next error-free cycle.
+    final cycleHadError = hadError || pushReport.hadError;
+    _lastSyncAt = DateTime.now();
+    if (!cycleHadError) _lastError = null;
+    final idle = _effectiveIdle();
+    _transition(cycleHadError && idle == SyncEngineState.idle
+        ? SyncEngineState.backoff
+        : idle);
     lastReport = SyncReport(
       pulled: pulled,
       swept: swept,
       pushed: pushReport.pushed,
       deadLettered: pushReport.deadLettered,
-      hadError: hadError || pushReport.hadError,
+      hadError: cycleHadError,
     );
     return lastReport!;
   }

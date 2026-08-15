@@ -233,28 +233,43 @@ class BackendHint {
 // ---------------------------------------------------------------------------
 
 final RegExp _pbTimestampRe =
-    RegExp(r'(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3})Z');
+    RegExp(r'^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3})Z$');
 
-/// Parses a PocketBase UTC timestamp.
+/// Parses a PocketBase UTC timestamp (`YYYY-MM-DD HH:MM:SS.mmmZ`).
+///
+/// The regex is anchored, so trailing garbage, extra text, timezone suffixes
+/// and missing zero padding are all rejected. Out-of-range months/days/times
+/// are rejected too (rather than silently normalized by `DateTime.utc`).
+/// Every failure raises a typed [ProtocolError].
 DateTime pbTimestampToDateTime(String s) {
   final m = _pbTimestampRe.firstMatch(s);
   if (m == null) throw ProtocolError('Bad timestamp "$s"');
-  return DateTime.utc(
-    int.parse(m.group(1)!),
-    int.parse(m.group(2)!),
-    int.parse(m.group(3)!),
-    int.parse(m.group(4)!),
-    int.parse(m.group(5)!),
-    int.parse(m.group(6)!),
-    int.parse(m.group(7)!),
-  );
+  final year = int.parse(m.group(1)!);
+  final month = int.parse(m.group(2)!);
+  final day = int.parse(m.group(3)!);
+  final hour = int.parse(m.group(4)!);
+  final minute = int.parse(m.group(5)!);
+  final second = int.parse(m.group(6)!);
+  final millis = int.parse(m.group(7)!);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) {
+    throw ProtocolError('Bad timestamp "$s"');
+  }
+  final lastDay = DateTime.utc(
+          month == 12 ? year + 1 : year, month == 12 ? 1 : month + 1, 0)
+      .day;
+  if (day < 1 || day > lastDay) throw ProtocolError('Bad timestamp "$s"');
+  return DateTime.utc(year, month, day, hour, minute, second, millis);
 }
 
 /// Formats [dt] using PocketBase's millisecond UTC timestamp format.
+///
+/// [dt] is converted to UTC first, so a local (non-UTC) `DateTime` still
+/// produces a correct instant-based timestamp ending in `Z`.
 String formatPbTimestamp(DateTime dt) {
+  final u = dt.toUtc();
   String p(int n, [int w = 2]) => n.toString().padLeft(w, '0');
-  return '${p(dt.year, 4)}-${p(dt.month)}-${p(dt.day)} '
-      '${p(dt.hour)}:${p(dt.minute)}:${p(dt.second)}.${p(dt.millisecond, 3)}Z';
+  return '${p(u.year, 4)}-${p(u.month)}-${p(u.day)} '
+      '${p(u.hour)}:${p(u.minute)}:${p(u.second)}.${p(u.millisecond, 3)}Z';
 }
 
 /// The rewind window start: cursor − Δ.
@@ -312,7 +327,8 @@ abstract class SyncBackend {
     List<String>? keepNames,
     List<String>? removeNames,
   }) async {
-    throw UnimplementedError('updateRecordFiles not implemented on this backend');
+    throw UnimplementedError(
+        'updateRecordFiles not implemented on this backend');
   }
 
   /// Streamed counterpart used by large-file sync. The default implementation

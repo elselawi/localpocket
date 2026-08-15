@@ -4,11 +4,13 @@ import 'dart:math';
 import '../core/database_adapter.dart';
 
 import '../core/codec.dart';
+import '../core/change_bus.dart';
 import '../core/errors.dart';
 import '../core/hashing.dart';
 import '../core/local_pocket.dart';
 import '../core/sql_utils.dart';
 import '../core/store.dart';
+import '../core/transaction.dart';
 import 'sync_tables.dart';
 
 /// The captured optimistic-concurrency base of a dirty row.
@@ -24,7 +26,8 @@ class BaseSnapshot {
   final String? baseUpdated;
 
   /// Creates a base snapshot.
-  const BaseSnapshot({required this.baseJson, required this.baseHash, this.baseUpdated});
+  const BaseSnapshot(
+      {required this.baseJson, required this.baseHash, this.baseUpdated});
 }
 
 /// Result of applying a local mutation to the outbox.
@@ -83,13 +86,15 @@ class Outbox {
 
   // ------------------------------------------------------------ read helpers --
 
-  Future<OutboxOp?> readOp(DatabaseExecutor exec, String store, String id) async {
+  Future<OutboxOp?> readOp(
+      DatabaseExecutor exec, String store, String id) async {
     final rows = await exec.query('lp_outbox',
         where: 'store = ? AND record_id = ?', whereArgs: [store, id], limit: 1);
     return rows.isEmpty ? null : OutboxOp.fromRow(rows.first);
   }
 
-  Future<SyncRowState?> readSyncRow(DatabaseExecutor exec, String store, String id) async {
+  Future<SyncRowState?> readSyncRow(
+      DatabaseExecutor exec, String store, String id) async {
     final rows = await exec.query('lp_sync_row',
         where: 'store = ? AND record_id = ?', whereArgs: [store, id], limit: 1);
     return rows.isEmpty ? null : SyncRowState.fromRow(rows.first);
@@ -141,8 +146,10 @@ class Outbox {
       // A fresh op. With a captured base this is an update-path op whose kind
       // reflects the intent; without a base (never remote) it is a create.
       opKind = switch (action) {
-        MutationAction.archive => base == null ? OutboxKind.upsert : OutboxKind.archive,
-        MutationAction.restore => base == null ? OutboxKind.upsert : OutboxKind.restore,
+        MutationAction.archive =>
+          base == null ? OutboxKind.upsert : OutboxKind.archive,
+        MutationAction.restore =>
+          base == null ? OutboxKind.upsert : OutboxKind.restore,
         _ => OutboxKind.upsert,
       };
     } else {
@@ -151,7 +158,8 @@ class Outbox {
         case OutboxKind.upsert:
           if (baseNull) {
             // Never existed remotely: archive vanishes (unless configured).
-            if (action == MutationAction.archive && !schema.keepUnsyncedArchives) {
+            if (action == MutationAction.archive &&
+                !schema.keepUnsyncedArchives) {
               vanish = true;
             } else {
               opKind = OutboxKind.upsert;
@@ -179,8 +187,10 @@ class Outbox {
 
     if (vanish) {
       // Vanish rule: never existed remotely → no network op at all.
-      await exec.delete('lp_outbox', where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
-      await exec.delete('lp_sync_row', where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+      await exec.delete('lp_outbox',
+          where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+      await exec.delete('lp_sync_row',
+          where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
       await _vanishFileRefs(exec, store, id);
       await exec.delete(table.tableName, where: 'id = ?', whereArgs: [id]);
       return const LocalWriteResult(vanished: true);
@@ -194,7 +204,8 @@ class Outbox {
     final baseUpdated = outboxOp?.baseUpdated ?? base?.baseUpdated;
     final baseHash = outboxOp?.baseHash ?? base?.baseHash ?? '';
     final baseJson = syncRow?.baseJson ?? base?.baseJson;
-    final mergedDirty = <String>{...?outboxOp?.dirtyFields, ...dirtyFields}.toList()..sort();
+    final mergedDirty =
+        <String>{...?outboxOp?.dirtyFields, ...dirtyFields}.toList()..sort();
     final createdAt = outboxOp?.createdAt ?? now;
 
     final outboxMap = <String, Object?>{
@@ -246,20 +257,26 @@ class Outbox {
     return LocalWriteResult(vanished: false, opId: opId);
   }
 
-  Future<void> _vanishFileRefs(DatabaseExecutor exec, String store, String id) async {
+  Future<void> _vanishFileRefs(
+      DatabaseExecutor exec, String store, String id) async {
     final refs = await exec.query('lp_file_refs',
-        columns: ['ref_id', 'hash'], where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+        columns: ['ref_id', 'hash'],
+        where: 'store = ? AND record_id = ?',
+        whereArgs: [store, id]);
     for (final r in refs) {
-      await exec.delete('lp_file_refs', where: 'ref_id = ?', whereArgs: [r['ref_id']]);
+      await exec.delete('lp_file_refs',
+          where: 'ref_id = ?', whereArgs: [r['ref_id']]);
       final hash = r['hash'] as String?;
       if (hash != null && hash.isNotEmpty) {
         await exec.execute(
-            'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?', [hash]);
+            'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
+            [hash]);
       }
     }
-    // Cancel queued file ops for this record.
+    // Cancel queued file ops for this record (pending AND retryable-failed).
     await exec.update('lp_op_queue', {'state': 'done'},
-        where: 'store = ? AND record_id = ? AND state = ?', whereArgs: [store, id, 'pending']);
+        where: "store = ? AND record_id = ? AND state IN ('pending','failed')",
+        whereArgs: [store, id]);
   }
 
   // -------------------------------------------------------------- draining --
@@ -270,11 +287,12 @@ class Outbox {
   /// Ops whose sync row is in `error`/`quarantine`/`conflict` are excluded
   /// (they are surfaced to the app, never retried in a loop), and ops
   /// whose `next_retry_at` is in the future are deferred (persisted backoff).
-  Future<List<OutboxOp>> drain({String? store, int limit = 25, int? now}) async {
+  Future<List<OutboxOp>> drain(
+      {String? store, int limit = 25, int? now}) async {
     final n = now ?? DateTime.now().millisecondsSinceEpoch;
-    final where = StringBuffer(
-        "s.sync_state NOT IN ('error','quarantine','conflict') "
-        'AND (s.next_retry_at IS NULL OR s.next_retry_at <= ?)');
+    final where =
+        StringBuffer("s.sync_state NOT IN ('error','quarantine','conflict') "
+            'AND (s.next_retry_at IS NULL OR s.next_retry_at <= ?)');
     final args = <Object?>[n];
     if (store != null) {
       where.write(' AND o.store = ?');
@@ -302,7 +320,7 @@ class Outbox {
           'SELECT op_id FROM lp_outbox WHERE op_id IN ($ph)', depList);
       blocked.addAll(inOutbox.map((r) => r['op_id'] as String));
       final inQueue = await pocket.db.rawQuery(
-          "SELECT op_id FROM lp_op_queue WHERE op_id IN ($ph) AND state = 'pending'",
+          "SELECT op_id FROM lp_op_queue WHERE op_id IN ($ph) AND state IN ('pending','failed')",
           depList);
       blocked.addAll(inQueue.map((r) => r['op_id'] as String));
     }
@@ -323,19 +341,23 @@ class Outbox {
       final exec = tx.executor;
       await exec.delete('lp_outbox',
           where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
-      await exec.update('lp_sync_row', {
-        'sync_state': 'clean',
-        'base_updated': null,
-        'base_hash': null,
-        'base_json': null,
-        'dirty_fields': '[]',
-        'remote_updated': serverUpdated,
-        'op_id': null,
-        'attempt_count': 0,
-        'next_retry_at': 0,
-        'last_error': null,
-        'last_seen_at': DateTime.now().millisecondsSinceEpoch,
-      }, where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+      await exec.update(
+          'lp_sync_row',
+          {
+            'sync_state': 'clean',
+            'base_updated': null,
+            'base_hash': null,
+            'base_json': null,
+            'dirty_fields': '[]',
+            'remote_updated': serverUpdated,
+            'op_id': null,
+            'attempt_count': 0,
+            'next_retry_at': 0,
+            'last_error': null,
+            'last_seen_at': DateTime.now().millisecondsSinceEpoch,
+          },
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [store, id]);
     });
   }
 
@@ -388,13 +410,14 @@ class Outbox {
     return pocket.transaction((tx) async {
       pocket.perf.pushSettlementItems += settlements.length;
       for (final settlement in settlements) {
-        await _settlePushInTransaction(tx.executor, settlement);
+        await _settlePushInTransaction(tx, settlement);
       }
     });
   }
 
   Future<void> _settlePushInTransaction(
-      DatabaseExecutor exec, PushSettlement settlement) async {
+      Tx tx, PushSettlement settlement) async {
+    final exec = tx.executor;
     final store = settlement.op.store;
     final id = settlement.op.recordId;
     final table = pocket.requireTable(store);
@@ -402,16 +425,33 @@ class Outbox {
     final nowMs = DateTime.now().millisecondsSinceEpoch;
 
     if (settlement.mergedLogical != null) {
-      final dbRow = encodeDbRow(
-        schema,
-        id: id,
-        logical: settlement.mergedLogical!,
-        archived: settlement.mergedLogical!['archived'] == true,
-        cipher: pocket.fieldCipher,
-        cryptoProvider: pocket.cryptoProvider,
-      );
-      await exec.update(table.tableName, dbRow,
-          where: 'id = ?', whereArgs: [id]);
+      // Guard: only write the stale merge result if the row was NOT edited
+      // again while the request was in flight. `settlement.op.payloadJson`
+      // is the outbox payload captured at push time; a newer local edit
+      // rewrites the outbox payload, so a difference means the merge is stale
+      // and must not overwrite the newer edit. The newer edit then keeps the
+      // row dirty and is pushed on the next cycle (with the advanced base).
+      final currentOutbox = await exec.query('lp_outbox',
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [store, id],
+          limit: 1);
+      final editedDuringRequest = currentOutbox.isNotEmpty &&
+          currentOutbox.first['payload_json'] != settlement.op.payloadJson;
+      if (!editedDuringRequest) {
+        final dbRow = encodeDbRow(
+          schema,
+          id: id,
+          logical: settlement.mergedLogical!,
+          archived: settlement.mergedLogical!['archived'] == true,
+          cipher: pocket.fieldCipher,
+          cryptoProvider: pocket.cryptoProvider,
+        );
+        await exec
+            .update(table.tableName, dbRow, where: 'id = ?', whereArgs: [id]);
+        // The merged domain write is a real content change: publish it so
+        // query/watch subscribers refresh.
+        tx.addChange(ChangeSet(store, {id}));
+      }
     }
 
     final rows = await exec.query(table.tableName,
@@ -420,6 +460,7 @@ class Outbox {
       await exec.delete('lp_outbox',
           where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
       await _markClean(exec, store, id, settlement.serverUpdated, nowMs);
+      tx.addChange(ChangeSet(store, {id}));
       return;
     }
 
@@ -430,45 +471,92 @@ class Outbox {
       cryptoProvider: pocket.cryptoProvider,
     );
     final currentHash = payloadHash(schema, currentLogical);
-    if (currentHash == settlement.pushedPayloadHash) {
+    final serverHash = sha256Hex(settlement.serverDataJson);
+    if (currentHash == settlement.pushedPayloadHash &&
+        serverHash == settlement.pushedPayloadHash) {
+      // The server echoed exactly what we pushed: a plain clean ack.
       await exec.delete('lp_outbox',
           where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
       await _markClean(exec, store, id, settlement.serverUpdated, nowMs);
+      tx.addChange(ChangeSet(store, {id}));
+    } else if (currentHash == settlement.pushedPayloadHash) {
+      // The server transformed the payload (normalized/renamed fields). Adopt
+      // its content locally so the row mirrors the server (server field
+      // preservation) and stays clean — the next pull would otherwise skip a
+      // same-`updated` re-delivery and the transform would be lost forever.
+      final serverLogical = _decodeServerData(settlement.serverDataJson);
+      final dbRow = encodeDbRow(
+        schema,
+        id: id,
+        logical: serverLogical,
+        archived: serverLogical['archived'] == true,
+        cipher: pocket.fieldCipher,
+        cryptoProvider: pocket.cryptoProvider,
+      );
+      await exec
+          .update(table.tableName, dbRow, where: 'id = ?', whereArgs: [id]);
+      await exec.delete('lp_outbox',
+          where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+      await _markClean(exec, store, id, settlement.serverUpdated, nowMs);
+      tx.addChange(ChangeSet(store, {id}));
     } else {
       final serverHash = sha256Hex(settlement.serverDataJson);
-      await exec.update('lp_sync_row', {
-        'base_json': settlement.serverDataJson,
-        'base_hash': serverHash,
-        'base_updated': settlement.serverUpdated,
-        'remote_updated': settlement.serverUpdated,
-        'last_seen_at': nowMs,
-        'access_state': 'visible',
-      }, where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
-      await exec.update('lp_outbox', {
-        'base_updated': settlement.serverUpdated,
-        'base_hash': serverHash,
-      }, where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+      await exec.update(
+          'lp_sync_row',
+          {
+            'base_json': settlement.serverDataJson,
+            'base_hash': serverHash,
+            'base_updated': settlement.serverUpdated,
+            'remote_updated': settlement.serverUpdated,
+            'last_seen_at': nowMs,
+            'access_state': 'visible',
+          },
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [store, id]);
+      await exec.update(
+          'lp_outbox',
+          {
+            'base_updated': settlement.serverUpdated,
+            'base_hash': serverHash,
+          },
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [store, id]);
       await exec.update(table.tableName, {'hidden': 0},
           where: 'id = ?', whereArgs: [id]);
+      // The edit-in-flight branch rewrites the base and may unhide the row.
+      tx.addChange(ChangeSet(store, {id}));
     }
   }
 
-  Future<void> _markClean(
-      DatabaseExecutor exec, String store, String id, String serverUpdated, int nowMs) async {
-    await exec.update('lp_sync_row', {
-      'sync_state': 'clean',
-      'base_updated': null,
-      'base_hash': null,
-      'base_json': null,
-      'dirty_fields': '[]',
-      'remote_updated': serverUpdated,
-      'op_id': null,
-      'attempt_count': 0,
-      'next_retry_at': 0,
-      'last_error': null,
-      'last_seen_at': nowMs,
-      'access_state': 'visible',
-    }, where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+  /// Parses a canonical/raw server payload JSON into a logical map for the
+  /// domain codec (missing declared fields are treated as absent).
+  Map<String, Object?> _decodeServerData(String json) {
+    final decoded = jsonDecode(json);
+    return decoded is Map
+        ? Map<String, Object?>.from(decoded)
+        : <String, Object?>{};
+  }
+
+  Future<void> _markClean(DatabaseExecutor exec, String store, String id,
+      String serverUpdated, int nowMs) async {
+    await exec.update(
+        'lp_sync_row',
+        {
+          'sync_state': 'clean',
+          'base_updated': null,
+          'base_hash': null,
+          'base_json': null,
+          'dirty_fields': '[]',
+          'remote_updated': serverUpdated,
+          'op_id': null,
+          'attempt_count': 0,
+          'next_retry_at': 0,
+          'last_error': null,
+          'last_seen_at': nowMs,
+          'access_state': 'visible',
+        },
+        where: 'store = ? AND record_id = ?',
+        whereArgs: [store, id]);
     // The domain `hidden` column mirrors access_state: a confirmed push means
     // the server holds the record, so the row is visible again (a sweep may
     // have hidden it before the push, e.g. a pending create).
@@ -484,12 +572,16 @@ class Outbox {
       required int nextRetryAt,
       SyncState state = SyncState.dirty}) {
     return pocket.transaction((tx) async {
-      await tx.executor.update('lp_sync_row', {
-        'attempt_count': attempts,
-        'next_retry_at': nextRetryAt,
-        'last_error': error,
-        'sync_state': state.name,
-      }, where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+      await tx.executor.update(
+          'lp_sync_row',
+          {
+            'attempt_count': attempts,
+            'next_retry_at': nextRetryAt,
+            'last_error': error,
+            'sync_state': state.name,
+          },
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [store, id]);
     });
   }
 
@@ -513,10 +605,14 @@ class Outbox {
         'error': error,
         'payload_json': payloadJson,
       });
-      await exec.update('lp_sync_row', {
-        'sync_state': state.name,
-        'last_error': error,
-      }, where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+      await exec.update(
+          'lp_sync_row',
+          {
+            'sync_state': state.name,
+            'last_error': error,
+          },
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [store, id]);
     });
   }
 
@@ -527,11 +623,15 @@ class Outbox {
       required String baseHash,
       required String baseUpdated,
       String? newPayloadJson}) async {
-    await exec.update('lp_sync_row', {
-      'base_json': baseJson,
-      'base_hash': baseHash,
-      'base_updated': baseUpdated,
-    }, where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+    await exec.update(
+        'lp_sync_row',
+        {
+          'base_json': baseJson,
+          'base_hash': baseHash,
+          'base_updated': baseUpdated,
+        },
+        where: 'store = ? AND record_id = ?',
+        whereArgs: [store, id]);
     final updates = <String, Object?>{
       'base_updated': baseUpdated,
       'base_hash': baseHash,
@@ -560,7 +660,9 @@ class Outbox {
   }
 
   Future<int> outboxCount() async =>
-      firstIntValue(await pocket.db.rawQuery('SELECT COUNT(*) AS c FROM lp_outbox')) ?? 0;
+      firstIntValue(
+          await pocket.db.rawQuery('SELECT COUNT(*) AS c FROM lp_outbox')) ??
+      0;
 
   /// Registers a file ref + blob refcount (used by tests).
   Future<void> registerFileRef({

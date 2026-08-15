@@ -4,7 +4,7 @@ import 'dart:convert';
 import '../core/canonical_json.dart';
 import '../core/change_bus.dart';
 import '../core/codec.dart';
-import '../core/ids.dart';
+import '../core/errors.dart';
 import '../core/local_pocket.dart';
 import 'merge.dart';
 import 'sync_tables.dart';
@@ -51,18 +51,35 @@ class ConflictRecord {
   });
 
   static ConflictRecord fromRow(Map<String, Object?> row) {
-    Map<String, Object?> parseMap(Object? val) {
+    // Corrupt JSON (or a JSON value of the wrong shape) surfaces as a typed
+    // StorageError — never a raw FormatException/TypeError — mirroring the
+    // other sync row-model factories.
+    Map<String, Object?> parseMap(Object? val, String column) {
       if (val is String && val.isNotEmpty) {
-        final d = jsonDecode(val);
-        if (d is Map) return Map<String, Object?>.from(d);
+        try {
+          final d = jsonDecode(val);
+          if (d is Map) return Map<String, Object?>.from(d);
+        } catch (e) {
+          throw StorageError('Corrupt lp_conflicts row: $column: $e');
+        }
       }
       return const {};
     }
 
-    Set<String> parseSet(Object? val) {
+    Set<String> parseSet(Object? val, String column) {
       if (val is String && val.isNotEmpty) {
-        final d = jsonDecode(val);
-        if (d is List) return d.cast<String>().toSet();
+        try {
+          final d = jsonDecode(val);
+          if (d is List) {
+            try {
+              return d.cast<String>().toSet();
+            } catch (e) {
+              throw StorageError('Corrupt lp_conflicts row: $column: $e');
+            }
+          }
+        } catch (e) {
+          throw StorageError('Corrupt lp_conflicts row: $column: $e');
+        }
       }
       return const {};
     }
@@ -70,14 +87,14 @@ class ConflictRecord {
     return ConflictRecord(
       store: row['store'] as String,
       recordId: row['record_id'] as String,
-      base: parseMap(row['base_json']),
-      local: parseMap(row['local_json']),
-      remote: parseMap(row['remote_json']),
-      dirtyLocal: parseSet(row['dirty_local']),
-      dirtyRemote: parseSet(row['dirty_remote']),
+      base: parseMap(row['base_json'], 'base_json'),
+      local: parseMap(row['local_json'], 'local_json'),
+      remote: parseMap(row['remote_json'], 'remote_json'),
+      dirtyLocal: parseSet(row['dirty_local'], 'dirty_local'),
+      dirtyRemote: parseSet(row['dirty_remote'], 'dirty_remote'),
       detectedAt: row['detected_at'] as int,
       resolved: row['resolved_json'] != null
-          ? parseMap(row['resolved_json'])
+          ? parseMap(row['resolved_json'], 'resolved_json')
           : null,
     );
   }
@@ -94,7 +111,9 @@ class Conflicts {
   Future<List<ConflictRecord>> listOpen({String? store}) async {
     final rows = await _pocket.db.query(
       'lp_conflicts',
-      where: store != null ? 'store = ? AND resolved_json IS NULL' : 'resolved_json IS NULL',
+      where: store != null
+          ? 'store = ? AND resolved_json IS NULL'
+          : 'resolved_json IS NULL',
       whereArgs: store != null ? [store] : null,
       orderBy: 'detected_at ASC',
     );
@@ -132,7 +151,9 @@ class Conflicts {
     controller = StreamController<List<ConflictRecord>>.broadcast(
       onListen: () {
         sub = _pocket.changes.listen((cs) {
-          if (store == null || cs.store == store || cs.store == 'lp_conflicts') {
+          if (store == null ||
+              cs.store == store ||
+              cs.store == 'lp_conflicts') {
             emit();
           }
         });
@@ -175,6 +196,23 @@ class Conflicts {
       final remoteJson = canonicalize(record.remote);
       final remoteHash = payloadHash(schema, record.remote);
 
+      // The domain row may be gone (e.g. the record was purged). There is
+      // nothing to resolve then: drop the stale conflict (and any dangling
+      // sync/outbox rows) instead of inserting an orphaned outbox op.
+      final domainRow = await exec.query(table.tableName,
+          where: 'id = ?', whereArgs: [id], limit: 1);
+      if (domainRow.isEmpty) {
+        await exec.delete('lp_conflicts',
+            where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+        await exec.delete('lp_sync_row',
+            where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+        await exec.delete('lp_outbox',
+            where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+        tx.addChange(ChangeSet(store, {id}));
+        tx.addChange(ChangeSet('lp_conflicts', {id}));
+        return;
+      }
+
       // Read remote_updated from sync row
       final srRow = await exec.query(
         'lp_sync_row',
@@ -182,9 +220,8 @@ class Conflicts {
         whereArgs: [store, id],
         limit: 1,
       );
-      final remoteUpdated = srRow.isNotEmpty
-          ? (srRow.first['remote_updated'] as String?)
-          : null;
+      final remoteUpdated =
+          srRow.isNotEmpty ? (srRow.first['remote_updated'] as String?) : null;
 
       // 1. Delete conflict row
       await exec.delete(
@@ -193,10 +230,13 @@ class Conflicts {
         whereArgs: [store, id],
       );
 
-      // 2. Update domain row
-      final mergedWithId = {'id': id, ...merged};
+      // 2. Update domain row. The resolution id ALWAYS wins: a caller-supplied
+      // `id` inside [merged] must never rename the record or leak into the
+      // pushed payload.
+      final mergedWithId = <String, Object?>{...merged, 'id': id};
       final isArchived = mergedWithId['archived'] == true;
-      final dbRow = encodeDbRow(schema, id: id, logical: mergedWithId, archived: isArchived);
+      final dbRow = encodeDbRow(schema,
+          id: id, logical: mergedWithId, archived: isArchived);
       await exec.update(
         table.tableName,
         dbRow,
@@ -205,7 +245,8 @@ class Conflicts {
       );
 
       // 3. Compute dirty fields between remote and merged
-      final dirtyFields = computeDirtyFields(record.remote, mergedWithId).toList()..sort();
+      final dirtyFields =
+          computeDirtyFields(record.remote, mergedWithId).toList()..sort();
       final mergedPayload = canonicalize(buildPayload(schema, mergedWithId));
 
       // 4. Update sync row to dirty with remote as base
@@ -231,15 +272,18 @@ class Conflicts {
       );
 
       if (existingOp.isEmpty) {
+        final now = DateTime.now().millisecondsSinceEpoch;
         await exec.insert('lp_outbox', {
-          'op_id': generateRecordId(),
+          'op_id': _pocket.outbox.generateOpId(),
           'store': store,
           'record_id': id,
           'kind': isArchived ? 'archive' : 'upsert',
           'payload_json': mergedPayload,
           'base_updated': remoteUpdated,
           'base_hash': remoteHash,
-          'created_at': DateTime.now().millisecondsSinceEpoch,
+          'dirty_fields': jsonEncode(dirtyFields),
+          'created_at': now,
+          'updated_at': now,
         });
       } else {
         await exec.update(

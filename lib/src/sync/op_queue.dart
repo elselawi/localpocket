@@ -36,13 +36,18 @@ class OpQueue {
     });
   }
 
-  /// Returns pending ops ready to run, FIFO by seq, skipping blocked ones.
+  /// Returns ops ready to run, FIFO by seq, skipping blocked ones.
+  ///
+  /// Both `pending` and retryable `failed` ops (whose persisted `next_retry_at`
+  /// deadline has passed) are selected, so a transiently-failed op is never
+  /// lost — it is retried with backoff until it succeeds or the record it
+  /// belongs to is purged.
   Future<List<OpQueueRow>> drain({String? store, int limit = 25}) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     final rows = await pocket.db.query('lp_op_queue',
-        where: 'state = ? AND next_retry_at <= ?${store == null ? '' : ' AND store = ?'}',
+        where: "state IN ('pending','failed') AND next_retry_at <= ?"
+            '${store == null ? '' : ' AND store = ?'}',
         whereArgs: [
-          'pending',
           now,
           if (store != null) store,
         ],
@@ -61,8 +66,10 @@ class OpQueue {
       final outboxRows = await pocket.db.rawQuery(
           'SELECT op_id FROM lp_outbox WHERE op_id IN ($placeholders)', ids);
       blocked.addAll(outboxRows.map((row) => row['op_id'] as String));
+      // A failed-but-retryable queue op still gates its dependents.
       final queueRows = await pocket.db.rawQuery(
-          "SELECT op_id FROM lp_op_queue WHERE op_id IN ($placeholders) AND state = 'pending'",
+          "SELECT op_id FROM lp_op_queue WHERE op_id IN ($placeholders) "
+          "AND state IN ('pending','failed')",
           ids);
       blocked.addAll(queueRows.map((row) => row['op_id'] as String));
     }
@@ -85,12 +92,24 @@ class OpQueue {
   }
 
   /// Marks [opId] failed and stores [error] for inspection.
-  Future<void> markFailed(String opId, String error) {
+  ///
+  /// The op stays retryable: it transitions to `failed` with an incremented
+  /// attempt count and a persisted backoff deadline, and [drain] will select
+  /// it again once the deadline passes. [attempts] is the total attempt count
+  /// (including this failure) and [nextRetryAt] the epoch-ms deadline.
+  Future<void> markFailed(String opId, String error,
+      {int attempts = 1, int nextRetryAt = 0}) {
     return pocket.transaction((tx) async {
-      await tx.executor.update('lp_op_queue', {
-        'state': 'failed',
-        'last_error': error,
-      }, where: 'op_id = ?', whereArgs: [opId]);
+      await tx.executor.update(
+          'lp_op_queue',
+          {
+            'state': 'failed',
+            'attempt_count': attempts,
+            'next_retry_at': nextRetryAt,
+            'last_error': error,
+          },
+          where: 'op_id = ?',
+          whereArgs: [opId]);
     });
   }
 

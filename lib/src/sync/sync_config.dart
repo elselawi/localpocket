@@ -5,6 +5,13 @@ library;
 import 'dart:math';
 
 /// Configuration for pull, push, retry, sweep, and sync scheduling.
+///
+/// The constructor is `const` and therefore does not validate or throw;
+/// invalid values are instead **clamped at point of use**:
+/// - `delayFor` treats attempts < 1 as attempt 1,
+/// - jitter results are clamped to the documented `0.5..1.5` range,
+/// - negative `backoffBase`/`backoffCap` behave as zero,
+/// - exponential growth is integer and overflow-safe (capped at `backoffCap`).
 class SyncConfig {
   /// Pull page size (server max 500; default 200).
   final int maxPage;
@@ -72,12 +79,127 @@ class SyncConfig {
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 
   /// Backoff delay for attempt `n` (1-based) honoring Retry-After.
+  ///
+  /// Retry-After may be integer seconds (optional sign, surrounding
+  /// whitespace) or an HTTP-date; malformed values fall back to 1 second.
+  /// Negative integer seconds and dates in the past clamp to zero.
+  /// Attempts below 1 are treated as 1; jitter is clamped to `0.5..1.5` and
+  /// the exponential is integer-doubled with overflow protection, never
+  /// exceeding [backoffCap].
   Duration delayFor(int attempt, {String? retryAfter}) {
     if (retryAfter != null) {
-      return Duration(seconds: int.tryParse(retryAfter) ?? 1);
+      final parsed = _parseRetryAfter(retryAfter);
+      if (parsed is int) {
+        return Duration(seconds: parsed < 0 ? 0 : parsed);
+      }
+      if (parsed is DateTime) {
+        final delayMs = parsed.millisecondsSinceEpoch - now();
+        return delayMs <= 0 ? Duration.zero : Duration(milliseconds: delayMs);
+      }
+      return const Duration(seconds: 1);
     }
-    final raw = backoffBase * pow(2, attempt - 1).toInt();
-    final capped = raw < backoffCap ? raw : backoffCap;
-    return Duration(microseconds: (capped.inMicroseconds * jitter(attempt)).round());
+    final n = attempt < 1 ? 1 : attempt;
+    final baseUs =
+        backoffBase.inMicroseconds < 0 ? 0 : backoffBase.inMicroseconds;
+    final capUs = backoffCap.inMicroseconds < 0 ? 0 : backoffCap.inMicroseconds;
+    var exp = baseUs > capUs ? capUs : baseUs;
+    for (var i = 1; i < n && exp < capUs; i++) {
+      final doubled = exp * 2;
+      exp = doubled > capUs ? capUs : doubled;
+    }
+    final j = jitter(n).clamp(0.5, 1.5).toDouble();
+    return Duration(microseconds: (exp * j).round());
+  }
+
+  /// Parses a `Retry-After` header value: integer seconds or an HTTP-date.
+  /// Returns `null` for malformed input.
+  Object? _parseRetryAfter(String s) {
+    final trimmed = s.trim();
+    final seconds = int.tryParse(trimmed);
+    if (seconds != null) return seconds;
+    return _tryParseHttpDate(trimmed);
+  }
+
+  static int? _monthNumber(String name) => switch (name.toLowerCase()) {
+        'jan' => 1,
+        'feb' => 2,
+        'mar' => 3,
+        'apr' => 4,
+        'may' => 5,
+        'jun' => 6,
+        'jul' => 7,
+        'aug' => 8,
+        'sep' => 9,
+        'oct' => 10,
+        'nov' => 11,
+        'dec' => 12,
+        _ => null,
+      };
+
+  /// Minimal HTTP-date parser (RFC 7231 §7.1.1.1): RFC 1123
+  /// (`Sun, 06 Nov 1994 08:49:37 GMT`), RFC 850 (`Sunday, 06-Nov-94 …`), and
+  /// asctime (`Sun Nov  6 08:49:37 1994`). Day names are case-insensitive;
+  /// anything else returns null. Avoids `dart:io` for web compatibility.
+  static DateTime? _tryParseHttpDate(String s) {
+    final rfc1123 = RegExp(
+        r'^[A-Za-z]{3}, (\d{2}) ([A-Za-z]{3}) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$');
+    var m = rfc1123.firstMatch(s);
+    if (m != null) {
+      final month = _monthNumber(m.group(2)!);
+      if (month == null) return null;
+      return _safeUtc(
+        int.parse(m.group(3)!),
+        month,
+        int.parse(m.group(1)!),
+        int.parse(m.group(4)!),
+        int.parse(m.group(5)!),
+        int.parse(m.group(6)!),
+      );
+    }
+    // RFC 850: 2-digit year (>=70 → 19xx, else 20xx).
+    final rfc850 = RegExp(
+        r'^[A-Za-z]+, (\d{2})-([A-Za-z]{3})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) GMT$');
+    m = rfc850.firstMatch(s);
+    if (m != null) {
+      final month = _monthNumber(m.group(2)!);
+      if (month == null) return null;
+      final yy = int.parse(m.group(3)!);
+      final year = yy >= 70 ? 1900 + yy : 2000 + yy;
+      return _safeUtc(
+        year,
+        month,
+        int.parse(m.group(1)!),
+        int.parse(m.group(4)!),
+        int.parse(m.group(5)!),
+        int.parse(m.group(6)!),
+      );
+    }
+    final asctime = RegExp(
+        r'^[A-Za-z]{3} ([A-Za-z]{3}) {1,2}(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$');
+    m = asctime.firstMatch(s);
+    if (m != null) {
+      final month = _monthNumber(m.group(1)!);
+      if (month == null) return null;
+      return _safeUtc(
+        int.parse(m.group(6)!),
+        month,
+        int.parse(m.group(2)!),
+        int.parse(m.group(3)!),
+        int.parse(m.group(4)!),
+        int.parse(m.group(5)!),
+      );
+    }
+    return null;
+  }
+
+  static DateTime? _safeUtc(int y, int mo, int d, int h, int mi, int s) {
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 59) {
+      return null;
+    }
+    try {
+      return DateTime.utc(y, mo, d, h, mi, s);
+    } catch (_) {
+      return null;
+    }
   }
 }

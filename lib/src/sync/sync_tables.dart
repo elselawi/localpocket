@@ -3,6 +3,8 @@ library;
 
 import 'dart:convert';
 
+import '../core/errors.dart';
+
 enum SyncState { clean, dirty, inFlight, conflict, error, quarantine }
 
 enum AccessState { visible, hidden }
@@ -114,6 +116,21 @@ const List<String> syncSystemDdl = [
   'CREATE INDEX IF NOT EXISTS ix_filerefs_record ON lp_file_refs (store, record_id)',
 ];
 
+/// Parses [row] into [T], converting any malformed value (wrong SQLite type,
+/// unknown enum string, broken JSON, …) into a typed [StorageError]
+/// corruption failure instead of leaking a raw `TypeError`/`ArgumentError`/
+/// `FormatException`. These tables are written exclusively by the package, so
+/// a row that fails to parse indicates disk corruption or a version mismatch.
+T _parseRow<T>(String table, T Function() build) {
+  try {
+    return build();
+  } on StorageError {
+    rethrow;
+  } catch (e) {
+    throw StorageError('Corrupt $table row: $e');
+  }
+}
+
 class SyncRowState {
   final String store;
   final String recordId;
@@ -151,24 +168,27 @@ class SyncRowState {
     this.schemaVer = 1,
   });
 
-  factory SyncRowState.fromRow(Map<String, Object?> row) => SyncRowState(
-        store: row['store'] as String,
-        recordId: row['record_id'] as String,
-        remoteUpdated: row['remote_updated'] as String?,
-        lastSeenAt: row['last_seen_at'] as int?,
-        baseUpdated: row['base_updated'] as String?,
-        baseHash: row['base_hash'] as String?,
-        baseJson: row['base_json'] as String?,
-        syncState: SyncState.values.byName(row['sync_state'] as String),
-        dirtyFields: _decodeStringList(row['dirty_fields']),
-        localRev: (row['local_rev'] as int?) ?? 0,
-        accessState: AccessState.values.byName(row['access_state'] as String),
-        opId: row['op_id'] as String?,
-        attemptCount: (row['attempt_count'] as int?) ?? 0,
-        nextRetryAt: (row['next_retry_at'] as int?) ?? 0,
-        lastError: row['last_error'] as String?,
-        schemaVer: (row['schema_ver'] as int?) ?? 1,
-      );
+  factory SyncRowState.fromRow(Map<String, Object?> row) => _parseRow(
+      'lp_sync_row',
+      () => SyncRowState(
+            store: row['store'] as String,
+            recordId: row['record_id'] as String,
+            remoteUpdated: row['remote_updated'] as String?,
+            lastSeenAt: row['last_seen_at'] as int?,
+            baseUpdated: row['base_updated'] as String?,
+            baseHash: row['base_hash'] as String?,
+            baseJson: row['base_json'] as String?,
+            syncState: SyncState.values.byName(row['sync_state'] as String),
+            dirtyFields: _decodeStringList(row['dirty_fields']),
+            localRev: (row['local_rev'] as int?) ?? 0,
+            accessState:
+                AccessState.values.byName(row['access_state'] as String),
+            opId: row['op_id'] as String?,
+            attemptCount: (row['attempt_count'] as int?) ?? 0,
+            nextRetryAt: (row['next_retry_at'] as int?) ?? 0,
+            lastError: row['last_error'] as String?,
+            schemaVer: (row['schema_ver'] as int?) ?? 1,
+          ));
 }
 
 class OutboxOp {
@@ -198,19 +218,21 @@ class OutboxOp {
     this.dependsOnOp,
   });
 
-  factory OutboxOp.fromRow(Map<String, Object?> row) => OutboxOp(
-        store: row['store'] as String,
-        recordId: row['record_id'] as String,
-        kind: OutboxKind.values.byName(row['kind'] as String),
-        payloadJson: row['payload_json'] as String,
-        baseUpdated: row['base_updated'] as String?,
-        baseHash: (row['base_hash'] as String?) ?? '',
-        dirtyFields: _decodeStringList(row['dirty_fields']),
-        opId: row['op_id'] as String,
-        createdAt: row['created_at'] as int,
-        updatedAt: row['updated_at'] as int,
-        dependsOnOp: row['depends_on_op'] as String?,
-      );
+  factory OutboxOp.fromRow(Map<String, Object?> row) => _parseRow(
+      'lp_outbox',
+      () => OutboxOp(
+            store: row['store'] as String,
+            recordId: row['record_id'] as String,
+            kind: OutboxKind.values.byName(row['kind'] as String),
+            payloadJson: row['payload_json'] as String,
+            baseUpdated: row['base_updated'] as String?,
+            baseHash: (row['base_hash'] as String?) ?? '',
+            dirtyFields: _decodeStringList(row['dirty_fields']),
+            opId: row['op_id'] as String,
+            createdAt: row['created_at'] as int,
+            updatedAt: row['updated_at'] as int,
+            dependsOnOp: row['depends_on_op'] as String?,
+          ));
 }
 
 class OpQueueRow {
@@ -242,20 +264,22 @@ class OpQueueRow {
     required this.createdAt,
   });
 
-  factory OpQueueRow.fromRow(Map<String, Object?> row) => OpQueueRow(
-        seq: row['seq'] as int,
-        opId: row['op_id'] as String,
-        store: row['store'] as String,
-        recordId: row['record_id'] as String,
-        kind: OpQueueKind.values.byName(row['kind'] as String),
-        payloadJson: row['payload_json'] as String,
-        state: row['state'] as String,
-        attemptCount: (row['attempt_count'] as int?) ?? 0,
-        nextRetryAt: (row['next_retry_at'] as int?) ?? 0,
-        lastError: row['last_error'] as String?,
-        dependsOnOp: row['depends_on_op'] as String?,
-        createdAt: row['created_at'] as int,
-      );
+  factory OpQueueRow.fromRow(Map<String, Object?> row) => _parseRow(
+      'lp_op_queue',
+      () => OpQueueRow(
+            seq: row['seq'] as int,
+            opId: row['op_id'] as String,
+            store: row['store'] as String,
+            recordId: row['record_id'] as String,
+            kind: OpQueueKind.values.byName(row['kind'] as String),
+            payloadJson: row['payload_json'] as String,
+            state: row['state'] as String,
+            attemptCount: (row['attempt_count'] as int?) ?? 0,
+            nextRetryAt: (row['next_retry_at'] as int?) ?? 0,
+            lastError: row['last_error'] as String?,
+            dependsOnOp: row['depends_on_op'] as String?,
+            createdAt: row['created_at'] as int,
+          ));
 }
 
 List<String> _decodeStringList(Object? v) {
@@ -263,6 +287,15 @@ List<String> _decodeStringList(Object? v) {
   final s = v as String;
   if (s.isEmpty) return const [];
   final decoded = jsonDecode(s);
-  if (decoded is List) return decoded.cast<String>();
-  return const [];
+  if (decoded is! List) {
+    throw FormatException('expected a JSON array, got ${decoded.runtimeType}');
+  }
+  return [
+    for (final item in decoded)
+      if (item is String)
+        item
+      else
+        throw FormatException(
+            'dirty-field member is ${item.runtimeType}, expected String')
+  ];
 }

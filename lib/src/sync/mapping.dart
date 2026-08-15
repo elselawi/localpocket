@@ -37,7 +37,12 @@ class NormalizedRemoteRecord {
 }
 
 /// Normalizes a single remote record and precomputes its canonical payload JSON and hash.
-NormalizedRemoteRecord normalizeSingleRemote(CollectionSchema schema, RemoteRecord remote) {
+///
+/// Every failure — a typed [MapFailure] or any other parsing/casting error —
+/// is captured into [NormalizedRemoteRecord.error] so one poison record is
+/// quarantined instead of stalling the whole store.
+NormalizedRemoteRecord normalizeSingleRemote(
+    CollectionSchema schema, RemoteRecord remote) {
   try {
     final logical = normalizeRemote(schema, remote);
     final remotePayload = buildPayload(schema, logical);
@@ -53,6 +58,13 @@ NormalizedRemoteRecord normalizeSingleRemote(CollectionSchema schema, RemoteReco
     return NormalizedRemoteRecord(
       remote: remote,
       error: e.message,
+    );
+  } catch (e) {
+    // Any other failure (TypeError, FormatException, …) is still a per-record
+    // quarantine: a malformed payload must never stall valid records.
+    return NormalizedRemoteRecord(
+      remote: remote,
+      error: '$e',
     );
   }
 }
@@ -81,7 +93,8 @@ Future<List<NormalizedRemoteRecord>> normalizeRemoteBatchAsync(
   return normalizeRemoteBatch(schema, remotes);
 }
 
-Map<String, Object?> normalizeRemote(CollectionSchema schema, RemoteRecord remote) {
+Map<String, Object?> normalizeRemote(
+    CollectionSchema schema, RemoteRecord remote) {
   final data = Map<String, Object?>.from(remote.data);
   final declared = schema.declaredFieldNames;
 
@@ -109,7 +122,8 @@ Map<String, Object?> normalizeRemote(CollectionSchema schema, RemoteRecord remot
       case FieldKind.enumValue:
       case FieldKind.ref:
         if (v is! String) {
-          throw MapFailure('Field "${f.name}" must be a string, got ${v.runtimeType}.');
+          throw MapFailure(
+              'Field "${f.name}" must be a string, got ${v.runtimeType}.');
         }
         if (f.kind == FieldKind.enumValue && !f.enumValues!.contains(v)) {
           throw MapFailure('Field "${f.name}" has unknown enum value "$v".');
@@ -117,20 +131,30 @@ Map<String, Object?> normalizeRemote(CollectionSchema schema, RemoteRecord remot
       case FieldKind.int:
       case FieldKind.date:
         if (v is! int) {
-          throw MapFailure('Field "${f.name}" must be an integer, got ${v.runtimeType}.');
+          throw MapFailure(
+              'Field "${f.name}" must be an integer, got ${v.runtimeType}.');
         }
       case FieldKind.real:
         if (v is! num) {
-          throw MapFailure('Field "${f.name}" must be a number, got ${v.runtimeType}.');
+          throw MapFailure(
+              'Field "${f.name}" must be a number, got ${v.runtimeType}.');
         }
       case FieldKind.bool:
         if (v is! bool) {
-          throw MapFailure('Field "${f.name}" must be a boolean, got ${v.runtimeType}.');
+          throw MapFailure(
+              'Field "${f.name}" must be a boolean, got ${v.runtimeType}.');
         }
       case FieldKind.json:
-      case FieldKind.jsonList:
         if (v is! Map && v is! List) {
-          throw MapFailure('Field "${f.name}" must be JSON, got ${v.runtimeType}.');
+          throw MapFailure(
+              'Field "${f.name}" must be JSON, got ${v.runtimeType}.');
+        }
+      case FieldKind.jsonList:
+        // Matches local validation: a jsonList field only accepts arrays.
+        // (A JSON object here is a wire-format violation, not a valid list.)
+        if (v is! List) {
+          throw MapFailure(
+              'Field "${f.name}" must be a JSON array, got ${v.runtimeType}.');
         }
     }
     logical[f.name] = v;

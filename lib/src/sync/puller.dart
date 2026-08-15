@@ -5,6 +5,7 @@ import '../core/database_adapter.dart';
 import '../core/canonical_json.dart';
 import '../core/change_bus.dart';
 import '../core/codec.dart';
+import '../core/ids.dart';
 import '../core/local_pocket.dart';
 import '../core/schema.dart';
 import '../core/transaction.dart';
@@ -45,7 +46,8 @@ class Puller {
 
   Future<PullReport> pullStore(String store) async {
     var cursor = await syncStore.readCursor(store);
-    var from = cursor == null ? epoch : rewindUpdated(cursor.updated, config.rewind);
+    var from =
+        cursor == null ? epoch : rewindUpdated(cursor.updated, config.rewind);
     // The rewind resets the tie-break to the earliest id.
     String? fromId;
     var pages = 0;
@@ -60,7 +62,10 @@ class Puller {
       );
       if (page.isEmpty) break;
       pocket.perf.pullPages++;
-      final last = page.last;
+      // The cursor must advance to the MAXIMUM (updated, id) tuple actually
+      // seen, not the page's last element: a reordered/unsorted backend page
+      // would otherwise skip records that sort after `last`.
+      final last = _maxTuple(page);
 
       final normalizedBatch = await normalizeRemoteBatchAsync(
         pocket.requireTable(store).schema,
@@ -87,10 +92,8 @@ class Puller {
           for (final r in srRows) {
             srById[r['record_id'] as String] = SyncRowState.fromRow(r);
           }
-          final domRows = await exec.query(
-              pocket.requireTable(store).tableName,
-              where: 'id IN ($ph)',
-              whereArgs: chunk);
+          final domRows = await exec.query(pocket.requireTable(store).tableName,
+              where: 'id IN ($ph)', whereArgs: chunk);
           for (final r in domRows) {
             localById[r['id'] as String] = decodeDbRow(schema, r,
                 cipher: pocket.fieldCipher,
@@ -142,6 +145,21 @@ class Puller {
     if (u < 0) return true;
     if (u > 0) return false;
     return r.id.compareTo(c.id) <= 0;
+  }
+
+  bool _tupleGreater(RemoteRecord a, RemoteRecord b) {
+    final u = a.updated.compareTo(b.updated);
+    if (u != 0) return u > 0;
+    return a.id.compareTo(b.id) > 0;
+  }
+
+  /// The record with the greatest (updated, id) tuple in [page].
+  RemoteRecord _maxTuple(List<RemoteRecord> page) {
+    var max = page.first;
+    for (final r in page.skip(1)) {
+      if (_tupleGreater(r, max)) max = r;
+    }
+    return max;
   }
 
   /// Realtime fast-path: apply a realtime event's
@@ -245,6 +263,21 @@ class Puller {
     final remotePayloadJson = item.remotePayloadJson!;
     final remoteHash = item.remoteHash!;
 
+    // Security contract: a remote record is only ever written into the table
+    // it claims. A record whose `store` differs from the requested store, or
+    // whose id is not a valid local record id, is quarantined — it must never
+    // be routed into another table or silently written with a malformed id.
+    if (remote.store != store) {
+      await _quarantineMapFailure(exec, schema, store, remote,
+          'Remote store "${remote.store}" does not match requested store "$store".');
+      return;
+    }
+    if (!isValidRecordId(remote.id)) {
+      await _quarantineMapFailure(exec, schema, store, remote,
+          'Invalid remote record id "${remote.id}".');
+      return;
+    }
+
     // `prefetchedSyncRowChecked` makes the probe authoritative even when the
     // probe found NO row (null = absent); without it, null would fall through
     // to a per-record re-read (sync-apply profile: 33% of pull statements).
@@ -301,7 +334,7 @@ class Puller {
     // 2. Clean locally -> fast-forward (no conflict possible).
     if (state == SyncState.clean) {
       if (sr?.remoteUpdated == remote.updated) {
-        await _touchSeen(exec, store, remote.id, remote.updated);
+        await _touchSeen(tx, store, remote.id, remote.updated);
         return;
       }
       final dbRow = encodeDbRow(
@@ -330,14 +363,22 @@ class Puller {
         state == SyncState.conflict) {
       if (sr?.baseUpdated == remote.updated) {
         // Server unchanged; local edit stands.
-        await _touchSeen(exec, store, remote.id, remote.updated);
+        await _touchSeen(tx, store, remote.id, remote.updated);
+        return;
+      }
+      if (state == SyncState.conflict) {
+        // A conflict is resolved only by explicit user action. Neither a
+        // converged nor a newly-changed remote payload may silently clear it:
+        // keep the row open and only refresh visibility.
+        await _touchSeen(tx, store, remote.id, remote.updated);
         return;
       }
       final localPayload = buildPayload(schema, localRow);
       if (canonicalize(localPayload) == remotePayloadJson) {
         // Already converged: clear the dirty state.
         await exec.delete('lp_outbox',
-            where: 'store = ? AND record_id = ?', whereArgs: [store, remote.id]);
+            where: 'store = ? AND record_id = ?',
+            whereArgs: [store, remote.id]);
         await _upsertSyncRow(exec, store, remote.id,
             remoteUpdated: remote.updated,
             state: SyncState.clean,
@@ -350,13 +391,14 @@ class Puller {
       // 3-way merge: remote is the trunk; local changes apply on top.
       final basePayload = _parsePayload(sr?.baseJson);
       final policy = MergePolicy(
-        collectionResolver: schema.conflictPolicy.collectionResolver is ConflictResolver
-            ? schema.conflictPolicy.collectionResolver as ConflictResolver
-            : null,
+        collectionResolver:
+            schema.conflictPolicy.collectionResolver is ConflictResolver
+                ? schema.conflictPolicy.collectionResolver as ConflictResolver
+                : null,
         fieldOverrides: schema.conflictPolicy.fieldOverrides,
         editsUnarchive: schema.conflictPolicy.editsUnarchive,
       );
-      final outcome = merge3Way(
+      final outcome = await merge3WayAsync(
         base: basePayload,
         local: localPayload,
         remote: remotePayload,
@@ -366,8 +408,9 @@ class Puller {
       );
       if (outcome.needsReview) {
         // Escalate to lp_conflicts; outbox op is held.
-        await _recordPullConflict(exec, store, remote, schema, sr, localPayload, outcome);
-        await _touchSeen(exec, store, remote.id, remote.updated);
+        await _recordPullConflict(
+            exec, store, remote, schema, sr, localPayload, outcome);
+        await _touchSeen(tx, store, remote.id, remote.updated);
         tx.addChange(ChangeSet(store, {remote.id}));
         tx.addChange(ChangeSet('lp_conflicts', {remote.id}));
         return;
@@ -390,7 +433,7 @@ class Puller {
           baseHash: remoteHash,
           baseUpdated: remote.updated,
           newPayloadJson: canonicalize(merged));
-      await _touchSeen(exec, store, remote.id, remote.updated);
+      await _touchSeen(tx, store, remote.id, remote.updated);
       tx.addChange(ChangeSet(store, {remote.id}));
       return;
     }
@@ -416,8 +459,10 @@ class Puller {
   ) async {
     final basePayload = _parsePayload(sr?.baseJson);
     final remotePayload = buildPayload(schema, normalizeRemote(schema, remote));
-    final dirtyLocal = computeDirtyFields(basePayload, localPayload).toList()..sort();
-    final dirtyRemote = computeDirtyFields(basePayload, remotePayload).toList()..sort();
+    final dirtyLocal = computeDirtyFields(basePayload, localPayload).toList()
+      ..sort();
+    final dirtyRemote = computeDirtyFields(basePayload, remotePayload).toList()
+      ..sort();
 
     await exec.insert(
       'lp_conflicts',
@@ -441,15 +486,27 @@ class Puller {
     );
   }
 
-  Future<void> _quarantineMapFailure(DatabaseExecutor exec,
-      CollectionSchema schema, String store, RemoteRecord remote, String message) async {
+  Future<void> _quarantineMapFailure(
+      DatabaseExecutor exec,
+      CollectionSchema schema,
+      String store,
+      RemoteRecord remote,
+      String message) async {
+    // Best-effort payload capture: a payload that is not JSON-serializable
+    // must still be quarantined, not crash the page.
+    String payloadJson;
+    try {
+      payloadJson = jsonEncode(remote.data);
+    } catch (_) {
+      payloadJson = jsonEncode({'raw': remote.data.toString()});
+    }
     await exec.insert('lp_dead_letter', {
       'at': _nowMs(),
       'kind': 'map_failure',
       'store': store,
       'record_id': remote.id,
       'error': message,
-      'payload_json': jsonEncode(remote.data),
+      'payload_json': payloadJson,
     });
     final sr = await pocket.outbox.readSyncRow(exec, store, remote.id);
     if (sr == null) {
@@ -461,11 +518,15 @@ class Puller {
         'schema_ver': schema.version,
       });
     } else {
-      await exec.update('lp_sync_row', {
-        'sync_state': 'quarantine',
-        'last_error': message,
-        'remote_updated': remote.updated,
-      }, where: 'store = ? AND record_id = ?', whereArgs: [store, remote.id]);
+      await exec.update(
+          'lp_sync_row',
+          {
+            'sync_state': 'quarantine',
+            'last_error': message,
+            'remote_updated': remote.updated,
+          },
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [store, remote.id]);
     }
   }
 
@@ -510,18 +571,28 @@ class Puller {
     }
   }
 
-  Future<void> _touchSeen(DatabaseExecutor exec, String store, String id,
-      String remoteUpdated) async {
-    await exec.update('lp_sync_row', {
-      'last_seen_at': _nowMs(),
-      'access_state': 'visible',
-      'remote_updated': remoteUpdated,
-    }, where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+  Future<void> _touchSeen(
+      Tx tx, String store, String id, String remoteUpdated) async {
+    final exec = tx.executor;
+    await exec.update(
+        'lp_sync_row',
+        {
+          'last_seen_at': _nowMs(),
+          'access_state': 'visible',
+          'remote_updated': remoteUpdated,
+        },
+        where: 'store = ? AND record_id = ?',
+        whereArgs: [store, id]);
     // A record arriving on the wire is visible; avoid rewriting an already
     // visible domain row during rewind-window redelivery.
     final table = pocket.requireTable(store).tableName;
-    await exec.update(table, {'hidden': 0},
+    final flipped = await exec.update(table, {'hidden': 0},
         where: 'id = ? AND hidden <> 0', whereArgs: [id]);
+    // An unhide changes the default query/FTS/watch scope: publish it so
+    // watchers and the point-read cache refresh.
+    if (flipped > 0) {
+      tx.addChange(ChangeSet(store, {id}));
+    }
   }
 
   /// Marks a record hidden (permission loss or server delete — never a local
@@ -529,12 +600,18 @@ class Puller {
   Future<void> markHidden(String store, String id) async {
     await pocket.transaction((tx) async {
       final exec = tx.executor;
-      await exec.update('lp_sync_row', {
-        'access_state': 'hidden',
-      }, where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+      await exec.update(
+          'lp_sync_row',
+          {
+            'access_state': 'hidden',
+          },
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [store, id]);
       final table = pocket.requireTable(store).tableName;
-      await exec.update(table, {'hidden': 1},
-          where: 'id = ?', whereArgs: [id]);
+      await exec.update(table, {'hidden': 1}, where: 'id = ?', whereArgs: [id]);
+      // Hidden transitions change the default query/FTS/watch scope and must
+      // invalidate the point-read cache and refresh watchers.
+      tx.addChange(ChangeSet(store, {id}));
     });
   }
 
