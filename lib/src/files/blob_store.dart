@@ -46,6 +46,16 @@ class MemoryBlobStore extends BlobStore {
   final Map<String, int> _lastModified = {};
   final List<String> _tmpFiles = [];
 
+  /// Mirrors [NativeBlobStore]: a stored identity must be a 64-char hex
+  /// SHA-256 so both implementations reject the same malformed/traversal keys.
+  static final RegExp _hashRe = RegExp(r'^[0-9a-f]{64}$');
+
+  void _validateHash(String hash) {
+    if (!_hashRe.hasMatch(hash)) {
+      throw ArgumentError('Invalid blob hash "$hash": must be 64 hex chars.');
+    }
+  }
+
   @override
   Future<String> put(
     Stream<List<int>> bytes, {
@@ -59,11 +69,14 @@ class MemoryBlobStore extends BlobStore {
     }
     final data = builder.takeBytes();
     if (expectedSize != null && data.length != expectedSize) {
-      throw StateError('Size mismatch: expected $expectedSize but got ${data.length}');
+      throw StateError(
+          'Size mismatch: expected $expectedSize but got ${data.length}');
     }
     final hash = key ?? sha256.convert(data).toString();
+    _validateHash(hash);
     if (expectedSha256 != null && hash != expectedSha256) {
-      throw StateError('SHA-256 mismatch: expected $expectedSha256 but got $hash');
+      throw StateError(
+          'SHA-256 mismatch: expected $expectedSha256 but got $hash');
     }
     _blobs[hash] = data;
     _lastModified[hash] = DateTime.now().millisecondsSinceEpoch;
@@ -72,6 +85,7 @@ class MemoryBlobStore extends BlobStore {
 
   @override
   Future<Stream<List<int>>> open(String hash) async {
+    _validateHash(hash);
     final data = _blobs[hash];
     if (data == null) {
       throw StateError('Blob not found: $hash');
@@ -81,15 +95,22 @@ class MemoryBlobStore extends BlobStore {
 
   @override
   Future<void> delete(String hash) async {
+    _validateHash(hash);
     _blobs.remove(hash);
     _lastModified.remove(hash);
   }
 
   @override
-  Future<bool> exists(String hash) async => _blobs.containsKey(hash);
+  Future<bool> exists(String hash) async {
+    _validateHash(hash);
+    return _blobs.containsKey(hash);
+  }
 
   @override
-  Future<int?> size(String hash) async => _blobs[hash]?.length;
+  Future<int?> size(String hash) async {
+    _validateHash(hash);
+    return _blobs[hash]?.length;
+  }
 
   @override
   Future<int> cleanTmp({Duration olderThan = const Duration(hours: 24)}) async {
@@ -144,18 +165,21 @@ class EncryptingBlobStore extends BlobStore {
     }
     final plaintext = builder.takeBytes();
     if (expectedSize != null && plaintext.length != expectedSize) {
-      throw StateError('Size mismatch: expected $expectedSize but got ${plaintext.length}');
+      throw StateError(
+          'Size mismatch: expected $expectedSize but got ${plaintext.length}');
     }
     final hash = sha256.convert(plaintext).toString();
     if (expectedSha256 != null && hash != expectedSha256) {
-      throw StateError('SHA-256 mismatch: expected $expectedSha256 but got $hash');
+      throw StateError(
+          'SHA-256 mismatch: expected $expectedSha256 but got $hash');
     }
 
     final ciphertext = _cipher != null
         ? await _cipher!.encryptAsync(plaintext)
         : _encrypt(plaintext);
     // Put ciphertext into inner store under the plaintext hash
-    await _inner.put(Stream.value(ciphertext), expectedSha256: null, expectedSize: null, key: hash);
+    await _inner.put(Stream.value(ciphertext),
+        expectedSha256: null, expectedSize: null, key: hash);
     return hash;
   }
 

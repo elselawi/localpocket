@@ -137,9 +137,34 @@ class LocalPocketFiles {
     final size = (await bs.size(hash)) ?? 0;
     final refId = generateRecordId();
 
-    await _pocket.transaction((tx) async {
+    final ref = await _pocket.transaction<FileRef>((tx) async {
       final exec = tx.executor;
       final now = DateTime.now().millisecondsSinceEpoch;
+
+      // Dedup: an identical (store, record_id, field, hash) attachment is the
+      // SAME logical file — return the existing live ref without creating a
+      // duplicate ref/op or double-counting the blob refcount.
+      final existingRef = await exec.query(
+        'lp_file_refs',
+        columns: [
+          'ref_id',
+          'store',
+          'record_id',
+          'field',
+          'hash',
+          'remote_name',
+          'state',
+          'next_retry_at',
+          'attempt_count',
+          'last_error',
+        ],
+        where: 'store = ? AND record_id = ? AND field = ? AND hash = ?',
+        whereArgs: [store, recordId, field, hash],
+        limit: 1,
+      );
+      if (existingRef.isNotEmpty) {
+        return FileRef.fromRow(existingRef.first);
+      }
 
       // 1. Update lp_blobs (refcount++)
       final existingBlob = await exec.query(
@@ -179,15 +204,18 @@ class LocalPocketFiles {
       }
 
       // 2. Insert lp_file_refs
-      await exec.insert('lp_file_refs', {
-        'ref_id': refId,
-        'store': store,
-        'record_id': recordId,
-        'field': field,
-        'hash': hash,
-        'remote_name': name,
-        'state': 'pending_upload',
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await exec.insert(
+          'lp_file_refs',
+          {
+            'ref_id': refId,
+            'store': store,
+            'record_id': recordId,
+            'field': field,
+            'hash': hash,
+            'remote_name': name,
+            'state': 'pending_upload',
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace);
 
       // 3. Enqueue file_upload in lp_op_queue
       await exec.insert('lp_op_queue', {
@@ -207,17 +235,19 @@ class LocalPocketFiles {
       });
 
       tx.addChange(ChangeSet(store, {recordId}));
+
+      return FileRef(
+        refId: refId,
+        store: store,
+        recordId: recordId,
+        field: field,
+        hash: hash,
+        remoteName: name,
+        state: 'pending_upload',
+      );
     });
 
-    return FileRef(
-      refId: refId,
-      store: store,
-      recordId: recordId,
-      field: field,
-      hash: hash,
-      remoteName: name,
-      state: 'pending_upload',
-    );
+    return ref;
   }
 
   /// Opens a byte stream for a local file reference.
@@ -290,11 +320,20 @@ class LocalPocketFiles {
       final now = DateTime.now().millisecondsSinceEpoch;
 
       if (ref.state == 'pending_upload' && ref.remoteName == null) {
-        // Was never uploaded remotely -> vanish immediately
-        await exec.delete('lp_file_refs', where: 'ref_id = ?', whereArgs: [ref.refId]);
+        // Was never uploaded remotely -> vanish immediately: drop the ref,
+        // release the blob, and neutralize the pending upload op so a later
+        // file-lane drain can never upload it.
+        await exec.delete('lp_file_refs',
+            where: 'ref_id = ?', whereArgs: [ref.refId]);
         await exec.execute(
           'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
           [ref.hash],
+        );
+        await exec.update(
+          'lp_op_queue',
+          {'state': 'done'},
+          where: "kind = ? AND payload_json LIKE ?",
+          whereArgs: [OpQueueKind.fileUpload.name, '%"ref_id":"${ref.refId}"%'],
         );
       } else {
         // Mark pending_remove and queue file_remove
@@ -342,7 +381,8 @@ class LocalPocketFiles {
     }
 
     // 2. Clean blobs with refcount = 0 and last_access older than grace
-    final cutoff = DateTime.now().millisecondsSinceEpoch - blobGrace.inMilliseconds;
+    final cutoff =
+        DateTime.now().millisecondsSinceEpoch - blobGrace.inMilliseconds;
     const pageSize = 250;
     while (true) {
       final deadBlobs = await _pocket.db.query(
@@ -357,7 +397,8 @@ class LocalPocketFiles {
       for (final b in deadBlobs) {
         final hash = b['hash'] as String;
         if (bs != null) await bs.delete(hash);
-        await _pocket.db.delete('lp_blobs', where: 'hash = ?', whereArgs: [hash]);
+        await _pocket.db
+            .delete('lp_blobs', where: 'hash = ?', whereArgs: [hash]);
         count++;
       }
     }
@@ -370,7 +411,8 @@ class LocalPocketFiles {
     final bs = blobStore;
     if (bs == null) return 0;
 
-    final totalSizeRow = await _pocket.db.rawQuery('SELECT SUM(size) as total FROM lp_blobs');
+    final totalSizeRow =
+        await _pocket.db.rawQuery('SELECT SUM(size) as total FROM lp_blobs');
     var currentSize = firstIntValue(totalSizeRow) ?? 0;
     if (currentSize <= maxBytes) return 0;
 
@@ -399,7 +441,8 @@ class LocalPocketFiles {
           where: 'hash = ? AND state = ?',
           whereArgs: [hash, 'synced'],
         );
-        await _pocket.db.delete('lp_blobs', where: 'hash = ?', whereArgs: [hash]);
+        await _pocket.db
+            .delete('lp_blobs', where: 'hash = ?', whereArgs: [hash]);
         currentSize -= size;
         evicted++;
       }

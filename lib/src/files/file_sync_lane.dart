@@ -71,7 +71,13 @@ class FileSyncLane {
         }
       } catch (e) {
         hadError = true;
-        await pocket.opQueue.markFailed(op.opId, e.toString());
+        // Transient failure: keep the op retryable with a persisted backoff
+        // deadline. drain() only selects ops whose deadline has passed, so
+        // backoff is honoured across calls and across app restarts.
+        final attempts = op.attemptCount + 1;
+        final delay = config.delayFor(attempts);
+        await pocket.opQueue.markFailed(op.opId, e.toString(),
+            attempts: attempts, nextRetryAt: _nowMs() + delay.inMilliseconds);
       }
     }
 
@@ -138,7 +144,8 @@ class FileSyncLane {
     String? adoptedFilename;
     if (remoteRec != null) {
       for (final existingName in remoteRec.imgs) {
-        if (existingName.startsWith(hash.substring(0, 10)) || existingName.startsWith(name)) {
+        if (existingName.startsWith(hash.substring(0, 10)) ||
+            existingName.startsWith(name)) {
           adoptedFilename = existingName;
           break;
         }
@@ -198,7 +205,8 @@ class FileSyncLane {
     // Delete ref and decrement blob refcount
     await pocket.transaction((tx) async {
       final exec = tx.executor;
-      await exec.delete('lp_file_refs', where: 'ref_id = ?', whereArgs: [refId]);
+      await exec
+          .delete('lp_file_refs', where: 'ref_id = ?', whereArgs: [refId]);
       await exec.execute(
         'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
         [hash],
@@ -285,6 +293,7 @@ class FileSyncLane {
       whereArgs: [store, recordId],
     );
 
+    final desiredNames = remoteFilenames.toSet();
     final knownRemoteNames = existingRefs
         .map((r) => r['remote_name'] as String?)
         .whereType<String>()
@@ -293,15 +302,40 @@ class FileSyncLane {
     for (final filename in remoteFilenames) {
       if (!knownRemoteNames.contains(filename)) {
         // Unknown remote file: create remote_only ref
-        await exec.insert('lp_file_refs', {
-          'ref_id': generateRecordId(),
-          'store': store,
-          'record_id': recordId,
-          'field': 'imgs',
-          'hash': 'unknown_$filename',
-          'remote_name': filename,
-          'state': 'remote_only',
-        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        await exec.insert(
+            'lp_file_refs',
+            {
+              'ref_id': generateRecordId(),
+              'store': store,
+              'record_id': recordId,
+              'field': 'imgs',
+              'hash': 'unknown_$filename',
+              'remote_name': filename,
+              'state': 'remote_only',
+            },
+            conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+    }
+
+    // Remote shrink reconciliation: a ref whose remote_name is no longer
+    // listed on the server no longer exists remotely. Remove it safely —
+    // releasing its blob refcount for synced content — while leaving refs that
+    // are already mid-removal (`pending_remove`) or pending a local upload
+    // (no remote_name yet) untouched.
+    for (final ref in existingRefs) {
+      final remoteName = ref['remote_name'] as String?;
+      if (remoteName == null) continue;
+      if (desiredNames.contains(remoteName)) continue;
+      final state = ref['state'] as String;
+      if (state == 'pending_remove' || state == 'pending_upload') continue;
+      final refId = ref['ref_id'];
+      await exec
+          .delete('lp_file_refs', where: 'ref_id = ?', whereArgs: [refId]);
+      final hash = ref['hash'] as String?;
+      if (hash != null && hash.isNotEmpty && !hash.startsWith('unknown_')) {
+        await exec.execute(
+            'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
+            [hash]);
       }
     }
   }
