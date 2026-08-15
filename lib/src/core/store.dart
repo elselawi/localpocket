@@ -50,7 +50,8 @@ class Collection {
   final Tx? _tx;
 
   /// Internal constructor used by [LocalPocket.collection] and [Tx.collection].
-  Collection.internal(this._pocket, this._table, {DatabaseExecutor? exec, Tx? tx})
+  Collection.internal(this._pocket, this._table,
+      {DatabaseExecutor? exec, Tx? tx})
       : _exec = exec,
         _tx = tx;
 
@@ -81,7 +82,9 @@ class Collection {
   /// ```
   Future<void> put(Map<String, Object?> record,
       {DurabilityClass durability = DurabilityClass.full}) {
-    if (_tx != null) return _mutate(MutationAction.createOrUpdate, record: record);
+    if (_tx != null) {
+      return _mutate(MutationAction.createOrUpdate, record: record);
+    }
     return _pocket.transaction((tx) => tx.collection(name).put(record),
         durability: durability);
   }
@@ -159,16 +162,26 @@ class Collection {
     );
     for (final r in refs) {
       final hash = r['hash'] as String;
-      await exec.delete('lp_file_refs', where: 'ref_id = ?', whereArgs: [r['ref_id']]);
+      await exec.delete('lp_file_refs',
+          where: 'ref_id = ?', whereArgs: [r['ref_id']]);
       await exec.execute(
         'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
         [hash],
       );
     }
-    // 2. Delete outbox and sync rows
-    await exec.delete('lp_outbox', where: 'store = ? AND record_id = ?', whereArgs: [name, id]);
-    await exec.delete('lp_sync_row', where: 'store = ? AND record_id = ?', whereArgs: [name, id]);
-    // 3. Delete domain row
+    // 2. Remove the open conflict (if any) and neutralize queued file ops so
+    //    a later file-lane drain can never act on a purged record.
+    await exec.delete('lp_conflicts',
+        where: 'store = ? AND record_id = ?', whereArgs: [name, id]);
+    await exec.update('lp_op_queue', {'state': 'done'},
+        where: "store = ? AND record_id = ? AND state IN ('pending','failed')",
+        whereArgs: [name, id]);
+    // 3. Delete outbox and sync rows
+    await exec.delete('lp_outbox',
+        where: 'store = ? AND record_id = ?', whereArgs: [name, id]);
+    await exec.delete('lp_sync_row',
+        where: 'store = ? AND record_id = ?', whereArgs: [name, id]);
+    // 4. Delete domain row
     await exec.delete(_table.tableName, where: 'id = ?', whereArgs: [id]);
     _tx!.addChange(ChangeSet(name, {id}));
   }
@@ -261,6 +274,24 @@ class Collection {
           prefetchedOp: op);
       return;
     }
+    // A payload that names a different record is corruption: treating it as
+    // the desired state would drop the real record's fields. Fall back to the
+    // authoritative domain row.
+    final payloadId = currentPayload['id'];
+    if (payloadId != null && payloadId != id) {
+      final existing = await _readLogical(id);
+      if (existing == null) {
+        throw RecordNotFoundException('No record $name/$id to patch.');
+      }
+      final merged = <String, Object?>{...existing, ...changes};
+      await _mutate(MutationAction.update,
+          record: {'id': id, ...merged},
+          id: id,
+          existing: existing,
+          prefetchedSyncRow: sr,
+          prefetchedOp: op);
+      return;
+    }
 
     final merged = <String, Object?>{...currentPayload, ...changes};
     merged['id'] = id;
@@ -278,14 +309,14 @@ class Collection {
       cryptoProvider: _pocket.cryptoProvider,
     );
     try {
-      await _ex.update(_table.tableName, row,
-          where: 'id = ?', whereArgs: [id]);
-            } catch (e) {
+      await _ex.update(_table.tableName, row, where: 'id = ?', whereArgs: [id]);
+    } catch (e) {
       throw translateConstraintError(e, record: merged);
     }
     hooks?.mutationCrashPoint?.call('after-domain-write');
 
-    final dirtyFields = _dirtyFields(currentPayload, merged, MutationAction.update);
+    final dirtyFields =
+        _dirtyFields(currentPayload, merged, MutationAction.update);
     await _pocket.outbox.applyLocalMutation(
       table: _table,
       exec: _ex,
@@ -322,13 +353,15 @@ class Collection {
     if (action == MutationAction.createOrUpdate) {
       final rid = (record!['id'] as String?) ?? generateRecordId();
       if (!isValidRecordId(rid)) {
-        throw ValidationException('Invalid record id "$rid"; expected [a-z0-9]{15}.',
+        throw ValidationException(
+            'Invalid record id "$rid"; expected [a-z0-9]{15}.',
             field: 'id');
       }
       recordId = rid;
       existingRow = existingRow ?? await _readLogical(recordId);
       logical = _logicalFromRecord(record, recordId);
-      action = existingRow == null ? MutationAction.create : MutationAction.update;
+      action =
+          existingRow == null ? MutationAction.create : MutationAction.update;
     } else if (action == MutationAction.update) {
       recordId = id!;
       existingRow = existingRow ?? await _readLogical(recordId);
@@ -341,7 +374,8 @@ class Collection {
       recordId = id!;
       existingRow = existingRow ?? await _readLogical(recordId);
       if (existingRow == null) {
-        throw RecordNotFoundException('No record $name/$recordId to archive/restore.');
+        throw RecordNotFoundException(
+            'No record $name/$recordId to archive/restore.');
       }
       logical = {...existingRow, 'archived': action == MutationAction.archive};
     }
@@ -442,7 +476,8 @@ class Collection {
       final rid = (record['id'] as String?) ?? generateRecordId();
       if (!isValidRecordId(rid)) {
         throw ValidationException(
-            'Invalid record id "$rid"; expected [a-z0-9]{15}.', field: 'id');
+            'Invalid record id "$rid"; expected [a-z0-9]{15}.',
+            field: 'id');
       }
       resolved.add((rid, record));
     }
@@ -464,8 +499,8 @@ class Collection {
       final end = (start + probePage).clamp(0, resolved.length);
       final ids = [for (final (id, _) in resolved.sublist(start, end)) id];
       final ph = List.filled(ids.length, '?').join(', ');
-      final rows = await exec.query(tableName,
-          where: 'id IN ($ph)', whereArgs: ids);
+      final rows =
+          await exec.query(tableName, where: 'id IN ($ph)', whereArgs: ids);
       for (final r in rows) {
         final id = r['id'] as String;
         existingById[id] = decodeDbRow(_schema, r,
@@ -536,13 +571,13 @@ class Collection {
     final schema = _schema;
     final now = DateTime.now().millisecondsSinceEpoch;
     final db = _pocket.db;
-    
+
     // If using DirectSqliteDatabase, we can bind directly to prepared statements
     // with fixed column lists for max insertion throughput.
     final insertOutboxSql =
-      'INSERT INTO lp_outbox ("store", "record_id", "kind", "payload_json", "base_updated", "base_hash", "dirty_fields", "op_id", "created_at", "updated_at", "depends_on_op") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        'INSERT INTO lp_outbox ("store", "record_id", "kind", "payload_json", "base_updated", "base_hash", "dirty_fields", "op_id", "created_at", "updated_at", "depends_on_op") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
     final insertSyncRowSql =
-      'INSERT INTO lp_sync_row ("store", "record_id", "remote_updated", "last_seen_at", "base_updated", "base_hash", "base_json", "sync_state", "dirty_fields", "local_rev", "access_state", "op_id", "attempt_count", "next_retry_at", "last_error", "schema_ver") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        'INSERT INTO lp_sync_row ("store", "record_id", "remote_updated", "last_seen_at", "base_updated", "base_hash", "base_json", "sync_state", "dirty_fields", "local_rev", "access_state", "op_id", "attempt_count", "next_retry_at", "last_error", "schema_ver") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
     for (final (rid, record) in records) {
       final logical = _logicalFromRecord(record, rid);
@@ -558,32 +593,75 @@ class Collection {
       );
       final opId = _pocket.outbox.generateOpId();
       try {
-        if (db is DirectSqliteDatabase && _pocket.testHooks?.onExecute == null) {
+        if (db is DirectSqliteDatabase &&
+            _pocket.testHooks?.onExecute == null) {
           final cols = row.keys.map((k) => '"$k"').join(', ');
           final ph = List.filled(row.length, '?').join(', ');
-          final domainSql = 'INSERT INTO "${_table.tableName}" ($cols) VALUES ($ph)';
+          final domainSql =
+              'INSERT INTO "${_table.tableName}" ($cols) VALUES ($ph)';
           db.getPreparedStatement(domainSql).execute(row.values.toList());
           db.getPreparedStatement(insertOutboxSql).execute([
-            name, rid, OutboxKind.upsert.name, payloadJson, null, '', '["*"]', opId, now, now, null
+            name,
+            rid,
+            OutboxKind.upsert.name,
+            payloadJson,
+            null,
+            '',
+            '["*"]',
+            opId,
+            now,
+            now,
+            null
           ]);
           db.getPreparedStatement(insertSyncRowSql).execute([
-            name, rid, null, null, null, '', null, SyncState.dirty.name, '["*"]', 1, AccessState.visible.name, opId, 0, 0, null, schema.version
+            name,
+            rid,
+            null,
+            null,
+            null,
+            '',
+            null,
+            SyncState.dirty.name,
+            '["*"]',
+            1,
+            AccessState.visible.name,
+            opId,
+            0,
+            0,
+            null,
+            schema.version
           ]);
         } else {
           await exec.insert(_table.tableName, row);
           await exec.insert('lp_outbox', {
-            'store': name, 'record_id': rid, 'kind': OutboxKind.upsert.name,
-            'payload_json': payloadJson, 'base_updated': null, 'base_hash': '',
-            'dirty_fields': '["*"]', 'op_id': opId, 'created_at': now, 'updated_at': now,
+            'store': name,
+            'record_id': rid,
+            'kind': OutboxKind.upsert.name,
+            'payload_json': payloadJson,
+            'base_updated': null,
+            'base_hash': '',
+            'dirty_fields': '["*"]',
+            'op_id': opId,
+            'created_at': now,
+            'updated_at': now,
             'depends_on_op': null,
           });
           await exec.insert('lp_sync_row', {
-            'store': name, 'record_id': rid, 'remote_updated': null,
-            'last_seen_at': null, 'base_updated': null, 'base_hash': '',
-            'base_json': null, 'sync_state': SyncState.dirty.name,
-            'dirty_fields': '["*"]', 'local_rev': 1,
-            'access_state': AccessState.visible.name, 'op_id': opId,
-            'attempt_count': 0, 'next_retry_at': 0, 'last_error': null,
+            'store': name,
+            'record_id': rid,
+            'remote_updated': null,
+            'last_seen_at': null,
+            'base_updated': null,
+            'base_hash': '',
+            'base_json': null,
+            'sync_state': SyncState.dirty.name,
+            'dirty_fields': '["*"]',
+            'local_rev': 1,
+            'access_state': AccessState.visible.name,
+            'op_id': opId,
+            'attempt_count': 0,
+            'next_retry_at': 0,
+            'last_error': null,
             'schema_ver': schema.version,
           });
         }
@@ -593,7 +671,8 @@ class Collection {
     }
   }
 
-  Map<String, Object?> _logicalFromRecord(Map<String, Object?> record, String id) {
+  Map<String, Object?> _logicalFromRecord(
+      Map<String, Object?> record, String id) {
     final logical = <String, Object?>{};
     for (final e in record.entries) {
       if (e.key == 'id') continue;
@@ -603,8 +682,8 @@ class Collection {
     return logical;
   }
 
-  List<String> _dirtyFields(
-      Map<String, Object?>? oldLogical, Map<String, Object?> newLogical, MutationAction action) {
+  List<String> _dirtyFields(Map<String, Object?>? oldLogical,
+      Map<String, Object?> newLogical, MutationAction action) {
     if (oldLogical == null) return const ['*'];
     final changed = <String>{};
     final keys = {...oldLogical.keys, ...newLogical.keys};
@@ -621,8 +700,8 @@ class Collection {
 
   /// Returns the record with [id], or `null` when it does not exist locally.
   Future<Map<String, Object?>?> _readLogical(String id) async {
-    final rows =
-        await _ex.query(_table.tableName, where: 'id = ?', whereArgs: [id], limit: 1);
+    final rows = await _ex.query(_table.tableName,
+        where: 'id = ?', whereArgs: [id], limit: 1);
     if (rows.isEmpty) return null;
     return decodeDbRow(_schema, rows.first,
         cipher: _pocket.fieldCipher, cryptoProvider: _pocket.cryptoProvider);
@@ -674,7 +753,8 @@ class Collection {
     for (final f in _schema.fields) {
       final v = logical[f.name];
       if (f.required && v == null) {
-        throw ValidationException('Field "${f.name}" is required.', field: f.name);
+        throw ValidationException('Field "${f.name}" is required.',
+            field: f.name);
       }
       if (v == null) continue;
       switch (f.kind) {
@@ -682,7 +762,8 @@ class Collection {
         case FieldKind.enumValue:
         case FieldKind.ref:
           if (v is! String) {
-            throw ValidationException('Field "${f.name}" must be a string.', field: f.name);
+            throw ValidationException('Field "${f.name}" must be a string.',
+                field: f.name);
           }
           if (f.kind == FieldKind.enumValue && !f.enumValues!.contains(v)) {
             throw ValidationException(
@@ -692,20 +773,24 @@ class Collection {
         case FieldKind.int:
         case FieldKind.date:
           if (v is! int) {
-            throw ValidationException('Field "${f.name}" must be an integer.', field: f.name);
+            throw ValidationException('Field "${f.name}" must be an integer.',
+                field: f.name);
           }
         case FieldKind.real:
           if (v is! num) {
-            throw ValidationException('Field "${f.name}" must be a number.', field: f.name);
+            throw ValidationException('Field "${f.name}" must be a number.',
+                field: f.name);
           }
         case FieldKind.bool:
           if (v is! bool) {
-            throw ValidationException('Field "${f.name}" must be a boolean.', field: f.name);
+            throw ValidationException('Field "${f.name}" must be a boolean.',
+                field: f.name);
           }
         case FieldKind.json:
           if (v is! Map && v is! List) {
             throw ValidationException(
-                'Field "${f.name}" must be a JSON object or array.', field: f.name);
+                'Field "${f.name}" must be a JSON object or array.',
+                field: f.name);
           }
         case FieldKind.jsonList:
           if (v is! List) {
@@ -718,7 +803,9 @@ class Collection {
     if (msgs.isNotEmpty) {
       throw ValidationException(msgs.join('; '));
     }
-    final bytes = utf8.encode(precomputedPayload ?? canonicalPayload(_schema, logical)).length;
+    final bytes = utf8
+        .encode(precomputedPayload ?? canonicalPayload(_schema, logical))
+        .length;
     if (bytes > _pocket.maxDocBytes) {
       throw ValidationException(
           'Document exceeds max size ($bytes > ${_pocket.maxDocBytes} bytes).',

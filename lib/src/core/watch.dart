@@ -131,7 +131,7 @@ class OneWatcher {
       {this.coalesceWindow = const Duration(milliseconds: 16)});
 
   Stream<Map<String, Object?>?> start() {
-    _controller = StreamController<Map<String, Object?>>(
+    _controller = StreamController<Map<String, Object?>?>(
       onListen: () {
         _sub = _pocket.changes.listen(_onChange);
         _refresh();

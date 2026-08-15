@@ -140,6 +140,7 @@ class LocalPocket {
   late final WriteQueue writeQueue;
   final PerfCounters perf;
   final ChangeBus changeBus;
+
   /// Maximum canonical document size accepted by local writes.
   final int maxDocBytes;
 
@@ -284,7 +285,8 @@ class LocalPocket {
     }
   }
 
-  static Future<void> _applyPragmas(Database db, PlatformProfile platform) async {
+  static Future<void> _applyPragmas(
+      Database db, PlatformProfile platform) async {
     if (platform == PlatformProfile.native) {
       // WAL first; may silently degrade (probe records the outcome).
       try {
@@ -301,7 +303,8 @@ class LocalPocket {
   }
 
   static Future<void> _recordCoreMigration(Database db) async {
-    final rows = await db.query('lp_migrations', where: 'version = ?', whereArgs: [1]);
+    final rows =
+        await db.query('lp_migrations', where: 'version = ?', whereArgs: [1]);
     if (rows.isNotEmpty) return;
     await db.insert('lp_migrations', {
       'version': 1,
@@ -313,8 +316,8 @@ class LocalPocket {
 
   Future<void> _registerStore(CollectionSchema schema) async {
     final compiled = DdlCompiler(capabilities).compile(schema);
-    final existing =
-        await db.query('lp_stores', where: 'store = ?', whereArgs: [schema.name], limit: 1);
+    final existing = await db.query('lp_stores',
+        where: 'store = ?', whereArgs: [schema.name], limit: 1);
     if (existing.isEmpty) {
       await db.execute(compiled.tableDdl);
       for (final ix in compiled.indexDdl) {
@@ -330,8 +333,8 @@ class LocalPocket {
         'definition_json': jsonEncode(schema.toJson()),
         'created_at': DateTime.now().millisecondsSinceEpoch,
       });
-      await Migrator.recordMigration(db, name: 'create:${schema.name}',
-          from: 0, to: schema.version);
+      await Migrator.recordMigration(db,
+          name: 'create:${schema.name}', from: 0, to: schema.version);
     } else {
       final current = existing.first['schema_ver'] as int;
       if (current > schema.version) {
@@ -341,9 +344,14 @@ class LocalPocket {
       if (current < schema.version) {
         await Migrator.migrateStore(this, schema, fromVersion: current);
       }
-      await db.update('lp_stores',
-          {'definition_json': jsonEncode(schema.toJson()), 'schema_ver': schema.version},
-          where: 'store = ?', whereArgs: [schema.name]);
+      await db.update(
+          'lp_stores',
+          {
+            'definition_json': jsonEncode(schema.toJson()),
+            'schema_ver': schema.version
+          },
+          where: 'store = ?',
+          whereArgs: [schema.name]);
     }
     _tables[schema.name] = StoreTable(schema, compiled);
   }
@@ -407,11 +415,15 @@ class LocalPocket {
   /// ```
   Future<T> read<T>(Future<T> Function(Tx tx) action) {
     _guardOutsideTx();
-    return db.transaction((txn) async {
-      final changes = <ChangeSet>[];
-      final tx = Tx.internal(this, txn, changes, readOnly: true);
-      return tx.runInZone(() => action(tx));
-    });
+    // Reads share the single connection and therefore must be serialized with
+    // writes through the same queue: a read transaction held open on the
+    // connection would otherwise make a queued write's BEGIN IMMEDIATE fail
+    // with "cannot start a transaction within a transaction".
+    return writeQueue.run(() => db.transaction((txn) async {
+          final changes = <ChangeSet>[];
+          final tx = Tx.internal(this, txn, changes, readOnly: true);
+          return tx.runInZone(() => action(tx));
+        }));
   }
 
   Future<T> _runTransaction<T>(
@@ -508,7 +520,8 @@ class LocalPocket {
       for (final r in orphaned) {
         final st = r['store'] as String;
         final id = r['record_id'] as String;
-        await exec.delete('lp_outbox', where: 'store = ? AND record_id = ?', whereArgs: [st, id]);
+        await exec.delete('lp_outbox',
+            where: 'store = ? AND record_id = ?', whereArgs: [st, id]);
         pruned++;
       }
 
@@ -527,7 +540,8 @@ class LocalPocket {
         for (final r in oldest) {
           final st = r['store'] as String;
           final id = r['record_id'] as String;
-          await exec.delete('lp_outbox', where: 'store = ? AND record_id = ?', whereArgs: [st, id]);
+          await exec.delete('lp_outbox',
+              where: 'store = ? AND record_id = ?', whereArgs: [st, id]);
           pruned++;
         }
       }
@@ -540,7 +554,8 @@ class LocalPocket {
   /// 2. Prunes the outbox
   /// 3. Executes WAL checkpointing
   /// 4. Optimizes planner statistics
-  Future<void> runMaintenance({Duration compactOlderThan = const Duration(days: 90)}) async {
+  Future<void> runMaintenance(
+      {Duration compactOlderThan = const Duration(days: 90)}) async {
     for (final store in storeNames) {
       await compact(store, olderThan: compactOlderThan);
     }
@@ -553,7 +568,8 @@ class LocalPocket {
   ///
   /// Deletes ONLY rows that are `archived=1 AND sync_state='clean' AND hidden=0 AND last_seen < now−olderThan`
   /// and drops their file refs and blob refcounts.
-  Future<int> compact(String store, {required Duration olderThan, int? nowMs}) async {
+  Future<int> compact(String store,
+      {required Duration olderThan, int? nowMs}) async {
     final now = nowMs ?? DateTime.now().millisecondsSinceEpoch;
     final cutoff = now - olderThan.inMilliseconds;
     var count = 0;
@@ -583,6 +599,14 @@ class LocalPocket {
                 'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
                 [ref['hash']]);
           }
+          // A compacted row must not leave an open conflict or queued file ops
+          // behind (a later drain could otherwise act on the vanished record).
+          await exec.delete('lp_conflicts',
+              where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+          await exec.update('lp_op_queue', {'state': 'done'},
+              where:
+                  "store = ? AND record_id = ? AND state IN ('pending','failed')",
+              whereArgs: [store, id]);
           await exec.delete('lp_outbox',
               where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
           await exec.delete('lp_sync_row',

@@ -34,15 +34,18 @@ class NotNullConstraintException extends LocalPocketError {
 }
 
 class CheckConstraintException extends LocalPocketError {
-  CheckConstraintException([String? message]) : super(message ?? 'CHECK constraint violated.');
+  CheckConstraintException([String? message])
+      : super(message ?? 'CHECK constraint violated.');
 }
 
 class PrimaryKeyConstraintException extends LocalPocketError {
-  PrimaryKeyConstraintException([String? message]) : super(message ?? 'PRIMARY KEY constraint violated.');
+  PrimaryKeyConstraintException([String? message])
+      : super(message ?? 'PRIMARY KEY constraint violated.');
 }
 
 class ForeignKeyConstraintException extends LocalPocketError {
-  ForeignKeyConstraintException([String? message]) : super(message ?? 'FOREIGN KEY constraint violated.');
+  ForeignKeyConstraintException([String? message])
+      : super(message ?? 'FOREIGN KEY constraint violated.');
 }
 
 /// Storage-level failure (SQLITE_FULL, IOERR, BUSY, CORRUPT, ...).
@@ -80,7 +83,8 @@ class StaleCursorError extends LocalPocketError {
 class ChangeBusOverflowError extends LocalPocketError {
   final int queueSize;
   ChangeBusOverflowError(this.queueSize, [String? message])
-      : super(message ?? 'ChangeBus queue overflowed with $queueSize pending events.');
+      : super(message ??
+            'ChangeBus queue overflowed with $queueSize pending events.');
 }
 
 /// A query was executed without a limit and without `.all()`.
@@ -101,7 +105,8 @@ class DestructiveMigrationRefusedError extends LocalPocketError {
 
 /// A write was attempted through a read-only Tx handle.
 class ReadOnlyTxError extends LocalPocketError {
-  ReadOnlyTxError([String? message]) : super(message ?? 'This Tx is read-only.');
+  ReadOnlyTxError([String? message])
+      : super(message ?? 'This Tx is read-only.');
 }
 
 /// Translates a SQLite exception or error into a typed [LocalPocketError].
@@ -112,9 +117,17 @@ LocalPocketError translateConstraintError(Object e,
   final text = e.toString();
   final extendedCode = e is SqliteException ? e.extendedResultCode : null;
   final resultCode = e is SqliteException ? e.resultCode : null;
-  if (extendedCode == 2067 || extendedCode == 1555 || text.contains('UNIQUE constraint failed')) {
-    final m = RegExp(r'UNIQUE constraint failed: (\w+)\.(\w+)').firstMatch(text);
-    final field = m?.group(2) ?? '?';
+  // PRIMARY KEY violations (extended code 1555 = SQLITE_CONSTRAINT_PRIMARYKEY)
+  // must be checked before UNIQUE: SQLite reports them with the same
+  // "UNIQUE constraint failed" wording, and code 1555 must not be classified
+  // as a unique violation.
+  if (extendedCode == 1555 ||
+      (text.contains('PRIMARY KEY') &&
+          !text.contains('UNIQUE constraint failed'))) {
+    return PrimaryKeyConstraintException();
+  }
+  if (extendedCode == 2067 || text.contains('UNIQUE constraint failed')) {
+    final field = _extractFieldName(text, 'UNIQUE constraint failed:');
     return UniqueConstraintException(
       field: field,
       value: record?[field],
@@ -122,20 +135,48 @@ LocalPocketError translateConstraintError(Object e,
     );
   }
   if (extendedCode == 1299 || text.contains('NOT NULL constraint failed')) {
-    final m = RegExp(r'NOT NULL constraint failed: (\w+)\.(\w+)').firstMatch(text);
-    return NotNullConstraintException(field: m?.group(2) ?? '?');
+    return NotNullConstraintException(
+        field: _extractFieldName(text, 'NOT NULL constraint failed:'));
   }
-  if (text.contains('CHECK constraint failed') || extendedCode == 275 || resultCode == 275) {
+  if (text.contains('CHECK constraint failed') ||
+      extendedCode == 275 ||
+      resultCode == 275) {
     return CheckConstraintException();
   }
-  if (text.contains('PRIMARY KEY') || extendedCode == 1555) {
-    return PrimaryKeyConstraintException();
-  }
-  if (text.contains('FOREIGN KEY') || extendedCode == 787 || resultCode == 787) {
+  if (text.contains('FOREIGN KEY') ||
+      extendedCode == 787 ||
+      resultCode == 787) {
     return ForeignKeyConstraintException();
   }
   if (text.contains('database or disk is full')) {
     return StorageError('Database full: $e');
   }
   return StorageError('SQLite error: $e');
+}
+
+/// Extracts the field name from a constraint message such as
+/// `UNIQUE constraint failed: main.widgets.phone, constraint failed (code 2067)`
+/// or `NOT NULL constraint failed: "my table"."my col"`.
+///
+/// Handles multi-part (schema.table.field) names, trailing message text,
+/// quoted identifiers with escaped quotes, and non-ASCII field names. Returns
+/// `?` when no field can be identified.
+String _extractFieldName(String text, String prefix) {
+  final idx = text.indexOf(prefix);
+  if (idx < 0) return '?';
+  var rest = text.substring(idx + prefix.length);
+  // Stop at trailing message text ("... phone, constraint failed (code 2067)").
+  var end = rest.length;
+  final comma = rest.indexOf(',');
+  if (comma >= 0) end = comma;
+  final paren = rest.indexOf('(');
+  if (paren >= 0 && paren < end) end = paren;
+  rest = rest.substring(0, end).trim();
+  final lastDot = rest.lastIndexOf('.');
+  if (lastDot >= 0) rest = rest.substring(lastDot + 1);
+  rest = rest.trim();
+  if (rest.startsWith('"') && rest.endsWith('"')) {
+    rest = rest.substring(1, rest.length - 1).replaceAll('""', '"');
+  }
+  return rest.isEmpty ? '?' : rest;
 }

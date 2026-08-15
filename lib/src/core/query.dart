@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:collection/collection.dart';
+import 'package:sqlite3/sqlite3.dart' show SqliteException;
 
 import 'codec.dart';
 import 'ddl_compiler.dart';
@@ -54,11 +55,19 @@ class QueryBuilder {
 
   void _checkQueryable(String field) {
     for (final f in _schema.fields) {
-      if (f.name == field && f.encrypted) {
-        throw SchemaRegistrationError(
-            'Field "$field" is encrypted and cannot be queried or sorted.');
+      if (f.name == field) {
+        if (f.encrypted) {
+          throw SchemaRegistrationError(
+              'Field "$field" is encrypted and cannot be queried or sorted.');
+        }
+        return;
       }
     }
+    // The synthetic `id`/`archived` and the internal `hidden` column are real
+    // SQL columns, so they are queryable even though not declared.
+    if (field == 'id' || field == 'archived' || field == 'hidden') return;
+    throw ValidationException('Unknown field "$field" for query.',
+        field: field);
   }
 
   /// Adds one or more predicates for [field].
@@ -121,6 +130,9 @@ class QueryBuilder {
 
   /// OR-group of equality predicates, e.g.
   /// `orWhere([{'name': 'a'}, {'qty': 1}])` → `(("name" = ?) OR ("qty" = ?))`.
+  ///
+  /// Empty groups and empty lists are ignored (no-op): `orWhere([])` adds no
+  /// predicate rather than emitting invalid SQL.
   QueryBuilder orWhere(List<Map<String, Object?>> groups) {
     final groupSqls = <String>[];
     final args = <Object?>[];
@@ -131,8 +143,10 @@ class QueryBuilder {
         parts.add('${DdlCompiler.quote(f)} = ?');
         args.add(v);
       });
+      if (parts.isEmpty) continue;
       groupSqls.add('(${parts.join(' AND ')})');
     }
+    if (groupSqls.isEmpty) return this;
     _orGroups.add(WhereClause('(${groupSqls.join(' OR ')})', args));
     return this;
   }
@@ -152,6 +166,9 @@ class QueryBuilder {
   /// A limit is required unless [all] is selected. Use modest limits for UI
   /// screens and keyset pagination for large collections.
   QueryBuilder limit(int n) {
+    if (n < 0) {
+      throw ValidationException('Limit must be non-negative, got $n.');
+    }
     _limit = n;
     return this;
   }
@@ -194,9 +211,13 @@ class QueryBuilder {
     return this;
   }
 
+  /// Internal flag toggled by [distinct]: distinct result sets cannot carry
+  /// the automatic `id` tiebreaker (it would break DISTINCT semantics).
+  bool _suppressIdTiebreak = false;
+
   List<OrderClause> get _effectiveOrder {
     final o = [..._order];
-    if (o.isEmpty || o.last.field != 'id') {
+    if (!_suppressIdTiebreak && (o.isEmpty || o.last.field != 'id')) {
       o.add(const OrderClause('id', desc: false));
     }
     return o;
@@ -208,8 +229,7 @@ class QueryBuilder {
   int? _resolveLimit() {
     if (_all) return null;
     if (_limit == null) {
-      throw MissingLimitError(
-          'Query on "$name" requires .limit(n) or .all().');
+      throw MissingLimitError('Query on "$name" requires .limit(n) or .all().');
     }
     return _limit;
   }
@@ -281,9 +301,12 @@ class QueryBuilder {
             ? '$aggregate(${DdlCompiler.quote(aggField!)}) AS v'
             : _selectColumns);
 
+    final effOrder = _effectiveOrder;
     final orderSql = (forCount || aggregate != null)
         ? ''
-        : ' ORDER BY ${_effectiveOrder.map((o) => '${DdlCompiler.quote(o.field)} ${o.desc ? 'DESC' : 'ASC'}').join(', ')}';
+        : (effOrder.isEmpty
+            ? ''
+            : ' ORDER BY ${effOrder.map((o) => '${DdlCompiler.quote(o.field)} ${o.desc ? 'DESC' : 'ASC'}').join(', ')}');
 
     final shapeKey = '$name|a:$_includeArchived|h:$_includeHidden|'
         'w:${where.join('|')}|c:$columns|o:$orderSql|cd:$countDistinct|'
@@ -303,6 +326,11 @@ class QueryBuilder {
 
   String get _selectColumns {
     if (_select == null) return '*';
+    // Projection of undeclared overflow keys falls back to full decoding:
+    // SELECT * so the undeclared keys (stored in the extra JSON column) can be
+    // unpacked by the full decoder. Referencing a nonexistent SQL column
+    // would otherwise surface a raw "no such column" error.
+    if (!_allProjectedDeclared()) return '*';
     final cols = <String>[..._select!];
     for (final o in _effectiveOrder) {
       if (!cols.contains(o.field)) cols.add(o.field);
@@ -311,22 +339,61 @@ class QueryBuilder {
   }
 
   _CursorData _decodeCursor(String cursor) {
-    final jsonStr = utf8.decode(base64Url.decode(cursor));
-    final m = jsonDecode(jsonStr) as Map<String, Object?>;
-    final storeName = m['store'];
-    final schemaVer = m['schemaVer'];
-    final sort = (m['sort'] as List).cast<String>();
-    final values = (m['values'] as List).cast<Object?>();
+    Object? storeName;
+    Object? schemaVer;
+    Object? shape;
+    List<String> sort;
+    List<Object?> values;
+    try {
+      final m = jsonDecode(utf8.decode(base64Url.decode(cursor)))
+          as Map<String, Object?>;
+      storeName = m['store'];
+      schemaVer = m['schemaVer'];
+      shape = m['shape'];
+      sort = List<String>.from(m['sort'] as List? ?? const []);
+      values = List<Object?>.from(m['values'] as List? ?? const []);
+    } catch (_) {
+      // Any malformed cursor (bad base64, invalid UTF-8/JSON, wrong field
+      // types) is a stale cursor, never a FormatException/TypeError.
+      throw StaleCursorError('Malformed cursor.');
+    }
     final expectedSort = _sortSignature;
     if (storeName != _schema.name ||
         schemaVer != _schema.version ||
+        shape != _shapeFingerprint ||
         !const ListEquality<String>().equals(sort, expectedSort) ||
         values.length != expectedSort.length) {
       throw StaleCursorError(
-          'Cursor does not match this query shape (store/schema/sort).');
+          'Cursor does not match this query shape (store/schema/sort/filters).');
+    }
+    // Values must be scalars; anything else (maps, lists, ...) could only
+    // come from a hand-crafted cursor and would leak an untyped binding error.
+    for (final v in values) {
+      if (v != null &&
+          v is! bool &&
+          v is! int &&
+          v is! double &&
+          v is! String) {
+        throw StaleCursorError('Malformed cursor.');
+      }
     }
     return _CursorData(values);
   }
+
+  /// Fingerprint of every query-shape component that a keyset cursor is only
+  /// valid for: scope flags, WHERE/OR predicates (structure *and* bound
+  /// values) and projection. A cursor produced by a differently-shaped query
+  /// must be rejected with [StaleCursorError] instead of silently returning a
+  /// wrong page.
+  String get _shapeFingerprint => jsonEncode({
+        'a': _includeArchived,
+        'h': _includeHidden,
+        'w': [
+          for (final c in _where) [c.sql, c.args],
+          for (final c in _orGroups) [c.sql, c.args],
+        ],
+        'p': _select,
+      });
 
   (String, List<Object?>) _keysetPredicate(_CursorData data) {
     final order = _effectiveOrder;
@@ -347,23 +414,55 @@ class QueryBuilder {
       return ('($cols) $op ($ph)', values);
     }
 
+    // Null-aware OR-chain. SQLite sorts NULLs FIRST in ASC and LAST in DESC.
+    // For a NULL cursor value in an ASC column, all non-NULL values still
+    // follow, so the comparison becomes `IS NOT NULL`; for a NULL cursor value
+    // in a DESC column, nothing follows, so that alternative is dropped.
+    // Equality with a NULL cursor value becomes `IS NULL` so the chain can
+    // continue within the NULL group.
     final clauses = <String>[];
     final args = <Object?>[];
     for (var i = 0; i < order.length; i++) {
       final parts = <String>[];
+      final clauseArgs = <Object?>[];
+      var viable = true;
       for (var j = 0; j <= i; j++) {
         final col = DdlCompiler.quote(order[j].field);
-        final op = order[j].desc ? '<' : '>';
+        final v = values[j];
         if (j == i) {
-          parts.add('$col $op ?');
-          args.add(values[j]);
+          if (v == null) {
+            if (order[j].desc) {
+              // DESC: NULLs sort last, so nothing follows this row — but the
+              // chain may still continue within the NULL group via the next
+              // position (`$col IS NULL AND ...`).
+              viable = false;
+              break;
+            }
+            parts.add('$col IS NOT NULL');
+          } else {
+            final op = order[j].desc ? '<' : '>';
+            if (order[j].desc) {
+              // DESC: NULLs sort after every non-NULL value, so the trailing
+              // NULL group must be kept: `col < ?` alone would drop it.
+              parts.add('($col $op ? OR $col IS NULL)');
+            } else {
+              parts.add('$col $op ?');
+            }
+            clauseArgs.add(v);
+          }
+        } else if (v == null) {
+          parts.add('$col IS NULL');
         } else {
           parts.add('$col = ?');
-          args.add(values[j]);
+          clauseArgs.add(v);
         }
       }
-      clauses.add('(${parts.join(' AND ')})');
+      if (viable) {
+        clauses.add('(${parts.join(' AND ')})');
+        args.addAll(clauseArgs);
+      }
     }
+    if (clauses.isEmpty) return ('0', const []);
     return ('(${clauses.join(' OR ')})', args);
   }
 
@@ -374,6 +473,7 @@ class QueryBuilder {
       'store': _schema.name,
       'schemaVer': _schema.version,
       'sort': _sortSignature,
+      'shape': _shapeFingerprint,
       'values': values,
     };
     return base64UrlEncode(utf8.encode(jsonEncode(payload)));
@@ -384,6 +484,11 @@ class QueryBuilder {
   /// Executes the query and returns one page of records.
   Future<Page> fetch() async {
     final limit = _resolveLimit();
+    // A zero limit is a degenerate (but legal) page: nothing to return and
+    // nothing to paginate from.
+    if (limit == 0) {
+      return const Page(items: [], nextCursor: null, hasMore: false);
+    }
     final (sql, args) =
         _compile(limitOverride: limit == null ? null : limit + 1);
     final rows = await _pocket.traceQuery(sql, args);
@@ -480,10 +585,24 @@ class QueryBuilder {
   }
 
   /// Returns the distinct values of [field] matching the current filters.
+  ///
+  /// Ordering is honoured only for order clauses on [field] itself; ordering
+  /// by another column (or the implicit `id` tiebreaker) would make DISTINCT
+  /// meaningless, so those clauses are dropped. Distinct results are otherwise
+  /// unordered, so callers should not rely on a stable order.
   Future<List<Object?>> distinct(String field) async {
     _checkQueryable(field);
-    final saved = _select;
+    final savedSelect = _select;
+    final savedOrder = [..._order];
+    final savedSuppress = _suppressIdTiebreak;
     _select = [field];
+    _order
+      ..clear()
+      ..addAll([
+        for (final o in savedOrder)
+          if (o.field == field) o
+      ]);
+    _suppressIdTiebreak = true;
     final limit = _all ? null : (_limit ?? 1000);
     try {
       final (sql, args) = _compile(limitOverride: limit);
@@ -491,12 +610,37 @@ class QueryBuilder {
       final rows = await _pocket.traceQuery(distinctSql, args);
       return [for (final r in rows) r[field]];
     } finally {
-      _select = saved;
+      _select = savedSelect;
+      _order
+        ..clear()
+        ..addAll(savedOrder);
+      _suppressIdTiebreak = savedSuppress;
     }
+  }
+
+  /// Whether [field] can be aggregated numerically. Only declared numeric
+  /// kinds (int/real/bool/date) qualify: text and JSON fields would either
+  /// coerce silently (SUM→0.0) or leak a raw cast error (MIN/MAX→String).
+  bool _isNumericField(String field) {
+    final f = _schema.fieldByName(field);
+    if (f == null) return false;
+    return switch (f.kind) {
+      FieldKind.int ||
+      FieldKind.real ||
+      FieldKind.bool ||
+      FieldKind.date =>
+        true,
+      _ => false,
+    };
   }
 
   Future<num?> _aggregate(String fn, String field) async {
     _checkQueryable(field);
+    if (!_isNumericField(field)) {
+      throw ValidationException(
+          'Field "$field" is not numeric and cannot be aggregated.',
+          field: field);
+    }
     final (sql, args) = _compile(aggregate: fn, aggField: field);
     final rows = await _pocket.traceQuery(sql, args);
     final v = rows.isEmpty ? null : rows.first['v'];
@@ -587,8 +731,7 @@ class SearchQueryBuilder {
           'Store "${_schema.name}" does not have FTS enabled.');
     }
     if (!_pocket.capabilities.hasFts5) {
-      throw FtsUnavailableError(
-          'FTS5 is not available on this SQLite engine.');
+      throw FtsUnavailableError('FTS5 is not available on this SQLite engine.');
     }
   }
 
@@ -654,15 +797,25 @@ class SearchQueryBuilder {
   ///     .limit(10)
   ///     .fetch();
   /// ```
+  ///
+  /// An empty or whitespace-only term is a valid no-op that returns no
+  /// results. Terms that FTS5 rejects (malformed expressions, unbalanced
+  /// quotes, bare operators) throw a typed [ValidationException] instead of a
+  /// raw SQLite error.
   Future<List<SearchResult>> fetch() async {
+    if (_term.trim().isEmpty) return const [];
     final (sql, args) = _compile();
-    final rows = await _pocket.traceQuery(sql, args);
-    return [
-      for (final r in rows)
-        SearchResult(
-          id: r['id'] as String,
-          score: (r['score'] as num).toDouble(),
-        )
-    ];
+    try {
+      final rows = await _pocket.traceQuery(sql, args);
+      return [
+        for (final r in rows)
+          SearchResult(
+            id: r['id'] as String,
+            score: (r['score'] as num).toDouble(),
+          )
+      ];
+    } on SqliteException catch (e) {
+      throw ValidationException('Invalid search term: ${e.message}');
+    }
   }
 }

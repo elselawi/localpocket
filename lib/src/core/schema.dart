@@ -43,7 +43,9 @@ class Field {
 
   /// Declares a text field.
   factory Field.text(String name,
-          {bool required = false, bool uniqueWhenActive = false, bool encrypted = false}) =>
+          {bool required = false,
+          bool uniqueWhenActive = false,
+          bool encrypted = false}) =>
       Field._(
           name: name,
           kind: FieldKind.text,
@@ -52,12 +54,22 @@ class Field {
           encrypted: encrypted);
 
   /// Declares an integer field.
-  factory Field.int(String name, {bool required = false, bool encrypted = false}) =>
-      Field._(name: name, kind: FieldKind.int, required: required, encrypted: encrypted);
+  factory Field.int(String name,
+          {bool required = false, bool encrypted = false}) =>
+      Field._(
+          name: name,
+          kind: FieldKind.int,
+          required: required,
+          encrypted: encrypted);
 
   /// Declares a real-number field.
-  factory Field.real(String name, {bool required = false, bool encrypted = false}) =>
-      Field._(name: name, kind: FieldKind.real, required: required, encrypted: encrypted);
+  factory Field.real(String name,
+          {bool required = false, bool encrypted = false}) =>
+      Field._(
+          name: name,
+          kind: FieldKind.real,
+          required: required,
+          encrypted: encrypted);
 
   /// Declares a boolean field stored as SQLite `0` or `1`.
   factory Field.bool(String name, {bool required = false}) =>
@@ -68,8 +80,13 @@ class Field {
       Field._(name: name, kind: FieldKind.date, required: required);
 
   /// Declares a string field restricted to [values].
-  factory Field.enumValue(String name, List<String> values, {bool required = false}) =>
-      Field._(name: name, kind: FieldKind.enumValue, required: required, enumValues: List.unmodifiable(values));
+  factory Field.enumValue(String name, List<String> values,
+          {bool required = false}) =>
+      Field._(
+          name: name,
+          kind: FieldKind.enumValue,
+          required: required,
+          enumValues: List.unmodifiable(values));
 
   /// Declares a JSON object or array field.
   factory Field.json(String name, {bool encrypted = false}) =>
@@ -80,20 +97,28 @@ class Field {
       Field._(name: name, kind: FieldKind.jsonList, encrypted: encrypted);
 
   /// Declares a reference to collection [to].
-  factory Field.ref(String name, {required String to, bool enforceFk = false}) =>
+  factory Field.ref(String name,
+          {required String to, bool enforceFk = false}) =>
       Field._(name: name, kind: FieldKind.ref, refTo: to, enforceFk: enforceFk);
 
   /// SQLite affinity for this field.
-  String get sqlType => switch (kind) {
-        FieldKind.text ||
-        FieldKind.enumValue ||
-        FieldKind.json ||
-        FieldKind.jsonList ||
-        FieldKind.ref =>
-          'TEXT',
-        FieldKind.int || FieldKind.bool || FieldKind.date => 'INTEGER',
-        FieldKind.real => 'REAL',
-      };
+  ///
+  /// Encrypted fields always store base64 ciphertext as TEXT: a STRICT
+  /// `INTEGER`/`REAL` column would reject the base64 string, so the storage
+  /// type must be TEXT even for logical int/real fields.
+  String get sqlType {
+    if (encrypted) return 'TEXT';
+    return switch (kind) {
+      FieldKind.text ||
+      FieldKind.enumValue ||
+      FieldKind.json ||
+      FieldKind.jsonList ||
+      FieldKind.ref =>
+        'TEXT',
+      FieldKind.int || FieldKind.bool || FieldKind.date => 'INTEGER',
+      FieldKind.real => 'REAL',
+    };
+  }
 
   Map<String, Object?> toJson() => {
         'name': name,
@@ -133,7 +158,8 @@ class Field {
       case FieldKind.jsonList:
         return Field.jsonList(name, encrypted: encrypted);
       case FieldKind.ref:
-        return Field.ref(name, to: j['refTo'] as String, enforceFk: j['enforceFk'] == true);
+        return Field.ref(name,
+            to: j['refTo'] as String, enforceFk: j['enforceFk'] == true);
     }
   }
 }
@@ -153,7 +179,8 @@ class IndexSpec {
   final IndexScope scope;
 
   /// Creates an index declaration.
-  const IndexSpec(this.columns, {this.unique = false, this.scope = IndexScope.live});
+  const IndexSpec(this.columns,
+      {this.unique = false, this.scope = IndexScope.live});
 
   Map<String, Object?> toJson() => {
         'columns': columns,
@@ -206,7 +233,8 @@ class StoreMigration {
 }
 
 /// A lazy, deterministic, never-pushed document-format migration.
-typedef DocumentMigration = Map<String, Object?> Function(Map<String, Object?> doc);
+typedef DocumentMigration = Map<String, Object?> Function(
+    Map<String, Object?> doc);
 
 /// Conflict resolution policy. Resolver implementations are provided by the
 /// sync layer; this type exists now so `CollectionSchema` can carry it.
@@ -321,7 +349,8 @@ class CollectionSchema<T> {
         name: j['name'] as String,
         version: j['version'] as int,
         fields: [
-          for (final f in (j['fields'] as List)) Field.fromJson(f as Map<String, Object?>)
+          for (final f in (j['fields'] as List))
+            Field.fromJson(f as Map<String, Object?>)
         ],
         indexes: [
           for (final ix in (j['indexes'] as List))
