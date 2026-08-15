@@ -180,4 +180,232 @@ void main() {
           reason: 'fresh pull is idempotent');
     });
   });
+
+  group('auth token boundary and provider failures', () {
+    test('Token.isExpired: exact expiry is not expired, past is', () {
+      final now = DateTime.now();
+      expect(Token('x', expiresAt: now).isExpired, isFalse,
+          reason: 'isAfter is strict: exactly-at-expiry is still valid');
+      expect(
+          Token('x', expiresAt: now.subtract(const Duration(seconds: 1)))
+              .isExpired,
+          isTrue);
+      expect(Token('x').isExpired, isFalse, reason: 'no expiry');
+    });
+
+    test('remainingFraction: no-expiry, zero/negative lifetimes clamp', () {
+      final now = DateTime.now();
+      expect(Token('x').remainingFraction, 1.0, reason: 'no expiry -> fresh');
+      // Zero/negative lifetime -> 0.0.
+      final zero = Token('x', expiresAt: now, issuedAt: now);
+      expect(zero.remainingFraction, 0.0);
+      final negative = Token('x',
+          expiresAt: now.subtract(const Duration(seconds: 5)),
+          issuedAt: now.add(const Duration(seconds: 5)));
+      expect(negative.remainingFraction, 0.0);
+      expect(negative.needsProactiveRefresh, isTrue);
+      // Issued after expiry -> 0.0, and past expiry -> expired.
+      final late = Token('x',
+          expiresAt: now.subtract(const Duration(seconds: 1)), issuedAt: now);
+      expect(late.remainingFraction, 0.0);
+      expect(late.isExpired, isTrue);
+      // A fully-fresh token is never proactively refreshed.
+      expect(
+          Token('x', expiresAt: now.add(const Duration(hours: 1)))
+              .needsProactiveRefresh,
+          isFalse);
+    });
+
+    test('proactive-refresh boundary is strictly below 25%', () {
+      // Lifetime 100s, elapsed 74.99s -> remaining fraction 0.2501 (not due).
+      final near = DateTime.now();
+      final justAbove = Token('x',
+          expiresAt: near.add(const Duration(seconds: 25, milliseconds: 10)),
+          issuedAt:
+              near.subtract(const Duration(seconds: 74, milliseconds: 990)));
+      expect(justAbove.remainingFraction, closeTo(0.2501, 0.0001));
+      expect(justAbove.needsProactiveRefresh, isFalse,
+          reason: 'fraction >= 0.25 is not due');
+
+      // Elapsed 75.01s -> fraction 0.2499 (due).
+      final justBelow = Token('x',
+          expiresAt: near.add(const Duration(seconds: 24, milliseconds: 990)),
+          issuedAt:
+              near.subtract(const Duration(seconds: 75, milliseconds: 10)));
+      expect(justBelow.remainingFraction, closeTo(0.2499, 0.0001));
+      expect(justBelow.needsProactiveRefresh, isTrue,
+          reason: 'fraction < 0.25 is due');
+    });
+
+    test('initial concurrent token() shares one currentToken() call', () async {
+      final provider = _ScriptedProvider();
+      final auth = AuthManager(provider);
+      final tokens =
+          await Future.wait([for (var i = 0; i < 5; i++) auth.token()]);
+      expect(provider.currentCalls, 1, reason: 'single-flight initial load');
+      expect(tokens.map((t) => t.value).toSet(), {'initial'});
+      expect(provider.refreshCalls, 0);
+    });
+
+    test('refreshNow() before token() loads then refreshes', () async {
+      final provider = _ScriptedProvider();
+      final auth = AuthManager(provider);
+      final fresh = await auth.refreshNow();
+      expect(fresh.value, 'refreshed');
+      expect(provider.currentCalls, 1);
+      expect(provider.refreshCalls, 1);
+      // Subsequent token() returns the cached refreshed token without a
+      // fresh load or another refresh.
+      final t = await auth.token();
+      expect(t.value, 'refreshed');
+      expect(provider.currentCalls, 1);
+      expect(provider.refreshCalls, 1);
+    });
+
+    test('proactive provider failure propagates and leaves a retryable state',
+        () async {
+      final now = DateTime.now();
+      final provider = _ScriptedProvider(
+        value: 'stale',
+        expiresAt: now.add(const Duration(seconds: 1)),
+        issuedAt: now.subtract(const Duration(seconds: 9)),
+        refreshError: StateError('provider down'),
+      );
+      final auth = AuthManager(provider);
+      // First token() loads and (proactively) refreshes -> the refresh throws.
+      await expectLater(auth.token(), throwsA(isA<StateError>()));
+      expect(provider.refreshCalls, 1);
+      expect(provider.currentCalls, 1);
+
+      // The failure is cleaned up: the next call retries the refresh.
+      provider.refreshError = null;
+      final t = await auth.token();
+      expect(t.value, 'refreshed');
+      expect(provider.refreshCalls, 2,
+          reason: 'failure did not poison the cache');
+    });
+
+    test('forced refresh failure keeps the cached token and retries later',
+        () async {
+      final provider = _ScriptedProvider(refreshError: StateError('down'));
+      final auth = AuthManager(provider);
+      await auth.token(); // cache 'initial'
+      await expectLater(auth.refreshNow(), throwsA(isA<StateError>()));
+      expect(provider.refreshCalls, 1);
+
+      provider.refreshError = null;
+      final fresh = await auth.refreshNow();
+      expect(fresh.value, 'refreshed');
+      expect(provider.refreshCalls, 2);
+    });
+
+    test('concurrent forced refreshes are single-flight', () async {
+      final provider =
+          _ScriptedProvider(refreshDelay: const Duration(milliseconds: 30));
+      final auth = AuthManager(provider);
+      await auth.token();
+      final results =
+          await Future.wait([for (var i = 0; i < 5; i++) auth.refreshNow()]);
+      expect(provider.refreshCalls, 1, reason: 'single-flight refresh');
+      expect(results.map((t) => t.value).toSet(), {'refreshed'});
+    });
+
+    test('invalidate() during an in-flight refresh completes cleanly',
+        () async {
+      final provider =
+          _ScriptedProvider(refreshDelay: const Duration(milliseconds: 40));
+      final auth = AuthManager(provider);
+      await auth.token();
+      final inflight = auth.refreshNow();
+      auth.invalidate(); // mid-flight
+      final fresh = await inflight;
+      expect(fresh.value, 'refreshed');
+      expect(provider.refreshCalls, 1);
+      // The in-flight refresh repopulated the cache.
+      expect((await auth.token()).value, 'refreshed');
+    });
+
+    test('invalidate() forces a reload on the next token()', () async {
+      final provider = _ScriptedProvider();
+      final auth = AuthManager(provider);
+      await auth.token();
+      auth.invalidate();
+      expect((await auth.token()).value, 'initial');
+      expect(provider.currentCalls, 2, reason: 'invalidated -> reloaded');
+    });
+
+    test('default identity is stable; scopeId derives from it', () async {
+      expect(TestTokenProvider(identityValue: 'alice').identity, 'alice');
+      final defaulted = _DefaultIdentityProvider();
+      expect(defaulted.identity, 'token-identity',
+          reason: 'TokenProvider.identity defaults to a stable fingerprint');
+
+      final a = PocketBaseBackend(
+          baseUrl: Uri.parse('https://pb.test'),
+          tokenProvider: TestTokenProvider(identityValue: 'same'),
+          stores: const []);
+      final b = PocketBaseBackend(
+          baseUrl: Uri.parse('https://pb.test'),
+          tokenProvider: TestTokenProvider(identityValue: 'same'),
+          stores: const []);
+      final c = PocketBaseBackend(
+          baseUrl: Uri.parse('https://pb.test'),
+          tokenProvider: TestTokenProvider(identityValue: 'other'),
+          stores: const []);
+      addTearDown(() {
+        a.close();
+        b.close();
+        c.close();
+      });
+      expect(a.scopeId, b.scopeId, reason: 'same baseUrl+identity');
+      expect(a.scopeId, isNot(c.scopeId), reason: 'identity changes the scope');
+    });
+  });
+}
+
+/// A scriptable [TokenProvider] with call counters and failure injection.
+class _ScriptedProvider implements TokenProvider {
+  String value;
+  DateTime? expiresAt;
+  DateTime? issuedAt;
+  int currentCalls = 0;
+  int refreshCalls = 0;
+  Object? refreshError;
+  Duration refreshDelay;
+
+  _ScriptedProvider({
+    this.value = 'initial',
+    this.expiresAt,
+    this.issuedAt,
+    this.refreshError,
+    this.refreshDelay = Duration.zero,
+  });
+
+  @override
+  String get identity => 'user-1';
+
+  @override
+  Future<Token> currentToken() async {
+    currentCalls++;
+    return Token(value, expiresAt: expiresAt, issuedAt: issuedAt);
+  }
+
+  @override
+  Future<Token> refreshToken(Token current) async {
+    refreshCalls++;
+    if (refreshDelay > Duration.zero) {
+      await Future<void>.delayed(refreshDelay);
+    }
+    final err = refreshError;
+    if (err != null) throw err;
+    return Token('refreshed', expiresAt: expiresAt, issuedAt: issuedAt);
+  }
+}
+
+/// A provider that does not override [TokenProvider.identity].
+class _DefaultIdentityProvider extends TokenProvider {
+  @override
+  Future<Token> currentToken() async => Token('x');
+  @override
+  Future<Token> refreshToken(Token current) async => Token('y');
 }

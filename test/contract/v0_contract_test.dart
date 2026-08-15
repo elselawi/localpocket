@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/pocketbase.dart';
 import 'package:localpocket/sync.dart';
@@ -103,6 +105,69 @@ void main() {
       );
       expect(server.records.containsKey(goodId), isFalse,
           reason: 'one failing item rolls back everything');
+    });
+
+    test('batch request wire shape: PUT upserts with id/store/data', () async {
+      final server = await MockPbServer().start();
+      addTearDown(() => server.stop());
+      final backend = PocketBaseBackend(
+          baseUrl: server.baseUrl,
+          tokenProvider: TestTokenProvider(),
+          stores: const []);
+      addTearDown(backend.close);
+
+      final id = generateRecordId();
+      await backend.pushBatch([
+        PushOp(
+            opId: 'op1',
+            store: 'widgets',
+            id: id,
+            dataJson: '{"name":"x","qty":3}',
+            upsert: true),
+      ]);
+      expect(server.batchBodies, hasLength(1));
+      final body =
+          jsonDecode(server.batchBodies.single) as Map<String, Object?>;
+      final requests = body['requests'] as List;
+      expect(requests, hasLength(1));
+      final req = requests.single as Map;
+      expect(req['method'], 'PUT');
+      expect(req['url'], '/api/collections/data/records');
+      final reqBody = req['body'] as Map;
+      expect(reqBody['id'], id);
+      expect(reqBody['store'], 'widgets');
+      expect(reqBody['data'], {'name': 'x', 'qty': 3});
+    });
+
+    test('batch response is a top-level array mapped by request order',
+        () async {
+      final server = await MockPbServer().start();
+      addTearDown(() => server.stop());
+      final backend = PocketBaseBackend(
+          baseUrl: server.baseUrl,
+          tokenProvider: TestTokenProvider(),
+          stores: const []);
+      addTearDown(backend.close);
+
+      final a = generateRecordId();
+      final b = generateRecordId();
+      final results = await backend.pushBatch([
+        PushOp(
+            opId: 'a',
+            store: 'widgets',
+            id: a,
+            dataJson: '{"name":"a"}',
+            upsert: true),
+        PushOp(
+            opId: 'b',
+            store: 'widgets',
+            id: b,
+            dataJson: '{"name":"b"}',
+            upsert: true),
+      ]);
+      expect(results.map((r) => r.opId), ['a', 'b'],
+          reason: 'results align with request order');
+      expect(results.map((r) => r.record!.id), [a, b]);
     });
   });
 }

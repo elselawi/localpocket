@@ -64,6 +64,11 @@ class MockPbServer {
   int? forceWriteStatus;
   String? forceRetryAfter;
 
+  /// When non-empty, each batch request consumes the next raw response
+  /// `(status, body)` WITHOUT applying the requests. Enables response-contract
+  /// tests (empty/short/long/duplicate/unknown-op/malformed-record bodies).
+  final List<(int, Object?)> batchResponseScript = [];
+
   int listCalls = 0;
   int viewCalls = 0;
   int createCalls = 0;
@@ -374,7 +379,22 @@ class MockPbServer {
     return null;
   }
 
-  String _unescape(String s) => s.replaceAll("\\'", "'");
+  /// Decodes one escape: `\\` → `\` and `\'` → `'` (and `\x` → `x`), in a
+  /// single left-to-right pass so escaped backslashes never re-interpret the
+  /// following escape.
+  String _unescape(String s) {
+    final b = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      final c = s[i];
+      if (c == '\\' && i + 1 < s.length) {
+        b.write(s[i + 1]);
+        i++;
+      } else {
+        b.write(c);
+      }
+    }
+    return b.toString();
+  }
 
   // ------------------------------------------------------------- view --
 
@@ -398,8 +418,9 @@ class MockPbServer {
     if (forceWriteStatus != null) {
       final res = req.response;
       res.statusCode = forceWriteStatus!;
-      if (forceRetryAfter != null)
+      if (forceRetryAfter != null) {
         res.headers.set('Retry-After', forceRetryAfter!);
+      }
       res.headers.contentType = ContentType.json;
       res.write(jsonEncode({'message': 'forced status'}));
       await res.close();
@@ -452,8 +473,9 @@ class MockPbServer {
     if (forceWriteStatus != null) {
       final res = req.response;
       res.statusCode = forceWriteStatus!;
-      if (forceRetryAfter != null)
+      if (forceRetryAfter != null) {
         res.headers.set('Retry-After', forceRetryAfter!);
+      }
       res.headers.contentType = ContentType.json;
       res.write(jsonEncode({'message': 'forced status'}));
       await res.close();
@@ -536,6 +558,12 @@ class MockPbServer {
         'data': data,
         'dataJson': dataJson,
       });
+    }
+
+    // Response-contract scripting: return a canned body without applying.
+    if (batchResponseScript.isNotEmpty) {
+      final (status, body) = batchResponseScript.removeAt(0);
+      return _sendJson(req, status, body ?? <Object?>[]);
     }
 
     // Apply all atomically (roll back everything on any failure).

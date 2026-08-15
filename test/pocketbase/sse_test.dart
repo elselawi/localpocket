@@ -1,7 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:localpocket/pocketbase.dart';
 import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
+import 'fake_transport.dart';
 import 'mock_pb_server.dart';
 import 'pb_helpers.dart';
 
@@ -229,6 +233,101 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(server.listCalls - listBefore, lessThanOrEqualTo(2),
           reason: '20 hints collapse to ~1 pull, not 20');
+    });
+
+    test('delete verification: transient GET failure emits no hint', () async {
+      final fake = FakeTransport();
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      fake.sendStatus(204); // subscribe POST
+      fake.sendError(HttpTransportException('connection reset')); // GET fails
+      final backend = PocketBaseBackend(
+        baseUrl: Uri.parse('https://pb.test'),
+        tokenProvider: TestTokenProvider(),
+        stores: const ['widgets'],
+        realtimeDebounce: const Duration(milliseconds: 20),
+        transport: fake,
+      );
+      addTearDown(backend.close);
+      final hints = <BackendHint>[];
+      final sub = backend.hints().listen(hints.add);
+      await backend.startRealtime();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      // Complete the handshake so the subscribe POST consumes its script
+      // entry; the next send is then the delete-verification GET.
+      controller.add(
+          utf8.encode('id:h1\nevent:PB_CONNECT\ndata:{"clientId":"c"}\n\n'));
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      hints.clear(); // drop the gap-closed hint
+
+      // A delete event whose verification GET fails transiently.
+      controller
+          .add(utf8.encode('event:data\ndata:${jsonEncode(<String, Object?>{
+            'record': {
+              'id': 'r1',
+              'store': 'widgets',
+              'updated': '2026-08-15 10:00:00.000Z',
+              'data': <String, Object?>{}
+            },
+            'action': 'delete'
+          })}\n\n'));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await controller.close();
+      await sub.cancel();
+      expect(hints, isEmpty,
+          reason:
+              'a transient verification failure is silent; the pull is the backstop');
+    });
+
+    test('delete verification never hides a still-visible record', () async {
+      final fake = FakeTransport();
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      fake.sendStatus(204); // subscribe POST
+      // Verification GET returns the current (still-visible) record.
+      fake.sendStatus(
+          200, FakeTransport.recordBody('r1', data: {'name': 'alive'}));
+      final backend = PocketBaseBackend(
+        baseUrl: Uri.parse('https://pb.test'),
+        tokenProvider: TestTokenProvider(),
+        stores: const ['widgets'],
+        realtimeDebounce: const Duration(milliseconds: 20),
+        transport: fake,
+      );
+      addTearDown(backend.close);
+      final hints = <BackendHint>[];
+      final sub = backend.hints().listen(hints.add);
+      await backend.startRealtime();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      // Complete the handshake first so the subscribe POST consumes its
+      // script entry and the delete-GET consumes the next one.
+      controller.add(
+          utf8.encode('id:h1\nevent:PB_CONNECT\ndata:{"clientId":"c"}\n\n'));
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      hints.clear();
+
+      controller.add(utf8.encode('event:data\ndata:${jsonEncode({
+            'record': {
+              'id': 'r1',
+              'store': 'widgets',
+              'updated': '2026-08-15 10:00:00.000Z',
+              'data': {'name': 'alive'}
+            },
+            'action': 'delete'
+          })}\n\n'));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await controller.close();
+      await sub.cancel();
+
+      expect(hints.any((h) => h.kind == BackendHintKind.deleted), isFalse,
+          reason: 'a visible record is never reported as deleted');
+      expect(
+          hints.any(
+              (h) => h.kind == BackendHintKind.changed && h.record?.id == 'r1'),
+          isTrue,
+          reason: 'it is re-delivered as a changed hint instead');
     });
   });
 }
