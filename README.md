@@ -255,8 +255,12 @@ engine.status.listen((status) {
   print('Sync State: ${status.state}, Pending Ops: ${status.pending}');
 });
 
-// Start background synchronization (REST Pull/Push + SSE Realtime)
+// Start background synchronization (REST Pull/Push)
 await engine.start();
+
+// SSE Realtime is application-managed: start it explicitly to receive
+// live change hints (polling/anti-entropy sweeps remain the backstop).
+await backend.startRealtime();
 
 // Or trigger an immediate one-shot sync cycle
 final report = await engine.syncNow();

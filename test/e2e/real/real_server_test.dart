@@ -440,5 +440,60 @@ void main() {
       });
       expect(server.data['tags'], ['a', 'b']);
     });
+
+    test('real_file_upload_and_single_file_clear', () async {
+      // Live-verified file modifier semantics: a streamed upload
+      // APPENDS a file to the record's imgs list; `removeNames` clears one
+      // file (single-file clearing). Requires the real data collection to
+      // expose an `imgs` file field.
+      final store = uniqueStore();
+      final h = await RealHarness.create(store: store);
+      registerCleanup(h);
+      final id = generateRecordId();
+      await h.backend
+          .createRecord(id: id, store: store, dataJson: '{"name":"f"}');
+
+      final bytes = List<int>.generate(1024, (i) => i % 251);
+      final uploaded = await h.backend.updateRecordFilesStream(
+        id: id,
+        uploads: {
+          'probe.bin': StreamFileUpload(
+            filename: 'probe.bin',
+            length: bytes.length,
+            streamFactory: () async => Stream.value(bytes),
+          ),
+        },
+      );
+      expect(uploaded.imgs, hasLength(1),
+          reason: 'the upload appends one entry to imgs');
+      final remoteName = uploaded.imgs.single;
+
+      // Single-file clearing: remove exactly that file.
+      final cleared = await h.backend.updateRecordFiles(
+        id: id,
+        removeNames: [remoteName],
+      );
+      expect(cleared.imgs, isEmpty, reason: 'the single file is cleared');
+
+      // The remote record reflects the empty list.
+      final fetched = await h.backend.getRecord(id);
+      expect(fetched!.imgs, isEmpty);
+    });
+
+    test('real_realtime_gap_hint_on_connect', () async {
+      // Live-verified SSE contract: every (re)connect closes a gap,
+      // so the backend hints every configured store to re-pull.
+      final store = uniqueStore();
+      final h = await RealHarness.create(store: store);
+      registerCleanup(h);
+
+      final hints = <BackendHint>[];
+      final sub = h.backend.hints().listen(hints.add);
+      addTearDown(() => sub.cancel());
+      await h.backend.startRealtime();
+      await Future<void>.delayed(const Duration(seconds: 3));
+      expect(hints.any((hint) => hint.store == store), isTrue,
+          reason: 'the connect (gap close) hints the store');
+    }, timeout: const Timeout(Duration(seconds: 20)));
   });
 }

@@ -1,8 +1,23 @@
+import 'dart:io';
+
 import 'package:localpocket/localpocket.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
 
+/// Release gate.
+///
+/// The authoritative CI gate is `tool/release_gate.dart`, which runs EVERY
+/// child check (analyze, full hermetic suite, web gate, core API smoke, and —
+/// when configured — the live suite and publish dry-run) and fails the whole
+/// gate when any child fails. A single application smoke test is NOT proof
+/// that the suite ran; this file verifies the gate itself:
+///
+///   1. the application smoke keeps working end-to-end (default suite), and
+///   2. the gate lists the required steps and propagates child failures.
+///
+/// The gate-logic tests spawn nested `dart` processes and are `gate`-tagged
+/// (see dart_test.yaml) — run explicitly or via the release gate tool.
 void main() {
   group('Full release gate', () {
     test('all suites in one ci run and example app smoke', () async {
@@ -84,5 +99,51 @@ void main() {
       expect(appts.items, hasLength(1));
       expect(appts.items.first['id'], apptId);
     });
+
+    test('release gate lists every required child check', () async {
+      final result = await Process.run(
+          'dart', ['run', 'tool/release_gate.dart', '--list-steps']);
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+      final out = result.stdout as String;
+      for (final required in [
+        'analyze',
+        'hermetic suite',
+        'web gate',
+        'core API smoke',
+      ]) {
+        expect(out, contains(required),
+            reason: 'the gate must run "$required"');
+      }
+      expect(out, isNot(contains('live suite')),
+          reason: 'the live suite is opt-in (--real)');
+    }, tags: ['gate']);
+
+    test('release gate: a failing child command fails the whole gate',
+        () async {
+      final result = await Process.run('dart', [
+        'run',
+        'tool/release_gate.dart',
+        '--extra-command',
+        'run tool/does_not_exist_smoke.dart',
+      ]);
+      expect(result.exitCode, isNot(0),
+          reason:
+              'any failing child must fail the gate:\n${result.stdout}\n${result.stderr}');
+      expect(result.stdout as String, contains('FAIL'),
+          reason: 'the failing step is reported');
+    }, tags: ['gate']);
+
+    test('release gate: --extra-command runs as a child step', () async {
+      // A passing extra command does not fail the gate (and proves the gate
+      // actually EXECUTES child commands, not just lists them).
+      final result = await Process.run('dart', [
+        'run',
+        'tool/release_gate.dart',
+        '--extra-command',
+        'run tool/core_web_compile_smoke.dart',
+      ]);
+      expect(result.stdout as String, contains('PASS  run'),
+          reason: 'the extra command ran as a child step');
+    }, tags: ['gate'], timeout: const Timeout(Duration(minutes: 3)));
   });
 }
