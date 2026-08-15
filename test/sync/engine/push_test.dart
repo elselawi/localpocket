@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
@@ -259,6 +262,641 @@ void main() {
       expect(dl.any((r) => r['kind'] == 'batch_poison'), isTrue);
       // The good op was settled (clean), not blocked by the poison sibling.
       expect(await h.engine.syncStore.countPending(), 0);
+    });
+
+    test('merged push publishes a ChangeSet for the merged domain write',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 1});
+      await h.engine.syncNow(); // pull -> clean
+
+      await h.pocket.collection('widgets').patch(id, {'name': 'local'});
+      h.mock.mutate(id, {'id': id, 'name': 'n0', 'qty': 99});
+
+      final changes = <ChangeSet>[];
+      final sub = h.pocket.changeBus.stream.listen(changes.add);
+      addTearDown(sub.cancel);
+
+      await h.engine.syncNow();
+
+      // The merge landed locally and the row went clean.
+      final local = await h.pocket.collection('widgets').get(id);
+      expect(local!['name'], 'local');
+      expect(local['qty'], 99, reason: 'merged remote value written locally');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean);
+
+      // The merged domain write must have published a ChangeSet.
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(changes.any((c) => c.store == 'widgets' && c.ids.contains(id)),
+          isTrue,
+          reason: 'merged domain write emitted a ChangeSet');
+    });
+
+    test('merged push settlement race keeps a newer edit and stays dirty',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 1});
+      await h.engine.syncNow(); // pull -> clean
+
+      // Local edit (name) + concurrent remote edit (qty) -> merge on push.
+      await h.pocket.collection('widgets').patch(id, {'name': 'local'});
+      h.mock.mutate(id, {'id': id, 'name': 'n0', 'qty': 99});
+
+      final changes = <ChangeSet>[];
+      final sub = h.pocket.changeBus.stream.listen(changes.add);
+      addTearDown(sub.cancel);
+
+      // Block the remote update request after the merge is computed.
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      h.mock.updateRecordEntered = entered;
+      h.mock.updateRecordBarrier = release;
+
+      final syncFuture = h.engine.syncNow();
+      await entered.future;
+
+      // Edit the same row again while the request is in flight.
+      await h.pocket.collection('widgets').patch(id, {'qty': 5});
+      expect((await sr(h.pocket, id))!.syncState, SyncState.dirty);
+
+      release.complete();
+      final report = await syncFuture;
+      expect(report.hadError, isFalse);
+      h.mock.updateRecordBarrier = null;
+      h.mock.updateRecordEntered = null;
+
+      // The second edit survives: the stale merge must not overwrite it.
+      final local = await h.pocket.collection('widgets').get(id);
+      expect(local!['qty'], 5,
+          reason: 'second edit not overwritten by the stale merge');
+      expect(local['name'], 'local');
+      final op = await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id);
+      expect(op, isNotNull, reason: 'outbox row retained');
+      expect(jsonDecode(op!.payloadJson)['qty'], 5);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.dirty,
+          reason: 'sync row stays dirty');
+
+      // The settlement still publishes a ChangeSet (advance-base branch).
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(changes.any((c) => c.store == 'widgets' && c.ids.contains(id)),
+          isTrue,
+          reason: 'settlement emitted a ChangeSet');
+
+      // A subsequent cycle converges: the newer edit is pushed.
+      await h.engine.syncNow();
+      expect(h.mock.records[id]!.data['qty'], 5);
+      expect(h.mock.records[id]!.data['name'], 'local');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean);
+    });
+  });
+
+  /// A `widgets`-shaped schema carrying a custom conflict policy (used by the
+  /// resolver-failure matrix).
+  CollectionSchema schemaWithPolicy(ConflictPolicy policy) => CollectionSchema(
+        name: 'widgets',
+        version: 1,
+        fields: [
+          Field.text('name', required: true),
+          Field.int('qty'),
+          Field.real('price'),
+          Field.bool('active'),
+          Field.date('made_on'),
+          Field.enumValue('size', ['S', 'M', 'L']),
+          Field.json('meta'),
+          Field.jsonList('tags'),
+          Field.ref('owner_id', to: 'owners'),
+          Field.text('phone', uniqueWhenActive: true),
+        ],
+        indexes: const [
+          IndexSpec(['name', 'qty'])
+        ],
+        conflictPolicy: policy,
+      );
+
+  group('pusher targeted-fetch result matrix', () {
+    test('getRecord returns null: vanished update dead-letters, no crash',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'edited'});
+      h.mock.script('getRecord', [MockReturn(null)]);
+
+      final report = await h.engine.syncNow();
+      expect(report.deadLettered, 1,
+          reason: 'vanished target dead-lettered, never a null crash');
+      expect(report.hadError, isFalse);
+      final dl = await deadLetters(h.pocket);
+      expect(dl.any((r) => r['kind'] == 'missing_target'), isTrue);
+      final local = await h.pocket.collection('widgets').get(id);
+      expect(local!['name'], 'edited', reason: 'local copy preserved');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.error);
+    });
+
+    test('getRecord auth error parks the engine and keeps the op', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'edited'});
+      h.mock.script('getRecord', [MockThrow(AuthError('401'))]);
+
+      final report = await h.engine.syncNow();
+      expect(report.hadError, isTrue);
+      expect(h.engine.state, SyncEngineState.authRequired);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.dirty,
+          reason: 'op retained, never dead-lettered on auth');
+      expect(
+          await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull);
+    });
+
+    test('getRecord not-found dead-letters missing target', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'edited'});
+      h.mock.script('getRecord', [MockThrow(NotFoundError())]);
+
+      final report = await h.engine.syncNow();
+      expect(report.deadLettered, 1);
+      final dl = await deadLetters(h.pocket);
+      expect(dl.any((r) => r['kind'] == 'missing_target'), isTrue);
+      final local = await h.pocket.collection('widgets').get(id);
+      expect(local!['name'], 'edited');
+    });
+
+    test('getRecord forbidden dead-letters forbidden push', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'edited'});
+      h.mock.script('getRecord', [MockThrow(ForbiddenError())]);
+
+      final report = await h.engine.syncNow();
+      expect(report.deadLettered, 1);
+      final dl = await deadLetters(h.pocket);
+      expect(dl.any((r) => r['kind'] == 'forbidden_push'), isTrue);
+      final local = await h.pocket.collection('widgets').get(id);
+      expect(local!['name'], 'edited');
+    });
+
+    test('getRecord busy throttles the lane and honors retry-after', () async {
+      var clock = 1000000;
+      final h =
+          await EngineHarness.create(config: testConfig(now: () => clock));
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'edited'});
+      h.mock.script('getRecord', [MockThrow(ServerBusyError('7'))]);
+
+      await h.engine.syncNow();
+      final row = await sr(h.pocket, id);
+      expect(row!.attemptCount, 1);
+      expect(row.nextRetryAt, clock + 7000,
+          reason: 'retry-after honored on the targeted fetch');
+      expect(row.syncState, SyncState.dirty);
+
+      // Still inside the window: no retry.
+      clock += 3000;
+      await h.engine.syncNow();
+      expect(h.mock.getCalls, 1);
+
+      // Past the deadline: retried.
+      clock += 5000;
+      await h.engine.syncNow();
+      expect(h.mock.getCalls, 2);
+    });
+
+    test('getRecord transient/5xx/protocol/payload errors retry with backoff',
+        () async {
+      final errors = <SyncError>[
+        TransientNetworkError(),
+        ServerError('500'),
+        ProtocolError('bad json'),
+        PayloadError('400'),
+        DuplicateIdError(),
+      ];
+      for (final err in errors) {
+        final h = await EngineHarness.create();
+        final id =
+            h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
+        await h.engine.syncNow();
+        await h.pocket.collection('widgets').patch(id, {'name': 'edited'});
+        h.mock.script('getRecord', [MockThrow(err)]);
+
+        final report = await h.engine.syncNow();
+        expect(report.hadError, isTrue, reason: '${err.runtimeType}');
+        final row = await sr(h.pocket, id);
+        expect(row!.attemptCount, 1, reason: '${err.runtimeType}');
+        expect(row.syncState, SyncState.dirty,
+            reason: '${err.runtimeType}: op retained for retry');
+        expect(
+            await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull,
+            reason: '${err.runtimeType}: never silently dropped');
+        await h.close();
+      }
+    });
+
+    test('getRecord returning a foreign id wedges the op (never dropped)',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'edited'});
+
+      // A misbehaving backend answers a DIFFERENT record than requested.
+      final foreign = generateRecordId();
+      h.mock.script('getRecord', [
+        MockReturn(RemoteRecord(
+            id: foreign,
+            store: 'widgets',
+            updated: '2025-06-01 00:00:00.000Z',
+            data: {'id': foreign, 'name': 'foreign', 'qty': 1}))
+      ]);
+
+      // The mismatched-id response surfaces loudly (MapFailure) and the op is
+      // retained for the next attempt — never silently acked.
+      await expectLater(h.engine.syncNow(), throwsA(isA<MapFailure>()));
+      expect(
+          await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull,
+          reason: 'op retained for the next attempt');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.dirty);
+      expect(await deadLetters(h.pocket), isEmpty);
+    });
+  });
+
+  group('pusher normalization and resolver failures', () {
+    test('async collection resolver is awaited during push merge', () async {
+      final policy = ConflictPolicy(
+        collectionResolver: CustomResolver((ctx) async {
+          final l = ctx.local['qty'] as num;
+          final r = ctx.remote['qty'] as num;
+          return MergeResult(merged: {
+            'id': ctx.recordId,
+            'name': ctx.local['name'],
+            'qty': l + r
+          });
+        }),
+      );
+      final h = await EngineHarness.create(stores: [schemaWithPolicy(policy)]);
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 10});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'qty': 5});
+      h.mock.mutate(id, {'id': id, 'name': 'n0', 'qty': 12});
+
+      await h.engine.syncNow();
+      expect(h.mock.records[id]!.data['qty'], 17,
+          reason: 'async resolver output (5+12) was applied');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean);
+    });
+
+    test('async field resolver is awaited during push merge', () async {
+      final policy = ConflictPolicy(fieldOverrides: {
+        'qty': CustomResolver((ctx) async {
+          final l = ctx.local['qty'] as num;
+          final r = ctx.remote['qty'] as num;
+          return MergeResult(merged: {'qty': l * r});
+        }),
+      });
+      final h = await EngineHarness.create(stores: [schemaWithPolicy(policy)]);
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 10});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'qty': 5});
+      h.mock.mutate(id, {'id': id, 'name': 'n0', 'qty': 12});
+
+      await h.engine.syncNow();
+      expect(h.mock.records[id]!.data['qty'], 60,
+          reason: 'async field resolver output (5*12) was applied');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean);
+    });
+
+    test('sync collection resolver still works through the push path',
+        () async {
+      final policy = ConflictPolicy(
+        collectionResolver: CustomResolver((ctx) => MergeResult(
+            merged: {'id': ctx.recordId, 'name': 'sync-merged', 'qty': 42})),
+      );
+      final h = await EngineHarness.create(stores: [schemaWithPolicy(policy)]);
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 10});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'local'});
+      h.mock.mutate(id, {'id': id, 'name': 'n0', 'qty': 12});
+
+      await h.engine.syncNow();
+      expect(h.mock.records[id]!.data['name'], 'sync-merged');
+      expect(h.mock.records[id]!.data['qty'], 42);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean);
+    });
+
+    test('resolver returning null escalates to a conflict', () async {
+      final policy =
+          ConflictPolicy(collectionResolver: CustomResolver((ctx) => null));
+      final h = await EngineHarness.create(stores: [schemaWithPolicy(policy)]);
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 10});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'local'});
+      h.mock.mutate(id, {'id': id, 'name': 'n0', 'qty': 12});
+
+      await h.engine.syncNow();
+      final conflicts = await h.pocket.db
+          .query('lp_conflicts', where: 'record_id = ?', whereArgs: [id]);
+      expect(conflicts, isNotEmpty, reason: 'conflict row written');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.conflict);
+    });
+
+    test('resolver needsReview escalates to a conflict', () async {
+      final policy = ConflictPolicy(
+        collectionResolver:
+            CustomResolver((ctx) => MergeResult(merged: {}, needsReview: true)),
+      );
+      final h = await EngineHarness.create(stores: [schemaWithPolicy(policy)]);
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 10});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'local'});
+      h.mock.mutate(id, {'id': id, 'name': 'n0', 'qty': 12});
+
+      await h.engine.syncNow();
+      final conflicts = await h.pocket.db
+          .query('lp_conflicts', where: 'record_id = ?', whereArgs: [id]);
+      expect(conflicts, isNotEmpty);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.conflict);
+    });
+
+    test('resolver merged map omitting id still patches via the URL', () async {
+      final policy = ConflictPolicy(
+        collectionResolver: CustomResolver((ctx) => MergeResult(merged: {
+              'name': 'merged-name',
+              'qty': 99,
+              'price': 1.5,
+              'active': true,
+              'size': 'M',
+            })),
+      );
+      final h = await EngineHarness.create(stores: [schemaWithPolicy(policy)]);
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 10});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'local'});
+      h.mock.mutate(id, {'id': id, 'name': 'n0', 'qty': 12});
+
+      await h.engine.syncNow();
+      // The merged payload reached the server (PATCH carries the id in URL).
+      expect(h.mock.records[id]!.data['name'], 'merged-name');
+      expect(h.mock.records[id]!.data['qty'], 99);
+      expect(await deadLetters(h.pocket), isEmpty,
+          reason: 'never dead-lettered for a missing id in the merge');
+    });
+
+    test('resolver throwing synchronously keeps the op pending', () async {
+      final policy = ConflictPolicy(
+        collectionResolver: CustomResolver((ctx) {
+          throw StateError('resolver boom');
+        }),
+      );
+      final h = await EngineHarness.create(stores: [schemaWithPolicy(policy)]);
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 10});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'local'});
+      h.mock.mutate(id, {'id': id, 'name': 'n0', 'qty': 12});
+
+      // The resolver failure is loud (never silently swallowed) and the op is
+      // retained for the next attempt.
+      await expectLater(h.engine.syncNow(), throwsA(isA<StateError>()));
+      expect(
+          await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull,
+          reason: 'op never silently dropped');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.dirty);
+      expect(await deadLetters(h.pocket), isEmpty);
+    });
+
+    test('resolver throwing asynchronously keeps the op pending', () async {
+      final policy = ConflictPolicy(
+        collectionResolver: CustomResolver((ctx) async {
+          throw ArgumentError('async boom');
+        }),
+      );
+      final h = await EngineHarness.create(stores: [schemaWithPolicy(policy)]);
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 10});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'local'});
+      h.mock.mutate(id, {'id': id, 'name': 'n0', 'qty': 12});
+
+      await expectLater(h.engine.syncNow(), throwsA(isA<ArgumentError>()));
+      expect(
+          await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.dirty);
+      expect(await deadLetters(h.pocket), isEmpty);
+    });
+
+    test('malformed remote during update normalization keeps the op pending',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 10});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'local'});
+
+      // Remote now carries an invalid `name` type (a misbehaving server).
+      h.mock.script('getRecord', [
+        MockReturn(RemoteRecord(
+            id: id,
+            store: 'widgets',
+            updated: '2025-06-01 00:00:00.000Z',
+            data: {'id': id, 'name': 7, 'qty': 10}))
+      ]);
+
+      // Normalization failure is loud (MapFailure) and the op stays pending.
+      await expectLater(h.engine.syncNow(), throwsA(isA<MapFailure>()));
+      expect(
+          await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull,
+          reason: 'op retained');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.dirty);
+      expect(await deadLetters(h.pocket), isEmpty);
+    });
+
+    test('malformed remote during create recovery keeps the op pending',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id, name: 'x'));
+      // create -> duplicate -> GET returns a malformed record.
+      h.mock.script('createRecord', [MockThrow(DuplicateIdError())]);
+      h.mock.script('getRecord', [
+        MockReturn(RemoteRecord(
+            id: id,
+            store: 'widgets',
+            updated: '2026-01-01 00:00:00.000Z',
+            data: {'id': id, 'name': 7}))
+      ]);
+      h.mock.script('listChanges', [MockReturn(const <RemoteRecord>[])]);
+
+      await expectLater(h.engine.syncNow(), throwsA(isA<MapFailure>()));
+      expect(
+          await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull,
+          reason: 'op retained for recovery');
+      expect(await deadLetters(h.pocket), isEmpty);
+    });
+  });
+
+  group('push settlement server-response variants', () {
+    test('server transforms the payload: push ACKed, next pull converges',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id, name: 'mine'));
+
+      // The server normalizes the payload (renames, bumps qty) and stamps a
+      // server-side updated time.
+      final serverUpdated = '2026-02-03 04:05:06.000Z';
+      h.mock.script('createRecord', [
+        MockReturn(RemoteRecord(
+            id: id,
+            store: 'widgets',
+            updated: serverUpdated,
+            data: {'id': id, 'name': 'server-renamed', 'qty': 7}))
+      ]);
+
+      final report = await h.engine.syncNow();
+      expect(report.pushed, 1);
+      final row = await sr(h.pocket, id);
+      expect(row!.syncState, SyncState.clean);
+      expect(row.remoteUpdated, serverUpdated,
+          reason: 'settlement trusts the server updated timestamp');
+      // The transformed server value is not silently dropped: the next pull
+      // brings it in.
+      h.mock.records[id] = MockRecord(
+          id: id,
+          store: 'widgets',
+          data: {'id': id, 'name': 'server-renamed', 'qty': 7},
+          updated: serverUpdated);
+      await h.engine.syncNow();
+      final local = await h.pocket.collection('widgets').get(id);
+      expect(local!['name'], 'server-renamed');
+    });
+
+    test('server omits id in response data: settle injects the record id',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id, name: 'mine'));
+
+      h.mock.script('createRecord', [
+        MockReturn(RemoteRecord(
+            id: id,
+            store: 'widgets',
+            updated: '2026-02-03 04:05:06.000Z',
+            data: {'name': 'mine', 'qty': 2}))
+      ]);
+
+      final report = await h.engine.syncNow();
+      expect(report.pushed, 1);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean,
+          reason: 'missing id in data is normalized, not quarantined');
+      expect(await deadLetters(h.pocket), isEmpty);
+    });
+
+    test('server adds extra remote keys: adopted without corrupting the settle',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id, name: 'mine'));
+
+      h.mock.script('createRecord', [
+        MockReturn(RemoteRecord(
+            id: id,
+            store: 'widgets',
+            updated: '2026-02-03 04:05:06.000Z',
+            data: {'id': id, 'name': 'mine', 'secret_server_only': 'x'}))
+      ]);
+
+      await h.engine.syncNow();
+      // The settle handled the extra key: the row is clean and the server's
+      // transformed content (extra key included) was preserved locally.
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean);
+      expect(await deadLetters(h.pocket), isEmpty);
+      final local = await h.pocket.collection('widgets').get(id);
+      expect(local!['name'], 'mine');
+      expect(local['secret_server_only'], 'x',
+          reason: 'server extras are preserved via the settlement adoption');
+    });
+
+    test('different updated timestamps between requests are respected',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'n0', 'qty': 1});
+      await h.engine.syncNow();
+      final before = (await sr(h.pocket, id))!.remoteUpdated;
+
+      // Server bumps its updated time on the PATCH response.
+      final serverUpdated = '2026-03-04 05:06:07.000Z';
+      h.mock.script('updateRecord', [
+        MockReturn(RemoteRecord(
+            id: id,
+            store: 'widgets',
+            updated: serverUpdated,
+            data: {'id': id, 'name': 'patched', 'qty': 1}))
+      ]);
+      await h.pocket.collection('widgets').patch(id, {'qty': 5});
+      await h.engine.syncNow();
+
+      final row = await sr(h.pocket, id);
+      expect(row!.syncState, SyncState.clean);
+      expect(row.remoteUpdated, serverUpdated);
+      expect(row.remoteUpdated, isNot(before));
+    });
+
+    test('batch push with pushedJson null falls back to the requested payload',
+        () async {
+      final h = await EngineHarness.create(
+          mock: MockSyncBackend()..batchEnabled = true);
+      addTearDown(h.close);
+      final id = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id, name: 'mine'));
+      final opId =
+          (await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id))!.opId;
+
+      h.mock.script('pushBatch', [
+        MockReturn([
+          PushResult(
+            opId: opId,
+            ok: true,
+            record: RemoteRecord(
+                id: id,
+                store: 'widgets',
+                updated: '2026-02-03 04:05:06.000Z',
+                data: {'id': id, 'name': 'mine'}),
+            pushedJson: null,
+          )
+        ])
+      ]);
+
+      await h.engine.syncNow();
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean,
+          reason: 'pushedJson null falls back to the requested payload');
+      expect(await deadLetters(h.pocket), isEmpty);
     });
   });
 }

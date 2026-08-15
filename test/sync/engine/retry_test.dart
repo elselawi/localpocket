@@ -102,6 +102,93 @@ void main() {
       expect((await sr(h.pocket, id))!.syncState, SyncState.clean);
     });
 
+    test('429 on one op throttles it but sibling ops flow in the same lane',
+        () async {
+      var clock = 1000000;
+      final h = await EngineHarness.create(
+          config: testConfig(
+              backoffBase: const Duration(seconds: 1), now: () => clock));
+      addTearDown(h.close);
+
+      final throttled = generateRecordId();
+      await h.pocket
+          .collection('widgets')
+          .put(record(id: throttled, name: 'busy'));
+      await h.pocket.collection('widgets').put(record(name: 'a'));
+      await h.pocket.collection('widgets').put(record(name: 'b'));
+
+      // Only the first create (earliest created_at) is throttled.
+      h.mock.script('createRecord', [MockThrow(ServerBusyError('9'))]);
+      await h.engine.syncNow();
+
+      // The throttled op recorded its deadline; the siblings were delivered.
+      expect((await sr(h.pocket, throttled))!.nextRetryAt, clock + 9000);
+      expect(h.mock.records.length, 2, reason: 'siblings pushed same cycle');
+      expect(h.mock.createCalls, 3,
+          reason: 'all three ops got one attempt in the first cycle');
+
+      // Before the deadline the throttled op stays deferred.
+      clock += 4000;
+      await h.engine.syncNow();
+      expect((await sr(h.pocket, throttled))!.attemptCount, 1,
+          reason: 'no retry inside the window');
+      expect(h.mock.createCalls, 3,
+          reason: 'throttled op not re-attempted before its deadline');
+
+      // Past the deadline it drains.
+      clock += 6000;
+      await h.engine.syncNow();
+      expect((await sr(h.pocket, throttled))!.syncState, SyncState.clean);
+      expect(h.mock.records.length, 3);
+    });
+
+    test('429 storm on the whole lane defers every op until the deadline',
+        () async {
+      var clock = 1000000;
+      final h = await EngineHarness.create(
+          config: testConfig(
+              backoffBase: const Duration(seconds: 2), now: () => clock));
+      addTearDown(h.close);
+
+      final ids = <String>[];
+      for (var i = 0; i < 3; i++) {
+        final id = generateRecordId();
+        ids.add(id);
+        await h.pocket.collection('widgets').put(record(id: id, name: 'n$i'));
+      }
+      // Every create answers 429.
+      h.mock.script('createRecord', [
+        MockThrow(ServerBusyError()),
+        MockThrow(ServerBusyError()),
+        MockThrow(ServerBusyError()),
+      ]);
+      await h.engine.syncNow();
+
+      for (final id in ids) {
+        final row = await sr(h.pocket, id);
+        expect(row!.attemptCount, 1, reason: '$id recorded a retry');
+        expect(row.nextRetryAt, greaterThan(clock));
+      }
+
+      // The whole lane is deferred: no later op bypasses the earlier deadline.
+      clock += 500;
+      await h.engine.syncNow();
+      expect(h.mock.createCalls, 3, reason: 'no retry inside the window');
+      for (final id in ids) {
+        expect((await sr(h.pocket, id))!.attemptCount, 1,
+            reason: 'later op did not bypass the lane deadline');
+      }
+
+      // Past the shared deadline every op drains.
+      clock += 3000;
+      await h.engine.syncNow();
+      expect(h.mock.createCalls, 6);
+      for (final id in ids) {
+        expect((await sr(h.pocket, id))!.syncState, SyncState.clean);
+      }
+      expect(await h.engine.syncStore.countPending(), 0);
+    });
+
     test('permanent errors no retry', () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);
@@ -217,4 +304,307 @@ void main() {
       expect((await sr(pocket, id))!.syncState, SyncState.clean);
     });
   });
+
+  group('config validation and backoff boundaries', () {
+    test('construction is permissive (const contract), delayFor clamps', () {
+      // The constructor never throws: invalid values are clamped at use.
+      const cfg = SyncConfig(
+        maxPage: 0,
+        maxBatch: -5,
+        sweepBucketCount: 0,
+        bucketsPerSweep: -1,
+        maxAttempts: -3,
+        backoffBase: Duration(seconds: 1),
+        backoffCap: Duration(minutes: 5),
+        jitter: _one,
+      );
+      expect(cfg.maxPage, 0);
+      expect(cfg.delayFor(1), const Duration(seconds: 1));
+    });
+
+    test('attempts below 1 are treated as attempt 1', () {
+      final cfg = SyncConfig(
+          backoffBase: const Duration(seconds: 1), jitter: (_) => 1.0);
+      expect(cfg.delayFor(0), const Duration(seconds: 1));
+      expect(cfg.delayFor(-1), const Duration(seconds: 1));
+      expect(cfg.delayFor(-100), const Duration(seconds: 1));
+      expect(cfg.delayFor(0), cfg.delayFor(1));
+    });
+
+    test('zero and negative base/cap behave as zero', () {
+      final zeroBase = SyncConfig(
+          backoffBase: Duration.zero,
+          backoffCap: const Duration(minutes: 5),
+          jitter: (_) => 1.0);
+      expect(zeroBase.delayFor(1), Duration.zero);
+      expect(zeroBase.delayFor(50), Duration.zero);
+
+      final negBase = SyncConfig(
+          backoffBase: const Duration(seconds: -3),
+          backoffCap: const Duration(minutes: 5),
+          jitter: (_) => 1.0);
+      expect(negBase.delayFor(1), Duration.zero, reason: 'negative base -> 0');
+
+      final negCap = SyncConfig(
+          backoffBase: const Duration(seconds: 1),
+          backoffCap: const Duration(seconds: -2),
+          jitter: (_) => 1.0);
+      expect(negCap.delayFor(1), Duration.zero, reason: 'negative cap -> 0');
+      expect(negCap.delayFor(10), Duration.zero);
+
+      final zeroCap = SyncConfig(
+          backoffBase: const Duration(seconds: 1),
+          backoffCap: Duration.zero,
+          jitter: (_) => 1.0);
+      expect(zeroCap.delayFor(1), Duration.zero);
+    });
+
+    test('base above cap is capped immediately', () {
+      final cfg = SyncConfig(
+          backoffBase: const Duration(minutes: 10),
+          backoffCap: const Duration(seconds: 5),
+          jitter: (_) => 1.0);
+      expect(cfg.delayFor(1), const Duration(seconds: 5),
+          reason: 'attempt 1 already above cap');
+      expect(cfg.delayFor(7), const Duration(seconds: 5));
+    });
+
+    test('huge attempts never overflow and stay capped', () {
+      final cfg = SyncConfig(
+          backoffBase: const Duration(seconds: 1),
+          backoffCap: const Duration(seconds: 30),
+          jitter: (_) => 1.0);
+      expect(cfg.delayFor(100), const Duration(seconds: 30));
+      expect(cfg.delayFor(1000000), const Duration(seconds: 30));
+      expect(cfg.delayFor(1 << 62), const Duration(seconds: 30));
+
+      // Huge base with a cap: integer doubling stays safe.
+      final huge = SyncConfig(
+          backoffBase: const Duration(days: 10000),
+          backoffCap: const Duration(days: 20000),
+          jitter: (_) => 1.0);
+      expect(huge.delayFor(200), const Duration(days: 20000));
+      expect(huge.delayFor(1 << 40), const Duration(days: 20000));
+    });
+
+    test('jitter outside the documented range is clamped to 0.5..1.5', () {
+      final cfg = SyncConfig(
+          backoffBase: const Duration(seconds: 1),
+          backoffCap: const Duration(minutes: 5),
+          jitter: (_) => 0.0);
+      expect(cfg.delayFor(1), const Duration(milliseconds: 500),
+          reason: 'jitter 0 clamps to 0.5');
+
+      final high = SyncConfig(
+          backoffBase: const Duration(seconds: 1),
+          backoffCap: const Duration(minutes: 5),
+          jitter: (_) => 100.0);
+      expect(high.delayFor(1), const Duration(milliseconds: 1500),
+          reason: 'jitter 100 clamps to 1.5');
+
+      final neg = SyncConfig(
+          backoffBase: const Duration(seconds: 1),
+          backoffCap: const Duration(minutes: 5),
+          jitter: (_) => -5.0);
+      expect(neg.delayFor(1), const Duration(milliseconds: 500));
+
+      // Documented formula: min(base*2^(n-1), cap) * jitter. The cap bounds
+      // the raw exponential; jitter (clamped to 1.5) multiplies on top.
+      final capped = SyncConfig(
+          backoffBase: const Duration(seconds: 1),
+          backoffCap: const Duration(seconds: 3),
+          jitter: (_) => 100.0);
+      expect(capped.delayFor(3), const Duration(milliseconds: 4500),
+          reason: '3s raw * 1.5 jitter');
+    });
+
+    test('cap boundary is exactly cap on the raw exponential', () {
+      // delayFor = min(base*2^(n-1), cap) * jitter, so the capped raw value
+      // (with jitter 1.0) is exactly the cap from attempt 3 onward.
+      final cfg = SyncConfig(
+          backoffBase: const Duration(seconds: 1),
+          backoffCap: const Duration(seconds: 7),
+          jitter: (_) => 1.0);
+      expect(cfg.delayFor(1), const Duration(seconds: 1));
+      expect(cfg.delayFor(2), const Duration(seconds: 2));
+      expect(cfg.delayFor(3), const Duration(seconds: 4));
+      expect(cfg.delayFor(4), const Duration(seconds: 7));
+      expect(cfg.delayFor(5), const Duration(seconds: 7));
+      expect(cfg.delayFor(12), const Duration(seconds: 7));
+
+      // With max jitter the final delay is cap * 1.5, never above.
+      final jit = SyncConfig(
+          backoffBase: const Duration(seconds: 1),
+          backoffCap: const Duration(seconds: 7),
+          jitter: (_) => 1.5);
+      for (var attempt = 1; attempt <= 12; attempt++) {
+        expect(jit.delayFor(attempt),
+            lessThanOrEqualTo(const Duration(milliseconds: 10500)),
+            reason: 'attempt $attempt');
+      }
+    });
+  });
+
+  group('retry-after parsing', () {
+    test('integer, signed, zero, and whitespace forms', () {
+      final cfg =
+          SyncConfig(backoffBase: const Duration(days: 1), jitter: (_) => 1.0);
+      expect(cfg.delayFor(1, retryAfter: '7'), const Duration(seconds: 7));
+      expect(cfg.delayFor(1, retryAfter: '+7'), const Duration(seconds: 7));
+      expect(cfg.delayFor(1, retryAfter: ' 7 '), const Duration(seconds: 7),
+          reason: 'surrounding whitespace trimmed');
+      expect(cfg.delayFor(1, retryAfter: '0'), Duration.zero);
+      expect(cfg.delayFor(1, retryAfter: '0007'), const Duration(seconds: 7));
+    });
+
+    test('negative, decimal, and malformed fall back safely', () {
+      final cfg =
+          SyncConfig(backoffBase: const Duration(days: 1), jitter: (_) => 1.0);
+      expect(cfg.delayFor(1, retryAfter: '-5'), Duration.zero,
+          reason: 'negative seconds clamp to zero');
+      expect(cfg.delayFor(1, retryAfter: '7.5'), const Duration(seconds: 1),
+          reason: 'decimal -> 1s fallback');
+      expect(cfg.delayFor(1, retryAfter: 'abc'), const Duration(seconds: 1),
+          reason: 'garbage -> 1s fallback');
+      expect(cfg.delayFor(1, retryAfter: ''), const Duration(seconds: 1),
+          reason: 'empty -> 1s fallback');
+      expect(cfg.delayFor(1, retryAfter: '1.2.3'), const Duration(seconds: 1));
+    });
+
+    test('rfc1123 http-date resolves to an absolute delay', () {
+      final target = DateTime.utc(2015, 10, 21, 7, 28).millisecondsSinceEpoch;
+      var clock = target - 60000;
+      final cfg = SyncConfig(
+          backoffBase: const Duration(days: 1),
+          jitter: (_) => 1.0,
+          now: () => clock);
+
+      final d = cfg.delayFor(1, retryAfter: 'Wed, 21 Oct 2015 07:28:00 GMT');
+      expect(d, const Duration(minutes: 1));
+
+      // Case-insensitive day/month names.
+      final d2 = cfg.delayFor(1, retryAfter: 'wed, 21 OCT 2015 07:28:00 GMT');
+      expect(d2, const Duration(minutes: 1));
+
+      // A date in the past clamps to zero.
+      clock = target + 5000;
+      expect(cfg.delayFor(1, retryAfter: 'Wed, 21 Oct 2015 07:28:00 GMT'),
+          Duration.zero);
+    });
+
+    test('rfc850 and asctime http-dates resolve', () {
+      final rfc850 =
+          DateTime.utc(1994, 11, 6, 8, 49, 37).millisecondsSinceEpoch;
+      final asctime =
+          DateTime.utc(1994, 11, 6, 8, 49, 37).millisecondsSinceEpoch;
+      final cfg = SyncConfig(
+          backoffBase: const Duration(days: 1),
+          jitter: (_) => 1.0,
+          now: () => rfc850 - 37000);
+
+      final d = cfg.delayFor(1, retryAfter: 'Sunday, 06-Nov-94 08:49:37 GMT');
+      expect(d, const Duration(seconds: 37));
+
+      final cfg2 = SyncConfig(
+          backoffBase: const Duration(days: 1),
+          jitter: (_) => 1.0,
+          now: () => asctime - 37000);
+      final d2 = cfg2.delayFor(1, retryAfter: 'Sun Nov  6 08:49:37 1994');
+      expect(d2, const Duration(seconds: 37));
+    });
+
+    test('malformed http-dates fall back to 1 second', () {
+      final cfg = SyncConfig(
+          backoffBase: const Duration(days: 1),
+          jitter: (_) => 1.0,
+          now: () => DateTime.utc(2026, 1, 1).millisecondsSinceEpoch);
+      for (final bad in [
+        'Wed, 21 Oct 2015 07:28:00', // missing GMT
+        'Wed 21 Oct 2015 07:28:00 GMT', // missing comma
+        'Funday, 21 Oct 2015 07:28:00 GMT', // bad day name
+        'Wed, 21 Foo 2015 07:28:00 GMT', // bad month
+        'Wed, 32 Oct 2015 07:28:00 GMT', // day out of range
+        'Wed, 21 Oct 2015 25:28:00 GMT', // hour out of range
+        'Wed, 21 Oct 2015 07:28:00 GMT extra', // trailing text
+        '21 Oct 2015 07:28:00 GMT', // no weekday
+        '99999999999999999999999', // overflows int.tryParse
+      ]) {
+        expect(cfg.delayFor(1, retryAfter: bad), const Duration(seconds: 1),
+            reason: '"$bad" -> 1s fallback');
+      }
+    });
+  });
+
+  group('pb timestamp parse and format', () {
+    test('formatPbTimestamp formats UTC and converts non-UTC to UTC', () {
+      expect(formatPbTimestamp(DateTime.utc(2026, 1, 2, 3, 4, 5, 6)),
+          '2026-01-02 03:04:05.006Z');
+
+      // Non-UTC DateTime: local fields must NOT leak into the Z-timestamp.
+      final local = DateTime(2026, 1, 2, 3, 4, 5, 6); // local wall time
+      final expected = formatPbTimestamp(local.toUtc());
+      final got = formatPbTimestamp(local);
+      expect(got, expected, reason: 'non-UTC converted to the UTC instant');
+      expect(got.endsWith('Z'), isTrue);
+    });
+
+    test('formatPbTimestamp pads to fixed width', () {
+      expect(formatPbTimestamp(DateTime.utc(2026, 1, 1)),
+          '2026-01-01 00:00:00.000Z');
+      expect(formatPbTimestamp(DateTime.utc(999, 1, 1)),
+          '0999-01-01 00:00:00.000Z');
+      expect(formatPbTimestamp(DateTime.utc(2026, 12, 31, 23, 59, 59, 999)),
+          '2026-12-31 23:59:59.999Z');
+    });
+
+    test('pbTimestampToDateTime parses valid input', () {
+      final dt = pbTimestampToDateTime('2026-01-02 03:04:05.006Z');
+      expect(dt, DateTime.utc(2026, 1, 2, 3, 4, 5, 6));
+      expect(dt.isUtc, isTrue);
+    });
+
+    test('pbTimestampToDateTime rejects invalid calendars and times', () {
+      for (final bad in [
+        '2026-13-01 00:00:00.000Z', // month 13
+        '2026-00-01 00:00:00.000Z', // month 0
+        '2026-01-32 00:00:00.000Z', // day 32
+        '2026-02-30 00:00:00.000Z', // Feb 30
+        '2026-04-31 00:00:00.000Z', // Apr 31
+        '2026-01-00 00:00:00.000Z', // day 0
+        '2026-01-01 24:00:00.000Z', // hour 24
+        '2026-01-01 23:60:00.000Z', // minute 60
+        '2026-01-01 23:59:60.000Z', // second 60
+      ]) {
+        expect(
+          () => pbTimestampToDateTime(bad),
+          throwsA(isA<ProtocolError>()),
+          reason: bad,
+        );
+      }
+    });
+
+    test('pbTimestampToDateTime rejects format violations', () {
+      for (final bad in [
+        '', // empty
+        '2026-1-01 00:00:00.000Z', // missing zero padding (month)
+        '2026-01-1 00:00:00.000Z', // missing zero padding (day)
+        '2026-01-01 0:00:00.000Z', // missing zero padding (hour)
+        '2026-01-01 00:00:00.00Z', // two-digit millis
+        '2026-01-01 00:00:00.000Z+05:00', // timezone suffix
+        '2026-01-01 00:00:00.000Z extra', // trailing garbage
+        'x2026-01-01 00:00:00.000Z', // leading text
+        '2026-01-01 00:00:00Z', // missing .mmm
+        '2026-01-01 00:00:00.000', // missing Z
+        '2026-01-01 00:00:00.000z', // lowercase z
+      ]) {
+        expect(
+          () => pbTimestampToDateTime(bad),
+          throwsA(isA<ProtocolError>()),
+          reason: '"$bad"',
+        );
+      }
+    });
+  });
 }
+
+double _one(int attempt) => 1.0;

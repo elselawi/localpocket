@@ -3,6 +3,7 @@
 /// batch capability, lost-response simulation, and concurrency tracking.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:localpocket/localpocket.dart';
@@ -59,6 +60,14 @@ class MockSyncBackend implements SyncBackend {
   bool lostCreateResponse = false;
   bool lostUpdateResponse = false;
 
+  /// When set, `updateRecord` awaits this completer before applying, and
+  /// completes [updateRecordEntered] first — so tests can interleave a local
+  /// edit while the request is "in flight".
+  Completer<void>? updateRecordBarrier;
+
+  /// Completes when an `updateRecord` call reaches the barrier.
+  Completer<void>? updateRecordEntered;
+
   /// Poison marker: any op whose payload contains `"poison"` fails the batch.
   bool poisonEnabled = true;
 
@@ -70,12 +79,14 @@ class MockSyncBackend implements SyncBackend {
 
   // Observability / counters.
   int listChangesCalls = 0;
+  int sweepListChangesCalls = 0; // listChanges calls with an idPrefix (sweep)
   int getCalls = 0;
   int createCalls = 0;
   int updateCalls = 0;
   int updateFilesCalls = 0;
   int downloadFileCalls = 0;
   int batchCalls = 0;
+  final List<int> batchSizes = []; // ops per pushBatch call, in call order
   int activeListChanges = 0;
   int maxConcurrentListChanges = 0;
   final List<String> lastBatchOps = []; // 'create' | 'update' | 'upsert'
@@ -154,6 +165,7 @@ class MockSyncBackend implements SyncBackend {
     int perPage = 200,
   }) async {
     listChangesCalls++;
+    if (idPrefix != null) sweepListChangesCalls++;
     activeListChanges++;
     if (activeListChanges > maxConcurrentListChanges) {
       maxConcurrentListChanges = activeListChanges;
@@ -334,6 +346,11 @@ class MockSyncBackend implements SyncBackend {
     if (b is MockReturn) return b.value as RemoteRecord;
     if (b is MockDrop) throw TransientNetworkError();
     _checkAuth();
+    final barrier = updateRecordBarrier;
+    if (barrier != null) {
+      updateRecordEntered?.complete();
+      await barrier.future;
+    }
     final rec = records[id];
     if (rec == null) throw NotFoundError();
     rec.data = jsonDecode(dataJson) as Map<String, Object?>;
@@ -345,12 +362,14 @@ class MockSyncBackend implements SyncBackend {
   @override
   Future<List<PushResult>> pushBatch(List<PushOp> ops) async {
     batchCalls++;
+    batchSizes.add(ops.length);
     lastBatchOps
       ..clear()
       ..addAll(ops.map((o) =>
           o.upsert ? 'upsert' : (o.baseUpdated == null ? 'create' : 'update')));
     final b = await _next('pushBatch');
     if (b is MockThrow) throw b.error;
+    if (b is MockReturn) return (b.value as List).cast<PushResult>();
     if (b is MockDrop) throw TransientNetworkError();
     _checkAuth();
     if (poisonEnabled && ops.any((o) => o.dataJson.contains('"poison"'))) {

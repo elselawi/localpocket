@@ -20,6 +20,7 @@ SyncConfig testConfig({
   // Default is effectively disabled: engine tests drive cycles explicitly via
   // syncNow(), so an auto-push timer must never race a manual cycle.
   Duration pushDebounce = const Duration(days: 365),
+  Duration? connectivitySettle,
   Duration? purgeHiddenAfter,
   int Function()? now,
 }) {
@@ -30,7 +31,7 @@ SyncConfig testConfig({
     sweepInterval: sweepInterval ?? const Duration(days: 365),
     syncInterval: const Duration(days: 365),
     pushDebounce: pushDebounce,
-    connectivitySettle: Duration.zero,
+    connectivitySettle: connectivitySettle ?? Duration.zero,
     maxBatch: maxBatch,
     maxAttempts: maxAttempts,
     backoffBase: backoffBase,
@@ -60,13 +61,13 @@ class EngineHarness {
     CryptoProvider? cryptoProvider,
   }) async {
     final p = await openPocket(
-        stores: stores ?? [widgetsSchema()],
-        testHooks: testHooks,
-        path: path,
-        blobStore: blobStore,
-        fieldCipher: fieldCipher,
-        cryptoProvider: cryptoProvider,
-      );
+      stores: stores ?? [widgetsSchema()],
+      testHooks: testHooks,
+      path: path,
+      blobStore: blobStore,
+      fieldCipher: fieldCipher,
+      cryptoProvider: cryptoProvider,
+    );
     final m = mock ?? MockSyncBackend();
     final e = SyncEngine(
       pocket: p,

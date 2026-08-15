@@ -1,9 +1,48 @@
+import 'dart:async';
+
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
 import 'engine_helpers.dart';
+import 'mock_backend.dart';
+
+/// A backend whose `prepare` explodes (adapter warm-up failure).
+class _ThrowingPrepareBackend extends MockSyncBackend {
+  @override
+  Future<void> prepare() async => throw StateError('prepare boom');
+}
+
+/// A backend whose `hints()` throws synchronously (subscription failure).
+class _ThrowingHintsBackend extends MockSyncBackend {
+  bool hintsThrows = true;
+  @override
+  Stream<BackendHint> hints() {
+    if (hintsThrows) throw StateError('hints boom');
+    return super.hints();
+  }
+}
+
+/// A backend whose `listChanges` blocks until [gate] completes.
+class _GatedListBackend extends MockSyncBackend {
+  Completer<void>? gate;
+  @override
+  Future<List<RemoteRecord>> listChanges(
+    String store, {
+    String? fromUpdated,
+    String? fromId,
+    String? idPrefix,
+    int perPage = 200,
+  }) async {
+    await gate?.future;
+    return super.listChanges(store,
+        fromUpdated: fromUpdated,
+        fromId: fromId,
+        idPrefix: idPrefix,
+        perPage: perPage);
+  }
+}
 
 /// Engine state machine tests.
 void main() {
@@ -162,6 +201,378 @@ void main() {
             'cycle', // timer -> full cycle
             'cycle', // syncNow -> full cycle
           ]));
+    });
+  });
+
+  group('engine start/stop/restart failures', () {
+    test('double start and double stop are idempotent no-ops', () async {
+      final h = await EngineHarness.create(start: false);
+      addTearDown(h.close);
+      await h.engine.start();
+      final afterFirst = h.engine.state;
+      // A second start must not restart or throw.
+      await h.engine.start();
+      expect(h.engine.state, afterFirst);
+      await h.engine.stop();
+      expect(h.engine.state, SyncEngineState.closed);
+      expect(h.engine.isRunning, isFalse);
+      // A second stop is a no-op, not an error.
+      await h.engine.stop();
+      expect(h.engine.state, SyncEngineState.closed);
+    });
+
+    test('prepare failure is tolerated; the engine still runs a cycle',
+        () async {
+      final mock = _ThrowingPrepareBackend();
+      final h = await EngineHarness.create(mock: mock);
+      addTearDown(h.close);
+      // prepare() threw, but start() swallowed it and the engine is running.
+      expect(h.engine.isRunning, isTrue);
+      expect(h.engine.state, SyncEngineState.idle);
+
+      await h.pocket.collection('widgets').put(record(name: 'x'));
+      final report = await h.engine.syncNow();
+      expect(report.pushed, 1, reason: 'push works despite the failed probe');
+    });
+
+    test('hints subscription failure rolls back to closed and can retry',
+        () async {
+      final mock = _ThrowingHintsBackend();
+      final pocket = await openPocket(stores: [widgetsSchema()]);
+      final engine = SyncEngine(pocket: pocket, backend: mock);
+      addTearDown(() async {
+        await engine.stop();
+        await pocket.close();
+      });
+
+      await expectLater(engine.start(), throwsA(isA<StateError>()));
+      expect(engine.isRunning, isFalse,
+          reason: 'a half-started engine is rolled back to closed');
+      expect(engine.state, SyncEngineState.closed);
+
+      // A well-behaved backend on the same engine recovers.
+      mock.hintsThrows = false;
+      await engine.start();
+      expect(engine.isRunning, isTrue);
+      expect(engine.state, SyncEngineState.idle);
+    });
+
+    test('same engine can restart after stop with fresh streams', () async {
+      final h = await EngineHarness.create(start: false);
+      addTearDown(h.close);
+
+      await h.engine.start();
+      expect(h.engine.isRunning, isTrue);
+      await h.engine.stop();
+      expect(h.engine.state, SyncEngineState.closed);
+
+      // Restart the SAME instance.
+      await h.engine.start();
+      expect(h.engine.isRunning, isTrue);
+      expect(h.engine.state, SyncEngineState.idle);
+
+      // The restarted engine delivers events on a FRESH stream.
+      final states = <SyncEngineState>[];
+      final sub = h.engine.stateChanges.listen(states.add);
+      h.engine.pause();
+      await Future<void>.delayed(Duration.zero);
+      expect(states, contains(SyncEngineState.paused),
+          reason: 'restarted engine emits state on a fresh stream');
+      await h.engine.resume();
+      await sub.cancel();
+    });
+
+    test('stop drains an in-flight push cycle before completing', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'edited'});
+      h.mock.mutate(id, {'id': id, 'name': 'v1', 'qty': 99});
+
+      // Block the merge PATCH; the cycle hangs in flight.
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      h.mock.updateRecordEntered = entered;
+      h.mock.updateRecordBarrier = release;
+      final cycle = h.engine.syncNow();
+      await entered.future;
+
+      // stop() must wait for the in-flight cycle, then complete cleanly.
+      var stoppedDone = false;
+      final stopped = h.engine.stop().then((_) => stoppedDone = true);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(stoppedDone, isFalse,
+          reason: 'stop waits for the in-flight cycle');
+      release.complete();
+      await stopped;
+      await cycle;
+      h.mock.updateRecordBarrier = null;
+      h.mock.updateRecordEntered = null;
+      expect(h.engine.state, SyncEngineState.closed);
+      // The pocket is still usable after the drained stop.
+      await h.pocket.collection('widgets').put(record(name: 'after-stop'));
+      expect(await h.pocket.collection('widgets').query().all().count(), 2);
+    });
+
+    test('stop cancels a pending debounce so no cycle touches a closed pocket',
+        () async {
+      final h = await EngineHarness.create(
+          config: testConfig(pushDebounce: const Duration(milliseconds: 10)));
+      addTearDown(h.close);
+
+      // Schedule a debounced pull, then stop before it fires.
+      final callsBefore = h.mock.listChangesCalls;
+      h.engine.handleHint(const BackendHint('widgets'));
+      await h.engine.stop();
+      expect(h.engine.state, SyncEngineState.closed);
+
+      // No pull ran after stop (the debounce timer was cancelled).
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(h.mock.listChangesCalls, callsBefore,
+          reason: 'no cycle after stop');
+    });
+
+    test('stop during connectivity settle cancels the settle timer', () async {
+      final h = await EngineHarness.create(
+          config:
+              testConfig(connectivitySettle: const Duration(milliseconds: 30)));
+      addTearDown(h.close);
+
+      h.engine.setConnectivity(false);
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      expect(h.engine.state, SyncEngineState.offline);
+      h.engine.setConnectivity(true); // schedules the settle timer
+      await h.engine.stop();
+
+      // The settle timer was cancelled: no cycle after stop.
+      final listCalls = h.mock.listChangesCalls;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(h.mock.listChangesCalls, listCalls,
+          reason: 'no settle-triggered cycle after stop');
+      expect(h.engine.state, SyncEngineState.closed);
+    });
+
+    test('stop during an active pull drains and never double-runs', () async {
+      final mock = _GatedListBackend();
+      final h = await EngineHarness.create(mock: mock, start: false);
+      addTearDown(h.close);
+      await h.engine.start(); // startup completes (gate null)
+      mock.gate = Completer<void>();
+      for (var i = 0; i < 5; i++) {
+        h.mock.seed(store: 'widgets', data: {'name': 'r$i'});
+      }
+
+      final cycle = h.engine.syncNow(); // blocked on the gate
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      final stopped = h.engine.stop(); // drains the blocked cycle
+      mock.gate!.complete();
+      await stopped;
+      await cycle;
+
+      expect(h.engine.state, SyncEngineState.closed);
+      expect(mock.maxConcurrentListChanges, 1,
+          reason: 'never overlapped, even across stop');
+    });
+  });
+
+  group('engine trigger coalescing and store routing', () {
+    test('two store hints in one debounce window both pull their stores',
+        () async {
+      final h = await EngineHarness.create(
+          stores: [widgetsSchema(), widgetsSchema(name: 'gadgets')],
+          config: testConfig(pushDebounce: const Duration(milliseconds: 30)));
+      addTearDown(h.close);
+
+      h.mock.seed(store: 'widgets', data: {'name': 'w1'});
+      h.mock.seed(store: 'gadgets', data: {'name': 'g1'});
+      h.engine.debugActions.clear();
+
+      h.engine.handleHint(const BackendHint('widgets'));
+      h.engine.handleHint(const BackendHint('gadgets'));
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+
+      expect(h.engine.debugActions, contains('pull:widgets'));
+      expect(h.engine.debugActions, contains('pull:gadgets'));
+      expect(await h.pocket.collection('widgets').query().all().count(), 1,
+          reason: 'widgets hint not lost to the gadgets hint');
+      expect(await h.pocket.collection('gadgets').query().all().count(), 1,
+          reason: 'gadgets hint not lost to the widgets hint');
+    });
+
+    test('local write + store hint coalesce to a full cycle (superset)',
+        () async {
+      final h = await EngineHarness.create(
+          stores: [widgetsSchema(), widgetsSchema(name: 'gadgets')],
+          config: testConfig(pushDebounce: const Duration(milliseconds: 30)));
+      addTearDown(h.close);
+
+      h.mock.seed(store: 'gadgets', data: {'name': 'g1'});
+      await h.pocket.collection('widgets').put(record(name: 'local'));
+      h.engine.debugActions.clear();
+
+      // Local write (full intent) then a widgets hint (pull-only).
+      h.engine.handleLocalWrite(const ChangeSet('widgets', {'r1'}));
+      h.engine.handleHint(const BackendHint('widgets'));
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+
+      // The full cycle won: the local write pushed AND both stores pulled
+      // (gadgets proves it was a full cycle, not a widgets-only pull).
+      expect(
+          h.mock.records.values.any((r) => r.data['name'] == 'local'), isTrue,
+          reason: 'local write pushed');
+      expect(await h.pocket.collection('gadgets').query().all().count(), 1,
+          reason: 'full cycle also pulled the unhinted store');
+    });
+
+    test('hints for the same store in one window coalesce to a single pull',
+        () async {
+      final mock = MockSyncBackend();
+      final h = await EngineHarness.create(
+          mock: mock,
+          config: testConfig(pushDebounce: const Duration(milliseconds: 30)));
+      addTearDown(h.close);
+
+      // No remote records: pulls apply nothing, so no applied-record cycle
+      // interferes with counting the debounced pull.
+      final callsBefore = mock.listChangesCalls;
+      h.engine.handleHint(const BackendHint('widgets'));
+      h.engine.handleHint(const BackendHint('widgets'));
+      h.engine.handleHint(const BackendHint('widgets'));
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+
+      expect(mock.listChangesCalls, callsBefore + 1,
+          reason: 'three hints coalesced into exactly one pull');
+    });
+
+    test('repeated connectivity flapping settles exactly once', () async {
+      final mock = MockSyncBackend();
+      final h = await EngineHarness.create(
+          mock: mock,
+          config:
+              testConfig(connectivitySettle: const Duration(milliseconds: 40)));
+      addTearDown(h.close);
+
+      await h.pocket.collection('widgets').put(record(name: 'x'));
+      h.engine.setConnectivity(false);
+      h.engine.setConnectivity(true);
+      h.engine.setConnectivity(false);
+      h.engine.setConnectivity(true);
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+
+      expect(h.engine.state, SyncEngineState.idle);
+      expect(mock.records.length, 1,
+          reason: 'pending push flushed exactly once after reconnect');
+    });
+
+    test('full cycle scheduled after a pull-only hint wins (no hint lost)',
+        () async {
+      final h = await EngineHarness.create(
+          stores: [widgetsSchema(), widgetsSchema(name: 'gadgets')],
+          config: testConfig(pushDebounce: const Duration(milliseconds: 30)));
+      addTearDown(h.close);
+
+      h.mock.seed(store: 'gadgets', data: {'name': 'g1'});
+      // Pull-only hint first, then a full trigger (timer) in the same window.
+      h.engine.handleHint(const BackendHint('gadgets'));
+      h.engine.handleTimer();
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+
+      expect(await h.pocket.collection('gadgets').query().all().count(), 1,
+          reason: 'the pull-only hint was not dropped by the full cycle');
+    });
+  });
+
+  group('engine auth/offline/pause concurrency', () {
+    test('concurrent forced-sweep triggers produce one sweep, no overlap',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      for (var i = 0; i < 6; i++) {
+        h.mock.seed(store: 'widgets', data: {'name': 'r$i'});
+      }
+      h.mock.authValid = false;
+      await h.engine.syncNow();
+      expect(h.engine.state, SyncEngineState.authRequired);
+
+      h.mock.authValid = true;
+      // markAuthValid + invalidateVisibility + syncNow race together.
+      await Future.wait([
+        h.engine.markAuthValid(),
+        h.engine.invalidateVisibility(),
+        h.engine.syncNow(),
+      ]);
+      expect(h.engine.state, SyncEngineState.idle);
+      expect(h.mock.maxConcurrentListChanges, 1,
+          reason: 'cycles and forced sweeps never overlap');
+      expect(await h.pocket.collection('widgets').query().all().count(), 6);
+    });
+
+    test('double markAuthValid does not double-sweep', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      for (var i = 0; i < 4; i++) {
+        h.mock.seed(store: 'widgets', data: {'name': 'r$i'});
+      }
+      h.mock.authValid = false;
+      await h.engine.syncNow();
+      expect(h.engine.state, SyncEngineState.authRequired);
+      h.mock.authValid = true;
+
+      // Three racing markAuthValid calls: only the first should sweep.
+      final before = h.mock.sweepListChangesCalls;
+      await Future.wait([
+        h.engine.markAuthValid(),
+        h.engine.markAuthValid(),
+        h.engine.markAuthValid(),
+      ]);
+      final raced = h.mock.sweepListChangesCalls - before;
+      expect(raced, greaterThan(0), reason: 'one forced sweep ran');
+      expect(h.engine.state, SyncEngineState.idle);
+
+      // Prove it was ONE sweep: a single markAuthValid costs the same.
+      h.mock.authValid = false;
+      await h.engine.syncNow();
+      h.mock.authValid = true;
+      final before2 = h.mock.sweepListChangesCalls;
+      await h.engine.markAuthValid();
+      expect(h.mock.sweepListChangesCalls - before2, raced,
+          reason: 'three racing calls swept exactly once, like one call');
+      expect(await h.pocket.collection('widgets').query().all().count(), 4);
+    });
+
+    test('pause/resume racing a cycle stays deterministic', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      for (var i = 0; i < 5; i++) {
+        h.mock.seed(store: 'widgets', data: {'name': 'r$i'});
+      }
+
+      await Future.wait([
+        h.engine.syncNow(),
+        h.engine.pause(),
+        h.engine.resume(),
+        h.engine.syncNow(),
+      ]);
+      expect(h.mock.maxConcurrentListChanges, 1);
+      expect(await h.pocket.collection('widgets').query().all().count(), 5,
+          reason: 'records applied deterministically across the race');
+    });
+
+    test('offline flag racing a cycle parks cleanly', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      h.mock.seed(store: 'widgets', data: {'name': 'r1'});
+
+      await Future.wait([
+        h.engine.syncNow(),
+        h.engine.setConnectivity(false),
+        h.engine.setConnectivity(true),
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(h.engine.state, isIn([SyncEngineState.idle]));
+      expect(h.mock.maxConcurrentListChanges, 1);
     });
   });
 }
