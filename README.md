@@ -421,6 +421,7 @@ final db = await LocalPocket.open(
 Attach files with streaming SHA-256 hashing and automatic deduplication:
 
 ```dart
+// Pluggable blob storage: BlobStore, MemoryBlobStore, NativeBlobStore, EncryptingBlobStore
 // 1. Attach a file
 final fileRef = await db.files.attach(
   store: 'tasks',
@@ -496,6 +497,29 @@ dart test
 
 # Run performance benchmark suite
 dart run benchmark/benchmark.dart
+```
+
+---
+
+## Release Checklist
+
+LocalPocket includes a single-command local pre-release checklist runner:
+
+```bash
+# Run all release quality gates locally (analysis, lints, security, API snapshot, tests, coverage)
+dart run tool/release_checklist.dart
+
+# Fast run skipping coverage collection
+dart run tool/release_checklist.dart --no-coverage
+
+# Run heavy/soak test suites
+dart run tool/release_checklist.dart --long
+
+# Run performance benchmarks against committed baseline (15% variance threshold)
+dart run tool/release_checklist.dart --perf
+
+# List all ordered checklist steps
+dart run tool/release_checklist.dart --list
 ```
 
 ---

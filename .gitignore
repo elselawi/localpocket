@@ -1,5 +1,6 @@
 # Analysis / build artifacts
 .dart_tool/
+coverage/
 build/
 *.iml
 .idea/

@@ -1,0 +1,56 @@
+# LocalPocket Public API Snapshot
+# Format: <entrypoint> -> <export lines sorted>
+
+=== lib/localpocket.dart ===
+export 'src/core/canonical_json.dart' show canonicalize;
+export 'src/core/capabilities.dart' show SqliteCapabilities, PlatformProfile;
+export 'src/core/change_bus.dart' show ChangeSet, ChangeBus;
+export 'src/core/cipher.dart'
+export 'src/core/codec.dart'
+export 'src/core/database_adapter.dart' show Database, DatabaseExecutor, ConflictAlgorithm, DirectSqliteDatabase;
+export 'src/core/ddl_compiler.dart' show DdlCompiler, CompiledSchema;
+export 'src/core/errors.dart';
+export 'src/core/hashing.dart' show sha256Hex;
+export 'src/core/ids.dart' show generateRecordId, isValidRecordId, recordIdPattern;
+export 'src/core/local_pocket.dart' show LocalPocket, DurabilityClass, TestHooks;
+export 'src/core/perf_counters.dart';
+export 'src/core/query.dart' show QueryBuilder, WhereClause, OrderClause, SearchResult, SearchQueryBuilder;
+export 'src/core/schema.dart'
+export 'src/core/store.dart' show Collection, Page, MutationAction;
+export 'src/core/transaction.dart' show Tx;
+export 'src/core/watch.dart';
+export 'src/files/blob_store.dart'
+export 'src/files/files_api.dart' show LocalPocketFiles, FileRef;
+export 'src/files/native_blob_store_platform.dart' show NativeBlobStore;
+export 'src/sync/conflicts.dart' show Conflicts, ConflictRecord;
+export 'src/sync/merge.dart'
+export 'src/sync/op_queue.dart' show OpQueue;
+export 'src/sync/outbox.dart'
+export 'src/sync/sync_backend.dart' show StreamFileUpload;
+export 'src/sync/sync_tables.dart'
+
+=== lib/pocketbase.dart ===
+export 'src/pocketbase/auth.dart' show AuthManager, Token, TokenProvider;
+export 'src/pocketbase/backend.dart' show PocketBaseBackend;
+export 'src/pocketbase/filter_builder.dart'
+export 'src/pocketbase/pb_client.dart' show PbClient;
+export 'src/pocketbase/sse.dart' show PbRealtime, PbRealtimeEvent;
+export 'src/pocketbase/transport.dart'
+
+=== lib/sync.dart ===
+export 'src/files/blob_store.dart'
+export 'src/files/file_sync_lane.dart' show FileSyncLane, FileSyncReport;
+export 'src/files/files_api.dart' show LocalPocketFiles, FileRef;
+export 'src/files/native_blob_store_platform.dart' show NativeBlobStore;
+export 'src/sync/conflicts.dart' show Conflicts, ConflictRecord;
+export 'src/sync/engine.dart' show SyncEngine;
+export 'src/sync/mapping.dart'
+export 'src/sync/merge.dart'
+export 'src/sync/puller.dart' show PullReport, Puller;
+export 'src/sync/pusher.dart' show PushReport, Pusher;
+export 'src/sync/status.dart' show SyncEngineState, SyncReport, SyncStatus;
+export 'src/sync/sweeper.dart' show SweepReport, Sweeper;
+export 'src/sync/sync_backend.dart';
+export 'src/sync/sync_config.dart' show SyncConfig;
+export 'src/sync/sync_store.dart' show PullCursor, SweepState, SyncStore;
+
