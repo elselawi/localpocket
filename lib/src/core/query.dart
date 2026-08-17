@@ -918,6 +918,7 @@ class SearchQueryBuilder {
   }
 
   (String, List<Object?>) _compile({int? limitOverride}) {
+    _validateSearchTerm(_term);
     final store = _schema.name;
     final ftsTable = '${store}_fts';
     final where = <String>['${DdlCompiler.quote(ftsTable)} MATCH ?'];
@@ -956,6 +957,21 @@ class SearchQueryBuilder {
       shape: jsonEncode(
           {'term': _term, 'a': _includeArchived, 'h': _includeHidden}),
     );
+  }
+
+  static void _validateSearchTerm(String term) {
+    final trimmed = term.trim();
+    if (trimmed.isEmpty) return;
+    // Reject the expression forms that SQLite FTS5 reports as syntax errors.
+    // This runs for native and compile-only/web paths so both boundaries expose
+    // the same typed ValidationException.
+    if (trimmed.contains('"') ||
+        RegExp(r'(^|\s)(AND|OR|NOT)(\s|$)', caseSensitive: false)
+            .hasMatch(trimmed) ||
+        trimmed.startsWith('-') ||
+        RegExp(r'\b(AND|OR|NOT)\s*$', caseSensitive: false).hasMatch(trimmed)) {
+      throw ValidationException('Invalid search term: $term');
+    }
   }
 
   /// Executes the FTS query and returns ranked results.

@@ -309,9 +309,29 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
         req.requestId,
         WireErrorCode.localpocket,
         e.toString(),
-        {'type': e.runtimeType.toString()},
+        {'type': _stableErrorType(e)},
       );
     }
+  }
+
+  /// dart2js minifies `runtimeType.toString()`, so it cannot be used as a
+  /// stable wire error category. Preserve explicit categories for errors that
+  /// cross the public protocol; unknown application exceptions retain their
+  /// diagnostic runtime type as a last resort.
+  static String _stableErrorType(Object error) {
+    if (error is ValidationException) return 'ValidationException';
+    if (error is StorageError) return 'StorageError';
+    if (error is StaleCursorError) return 'StaleCursorError';
+    if (error is SchemaRegistrationError) return 'SchemaRegistrationError';
+    if (error is FtsUnavailableError) return 'FtsUnavailableError';
+    if (error is MissingLimitError) return 'MissingLimitError';
+    if (error is ProtocolEnvelopeException) return 'ProtocolEnvelopeException';
+    if (error is StateError) return 'StateError';
+    if (error is ArgumentError) return 'ArgumentError';
+    if (error is FormatException) return 'FormatException';
+    if (error is RangeError) return 'RangeError';
+    if (error is UnsupportedError) return 'UnsupportedError';
+    return error.runtimeType.toString();
   }
 
   static Map<String, Object?>? _dartifyPayload(JSAny payload) {

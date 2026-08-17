@@ -101,6 +101,8 @@ class WebStorageCapabilities {
 }
 
 class LocalPocket {
+  static int _memoryDatabaseSequence = 0;
+
   final String path;
   final Database _remoteDb;
   final WebSqlite _webSqlite;
@@ -211,8 +213,13 @@ class LocalPocket {
 
     final ConnectToRecommendedResult connectResult;
     if (path == ':memory:') {
+      // sqlite3_web uses the database name as a worker identifier even for
+      // in-memory storage. The SQLite ':memory:' sentinel is not a valid
+      // worker database name and causes a null JS database response. Keep the
+      // public path contract while using a unique worker-safe name internally.
+      final memoryName = 'localpocket_memory_${++_memoryDatabaseSequence}';
       final db = await webSqlite.connect(
-        ':memory:',
+        memoryName,
         DatabaseImplementation.inMemoryShared,
         additionalOptions: openArgs.jsify(),
       );
@@ -326,7 +333,10 @@ class LocalPocket {
       throw ProtocolEnvelopeException('Malformed response map from worker.');
     }
 
-    final resp = WebResponse.fromJson(dartMap);
+    final resp = WebResponse.fromJson(
+      dartMap,
+      expectedVersion: webProtocolVersion,
+    );
     if (resp.isError) {
       throw decodeError(resp.error!);
     }
@@ -547,8 +557,13 @@ class LocalPocket {
     required List<int> bytes,
     String field = 'imgs',
     String name = 'blob.bin',
+    int? expectedSize,
     String? expectedSha256,
   }) async {
+    if (expectedSize != null && expectedSize != bytes.length) {
+      throw StateError(
+          'Size mismatch: expected $expectedSize but got ${bytes.length}');
+    }
     final beginRes = (await _send(WireOp.fileUploadBegin, {
       'store': store,
       'recordId': recordId,
@@ -1364,6 +1379,7 @@ class WebLocalPocketFiles {
       bytes: payload,
       field: field,
       name: name ?? 'blob.bin',
+      expectedSize: expectedSize,
       expectedSha256: expectedSha256,
     );
   }

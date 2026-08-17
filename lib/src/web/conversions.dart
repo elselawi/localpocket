@@ -11,8 +11,9 @@
 /// - [BigInt] is tagged as its decimal string. Off the wire it is ALWAYS
 ///   re-coerced with `BigInt.parse(...)` because a reconstructed value is not
 ///   guaranteed to satisfy `is BigInt` (nor to support `+` / `compareTo`).
-/// - [Uint8List] is tagged as a list of byte integers. Large payloads are
-///   carried by the transport as transferable ArrayBuffers instead.
+/// - [Uint8List] is tagged as a list of byte integers. The current transport
+///   does not implement transferable ArrayBuffers; large file payloads use
+///   bounded tagged chunks instead.
 /// - Everything else must already be structured-clone-safe: null, bool, int,
 ///   double, String, List, and Map with string keys.
 library;

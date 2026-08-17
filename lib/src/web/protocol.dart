@@ -190,8 +190,9 @@ class WebRequest {
     if (version is! int) {
       throw ProtocolEnvelopeException('Request "v" must be an int.');
     }
-    if (requestId is! int) {
-      throw ProtocolEnvelopeException('Request "i" must be an int.');
+    if (requestId is! int || requestId < 0) {
+      throw ProtocolEnvelopeException(
+          'Request "i" must be a non-negative int.');
     }
     if (op is! String || !WireOp.isKnown(op)) {
       throw ProtocolEnvelopeException('Unknown request operation: $op');
@@ -240,17 +241,31 @@ class WebResponse {
       };
 
   /// Parses a wire-safe Dart map into a response. Throws
-  /// [ProtocolEnvelopeException] on any malformed field.
-  static WebResponse fromJson(Map<String, Object?> json) {
+  /// [ProtocolEnvelopeException] on any malformed field. When supplied,
+  /// [expectedVersion] is checked here so every response path enforces the
+  /// protocol version, not only the worker request path.
+  static WebResponse fromJson(Map<String, Object?> json,
+      {int? expectedVersion}) {
     final version = json['v'];
     final requestId = json['i'];
     if (version is! int) {
       throw ProtocolEnvelopeException('Response "v" must be an int.');
     }
-    if (requestId is! int) {
-      throw ProtocolEnvelopeException('Response "i" must be an int.');
+    if (expectedVersion != null && version != expectedVersion) {
+      throw ProtocolMismatchException(
+          expected: expectedVersion, actual: version);
     }
-    if (json.containsKey('e')) {
+    if (requestId is! int || requestId < 0) {
+      throw ProtocolEnvelopeException(
+          'Response "i" must be a non-negative int.');
+    }
+    final hasError = json.containsKey('e');
+    final hasResult = json.containsKey('r');
+    if (hasError == hasResult) {
+      throw ProtocolEnvelopeException(
+          'Response must contain exactly one of "r" or "e".');
+    }
+    if (hasError) {
       final e = json['e'];
       if (e is! Map) {
         throw ProtocolEnvelopeException('Response "e" must be a map.');

@@ -237,6 +237,24 @@ class StoreMigration {
     this.addedFields = const [],
     this.transform,
   });
+
+  /// Serializes migration metadata that can cross the web worker boundary.
+  /// Function transforms are intentionally omitted: closures are not
+  /// structured-clone-safe and cannot be reconstructed in the worker.
+  Map<String, Object?> toJson() => {
+        'toVersion': toVersion,
+        'destructive': destructive,
+        'addedFields': [for (final field in addedFields) field.toJson()],
+      };
+
+  static StoreMigration fromJson(Map<String, Object?> json) => StoreMigration(
+        toVersion: json['toVersion'] as int,
+        destructive: json['destructive'] == true,
+        addedFields: [
+          for (final field in (json['addedFields'] as List? ?? const []))
+            Field.fromJson(field as Map<String, Object?>),
+        ],
+      );
 }
 
 /// A lazy, deterministic, never-pushed document-format migration.
@@ -351,6 +369,7 @@ class CollectionSchema<T> {
         'indexes': [for (final ix in indexes) ix.toJson()],
         'keepUnsyncedArchives': keepUnsyncedArchives,
         if (fts != null) 'fts': fts!.toJson(),
+        'migrations': [for (final migration in migrations) migration.toJson()],
       };
 
   factory CollectionSchema.fromJson(Map<String, Object?> j) => CollectionSchema(
@@ -368,6 +387,10 @@ class CollectionSchema<T> {
         fts: j['fts'] is Map
             ? FtsSpec.fromJson(j['fts'] as Map<String, Object?>)
             : null,
+        migrations: [
+          for (final migration in (j['migrations'] as List? ?? const []))
+            StoreMigration.fromJson(migration as Map<String, Object?>),
+        ],
       );
 }
 
