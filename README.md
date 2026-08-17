@@ -506,20 +506,23 @@ dart run benchmark/benchmark.dart
 LocalPocket includes a single-command local pre-release checklist runner:
 
 ```bash
-# Run all release quality gates locally (analysis, lints, security, API snapshot, tests, coverage)
-dart run tool/release_checklist.dart
+# Run the single pre-release decision (analysis, policy, API, web, browser matrix, tests, coverage)
+dart run tool/release.dart
 
 # Fast run skipping coverage collection
-dart run tool/release_checklist.dart --no-coverage
+dart run tool/release.dart --no-coverage
 
-# Run heavy/soak test suites
-dart run tool/release_checklist.dart --long
+# Run heavy/soak and release-gate tests
+dart run tool/release.dart --long
 
-# Run performance benchmarks against committed baseline (15% variance threshold)
-dart run tool/release_checklist.dart --perf
+# Run performance benchmarks against committed baseline
+dart run tool/release.dart --perf
 
-# List all ordered checklist steps
-dart run tool/release_checklist.dart --list
+# Add live PocketBase validation and package publish validation
+dart run tool/release.dart --real --publish
+
+# List all ordered release checks
+dart run tool/release.dart --list
 ```
 
 ---

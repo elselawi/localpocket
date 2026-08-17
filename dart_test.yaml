@@ -4,13 +4,11 @@
 # test/secret.dart (gitignored) and need network + valid credentials. They are
 # SKIPPED in the default run so the hermetic gate stays green offline.
 #
-# `gate`-tagged tests SPAWN nested `dart` processes (compile/run the release
-# gate, web compile gates). They cannot run inside the default parallel
-# `dart test` run — the nested process collides with the runner's native-asset
-# (sqlite3.dll) build-hook output, and two gate files would collide with each
-# other. They are run by the CI release gate
-# (`dart run tool/release_gate.dart`) as sequential child commands, and can be
-# run explicitly here (single concurrency):
+# `gate`-tagged tests SPAWN nested `dart` processes (compile/run release and
+# web checks). They cannot run inside the default parallel `dart test` run —
+# the nested process collides with the runner's native-asset (sqlite3.dll)
+# build-hook output. They are run sequentially by the canonical release runner
+# in long mode, and can be run explicitly here (single concurrency):
 #   dart test --tags gate --run-skipped -j 1 test/release/
 tags:
   real:
