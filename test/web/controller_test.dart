@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:localpocket/src/core/schema.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/protocol.dart';
@@ -112,5 +114,90 @@ void main() {
       args: {'sessionId': 1},
     );
     expect(txCommitReq.op, WireOp.txCommit);
+  });
+
+  test('file upload protocol envelopes round-trip through WebRequest', () {
+    final begin = WebRequest(
+      version: webProtocolVersion,
+      requestId: 10,
+      op: WireOp.fileUploadBegin,
+      args: {
+        'store': 'tasks',
+        'recordId': 'task000000000001',
+        'field': 'imgs',
+        'name': 'photo.bin',
+        'size': 700000,
+        'expectedSha256': 'a' * 64,
+      },
+    );
+    final decoded = WebRequest.fromJson(begin.toJson());
+    expect(decoded.op, WireOp.fileUploadBegin);
+    expect(decoded.args['size'], 700000);
+    expect(decoded.args['expectedSha256'], 'a' * 64);
+
+    final chunk = WebRequest(
+      version: webProtocolVersion,
+      requestId: 11,
+      op: WireOp.fileUploadChunk,
+      args: {
+        'uploadId': 1,
+        'chunk': encodeWireValue(
+            Uint8List.fromList(List<int>.generate(1024, (i) => i % 256))),
+      },
+    );
+    final chunkDecoded = WebRequest.fromJson(chunk.toJson());
+    expect(chunkDecoded.op, WireOp.fileUploadChunk);
+    expect(chunkDecoded.args['uploadId'], 1);
+
+    final finish = WebRequest(
+      version: webProtocolVersion,
+      requestId: 12,
+      op: WireOp.fileUploadFinish,
+      args: {'uploadId': 1},
+    );
+    expect(finish.op, WireOp.fileUploadFinish);
+  });
+
+  test('file list/open/remove/gc protocol envelopes', () {
+    final listReq = WebRequest(
+      version: webProtocolVersion,
+      requestId: 20,
+      op: WireOp.fileList,
+      args: {'store': 'tasks', 'recordId': 'task000000000001'},
+    );
+    expect(listReq.op, WireOp.fileList);
+
+    final openReq = WebRequest(
+      version: webProtocolVersion,
+      requestId: 21,
+      op: WireOp.fileOpen,
+      args: {'store': 'tasks', 'recordId': 'task000000000001', 'refId': 'ref1'},
+    );
+    expect(openReq.op, WireOp.fileOpen);
+    expect(openReq.args['refId'], 'ref1');
+
+    final removeReq = WebRequest(
+      version: webProtocolVersion,
+      requestId: 22,
+      op: WireOp.fileRemove,
+      args: {'store': 'tasks', 'recordId': 'task000000000001', 'refId': 'ref1'},
+    );
+    expect(removeReq.op, WireOp.fileRemove);
+
+    final gcReq = WebRequest(
+      version: webProtocolVersion,
+      requestId: 23,
+      op: WireOp.fileGc,
+      args: {'blobGraceMs': 0, 'tmpGraceMs': 0},
+    );
+    expect(gcReq.op, WireOp.fileGc);
+
+    final capReq = WebRequest(
+      version: webProtocolVersion,
+      requestId: 24,
+      op: WireOp.fileEnforceStorageCap,
+      args: {'maxBytes': 1000000},
+    );
+    expect(capReq.op, WireOp.fileEnforceStorageCap);
   });
 }

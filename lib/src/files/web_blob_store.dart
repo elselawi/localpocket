@@ -1,23 +1,30 @@
 import 'dart:async';
-import 'dart:convert';
+import 'dart:convert' show ChunkedConversionSink;
 import 'dart:js_interop';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
-import 'package:web/web.dart' as web;
+// ignore: implementation_imports
+import 'package:sqlite3/src/wasm/js_interop/new_file_system_access.dart';
+import 'package:web/web.dart' show FileSystemDirectoryHandle;
 
 import 'blob_store.dart';
 
-/// Web implementation of [BlobStore] supporting async OPFS and in-memory fallback.
+/// Web implementation of [BlobStore] backed by async OPFS, with an in-memory
+/// fallback when OPFS is unavailable.
+///
+/// Uses the same worker-safe OPFS interop (`storageManager` -> `directory`,
+/// via `@JS('navigator')`) that `sqlite3_web` uses for its VFS, so this store
+/// can back a worker-owned `LocalPocket` engine.
 ///
 /// Features:
 /// - Streams bytes, computes and validates SHA-256 and expected size.
-/// - Atomic publication: writes to a temporary location first, validates, then commits to final hash.
-/// - Generates page-usable Object URLs on the main thread via [createObjectUrl].
-/// - Cleans unreferenced blobs on demand via [cleanTmp].
+/// - Writes to the final hash name only after validation, so a failed/short
+///   write never leaves a published-looking blob.
+/// - Does NOT create object URLs (window-scope work); see
+///   [web_blob_object_url.dart].
 class WebBlobStore extends BlobStore {
   final String _rootPrefix;
   final Map<String, Uint8List> _memoryFallback = {};
-  final List<String> _createdObjectUrls = [];
 
   static final RegExp _hashRe = RegExp(r'^[0-9a-f]{64}$');
 
@@ -30,51 +37,15 @@ class WebBlobStore extends BlobStore {
     }
   }
 
-  /// Creates a page-usable `blob:` URL on the main thread for the specified [hash].
-  ///
-  /// The returned URL can be used in `<img>`, `<video>`, `<audio>`, etc.
-  Future<String> createObjectUrl(String hash,
-      {String mimeType = 'application/octet-stream'}) async {
-    _validateHash(hash);
-    final stream = await open(hash);
-    final builder = BytesBuilder(copy: false);
-    await for (final chunk in stream) {
-      builder.add(chunk);
-    }
-    final bytes = builder.takeBytes();
-    final jsBuffer = bytes.buffer.toJS;
-    final blob = web.Blob([jsBuffer].toJS, web.BlobPropertyBag(type: mimeType));
-    final url = web.URL.createObjectURL(blob);
-    _createdObjectUrls.add(url);
-    return url;
-  }
-
-  /// Revokes an Object URL created by [createObjectUrl].
-  void revokeObjectUrl(String url) {
+  /// The OPFS root directory for this store's blobs, or `null` when OPFS is
+  /// unavailable (for example in a worker without storage, or non-secure
+  /// context). Callers fall back to [_memoryFallback] in that case.
+  Future<FileSystemDirectoryHandle?> _getOpfsDir() async {
     try {
-      web.URL.revokeObjectURL(url);
-    } catch (_) {}
-    _createdObjectUrls.remove(url);
-  }
-
-  /// Revokes all object URLs created by this store.
-  void revokeAllObjectUrls() {
-    for (final url in _createdObjectUrls) {
-      try {
-        web.URL.revokeObjectURL(url);
-      } catch (_) {}
-    }
-    _createdObjectUrls.clear();
-  }
-
-  Future<web.FileSystemDirectoryHandle?> _getOpfsDir() async {
-    try {
-      final storage = web.window.navigator.storage;
-      final root = await storage.getDirectory().toDart;
-      return await root
-          .getDirectoryHandle(
-              _rootPrefix, web.FileSystemGetDirectoryOptions(create: true))
-          .toDart;
+      final storage = storageManager;
+      if (storage == null) return null;
+      final root = await storage.directory;
+      return await root.getDirectory(_rootPrefix, create: true);
     } catch (_) {
       return null;
     }
@@ -119,18 +90,10 @@ class WebBlobStore extends BlobStore {
 
       final opfs = await _getOpfsDir();
       if (opfs != null) {
-        try {
-          final fileHandle = await opfs
-              .getFileHandle(
-                  computedHash, web.FileSystemGetFileOptions(create: true))
-              .toDart;
-          final writable = await fileHandle.createWritable().toDart;
-          await writable.write(data.buffer.toJS).toDart;
-          await writable.close().toDart;
-        } catch (_) {
-          // OPFS write failed, store in memory fallback
-          _memoryFallback[computedHash] = data;
-        }
+        final fileHandle = await opfs.openFile(computedHash, create: true);
+        final writable = await fileHandle.createWritable().toDart;
+        await writable.write(data.buffer.toJS).toDart;
+        await writable.close().toDart;
       } else {
         _memoryFallback[computedHash] = data;
       }
@@ -151,9 +114,7 @@ class WebBlobStore extends BlobStore {
     final opfs = await _getOpfsDir();
     if (opfs != null) {
       try {
-        final fileHandle = await opfs
-            .getFileHandle(hash, web.FileSystemGetFileOptions(create: false))
-            .toDart;
+        final fileHandle = await opfs.openFile(hash);
         final file = await fileHandle.getFile().toDart;
         final arrayBuffer = await file.arrayBuffer().toDart;
         final uint8 = arrayBuffer.toDart.asUint8List();
@@ -172,7 +133,7 @@ class WebBlobStore extends BlobStore {
     final opfs = await _getOpfsDir();
     if (opfs != null) {
       try {
-        await opfs.removeEntry(hash).toDart;
+        await opfs.remove(hash);
       } catch (_) {}
     }
   }
@@ -185,9 +146,7 @@ class WebBlobStore extends BlobStore {
     final opfs = await _getOpfsDir();
     if (opfs != null) {
       try {
-        await opfs
-            .getFileHandle(hash, web.FileSystemGetFileOptions(create: false))
-            .toDart;
+        await opfs.openFile(hash);
         return true;
       } catch (_) {
         return false;
@@ -206,9 +165,7 @@ class WebBlobStore extends BlobStore {
     final opfs = await _getOpfsDir();
     if (opfs != null) {
       try {
-        final fileHandle = await opfs
-            .getFileHandle(hash, web.FileSystemGetFileOptions(create: false))
-            .toDart;
+        final fileHandle = await opfs.openFile(hash);
         final file = await fileHandle.getFile().toDart;
         return file.size;
       } catch (_) {}
@@ -218,8 +175,20 @@ class WebBlobStore extends BlobStore {
 
   @override
   Future<int> cleanTmp({Duration olderThan = const Duration(hours: 24)}) async {
-    // Temporary blobs in OPFS or memory are cleaned up synchronously on completion.
-    return 0;
+    final opfs = await _getOpfsDir();
+    if (opfs == null) return 0;
+    var cleaned = 0;
+    try {
+      await for (final entry in opfs.list()) {
+        final name = entry.name;
+        if (!name.startsWith('tmp_')) continue;
+        try {
+          await opfs.remove(name);
+          cleaned++;
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return cleaned;
   }
 
   @override
@@ -228,7 +197,11 @@ class WebBlobStore extends BlobStore {
     final opfs = await _getOpfsDir();
     if (opfs != null) {
       try {
-        // List directory entries if supported
+        await for (final element in opfs.list()) {
+          final entry = element;
+          final name = entry.name;
+          if (_hashRe.hasMatch(name)) result.add(name);
+        }
       } catch (_) {}
     }
     return result.toList();

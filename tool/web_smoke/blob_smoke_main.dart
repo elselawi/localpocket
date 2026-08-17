@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
+import 'package:localpocket/src/files/web_blob_object_url.dart';
 import 'package:localpocket/src/files/web_blob_store.dart';
 
 Future<void> main() async {
@@ -43,13 +44,13 @@ Future<void> main() async {
 
     // 4. Create Object URL on the main thread
     final objectUrl =
-        await blobStore.createObjectUrl(hash, mimeType: 'text/plain');
+        await createObjectUrlFromStore(blobStore, hash, mimeType: 'text/plain');
     if (!objectUrl.startsWith('blob:')) {
       throw StateError('Expected blob: URL, got $objectUrl');
     }
 
     // Revoke URL
-    blobStore.revokeObjectUrl(objectUrl);
+    revokeObjectUrl(objectUrl);
 
     // 5. Delete blob
     await blobStore.delete(hash);
