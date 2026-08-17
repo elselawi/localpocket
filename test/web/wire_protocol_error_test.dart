@@ -2,7 +2,7 @@ import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('Group A — protocol envelope rejection', () {
+  group('Protocol envelope rejection', () {
     test('every declared operation is known and round-trips', () {
       expect(WireOp.allKnown.toSet(), hasLength(WireOp.allKnown.length));
       for (final op in WireOp.allKnown) {
@@ -89,17 +89,19 @@ void main() {
           expectedVersion: webProtocolVersion,
         ),
         throwsA(
-          isA<ProtocolMismatchException>().having(
-            (e) => e.expected,
-            'expected',
-            webProtocolVersion,
-          ).having((e) => e.actual, 'actual', webProtocolVersion + 1),
+          isA<ProtocolMismatchException>()
+              .having(
+                (e) => e.expected,
+                'expected',
+                webProtocolVersion,
+              )
+              .having((e) => e.actual, 'actual', webProtocolVersion + 1),
         ),
       );
     });
   });
 
-  group('Group A — remote error mapping', () {
+  group('Remote error mapping', () {
     test('maps every stable wire error category to a typed exception', () {
       expect(
           decodeError(const WebError(
@@ -116,8 +118,8 @@ void main() {
               code: WireErrorCode.protocolEnvelope, message: 'bad envelope')),
           isA<RemoteLocalPocketException>());
       expect(
-          decodeError(const WebError(
-              code: WireErrorCode.aborted, message: 'aborted')),
+          decodeError(
+              const WebError(code: WireErrorCode.aborted, message: 'aborted')),
           isA<ProtocolEnvelopeException>());
       expect(
           decodeError(const WebError(
@@ -139,8 +141,9 @@ void main() {
     });
   });
 
-  group('Group A — request identity', () {
-    test('duplicate request IDs remain explicit and do not mutate envelopes', () {
+  group('Request identity', () {
+    test('duplicate request IDs remain explicit and do not mutate envelopes',
+        () {
       const first = WebRequest(
         version: webProtocolVersion,
         requestId: 7,

@@ -165,17 +165,22 @@ void main() {
       expect(json['fts'], {
         'fields': ['title']
       });
-      // The remaining properties carry functions (resolvers, transforms,
-      // validators) that cannot be JSON-encoded. This test locks in that
-      // documented gap so it stays explicit rather than accidental.
+      // Migration metadata is plain data and crosses the worker boundary;
+      // function transforms and validators remain intentionally omitted.
+      expect(json['migrations'], [
+        {
+          'toVersion': 2,
+          'destructive': false,
+          'addedFields': <Object?>[],
+        }
+      ]);
       expect(json.containsKey('conflictPolicy'), isFalse);
       expect(json.containsKey('prefetchFiles'), isFalse);
-      expect(json.containsKey('migrations'), isFalse);
       expect(json.containsKey('documentMigrations'), isFalse);
       expect(json.containsKey('validator'), isFalse);
     });
 
-    test('FtsSpec round-trips through CollectionSchema.toJson/fromJson', () {
+    test('FtsSpec and migration metadata round-trip through schema JSON', () {
       final schema = CollectionSchema<Object?>(
         name: 'articles',
         version: 2,
@@ -185,6 +190,27 @@ void main() {
       final rt = CollectionSchema<Object?>.fromJson(schema.toJson());
       expect(rt.fts, isNotNull);
       expect(rt.fts!.fields, ['title', 'body']);
+      expect(rt.migrations, isEmpty);
+
+      final migrated = CollectionSchema<Object?>(
+        name: 'migrated',
+        version: 2,
+        fields: [Field.text('title'), Field.text('body')],
+        migrations: [
+          StoreMigration(
+            toVersion: 2,
+            destructive: true,
+            addedFields: [Field.int('views')],
+          ),
+        ],
+      );
+      final migratedRoundTrip =
+          CollectionSchema<Object?>.fromJson(migrated.toJson());
+      expect(migratedRoundTrip.migrations, hasLength(1));
+      expect(migratedRoundTrip.migrations.single.toVersion, 2);
+      expect(migratedRoundTrip.migrations.single.destructive, isTrue);
+      expect(
+          migratedRoundTrip.migrations.single.addedFields.single.name, 'views');
     });
 
     test('fromJson default properties are absent', () {

@@ -17,6 +17,14 @@ Future<void> main() async {
     'files_worker_spike_main.dart',
     'cipher_smoke_main.dart',
     'conflicts_smoke_main.dart',
+    'lifecycle_error_smoke_main.dart',
+    'wire_values_smoke_main.dart',
+    'query_migration_smoke_main.dart',
+    'transaction_watch_lifecycle_smoke_main.dart',
+    'durability_reopen_smoke_main.dart',
+    'file_lifecycle_smoke_main.dart',
+    'compatibility_environment_smoke_main.dart',
+    'performance_resource_smoke_main.dart',
   ];
 
   // Smoke HTML pages load these files from /build/web/<name>.js.
@@ -70,10 +78,18 @@ Future<void> main() async {
 
   try {
     await serverReady.future.timeout(const Duration(seconds: 10));
-    stdout.writeln('BROWSER MATRIX Chromium Firefox WebKit × 7 smoke pages');
+    const browserPageCount = 15;
+    const browserCount = 3;
+    stdout.writeln(
+        'BROWSER MATRIX Chromium Firefox WebKit × $browserPageCount smoke pages ($browserCount browsers, ${browserPageCount * browserCount} scenarios)');
     final result = await Process.run(
       'npm',
       ['run', 'web-smoke'],
+      environment: {
+        ...Platform.environment,
+        'SMOKE_EXPECTED_PAGES': '$browserPageCount',
+        'SMOKE_EXPECTED_SCENARIOS': '${browserPageCount * browserCount}',
+      },
       workingDirectory: root.path,
       runInShell: Platform.isWindows,
     );

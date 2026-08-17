@@ -19,7 +19,8 @@ async function run(name, browserType, pagePath, signal) {
     try {
         await page.goto(`http://127.0.0.1:8124/tool/web_smoke/pages/${pagePath}`);
         try {
-            await page.waitForFunction(key => globalThis[key] === 'passed' || globalThis[key] === 'failed', signal, { timeout: 30000 });
+            const timeout = pagePath.includes('durability') ? 120000 : 30000;
+            await page.waitForFunction(key => globalThis[key] === 'passed' || globalThis[key] === 'failed', signal, { timeout });
         } catch (e) {
             const state = await page.evaluate(key => ({
                 status: globalThis[key],
@@ -35,6 +36,9 @@ async function run(name, browserType, pagePath, signal) {
         console.log(`${name} ${pagePath}: PASS`);
     } finally {
         await b.close().catch(() => { });
+        if (b.contexts().length !== 0) {
+            throw new Error(`${name} ${pagePath} leaked browser contexts after close`);
+        }
         browser = null;
     }
 }
@@ -50,13 +54,36 @@ async function run(name, browserType, pagePath, signal) {
     ['web_blob_smoke.html', '__blob_smoke'],
     ['web_files_worker_spike.html', '__files_spike'],
     ['web_cipher_smoke.html', '__cipher_smoke'],
-    ['web_conflicts_smoke.html', '__conflicts_smoke']]
+    ['web_conflicts_smoke.html', '__conflicts_smoke'],
+    ['web_lifecycle_error_smoke.html', '__lifecycle_error_smoke'],
+    ['web_wire_values_smoke.html', '__wire_values_smoke'],
+    ['web_query_migration_smoke.html', '__query_migration_smoke'],
+    ['web_transaction_watch_lifecycle_smoke.html', '__transaction_watch_lifecycle_smoke'],
+    ['web_durability_reopen_smoke.html', '__durability_reopen_smoke'],
+    ['web_file_lifecycle_smoke.html', '__file_lifecycle_smoke'],
+    ['web_compatibility_environment_smoke.html', '__compatibility_environment_smoke'],
+    ['web_performance_resource_smoke.html', '__performance_resource_smoke']]
         .filter(([p]) => !pageFilter || p.includes(pageFilter));
+    const filtered = Boolean(pageFilter || browserFilter);
+    const expectedScenarios = filtered
+        ? pages.length * browsers.length
+        : Number(process.env.SMOKE_EXPECTED_SCENARIOS || pages.length * browsers.length);
+    const expectedPages = filtered
+        ? pages.length
+        : Number(process.env.SMOKE_EXPECTED_PAGES || pages.length);
+    if (pages.length !== expectedPages) {
+        throw new Error(`Smoke manifest mismatch: expected ${expectedPages} pages, found ${pages.length}`);
+    }
+    let executed = 0;
     try {
         for (const [name, type] of browsers) {
             for (const [pagePath, signal] of pages) {
                 await run(name, type, pagePath, signal);
+                executed++;
             }
+        }
+        if (executed !== expectedScenarios) {
+            throw new Error(`Smoke scenario count mismatch: expected ${expectedScenarios}, executed ${executed}`);
         }
     } catch (e) {
         console.error(e.stack || e);
