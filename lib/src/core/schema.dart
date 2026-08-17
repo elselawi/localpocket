@@ -202,6 +202,13 @@ class FtsSpec {
 
   /// Creates an FTS5 configuration.
   const FtsSpec(this.fields);
+
+  /// Serializes this FTS config to a JSON-compatible map.
+  Map<String, Object?> toJson() => {'fields': fields};
+
+  /// Reconstructs an FTS config from a JSON-compatible map.
+  static FtsSpec fromJson(Map<String, Object?> j) =>
+      FtsSpec((j['fields'] as List).cast<String>());
 }
 
 /// A store schema migration step.
@@ -343,6 +350,7 @@ class CollectionSchema<T> {
         'fields': [for (final f in fields) f.toJson()],
         'indexes': [for (final ix in indexes) ix.toJson()],
         'keepUnsyncedArchives': keepUnsyncedArchives,
+        if (fts != null) 'fts': fts!.toJson(),
       };
 
   factory CollectionSchema.fromJson(Map<String, Object?> j) => CollectionSchema(
@@ -357,6 +365,9 @@ class CollectionSchema<T> {
             IndexSpec.fromJson(ix as Map<String, Object?>)
         ],
         keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
+        fts: j['fts'] is Map
+            ? FtsSpec.fromJson(j['fts'] as Map<String, Object?>)
+            : null,
       );
 }
 

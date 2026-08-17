@@ -160,15 +160,31 @@ void main() {
       expect(json.containsKey('fields'), isTrue);
       expect(json.containsKey('indexes'), isTrue);
       expect(json['keepUnsyncedArchives'], true);
-      // The following properties are NOT serialized by the current
-      // implementation (functions cannot be JSON-encoded). This test locks in
-      // the documented gap so it stays explicit rather than accidental.
-      expect(json.containsKey('fts'), isFalse);
+      // `fts` is plain data (a list of field names) and IS serialized so FTS
+      // stores can cross the web worker boundary (§ Task 3).
+      expect(json['fts'], {
+        'fields': ['title']
+      });
+      // The remaining properties carry functions (resolvers, transforms,
+      // validators) that cannot be JSON-encoded. This test locks in that
+      // documented gap so it stays explicit rather than accidental.
       expect(json.containsKey('conflictPolicy'), isFalse);
       expect(json.containsKey('prefetchFiles'), isFalse);
       expect(json.containsKey('migrations'), isFalse);
       expect(json.containsKey('documentMigrations'), isFalse);
       expect(json.containsKey('validator'), isFalse);
+    });
+
+    test('FtsSpec round-trips through CollectionSchema.toJson/fromJson', () {
+      final schema = CollectionSchema<Object?>(
+        name: 'articles',
+        version: 2,
+        fields: [Field.text('title'), Field.text('body')],
+        fts: const FtsSpec(['title', 'body']),
+      );
+      final rt = CollectionSchema<Object?>.fromJson(schema.toJson());
+      expect(rt.fts, isNotNull);
+      expect(rt.fts!.fields, ['title', 'body']);
     });
 
     test('fromJson default properties are absent', () {
