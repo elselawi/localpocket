@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:typed_data';
 
 import 'package:sqlite3_web/sqlite3_web.dart';
 import 'package:web/web.dart' as web;
@@ -11,7 +12,10 @@ import '../core/query.dart' show QueryBuilder, SearchQueryBuilder, SearchResult;
 import '../core/query_plan.dart';
 import '../core/schema.dart';
 import '../core/store.dart';
+import '../sync/conflicts.dart';
 import 'assets.dart';
+import 'cipher_bridge.dart';
+import 'conflicts_bridge.dart';
 import 'connector.dart';
 import 'conversions.dart';
 import 'protocol.dart';
@@ -107,6 +111,12 @@ class LocalPocket {
   final ChangeBus changeBus = ChangeBus();
   final PerfCounters perf = PerfCounters();
   final Map<int, StreamController<dynamic>> _workerStreams = {};
+
+  /// Optional per-watch transform applied to a worker event value before it is
+  /// added to the matching [_workerStreams] controller. Used by watch types
+  /// whose wire payload needs structural decoding (e.g. conflicts -> typed
+  /// [ConflictRecord] lists).
+  final Map<int, Object? Function(Object?)> _workerEventDecoders = {};
   final StreamController<Map<String, Object?>> _syncStatusController =
       StreamController<Map<String, Object?>>.broadcast();
   final StreamController<void> _authRequiredController =
@@ -181,10 +191,22 @@ class LocalPocket {
       },
     );
 
+    // Field-level encryption: serialize the cipher into `openArgs` so the
+    // worker reconstructs an `AesGcmFieldCipher` with the same key. The key
+    // crosses postMessage into the same-origin trusted worker; a cipher
+    // configuration that cannot be serialized throws a typed error here
+    // (never silently ignored).
+    final cipherEnvelope = buildFieldCipherEnvelope(
+      fieldCipher: fieldCipher,
+      cryptoProvider: cryptoProvider,
+      stores: stores,
+    );
+
     final openArgs = {
       'stores': stores.map((s) => s.toJson()).toList(),
       'maxDocBytes': maxDocBytes,
       'destructiveBackup': destructiveBackup,
+      if (cipherEnvelope != null) 'fieldCipher': cipherEnvelope,
     };
 
     final ConnectToRecommendedResult connectResult;
@@ -322,6 +344,7 @@ class LocalPocket {
       if (!stream.isClosed) stream.addError(error);
     }
     _workerStreams.clear();
+    _workerEventDecoders.clear();
     if (!_syncStatusController.isClosed) _syncStatusController.addError(error);
     if (!_authRequiredController.isClosed) {
       _authRequiredController.addError(error);
@@ -364,7 +387,9 @@ class LocalPocket {
         ));
         return;
       }
-      stream.add(decodeWireValue(event['value']));
+      final eventValue = decodeWireValue(event['value']);
+      final decoder = _workerEventDecoders[watchId];
+      stream.add(decoder != null ? decoder(eventValue) : eventValue);
     } catch (e, stack) {
       // A malformed unsolicited event must not tear down unrelated requests.
       for (final stream in _workerStreams.values) {
@@ -384,6 +409,19 @@ class LocalPocket {
   WebCollection collection(String name) {
     return WebCollection._(this, schemaFor(name));
   }
+
+  WebLocalPocketFiles? _files;
+
+  /// Page-facing file attachment and blob lifecycle API (worker-owned store).
+  WebLocalPocketFiles get files => _files ??= WebLocalPocketFiles._(this);
+
+  WebConflicts? _conflicts;
+
+  /// Conflict inspection, watch, and resolution API (worker-owned engine).
+  ///
+  /// Mirrors the native `pocket.conflicts` surface: `listOpen`, `get`,
+  /// `watch`, `resolve`, `acceptLocal`, `acceptRemote`.
+  WebConflicts get conflicts => _conflicts ??= WebConflicts._(this);
 
   /// Runs [action] in an interactive transaction session (§7.1).
   Future<T> transaction<T>(Future<T> Function(WebTx tx) action) async {
@@ -479,6 +517,141 @@ class LocalPocket {
   /// Informs the sync engine of online/offline connectivity changes.
   Future<void> setConnectivity(bool online) async {
     await _send(WireOp.syncSetConnectivity, {'online': online});
+  }
+
+  /// Temporary task-2 spike: prove the worker-owned blob store round-trips
+  /// bytes in a real browser. Replaced by the real `files` facade in task 4.
+  Future<Map<String, Object?>> filesProbe({
+    required String store,
+    required String recordId,
+    required List<int> bytes,
+  }) async {
+    final res = (await _send(WireOp.fileProbe, {
+      'store': store,
+      'recordId': recordId,
+      'bytes': encodeWireValue(Uint8List.fromList(bytes)),
+    })) as Map;
+    return res.map((k, v) => MapEntry(k.toString(), v));
+  }
+
+  /// Uploads [bytes] to a record attachment via bounded chunks (task 3).
+  ///
+  /// Splits the payload into <=256 KiB chunks so no single custom request
+  /// carries a large byte list, then finishes and returns the created
+  /// `FileRef` fields from the worker-owned store.
+  static const int _fileChunkBytes = 262144;
+
+  Future<Map<String, Object?>> filesUpload({
+    required String store,
+    required String recordId,
+    required List<int> bytes,
+    String field = 'imgs',
+    String name = 'blob.bin',
+    String? expectedSha256,
+  }) async {
+    final beginRes = (await _send(WireOp.fileUploadBegin, {
+      'store': store,
+      'recordId': recordId,
+      'field': field,
+      'name': name,
+      'size': bytes.length,
+      if (expectedSha256 != null) 'expectedSha256': expectedSha256,
+    })) as Map;
+    final uploadId = beginRes['uploadId'] as int;
+
+    try {
+      for (var offset = 0; offset < bytes.length; offset += _fileChunkBytes) {
+        final end = (offset + _fileChunkBytes < bytes.length)
+            ? offset + _fileChunkBytes
+            : bytes.length;
+        final chunk = Uint8List.fromList(bytes.sublist(offset, end));
+        await _send(WireOp.fileUploadChunk, {
+          'uploadId': uploadId,
+          'chunk': encodeWireValue(chunk),
+        });
+      }
+      final res = (await _send(WireOp.fileUploadFinish, {
+        'uploadId': uploadId,
+      })) as Map;
+      return res.map((k, v) => MapEntry(k.toString(), v));
+    } catch (e) {
+      // Best-effort abort: a partial upload session is discarded by the worker
+      // once it fails; no durable state is left behind.
+      rethrow;
+    }
+  }
+
+  /// Lists file references attached to a record field (metadata RPC).
+  Future<List<Map<String, Object?>>> filesList({
+    required String store,
+    required String recordId,
+    String field = 'imgs',
+  }) async {
+    final res = (await _send(WireOp.fileList, {
+      'store': store,
+      'recordId': recordId,
+      'field': field,
+    })) as Map;
+    return ((res['refs'] as List).cast<Map>())
+        .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+        .toList();
+  }
+
+  /// Opens a file's bytes for a record (metadata RPC; full read-back).
+  Future<Uint8List> filesOpen({
+    required String store,
+    required String recordId,
+    String field = 'imgs',
+    int index = 0,
+    String? refId,
+  }) async {
+    final res = (await _send(WireOp.fileOpen, {
+      'store': store,
+      'recordId': recordId,
+      'field': field,
+      'index': index,
+      if (refId != null) 'refId': refId,
+    })) as Map;
+    final bytes = decodeWireValue(res['bytes']);
+    if (bytes is! List) throw StateError('Malformed file bytes response');
+    return Uint8List.fromList(bytes.cast<int>());
+  }
+
+  /// Removes a file reference from a record (metadata RPC).
+  Future<void> filesRemove({
+    required String store,
+    required String recordId,
+    String field = 'imgs',
+    int index = 0,
+    String? refId,
+  }) async {
+    await _send(WireOp.fileRemove, {
+      'store': store,
+      'recordId': recordId,
+      'field': field,
+      'index': index,
+      if (refId != null) 'refId': refId,
+    });
+  }
+
+  /// Garbage-collects blobs in the worker-owned store.
+  Future<int> filesGc({
+    Duration blobGrace = const Duration(days: 7),
+    Duration tmpGrace = const Duration(hours: 24),
+  }) async {
+    final res = (await _send(WireOp.fileGc, {
+      'blobGraceMs': blobGrace.inMilliseconds,
+      'tmpGraceMs': tmpGrace.inMilliseconds,
+    })) as Map;
+    return (res['cleaned'] as int?) ?? 0;
+  }
+
+  /// Enforces the storage cap via LRU eviction of synced blobs.
+  Future<int> filesEnforceStorageCap({required int maxBytes}) async {
+    final res = (await _send(WireOp.fileEnforceStorageCap, {
+      'maxBytes': maxBytes,
+    })) as Map;
+    return (res['evicted'] as int?) ?? 0;
   }
 
   Stream<ChangeSet> get changes => changeBus.stream;
@@ -614,6 +787,15 @@ class WebCollection {
   }
 
   WebQueryBuilder query() => WebQueryBuilder._(_pocket, schema);
+
+  /// Starts a full-text search on the collection's configured FTS fields.
+  ///
+  /// Mirrors native `Collection.search(String term)`: the schema must define
+  /// [FtsSpec] and the SQLite engine must provide FTS5. Plans compile via
+  /// `SearchQueryBuilder.compileOnly` and travel as the single `compiled_query`
+  /// envelope.
+  WebSearchQueryBuilder search(String term) =>
+      WebSearchQueryBuilder._(_pocket, schema, term);
 }
 
 /// Main-thread query builder that forwards the full native query language to
@@ -756,9 +938,6 @@ class WebQueryBuilder {
   Future<num?> min(String field) => _aggregate('MIN', field);
 
   Future<num?> max(String field) => _aggregate('MAX', field);
-
-  WebSearchQueryBuilder search(String term) =>
-      WebSearchQueryBuilder._(_pocket, schema, term);
 
   /// Watches query results reactively.
   Stream<List<Map<String, Object?>>> watch() {
@@ -1133,5 +1312,193 @@ class WebTxCollection {
         {'action': 'purge', 'id': id}
       ],
     });
+  }
+}
+
+/// Page-facing file attachment and blob lifecycle API over the worker-owned
+/// store. Mirrors the native `LocalPocketFiles` public surface; every method
+/// dispatches a metadata RPC (or bounded-chunk upload) that delegates to the
+/// engine's `pocket.files` in the worker.
+///
+/// Object-URL materialization is intentionally NOT here: `URL.createObjectURL`
+/// is window-only work (see `web_blob_object_url.dart`).
+class WebLocalPocketFiles {
+  final LocalPocket _pocket;
+
+  WebLocalPocketFiles._(this._pocket);
+
+  Future<List<Map<String, Object?>>> list({
+    required String store,
+    required String recordId,
+    String field = 'imgs',
+  }) =>
+      _pocket.filesList(store: store, recordId: recordId, field: field);
+
+  /// Attaches [byteArray] (or [bytes]) to a record, streaming via bounded
+  /// chunks so no single custom request carries a large byte list.
+  Future<Map<String, Object?>> attach({
+    required String store,
+    required String recordId,
+    Stream<List<int>>? bytes,
+    List<int>? byteArray,
+    String field = 'imgs',
+    String? name,
+    int? expectedSize,
+    String? expectedSha256,
+  }) async {
+    final List<int> payload;
+    if (byteArray != null) {
+      payload = byteArray;
+    } else if (bytes != null) {
+      final collected = <int>[];
+      await for (final chunk in bytes) {
+        collected.addAll(chunk);
+      }
+      payload = collected;
+    } else {
+      throw ArgumentError('Either bytes or byteArray must be provided');
+    }
+    return _pocket.filesUpload(
+      store: store,
+      recordId: recordId,
+      bytes: payload,
+      field: field,
+      name: name ?? 'blob.bin',
+      expectedSha256: expectedSha256,
+    );
+  }
+
+  Future<Uint8List> open({
+    required String store,
+    required String recordId,
+    String field = 'imgs',
+    int index = 0,
+    String? refId,
+  }) =>
+      _pocket.filesOpen(
+          store: store,
+          recordId: recordId,
+          field: field,
+          index: index,
+          refId: refId);
+
+  Future<void> remove({
+    required String store,
+    required String recordId,
+    String field = 'imgs',
+    int index = 0,
+    String? refId,
+  }) =>
+      _pocket.filesRemove(
+          store: store,
+          recordId: recordId,
+          field: field,
+          index: index,
+          refId: refId);
+
+  Future<int> gc({
+    Duration blobGrace = const Duration(days: 7),
+    Duration tmpGrace = const Duration(hours: 24),
+  }) =>
+      _pocket.filesGc(blobGrace: blobGrace, tmpGrace: tmpGrace);
+
+  Future<int> enforceStorageCap({required int maxBytes}) =>
+      _pocket.filesEnforceStorageCap(maxBytes: maxBytes);
+}
+
+/// Main-thread conflicts API over the worker-owned engine.
+///
+/// Mirrors the native `Conflicts` surface exactly: listing, point reads,
+/// a broadcast watch stream, and the three resolution paths. Every method
+/// dispatches a typed wire op that delegates to `pocket.conflicts` in the
+/// worker.
+class WebConflicts {
+  final LocalPocket _pocket;
+
+  WebConflicts._(this._pocket);
+
+  /// Lists all currently open / unresolved conflicts, optionally filtered by
+  /// [store]. Sorted by detection time (ascending), matching native.
+  Future<List<ConflictRecord>> listOpen({String? store}) async {
+    final res = (await _pocket._send(WireOp.conflictsList, {
+      if (store != null) 'store': store,
+    })) as Map;
+    return ((res['conflicts'] as List?) ?? const [])
+        .map((raw) => decodeConflictRecord(
+            (raw as Map).map((k, v) => MapEntry(k.toString(), v))))
+        .toList();
+  }
+
+  /// Returns the conflict for [store]/[id], or null when none is open.
+  Future<ConflictRecord?> get(String store, String id) async {
+    final res =
+        await _pocket._send(WireOp.conflictsGet, {'store': store, 'id': id});
+    if (res == null) return null;
+    return decodeConflictRecord(
+        (res as Map).map((k, v) => MapEntry(k.toString(), v)));
+  }
+
+  /// Watches open conflicts, emitting a new [List<ConflictRecord>] whenever
+  /// conflicts are added, resolved, or modified. Broadcast, like native.
+  Stream<List<ConflictRecord>> watch({String? store}) {
+    late final StreamController<List<ConflictRecord>> controller;
+    final watchId = _pocket._nextRequestId++;
+
+    controller = StreamController<List<ConflictRecord>>.broadcast(
+      onListen: () async {
+        _pocket._workerStreams[watchId] = controller;
+        // Transform raw wire lists into typed ConflictRecords. The worker's
+        // native conflicts watch emits the initial list immediately on
+        // listen, so no initial snapshot is returned in the request response.
+        _pocket._workerEventDecoders[watchId] = (raw) {
+          final list = (raw as List).cast<Map>();
+          return [
+            for (final m in list)
+              decodeConflictRecord(m.map((k, v) => MapEntry(k.toString(), v)))
+          ];
+        };
+        try {
+          await _pocket._send(WireOp.conflictsWatch, {
+            'watchId': watchId,
+            if (store != null) 'store': store,
+          });
+        } catch (e) {
+          if (!controller.isClosed) controller.addError(e);
+        }
+      },
+      onCancel: () async {
+        _pocket._workerStreams.remove(watchId);
+        _pocket._workerEventDecoders.remove(watchId);
+        try {
+          await _pocket._send(WireOp.watchCancel, {'watchId': watchId});
+        } catch (_) {}
+      },
+    );
+    return controller.stream;
+  }
+
+  /// Resolves the open conflict for [store]/[id] with [merged].
+  Future<void> resolve({
+    required String store,
+    required String id,
+    required Map<String, Object?> merged,
+  }) async {
+    await _pocket._send(WireOp.conflictsResolve, {
+      'store': store,
+      'id': id,
+      'merged': encodeWireValue(merged),
+    });
+  }
+
+  /// Accepts the local version to resolve the conflict.
+  Future<void> acceptLocal(String store, String id) async {
+    await _pocket
+        ._send(WireOp.conflictsAcceptLocal, {'store': store, 'id': id});
+  }
+
+  /// Accepts the remote version to resolve the conflict.
+  Future<void> acceptRemote(String store, String id) async {
+    await _pocket
+        ._send(WireOp.conflictsAcceptRemote, {'store': store, 'id': id});
   }
 }

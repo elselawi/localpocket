@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:typed_data';
 
 import 'package:sqlite3/common.dart';
 // ignore: implementation_imports
@@ -19,10 +20,14 @@ import '../core/hashing.dart';
 import '../core/schema.dart';
 import '../core/transaction.dart';
 import '../core/watch.dart';
+import '../files/files_api.dart' show FileRef;
+import '../files/web_blob_store.dart';
 import '../pocketbase/auth.dart';
 import '../pocketbase/backend.dart';
 import '../sync/engine.dart';
 import '../sync/status.dart';
+import 'cipher_bridge.dart';
+import 'conflicts_bridge.dart';
 import 'conversions.dart';
 import 'protocol.dart';
 
@@ -64,12 +69,36 @@ final class LocalPocketDatabaseController extends DatabaseController {
     final maxDocBytes = (options['maxDocBytes'] as int?) ?? 1900000;
     final destructiveBackup = (options['destructiveBackup'] as bool?) ?? true;
 
+    // Field cipher bridge: reconstruct the engine cipher from the serialized
+    // envelope. Parsing is intentionally OUTSIDE `_parseOpenOptions`, which
+    // swallows malformed options — a malformed cipher envelope must fail
+    // loudly, never be silently dropped.
+    final fieldCipher =
+        parseFieldCipherEnvelope(_rawOpenOption(additionalData, 'fieldCipher'));
+
+    // Reject encrypted stores opened without a cipher at open time. A web open
+    // must never silently produce stores that cannot be written.
+    final hasEncryptedFields =
+        stores.any((s) => s.fields.any((f) => f.encrypted));
+    if (hasEncryptedFields && fieldCipher == null) {
+      throw ValidationException(
+          'Store declares encrypted fields but no fieldCipher was provided.');
+    }
+
+    // Worker-owned blob store backs LocalPocket.files + the sync file lane.
+    // OPFS access uses @JS('navigator') (no window dependency), so it is safe
+    // inside this dedicated worker; it degrades to an in-memory store when OPFS
+    // is unavailable.
+    final blobStore = WebBlobStore();
+
     // Boot the LocalPocket engine around this DirectSqliteDatabase
     final pocket = await LocalPocket.open(
       path: path,
       database: db,
       stores: stores,
       platform: PlatformProfile.web,
+      blobStore: blobStore,
+      fieldCipher: fieldCipher,
       maxDocBytes: maxDocBytes,
       destructiveBackup: destructiveBackup,
     );
@@ -102,6 +131,20 @@ final class LocalPocketDatabaseController extends DatabaseController {
       }
     } catch (_) {}
     return {};
+  }
+
+  /// Reads a single raw option from `additionalData` WITHOUT swallowing
+  /// errors. Used for options whose malformed values must fail loudly (e.g.
+  /// the field-cipher envelope) rather than silently degrading to defaults.
+  static Object? _rawOpenOption(JSAny? data, String key) {
+    if (data == null) return null;
+    try {
+      final dartVal = data.dartify();
+      if (dartVal is Map) {
+        return _deepStringMap(dartVal)[key];
+      }
+    } catch (_) {}
+    return null;
   }
 
   static CollectionSchema<Object?> parseSchema(Object? raw) {
@@ -169,6 +212,32 @@ final class _WebTokenProvider implements TokenProvider {
   String get identity => identityValue;
 }
 
+/// Active bounded-chunk upload session (§ file upload).
+class _UploadSession {
+  final int uploadId;
+  final String store;
+  final String recordId;
+  final String field;
+  final String name;
+  final int expectedSize;
+  final String? expectedSha256;
+  int receivedBytes = 0;
+  final List<Uint8List> chunks = [];
+
+  _UploadSession({
+    required this.uploadId,
+    required this.store,
+    required this.recordId,
+    required this.field,
+    required this.name,
+    required this.expectedSize,
+    this.expectedSha256,
+  });
+}
+
+/// Maximum chunk size for bounded file uploads (256 KiB).
+const int _maxUploadChunkBytes = 262144;
+
 /// The worker database wrapping [CommonDatabase] and hosting the full
 /// [LocalPocket] engine.
 final class LocalPocketWorkerDatabase extends WorkerDatabase {
@@ -179,6 +248,8 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
   _TxSession? _activeSession;
   int _nextSessionId = 1;
   final Map<int, _ActiveWatcher> _watchers = {};
+  final Map<int, _UploadSession> _uploadSessions = {};
+  int _nextUploadId = 1;
   SyncEngine? _syncEngine;
   _WebTokenProvider? _tokenProvider;
   StreamSubscription<SyncStatus>? _syncStatusSubscription;
@@ -300,6 +371,21 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     WireOp.syncSetConnectivity: _handleSyncSetConnectivity,
     WireOp.syncUpdateAuth: _handleSyncUpdateAuth,
     WireOp.syncStatus: _handleSyncStatus,
+    WireOp.fileProbe: _handleFileProbe,
+    WireOp.fileUploadBegin: _handleFileUploadBegin,
+    WireOp.fileUploadChunk: _handleFileUploadChunk,
+    WireOp.fileUploadFinish: _handleFileUploadFinish,
+    WireOp.fileList: _handleFileList,
+    WireOp.fileOpen: _handleFileOpen,
+    WireOp.fileRemove: _handleFileRemove,
+    WireOp.fileGc: _handleFileGc,
+    WireOp.fileEnforceStorageCap: _handleFileEnforceStorageCap,
+    WireOp.conflictsList: _handleConflictsList,
+    WireOp.conflictsGet: _handleConflictsGet,
+    WireOp.conflictsResolve: _handleConflictsResolve,
+    WireOp.conflictsAcceptLocal: _handleConflictsAcceptLocal,
+    WireOp.conflictsAcceptRemote: _handleConflictsAcceptRemote,
+    WireOp.conflictsWatch: _handleConflictsWatch,
     WireOp.close: _handleClose,
   };
 
@@ -413,6 +499,14 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     if (storesRaw != null) {
       for (final s in storesRaw) {
         final schema = LocalPocketDatabaseController.parseSchema(s);
+        // Defense in depth: never register an encrypted store when the engine
+        // has no field cipher — the facade already rejects this at open.
+        final hasEncrypted = schema.fields.any((f) => f.encrypted);
+        if (hasEncrypted && pocket.fieldCipher == null) {
+          throw ValidationException(
+              'Store "${schema.name}" declares encrypted fields but no '
+              'fieldCipher was provided.');
+        }
         if (!pocket.storeNames.contains(schema.name)) {
           await pocket.registerStore(schema);
         }
@@ -737,6 +831,272 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     return _lastSyncStatus == null
         ? {'state': SyncEngineState.closed.name}
         : _encodeSyncStatus(_lastSyncStatus!);
+  }
+
+  /// Temporary task-2 spike: prove the worker-owned blob store round-trips
+  /// bytes inside the dedicated worker. Calls `pocket.files.attach` then
+  /// `pocket.files.open`, and compares the re-read bytes to the original.
+  /// Replaced by real file RPC in task 4.
+  Future<Object?> _handleFileProbe(
+      ClientConnection connection, WebRequest req) async {
+    final store = req.args['store'] as String;
+    final recordId = req.args['recordId'] as String;
+    final bytes = decodeWireValue(req.args['bytes']) as List<int>;
+
+    final ref = await pocket.files.attach(
+      store: store,
+      recordId: recordId,
+      bytes: Stream.value(bytes),
+      expectedSize: bytes.length,
+    );
+
+    final stream = await pocket.files.open(
+      store: store,
+      recordId: recordId,
+      refId: ref.refId,
+    );
+    final readBack = <int>[];
+    await for (final chunk in stream) {
+      readBack.addAll(chunk);
+    }
+
+    final listed = await pocket.files.list(
+      store: store,
+      recordId: recordId,
+    );
+
+    return {
+      'hash': ref.hash,
+      'state': ref.state,
+      'refCount': listed.length,
+      'readBack': readBack,
+      'match':
+          bytes.length == readBack.length && _intListEquals(bytes, readBack),
+    };
+  }
+
+  static bool _intListEquals(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  Future<Object?> _handleFileUploadBegin(
+      ClientConnection connection, WebRequest req) async {
+    final uploadId = _nextUploadId++;
+    final session = _UploadSession(
+      uploadId: uploadId,
+      store: req.args['store'] as String,
+      recordId: req.args['recordId'] as String,
+      field: req.args['field'] as String? ?? 'imgs',
+      name: req.args['name'] as String? ?? 'blob.bin',
+      expectedSize: req.args['size'] as int,
+      expectedSha256: req.args['expectedSha256'] as String?,
+    );
+    // Max ~4 GiB. Do NOT use (1 << 32): in dart2js that is 1 (JS shift is mod 32).
+    const maxFileBytes = 4294967296; // 2^32
+    if (session.expectedSize < 0 || session.expectedSize > maxFileBytes) {
+      throw ValidationException('Invalid file size: ${session.expectedSize}');
+    }
+    _uploadSessions[uploadId] = session;
+    return {'uploadId': uploadId};
+  }
+
+  Future<Object?> _handleFileUploadChunk(
+      ClientConnection connection, WebRequest req) async {
+    final uploadId = req.args['uploadId'] as int;
+    final session = _uploadSessions[uploadId];
+    if (session == null) {
+      throw ValidationException('Unknown upload session: $uploadId');
+    }
+    final bytes = decodeWireValue(req.args['chunk']) as List<int>;
+    if (bytes.length > _maxUploadChunkBytes) {
+      throw ValidationException(
+          'Chunk too large: ${bytes.length} > $_maxUploadChunkBytes');
+    }
+    session.chunks.add(Uint8List.fromList(bytes));
+    session.receivedBytes += bytes.length;
+    if (session.receivedBytes > session.expectedSize) {
+      throw ValidationException(
+          'Upload exceeds declared size ${session.expectedSize}');
+    }
+    return {'ok': true};
+  }
+
+  Future<Object?> _handleFileUploadFinish(
+      ClientConnection connection, WebRequest req) async {
+    final uploadId = req.args['uploadId'] as int;
+    final session = _uploadSessions.remove(uploadId);
+    if (session == null) {
+      throw ValidationException('Unknown upload session: $uploadId');
+    }
+    if (session.receivedBytes != session.expectedSize) {
+      throw ValidationException(
+          'Upload size mismatch: expected ${session.expectedSize} '
+          'but got ${session.receivedBytes}');
+    }
+
+    // Reassemble the byte stream from the bounded chunks.
+    Stream<List<int>> stream() async* {
+      for (final chunk in session.chunks) {
+        yield chunk;
+      }
+    }
+
+    final ref = await pocket.files.attach(
+      store: session.store,
+      recordId: session.recordId,
+      bytes: stream(),
+      field: session.field,
+      name: session.name,
+      expectedSize: session.expectedSize,
+      expectedSha256: session.expectedSha256,
+    );
+
+    return {
+      'refId': ref.refId,
+      'hash': ref.hash,
+      'state': ref.state,
+      'remoteName': ref.remoteName,
+    };
+  }
+
+  static Map<String, Object?> _encodeFileRef(FileRef ref) => {
+        'refId': ref.refId,
+        'store': ref.store,
+        'recordId': ref.recordId,
+        'field': ref.field,
+        'hash': ref.hash,
+        if (ref.remoteName != null) 'remoteName': ref.remoteName,
+        'state': ref.state,
+        'nextRetryAt': ref.nextRetryAt,
+        'attemptCount': ref.attemptCount,
+        if (ref.lastError != null) 'lastError': ref.lastError,
+      };
+
+  Future<Object?> _handleFileList(
+      ClientConnection connection, WebRequest req) async {
+    final refs = await pocket.files.list(
+      store: req.args['store'] as String,
+      recordId: req.args['recordId'] as String,
+      field: req.args['field'] as String? ?? 'imgs',
+    );
+    return {'refs': refs.map(_encodeFileRef).toList()};
+  }
+
+  Future<Object?> _handleFileOpen(
+      ClientConnection connection, WebRequest req) async {
+    final stream = await pocket.files.open(
+      store: req.args['store'] as String,
+      recordId: req.args['recordId'] as String,
+      field: req.args['field'] as String? ?? 'imgs',
+      index: req.args['index'] as int? ?? 0,
+      refId: req.args['refId'] as String?,
+    );
+    final allBytes = <int>[];
+    await for (final chunk in stream) {
+      allBytes.addAll(chunk);
+    }
+    return {
+      'bytes': encodeWireValue(Uint8List.fromList(allBytes)),
+      'size': allBytes.length,
+    };
+  }
+
+  Future<Object?> _handleFileRemove(
+      ClientConnection connection, WebRequest req) async {
+    await pocket.files.remove(
+      store: req.args['store'] as String,
+      recordId: req.args['recordId'] as String,
+      field: req.args['field'] as String? ?? 'imgs',
+      index: req.args['index'] as int? ?? 0,
+      refId: req.args['refId'] as String?,
+    );
+    return {'ok': true};
+  }
+
+  Future<Object?> _handleFileGc(
+      ClientConnection connection, WebRequest req) async {
+    final cleaned = await pocket.files.gc(
+      blobGrace: Duration(
+          milliseconds: req.args['blobGraceMs'] as int? ??
+              const Duration(days: 7).inMilliseconds),
+      tmpGrace: Duration(
+          milliseconds: req.args['tmpGraceMs'] as int? ??
+              const Duration(hours: 24).inMilliseconds),
+    );
+    return {'cleaned': cleaned};
+  }
+
+  Future<Object?> _handleFileEnforceStorageCap(
+      ClientConnection connection, WebRequest req) async {
+    final evicted = await pocket.files
+        .enforceStorageCap(maxBytes: req.args['maxBytes'] as int);
+    return {'evicted': evicted};
+  }
+
+  Future<Object?> _handleConflictsList(
+      ClientConnection connection, WebRequest req) async {
+    final store = req.args['store'] as String?;
+    final conflicts = await pocket.conflicts.listOpen(store: store);
+    return {'conflicts': conflicts.map(encodeConflictRecord).toList()};
+  }
+
+  Future<Object?> _handleConflictsGet(
+      ClientConnection connection, WebRequest req) async {
+    final store = req.args['store'] as String;
+    final id = req.args['id'] as String;
+    final conflict = await pocket.conflicts.get(store, id);
+    return conflict == null ? null : encodeConflictRecord(conflict);
+  }
+
+  Future<Object?> _handleConflictsResolve(
+      ClientConnection connection, WebRequest req) async {
+    final store = req.args['store'] as String;
+    final id = req.args['id'] as String;
+    final merged = decodeWireValue(req.args['merged']) as Map<String, Object?>;
+    await pocket.conflicts.resolve(store: store, id: id, merged: merged);
+    return {'ok': true};
+  }
+
+  Future<Object?> _handleConflictsAcceptLocal(
+      ClientConnection connection, WebRequest req) async {
+    final store = req.args['store'] as String;
+    final id = req.args['id'] as String;
+    await pocket.conflicts.acceptLocal(store, id);
+    return {'ok': true};
+  }
+
+  Future<Object?> _handleConflictsAcceptRemote(
+      ClientConnection connection, WebRequest req) async {
+    final store = req.args['store'] as String;
+    final id = req.args['id'] as String;
+    await pocket.conflicts.acceptRemote(store, id);
+    return {'ok': true};
+  }
+
+  Future<Object?> _handleConflictsWatch(
+      ClientConnection connection, WebRequest req) async {
+    final watchId = req.args['watchId'] as int;
+    final store = req.args['store'] as String?;
+    // The engine's own conflicts watch drives the stream: it emits the
+    // initial list immediately on listen and then on every change (add,
+    // resolve, modify), so every emission is forwarded as a worker event and
+    // no initial snapshot is returned in the request response.
+    final sub = pocket.conflicts.watch(store: store).listen((conflicts) {
+      unawaited(connection.customRequest({
+        'v': webProtocolVersion,
+        'op': WireOp.workerEvent,
+        'watchId': watchId,
+        'value': encodeWireValue(conflicts.map(encodeConflictRecord).toList()),
+      }.jsify()));
+    });
+    _watchers[watchId] = _ActiveWatcher(watchId, () async {
+      sub.cancel();
+    });
+    return {'watchId': watchId};
   }
 
   Future<Object?> _handleClose(

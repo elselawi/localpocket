@@ -64,6 +64,26 @@ class WireOp {
   static const String syncUpdateAuth = 'sync_update_auth';
   static const String syncSetConnectivity = 'sync_set_connectivity';
 
+  // File operations (§ files). Bounded chunked upload, then metadata RPC
+  // delegating to the worker-owned pocket.files.
+  static const String fileProbe = 'file_probe';
+  static const String fileUploadBegin = 'file_upload_begin';
+  static const String fileUploadChunk = 'file_upload_chunk';
+  static const String fileUploadFinish = 'file_upload_finish';
+  static const String fileList = 'file_list';
+  static const String fileOpen = 'file_open';
+  static const String fileRemove = 'file_remove';
+  static const String fileGc = 'file_gc';
+  static const String fileEnforceStorageCap = 'file_enforce_storage_cap';
+
+  // Conflicts API (§ conflicts). Delegates to the engine's `pocket.conflicts`.
+  static const String conflictsList = 'conflicts_list';
+  static const String conflictsGet = 'conflicts_get';
+  static const String conflictsResolve = 'conflicts_resolve';
+  static const String conflictsAcceptLocal = 'conflicts_accept_local';
+  static const String conflictsAcceptRemote = 'conflicts_accept_remote';
+  static const String conflictsWatch = 'conflicts_watch';
+
   static bool isKnown(String op) => _known.contains(op);
 
   /// Immutable list of operations used by worker dispatch tables.
@@ -103,6 +123,21 @@ class WireOp {
     syncResume,
     syncUpdateAuth,
     syncSetConnectivity,
+    fileProbe,
+    fileUploadBegin,
+    fileUploadChunk,
+    fileUploadFinish,
+    fileList,
+    fileOpen,
+    fileRemove,
+    fileGc,
+    fileEnforceStorageCap,
+    conflictsList,
+    conflictsGet,
+    conflictsResolve,
+    conflictsAcceptLocal,
+    conflictsAcceptRemote,
+    conflictsWatch,
   };
 }
 

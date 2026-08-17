@@ -47,7 +47,10 @@ async function run(name, browserType, pagePath, signal) {
     const pages = [['web_facade_smoke.html', '__facade_smoke'],
     ['web_watch_smoke.html', '__watch_smoke'],
     ['web_parity_smoke.html', '__parity_smoke'],
-    ['web_blob_smoke.html', '__blob_smoke']]
+    ['web_blob_smoke.html', '__blob_smoke'],
+    ['web_files_worker_spike.html', '__files_spike'],
+    ['web_cipher_smoke.html', '__cipher_smoke'],
+    ['web_conflicts_smoke.html', '__conflicts_smoke']]
         .filter(([p]) => !pageFilter || p.includes(pageFilter));
     try {
         for (const [name, type] of browsers) {

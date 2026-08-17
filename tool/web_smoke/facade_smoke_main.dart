@@ -30,11 +30,23 @@ Future<void> main() async {
       ],
     );
 
-    // 1. Open database through the facade
+    // FTS-enabled store for Collection.search() parity (Task 3).
+    final articlesSchema = CollectionSchema<Object?>(
+      name: 'articles',
+      version: 1,
+      fields: [
+        Field.text('title', required: true),
+        Field.text('body'),
+      ],
+      fts: const FtsSpec(['title', 'body']),
+    );
+
+    // 1. Open database through the facade. A versioned name keeps runs isolated
+    //    from stale OPFS data a prior buggy worker may have left behind.
     mark('open');
     final pocket = await LocalPocket.open(
-      path: 'facade_test_db',
-      stores: [schema],
+      path: 'facade_test_db_v2',
+      stores: [schema, articlesSchema],
     );
 
     final notes = pocket.collection('notes');
@@ -273,6 +285,57 @@ Future<void> main() async {
         .keysetAfter(page1.nextCursor!);
     if (page2.items.isEmpty) {
       throw StateError('matrix pagination page2 failed');
+    }
+
+    // 5b. FTS search parity via Collection.search() -> WebSearchQueryBuilder.
+    mark('search');
+    final articles = pocket.collection('articles');
+    await articles.putAll([
+      {
+        'id': 'art000000000001',
+        'title': 'SQLite full-text search',
+        'body': 'database performance and indexing',
+      },
+      {
+        'id': 'art000000000002',
+        'title': 'Dart on the web',
+        'body': 'database engines run in a worker',
+      },
+      {
+        'id': 'art000000000003',
+        'title': 'Local-first architecture',
+        'body': 'offline first with eventual sync',
+      },
+      {
+        'id': 'art000000000004',
+        'title': 'untouched record',
+        'body': 'no matching tokens here',
+      },
+    ]);
+
+    // Ranked search for 'database' matches the first two articles only, with
+    // the bm25 score reported as a double (which may be negative for a tiny
+    // corpus — never assert > 0).
+    final dbHits = await articles.search('database').limit(10).fetch();
+    if (dbHits.length != 2) {
+      throw StateError('search database expected 2 hits: $dbHits');
+    }
+
+    // .all() (no limit) returns all matching rows.
+    final allHits = await articles.search('engines').all().fetch();
+    if (allHits.length != 1 || allHits.single.id != 'art000000000002') {
+      throw StateError('search engines .all() mismatch: $allHits');
+    }
+
+    // limit caps the result set.
+    final limited = await articles.search('database').limit(1).fetch();
+    if (limited.length != 1) {
+      throw StateError('search limit(1) mismatch: $limited');
+    }
+
+    // No match for an absent term.
+    if ((await articles.search('zzznonexistent').limit(5).fetch()).isNotEmpty) {
+      throw StateError('absent search term must return no hits.');
     }
 
     // 5. Interactive transaction session (§7.1)
