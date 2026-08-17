@@ -7,14 +7,16 @@ export 'src/core/capabilities.dart' show SqliteCapabilities, PlatformProfile;
 export 'src/core/change_bus.dart' show ChangeSet, ChangeBus;
 export 'src/core/cipher.dart'
 export 'src/core/codec.dart'
-export 'src/core/database_adapter.dart' show Database, DatabaseExecutor, ConflictAlgorithm, DirectSqliteDatabase;
+export 'src/core/database_adapter.dart'
 export 'src/core/ddl_compiler.dart' show DdlCompiler, CompiledSchema;
 export 'src/core/errors.dart';
 export 'src/core/hashing.dart' show sha256Hex;
-export 'src/core/ids.dart' show generateRecordId, isValidRecordId, recordIdPattern;
-export 'src/core/local_pocket.dart' show LocalPocket, DurabilityClass, TestHooks;
+export 'src/core/ids.dart'
+export 'src/core/local_pocket.dart'
+export 'src/core/local_pocket.dart' show DurabilityClass, TestHooks;
 export 'src/core/perf_counters.dart';
-export 'src/core/query.dart' show QueryBuilder, WhereClause, OrderClause, SearchResult, SearchQueryBuilder;
+export 'src/core/query.dart'
+export 'src/core/query_plan.dart' show QueryPlan;
 export 'src/core/schema.dart'
 export 'src/core/store.dart' show Collection, Page, MutationAction;
 export 'src/core/transaction.dart' show Tx;

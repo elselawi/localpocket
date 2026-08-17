@@ -1,22 +1,13 @@
 /// Real web/WASM/OPFS gate.
 ///
 /// A real browser CI suite (opening WASM/IndexedDB, OPFS multi-megabyte blob
-/// I/O, persistence across reload) cannot run inside this hermetic suite; this
-/// test is the CI-visible stand-in and pins the exact current state:
+/// I/O, persistence across reload) cannot run inside this hermetic suite. These
+/// tests pin the supported web compilation gates and the current browser
+/// capability contract.
 ///
-///   1. The supported web surface (the blob-store platform conditional export)
-///      compiles to JS — the [tool/web_gate.dart] gate must pass.
-///   2. The full core DB layer is DOCUMENTED as not-yet-web-compilable: it
-///      hard-imports `package:sqlite3` (dart:ffi). If that ever changes (a
-///      WASM/IndexedDB sqlite factory is wired in), this test must be updated.
-///   3. The hermetic web capability facts (no-WAL, no-mmap, no-journal-mode
-///      probe on the web profile) are covered in
-///      `test/core/pragma/probe_test.dart`.
-///
-/// These tests spawn nested `dart` processes and are therefore `gate`-tagged:
-/// they run explicitly via `dart test --tags gate --run-skipped -j 1 test/release/`
-/// or as sequential steps of `tool/release_gate.dart` (they cannot run inside
-/// the default parallel suite — see dart_test.yaml).
+/// These tests spawn nested `dart` processes and are therefore `gate`-tagged;
+/// run them sequentially with `dart test --tags gate --run-skipped -j 1
+/// test/release/` or through `tool/release.dart --long`."}},{
 @Tags(['gate'])
 library;
 
@@ -33,13 +24,11 @@ void main() {
     expect(
         result.stdout as String, contains('PASS  web compile blob platform'));
     expect(result.stdout as String,
-        contains('core DB web compilation is deferred'));
+        contains('web gate: supported web surface compiles.'));
   }, timeout: const Timeout(Duration(minutes: 3)));
 
-  test('pinned limitation: core DB compile for web fails on sqlite3 dart:ffi',
-      () async {
-    // This pins the CURRENT state so a future WASM factory flips it loudly.
-    final outDir = Directory.systemTemp.createTempSync('lp_web_pin_');
+  test('core+sync public entrypoint compiles to JavaScript', () async {
+    final outDir = Directory.systemTemp.createTempSync('lp_web_core_');
     addTearDown(() {
       try {
         outDir.deleteSync(recursive: true);
@@ -52,22 +41,7 @@ void main() {
       '-o',
       '${outDir.path}/core.js',
     ]);
-    final combined = '${result.stdout}\n${result.stderr}';
-    expect(result.exitCode, isNot(0),
-        reason: 'core web compile currently fails (sqlite3 uses dart:ffi). '
-            'If this starts PASSING, a WASM sqlite factory was wired in — '
-            'update this test and the README. Output: $combined');
-    expect(combined, contains('dart:ffi'),
-        reason: 'the failure must be the documented sqlite3 FFI limitation, '
-            'not a new layering leak');
-  }, timeout: const Timeout(Duration(minutes: 3)));
-
-  test('core+sync entrypoint compiles and runs independently (native)',
-      () async {
-    // The core+sync public API is independently usable on the native target
-    // without importing the pocketbase adapter.
-    final result =
-        await Process.run('dart', ['run', 'tool/core_web_compile_smoke.dart']);
+    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
     expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
   }, timeout: const Timeout(Duration(minutes: 3)));
 }

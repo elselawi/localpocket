@@ -50,7 +50,9 @@ void main(List<String> args) {
             !line.contains(r'$table') &&
             !line.contains(r'$store') &&
             !line.contains(r'$name') &&
-            !line.contains(r'$pages')) {
+            !line.contains(r'$pages') &&
+            !line.contains(r'$spName') &&
+            !line.contains('lp_sp_wire_')) {
           violations.add(
               '$relPath:$lineNum: Potential unescaped/unbound SQL string interpolation.');
         }

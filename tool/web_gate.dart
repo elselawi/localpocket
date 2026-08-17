@@ -1,14 +1,9 @@
 import 'dart:io';
 
-/// The web compile gate: proves the supported web surface
-/// compiles for the web target — no `dart:io` leaks through the conditional
-/// exports.
-///
-/// NOTE — the full core DB layer currently CANNOT compile for web: it
-/// hard-imports `package:sqlite3` (dart:ffi). A WASM/IndexedDB sqlite factory
-/// is a documented TODO; until then the "supported web surface" is the blob
-/// store platform (conditional export) and the transport seam. See
-/// `test/release/web_gate_test.dart`, which pins this limitation explicitly.
+/// The web compile gate: proves the supported web entrypoints compile for the
+/// web target without native-only imports leaking through conditional exports.
+/// The production worker/facade and the core+sync public compile smoke are
+/// validated by separate checks in the unified release runner.
 ///
 /// Usage:
 ///   dart run tool/web_gate.dart

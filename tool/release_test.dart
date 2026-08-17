@@ -3,7 +3,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'find_repo_root.dart';
-import 'release_checklist.dart';
+import 'release.dart';
 
 void main() {
   group('Release checklist unit & harness tests', () {
@@ -19,7 +19,7 @@ void main() {
     });
 
     test('step ordering and flag variations', () {
-      final defaultSteps = buildChecklistSteps();
+      final defaultSteps = buildReleaseSteps();
       expect(
           defaultSteps.map((s) => s.id).toList(),
           containsAllInOrder([
@@ -35,32 +35,35 @@ void main() {
             'version_check',
             'core_web_smoke',
             'web_gate',
+            'local_web_gate',
+            'browser_web_matrix',
             'test_suite',
+            'release_tests',
             'coverage_collect',
             'coverage_format',
             'coverage_gate',
           ]));
 
-      final noCovSteps = buildChecklistSteps(noCoverage: true);
+      final noCovSteps = buildReleaseSteps(noCoverage: true);
       expect(noCovSteps.any((s) => s.id.startsWith('coverage')), isFalse);
 
-      final perfSteps = buildChecklistSteps(isPerf: true);
+      final perfSteps = buildReleaseSteps(isPerf: true);
       expect(perfSteps.any((s) => s.id == 'perf_gate'), isTrue);
 
-      final longSteps = buildChecklistSteps(isLong: true);
+      final longSteps = buildReleaseSteps(isLong: true);
       expect(longSteps.any((s) => s.id == 'test_suite_long'), isTrue);
-      expect(longSteps.any((s) => s.id == 'gate_tests_long'), isTrue);
+      expect(longSteps.any((s) => s.id == 'release_tests'), isTrue);
     });
 
     test('--list output execution smoke', () {
       final root = findRepoRoot();
       final result = Process.runSync(
         'dart',
-        ['run', 'tool/release_checklist.dart', '--list'],
+        ['run', 'tool/release.dart', '--list'],
         workingDirectory: root.path,
       );
       expect(result.exitCode, equals(0));
-      expect(result.stdout, contains('Release checklist steps'));
+      expect(result.stdout, contains('Release checks'));
       expect(result.stdout, contains('[analyze]'));
       expect(result.stdout, contains('[security_review]'));
       expect(result.stdout, contains('[traceability]'));
