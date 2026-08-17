@@ -48,6 +48,7 @@ Flags:
   --perf           Add performance stability checks against committed baselines.
   --real           Add the live PocketBase test suite.
   --publish        Add `dart pub publish --dry-run`.
+  --no-publish     Skip package publish dry-run (fast local mode).
   --no-coverage    Skip coverage collection and the coverage threshold gate.
 ''');
 }
@@ -56,7 +57,7 @@ List<ReleaseStep> buildReleaseSteps({
   bool isLong = false,
   bool isPerf = false,
   bool withReal = false,
-  bool withPublish = false,
+  bool withPublish = true,
   bool noCoverage = false,
 }) {
   return [
@@ -126,9 +127,19 @@ List<ReleaseStep> buildReleaseSteps({
       argv: ['run', 'tool/local_web_gate.dart'],
     ),
     const ReleaseStep(
+      id: 'package_assets',
+      label: 'Package metadata and web assets',
+      argv: ['run', 'tool/package_release_gate.dart'],
+    ),
+    const ReleaseStep(
       id: 'browser_web_matrix',
       label: 'Chromium, Firefox, and WebKit browser smoke matrix',
       argv: ['run', 'tool/browser_web_gate.dart'],
+    ),
+    const ReleaseStep(
+      id: 'browser_sync_matrix',
+      label: 'Browser sync/auth/realtime lifecycle smoke',
+      argv: ['run', 'tool/sync_web_gate.dart'],
     ),
     ReleaseStep(
       id: isLong ? 'test_suite_long' : 'test_suite',
@@ -197,6 +208,11 @@ List<ReleaseStep> buildReleaseSteps({
         label: 'Live PocketBase suite',
         argv: ['test', '--tags', 'real', '--run-skipped', 'test/e2e/real/'],
       ),
+    const ReleaseStep(
+      id: 'release_baseline',
+      label: 'Release baseline evidence',
+      argv: ['run', 'tool/release_baseline.dart'],
+    ),
     if (withPublish)
       const ReleaseStep(
         id: 'publish_dry_run',
@@ -217,7 +233,7 @@ Future<void> main(List<String> args) async {
     isLong: args.contains('--long'),
     isPerf: args.contains('--perf'),
     withReal: args.contains('--real') || Platform.environment['LP_LIVE'] == '1',
-    withPublish: args.contains('--publish'),
+    withPublish: !args.contains('--no-publish') || args.contains('--publish'),
     noCoverage: args.contains('--no-coverage'),
   );
 

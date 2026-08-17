@@ -36,12 +36,16 @@ void main() {
             'core_web_smoke',
             'web_gate',
             'local_web_gate',
+            'package_assets',
             'browser_web_matrix',
+            'browser_sync_matrix',
             'test_suite',
             'release_tests',
             'coverage_collect',
             'coverage_format',
             'coverage_gate',
+            'release_baseline',
+            'publish_dry_run',
           ]));
 
       final noCovSteps = buildReleaseSteps(noCoverage: true);

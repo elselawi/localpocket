@@ -509,8 +509,8 @@ LocalPocket includes a single-command local pre-release checklist runner:
 # Run the single pre-release decision (analysis, policy, API, web, browser matrix, tests, coverage)
 dart run tool/release.dart
 
-# Fast run skipping coverage collection
-dart run tool/release.dart --no-coverage
+# Fast run skipping coverage and package publish validation
+dart run tool/release.dart --no-coverage --no-publish
 
 # Run heavy/soak and release-gate tests
 dart run tool/release.dart --long
@@ -524,6 +524,15 @@ dart run tool/release.dart --real --publish
 # List all ordered release checks
 dart run tool/release.dart --list
 ```
+
+The release runner includes Dart/VM tests, web compilation and asset gates,
+the Chromium/Firefox/WebKit Playwright matrix, package asset validation, and
+release baseline evidence. Browser JavaScript execution is not included in
+Dart coverage. Playwright WebKit is not real Safari validation. Web uses
+`TRUNCATE` journaling, SQLCipher is unsupported, and sync is currently a
+single-tab configuration. The web `:memory:` path is currently unsupported
+with the dedicated-worker connector because sqlite3_web's worker memory mode
+requires a SharedWorker.
 
 ---
 
