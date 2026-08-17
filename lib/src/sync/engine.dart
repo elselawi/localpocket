@@ -36,6 +36,7 @@ class SyncEngine {
   final LocalPocket pocket;
   final SyncBackend backend;
   final SyncConfig config;
+  final FutureOr<void> Function()? onAuthRequired;
 
   late final SyncStore syncStore;
   late final Puller puller;
@@ -98,6 +99,7 @@ class SyncEngine {
     required this.pocket,
     required this.backend,
     SyncConfig? config,
+    this.onAuthRequired,
   }) : config = config ?? const SyncConfig() {
     syncStore = SyncStore(pocket, backend.scopeId);
     fileLane = FileSyncLane(
@@ -322,6 +324,10 @@ class SyncEngine {
   void _onAuthError() {
     _authInvalid = true;
     _transition(SyncEngineState.authRequired);
+    final callback = onAuthRequired;
+    if (callback != null) {
+      unawaited(Future<void>.sync(callback));
+    }
   }
 
   /// The token became valid again: resume with a forced full

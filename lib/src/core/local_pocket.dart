@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:meta/meta.dart';
-import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'database_adapter.dart';
+import 'database_factory.dart';
 
 import 'capabilities.dart';
 import 'change_bus.dart';
@@ -245,11 +245,7 @@ class LocalPocket {
     if (database != null) {
       db = database;
     } else {
-      if (path == ':memory:') {
-        db = DirectSqliteDatabase(sqlite.sqlite3.openInMemory());
-      } else {
-        db = DirectSqliteDatabase(sqlite.sqlite3.open(path));
-      }
+      db = await openPlatformDatabase(path);
     }
 
     try {
@@ -274,7 +270,7 @@ class LocalPocket {
       );
       await _recordCoreMigration(db);
       for (final schema in stores) {
-        await pocket._registerStore(schema);
+        await pocket.registerStore(schema);
       }
       return pocket;
     } catch (e) {
@@ -314,7 +310,7 @@ class LocalPocket {
     });
   }
 
-  Future<void> _registerStore(CollectionSchema schema) async {
+  Future<void> registerStore(CollectionSchema schema) async {
     final compiled = DdlCompiler(capabilities).compile(schema);
     final existing = await db.query('lp_stores',
         where: 'store = ?', whereArgs: [schema.name], limit: 1);

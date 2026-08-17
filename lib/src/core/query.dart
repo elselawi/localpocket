@@ -1,12 +1,16 @@
 import 'dart:convert';
 
 import 'package:collection/collection.dart';
-import 'package:sqlite3/sqlite3.dart' show SqliteException;
+
+import 'canonical_json.dart';
+import 'hashing.dart';
+import 'package:sqlite3/common.dart' show SqliteException;
 
 import 'codec.dart';
 import 'ddl_compiler.dart';
 import 'errors.dart';
 import 'local_pocket.dart';
+import 'query_plan.dart';
 import 'schema.dart';
 import 'sql_utils.dart';
 import 'store.dart';
@@ -32,7 +36,7 @@ class _CursorData {
 /// Parameterized query builder. No user input is ever string
 /// interpolated into SQL; values travel as bound parameters.
 class QueryBuilder {
-  final LocalPocket _pocket;
+  final LocalPocket? _pocket;
   final CollectionSchema _schema;
 
   final List<WhereClause> _where = [];
@@ -49,6 +53,11 @@ class QueryBuilder {
   /// Internal constructor used by [Collection.query].
   QueryBuilder.internal(this._pocket, StoreTable table)
       : _schema = table.schema;
+
+  /// Compile-only constructor used by the web query-plan spike.
+  QueryBuilder.compileOnly(CollectionSchema schema)
+      : _pocket = null,
+        _schema = schema;
 
   /// Name of the collection being queried.
   String get store => _schema.name;
@@ -236,6 +245,9 @@ class QueryBuilder {
 
   String get name => _schema.name;
 
+  LocalPocket get _requirePocket =>
+      _pocket ?? (throw StateError('This query is compile-only.'));
+
   /// Exposes internals needed by the watch layer (public because watches live
   /// in a separate library).
   int? get limitValue => _limit;
@@ -268,6 +280,7 @@ class QueryBuilder {
     bool countDistinct = false,
     String? aggregate,
     String? aggField,
+    String? distinctField,
     int? limitOverride,
   }) {
     final where = <String>[];
@@ -293,15 +306,22 @@ class QueryBuilder {
     }
     final whereSql = where.isEmpty ? '' : ' WHERE ${where.join(' AND ')}';
 
-    final columns = forCount
-        ? (countDistinct
-            ? 'COUNT(DISTINCT ${DdlCompiler.quote(aggField!)}) AS c'
-            : 'COUNT(*) AS c')
-        : (aggregate != null
-            ? '$aggregate(${DdlCompiler.quote(aggField!)}) AS v'
-            : _selectColumns);
+    final columns = distinctField != null
+        ? 'DISTINCT ${DdlCompiler.quote(distinctField)}'
+        : forCount
+            ? (countDistinct
+                ? 'COUNT(DISTINCT ${DdlCompiler.quote(aggField!)}) AS c'
+                : 'COUNT(*) AS c')
+            : (aggregate != null
+                ? '$aggregate(${DdlCompiler.quote(aggField!)}) AS v'
+                : _selectColumns);
 
-    final effOrder = _effectiveOrder;
+    final effOrder = distinctField != null
+        ? [
+            for (final o in _order)
+              if (o.field == distinctField) o
+          ]
+        : _effectiveOrder;
     final orderSql = (forCount || aggregate != null)
         ? ''
         : (effOrder.isEmpty
@@ -310,15 +330,17 @@ class QueryBuilder {
 
     final shapeKey = '$name|a:$_includeArchived|h:$_includeHidden|'
         'w:${where.join('|')}|c:$columns|o:$orderSql|cd:$countDistinct|'
-        'fc:$forCount|ag:$aggregate|af:$aggField';
+        'fc:$forCount|ag:$aggregate|af:$aggField|df:$distinctField';
     final baseSql = _cachedSqlTemplate(
         shapeKey,
         () =>
             'SELECT $columns FROM ${DdlCompiler.quote(_schema.name)}$whereSql$orderSql');
 
-    final limit = (forCount || aggregate != null)
-        ? null
-        : (limitOverride ?? _resolveLimit());
+    final limit = distinctField != null
+        ? (_all ? null : (_limit ?? 1000))
+        : (forCount || aggregate != null)
+            ? null
+            : (limitOverride ?? _resolveLimit());
     final limitSql = limit == null ? '' : ' LIMIT $limit';
 
     return ('$baseSql$limitSql', args);
@@ -491,7 +513,11 @@ class QueryBuilder {
     }
     final (sql, args) =
         _compile(limitOverride: limit == null ? null : limit + 1);
-    final rows = await _pocket.traceQuery(sql, args);
+    final pocket = _pocket;
+    if (pocket == null) {
+      throw StateError('A compile-only QueryBuilder cannot execute fetch().');
+    }
+    final rows = await pocket.traceQuery(sql, args);
     final hasMore = limit != null && rows.length > limit;
     final pageRows = limit == null ? rows : rows.take(limit).toList();
 
@@ -506,15 +532,15 @@ class QueryBuilder {
         _schema,
         pageRows,
         columns: [..._select!, ..._projectionOrderFields()],
-        cipher: _pocket.fieldCipher,
-        cryptoProvider: _pocket.cryptoProvider,
+        cipher: _requirePocket.fieldCipher,
+        cryptoProvider: _requirePocket.cryptoProvider,
       );
     } else {
       decoded = decodeDbRows(
         _schema,
         pageRows,
-        cipher: _pocket.fieldCipher,
-        cryptoProvider: _pocket.cryptoProvider,
+        cipher: _requirePocket.fieldCipher,
+        cryptoProvider: _requirePocket.cryptoProvider,
       );
     }
 
@@ -571,7 +597,7 @@ class QueryBuilder {
   /// Counts records matching the current filters.
   Future<int> count() async {
     final (sql, args) = _compile(forCount: true);
-    final rows = await _pocket.traceQuery(sql, args);
+    final rows = await _requirePocket.traceQuery(sql, args);
     return firstIntValue(rows) ?? 0;
   }
 
@@ -580,7 +606,7 @@ class QueryBuilder {
     _checkQueryable(field);
     final (sql, args) =
         _compile(forCount: true, countDistinct: true, aggField: field);
-    final rows = await _pocket.traceQuery(sql, args);
+    final rows = await _requirePocket.traceQuery(sql, args);
     return firstIntValue(rows) ?? 0;
   }
 
@@ -607,7 +633,7 @@ class QueryBuilder {
     try {
       final (sql, args) = _compile(limitOverride: limit);
       final distinctSql = sql.replaceFirst('SELECT ', 'SELECT DISTINCT ');
-      final rows = await _pocket.traceQuery(distinctSql, args);
+      final rows = await _requirePocket.traceQuery(distinctSql, args);
       return [for (final r in rows) r[field]];
     } finally {
       _select = savedSelect;
@@ -642,7 +668,7 @@ class QueryBuilder {
           field: field);
     }
     final (sql, args) = _compile(aggregate: fn, aggField: field);
-    final rows = await _pocket.traceQuery(sql, args);
+    final rows = await _requirePocket.traceQuery(sql, args);
     final v = rows.isEmpty ? null : rows.first['v'];
     return v as num?;
   }
@@ -665,7 +691,7 @@ class QueryBuilder {
     _select = ['id'];
     try {
       final (sql, args) = _compile();
-      final rows = await _pocket.traceQuery(sql, args);
+      final rows = await _requirePocket.traceQuery(sql, args);
       return [for (final r in rows) r['id'] as String];
     } finally {
       _select = saved;
@@ -679,17 +705,130 @@ class QueryBuilder {
   Future<String> explain() async {
     final limit = _resolveLimit();
     final (sql, args) = _compile(limitOverride: limit);
-    final rows = await _pocket.traceQuery('EXPLAIN QUERY PLAN $sql', args);
+    final rows =
+        await _requirePocket.traceQuery('EXPLAIN QUERY PLAN $sql', args);
     return rows.map((r) => r['detail']).join('\n');
   }
 
   /// Compiled SQL + args, for tests and goldens.
   (String, List<Object?>) debugCompile() => _compile();
 
+  /// Compiles a typed plan for the web transport.
+  ///
+  /// The plan contains only compiler-owned SQL and bound arguments. It is not
+  /// an arbitrary raw-SQL escape hatch.
+  QueryPlan compilePlan({int? limitOverride, String? cursor}) {
+    final previousCursor = _cursor;
+    if (cursor != null) _cursor = cursor;
+    try {
+      final (sql, args) = _compile(limitOverride: limitOverride);
+      return _plan('query', sql, args,
+          limit: limitOverride ?? _resolveLimit(),
+          projection: _select == null ? null : List.unmodifiable(_select!));
+    } finally {
+      _cursor = previousCursor;
+    }
+  }
+
+  /// Compiles a COUNT plan for the web transport.
+  QueryPlan compileCountPlan() {
+    final (sql, args) = _compile(forCount: true);
+    return _plan('count', sql, args);
+  }
+
+  /// Compiles a COUNT(DISTINCT [field]) plan for the web transport.
+  QueryPlan compileCountDistinctPlan(String field) {
+    _checkQueryable(field);
+    final (sql, args) =
+        _compile(forCount: true, countDistinct: true, aggField: field);
+    return _plan('countDistinct', sql, args);
+  }
+
+  /// Compiles a DISTINCT [field] plan for the web transport.
+  QueryPlan compileDistinctPlan(String field) {
+    _checkQueryable(field);
+    final (sql, args) = _compile(distinctField: field);
+    return _plan('distinct', sql, args);
+  }
+
+  /// Compiles an ID-list plan for the web transport.
+  QueryPlan compileIdsPlan() {
+    final saved = _select;
+    _select = ['id'];
+    try {
+      final (sql, args) = _compile();
+      return _plan('ids', sql, args, projection: const ['id']);
+    } finally {
+      _select = saved;
+    }
+  }
+
+  /// Compiles an EXPLAIN QUERY PLAN plan for the web transport. The worker
+  /// wraps the validated SELECT in `EXPLAIN QUERY PLAN`.
+  QueryPlan compileExplainPlan() {
+    final limit = _resolveLimit();
+    final (sql, args) = _compile(limitOverride: limit);
+    return _plan('explain', sql, args, limit: limit);
+  }
+
+  /// Compiles an aggregate plan for the web transport. [fn] is one of
+  /// `SUM`, `AVG`, `MIN`, `MAX`.
+  QueryPlan compileAggregatePlan(String fn, String field) {
+    _checkQueryable(field);
+    if (!_isNumericField(field)) {
+      throw ValidationException(
+          'Field "$field" is not numeric and cannot be aggregated.',
+          field: field);
+    }
+    final (sql, args) = _compile(aggregate: fn, aggField: field);
+    final operation = switch (fn) {
+      'SUM' => 'sum',
+      'AVG' => 'avg',
+      'MIN' => 'min',
+      'MAX' => 'max',
+      _ => throw ArgumentError.value(fn, 'fn', 'Unknown aggregate function.'),
+    };
+    return _plan(operation, sql, args);
+  }
+
+  QueryPlan _plan(String operation, String sql, List<Object?> args,
+      {int? limit, List<String>? projection}) {
+    // Projection-aware decode columns mirror the native fetch path: only
+    // declared projected columns plus the keyset sort columns are unpacked.
+    // Projections touching undeclared extra keys keep full decode (SELECT *).
+    final List<String>? decodeColumns;
+    if (operation == 'query' && _select != null && _allProjectedDeclared()) {
+      decodeColumns = <String>[
+        ..._select!,
+        for (final f in _projectionOrderFields())
+          if (!_select!.contains(f)) f,
+      ];
+    } else {
+      decodeColumns = null;
+    }
+    return QueryPlan(
+      operation: operation,
+      compilerVersion: queryCompilerVersion,
+      store: _schema.name,
+      schemaVersion: _schema.version,
+      schemaFingerprint: sha256Hex(canonicalize(_schema.toJson())),
+      sql: sql,
+      args: List<Object?>.unmodifiable(args),
+      limit: limit,
+      projection: projection == null ? null : List.unmodifiable(projection),
+      decodeColumns: decodeColumns,
+      shape: _shapeFingerprint,
+    );
+  }
+
+  /// Creates the next keyset cursor from a full decoded row returned by the
+  /// compiled-query worker path.
+  String cursorForCompiledRow(Map<String, Object?> row) => _makeCursor(row);
+
   /// Reactive stream of query results.
   /// Watches this query and emits after committed matching changes.
   Stream<List<Map<String, Object?>>> watch() =>
-      QueryWatcher(_pocket, this).start();
+      QueryWatcher(_requirePocket, this).start();
 }
 
 /// A ranked search result from an FTS5 full-text query.
@@ -717,7 +856,7 @@ class SearchResult {
 
 /// Query builder for FTS5 full-text search.
 class SearchQueryBuilder {
-  final LocalPocket _pocket;
+  final LocalPocket? _pocket;
   final CollectionSchema _schema;
   final String _term;
   int? _limit;
@@ -730,8 +869,20 @@ class SearchQueryBuilder {
       throw FtsUnavailableError(
           'Store "${_schema.name}" does not have FTS enabled.');
     }
-    if (!_pocket.capabilities.hasFts5) {
+    final pocket = _pocket;
+    if (pocket != null && !pocket.capabilities.hasFts5) {
       throw FtsUnavailableError('FTS5 is not available on this SQLite engine.');
+    }
+  }
+
+  /// Compile-only constructor used by the web query-plan transport.
+  SearchQueryBuilder.compileOnly(CollectionSchema schema, String term)
+      : _pocket = null,
+        _schema = schema,
+        _term = term {
+    if (_schema.fts == null) {
+      throw FtsUnavailableError(
+          'Store "${_schema.name}" does not have FTS enabled.');
     }
   }
 
@@ -789,6 +940,24 @@ class SearchQueryBuilder {
   /// Compiled SQL + args, for tests.
   (String, List<Object?>) debugCompile() => _compile();
 
+  /// Compiles a typed plan for the web query-plan transport.
+  QueryPlan compilePlan({int? limitOverride}) {
+    final (sql, args) = _compile(limitOverride: limitOverride);
+    return QueryPlan(
+      operation: 'search',
+      compilerVersion: queryCompilerVersion,
+      store: _schema.name,
+      schemaVersion: _schema.version,
+      schemaFingerprint: sha256Hex(canonicalize(_schema.toJson())),
+      sql: sql,
+      args: List<Object?>.unmodifiable(args),
+      limit: limitOverride ?? _resolveLimit(),
+      projection: null,
+      shape: jsonEncode(
+          {'term': _term, 'a': _includeArchived, 'h': _includeHidden}),
+    );
+  }
+
   /// Executes the FTS query and returns ranked results.
   ///
   /// ```dart
@@ -804,9 +973,14 @@ class SearchQueryBuilder {
   /// raw SQLite error.
   Future<List<SearchResult>> fetch() async {
     if (_term.trim().isEmpty) return const [];
+    final pocket = _pocket;
+    if (pocket == null) {
+      throw StateError(
+          'A compile-only SearchQueryBuilder cannot execute fetch().');
+    }
     final (sql, args) = _compile();
     try {
-      final rows = await _pocket.traceQuery(sql, args);
+      final rows = await pocket.traceQuery(sql, args);
       return [
         for (final r in rows)
           SearchResult(

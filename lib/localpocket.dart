@@ -16,7 +16,8 @@ export 'src/core/codec.dart'
         decodeDbRow,
         decodeDbRows,
         decodeDbRowsAsync;
-export 'src/core/ids.dart' show generateRecordId, isValidRecordId, recordIdPattern;
+export 'src/core/ids.dart'
+    show generateRecordId, isValidRecordId, recordIdPattern;
 export 'src/core/hashing.dart' show sha256Hex;
 export 'src/core/cipher.dart'
     show
@@ -40,11 +41,21 @@ export 'src/core/schema.dart'
         DocumentMigration,
         applyDocumentMigrations;
 export 'src/core/ddl_compiler.dart' show DdlCompiler, CompiledSchema;
-export 'src/core/database_adapter.dart' show Database, DatabaseExecutor, ConflictAlgorithm, DirectSqliteDatabase;
-export 'src/core/local_pocket.dart' show LocalPocket, DurabilityClass, TestHooks;
+export 'src/core/database_adapter.dart'
+    show Database, DatabaseExecutor, ConflictAlgorithm, DirectSqliteDatabase;
+export 'src/core/local_pocket.dart' show DurabilityClass, TestHooks;
+export 'src/core/local_pocket.dart'
+    if (dart.library.js_interop) 'src/web/facade.dart' show LocalPocket;
 export 'src/core/transaction.dart' show Tx;
 export 'src/core/store.dart' show Collection, Page, MutationAction;
-export 'src/core/query.dart' show QueryBuilder, WhereClause, OrderClause, SearchResult, SearchQueryBuilder;
+export 'src/core/query.dart'
+    show
+        QueryBuilder,
+        WhereClause,
+        OrderClause,
+        SearchResult,
+        SearchQueryBuilder;
+export 'src/core/query_plan.dart' show QueryPlan;
 export 'src/core/change_bus.dart' show ChangeSet, ChangeBus;
 export 'src/core/watch.dart';
 export 'src/sync/sync_tables.dart'

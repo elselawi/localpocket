@@ -700,8 +700,8 @@ class Collection {
 
   /// Returns the record with [id], or `null` when it does not exist locally.
   Future<Map<String, Object?>?> _readLogical(String id) async {
-    final rows = await _ex.query(_table.tableName,
-        where: 'id = ?', whereArgs: [id], limit: 1);
+    final rows = await _ex.rawQuery(
+        'SELECT * FROM "${_table.tableName}" WHERE id = ? LIMIT 1', [id]);
     if (rows.isEmpty) return null;
     return decodeDbRow(_schema, rows.first,
         cipher: _pocket.fieldCipher, cryptoProvider: _pocket.cryptoProvider);
