@@ -1,0 +1,10 @@
+{
+    "name": "localpocket-web-smoke",
+    "private": true,
+    "devDependencies": {
+        "playwright": "1.62.1"
+    },
+    "scripts": {
+        "web-smoke": "node tool/web_smoke/run_smoke.cjs"
+    }
+}

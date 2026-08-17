@@ -22,8 +22,16 @@ Future<void> main(List<String> args) async {
     (name: 'hermetic suite', command: const ['test']),
     (name: 'web gate', command: const ['run', 'tool/web_gate.dart']),
     (
+      name: 'local web compile and asset gate',
+      command: const ['run', 'tool/local_web_gate.dart'],
+    ),
+    (
       name: 'core API smoke',
       command: const ['run', 'tool/core_web_compile_smoke.dart']
+    ),
+    (
+      name: 'production web gate',
+      command: const ['run', 'tool/local_web_gate.dart'],
     ),
     if (withReal)
       (

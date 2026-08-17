@@ -127,14 +127,21 @@ List<ChecklistStep> buildChecklistSteps({
       argv: ['dart', 'run', 'tool/core_web_compile_smoke.dart'],
     ),
 
-    // 12. Web gate (supported web surface compile)
+    // 12. Production web worker, facade, and asset gate
+    const ChecklistStep(
+      id: 'local_web_gate',
+      label: 'Production Web Gate (tool/local_web_gate.dart)',
+      argv: ['dart', 'run', 'tool/local_web_gate.dart'],
+    ),
+
+    // 13. Web gate (supported web surface compile)
     const ChecklistStep(
       id: 'web_gate',
       label: 'Web Gate Compile (tool/web_gate.dart)',
       argv: ['dart', 'run', 'tool/web_gate.dart'],
     ),
 
-    // 13. Test suite
+    // 14. Test suite
     if (!isLong)
       const ChecklistStep(
         id: 'test_suite',
@@ -167,7 +174,7 @@ List<ChecklistStep> buildChecklistSteps({
       ),
     ],
 
-    // 14. Coverage block (unless --no-coverage)
+    // 15. Coverage block (unless --no-coverage)
     if (!noCoverage) ...[
       ChecklistStep(
         id: 'coverage_collect',
@@ -213,7 +220,7 @@ List<ChecklistStep> buildChecklistSteps({
       ),
     ],
 
-    // 15. Performance stability (if --perf)
+    // 16. Performance stability (if --perf)
     if (isPerf)
       const ChecklistStep(
         id: 'perf_gate',
