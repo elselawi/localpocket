@@ -468,6 +468,7 @@ void main() {
         Field.text('secret', encrypted: true),
         Field.int('code', encrypted: true),
         Field.json('blob', encrypted: true),
+        Field.real('balance', encrypted: true),
       ],
     );
     final key = List<int>.generate(32, (i) => (i * 7 + 13) % 256);
@@ -620,6 +621,90 @@ void main() {
       );
     });
 
+    test(
+        'encrypted real preserves double type even when serialized without decimal (COD-01)',
+        () {
+      // Plaintext "42" (e.g. from 42.0 or 42 integer-formatted float) must decode strictly as double
+      final row = {
+        'id': 'aaaaaaaaaaaaaaa',
+        'name': null,
+        'secret': null,
+        'code': null,
+        'blob': null,
+        'balance': base64Encode(cipher.encrypt(utf8.encode('42'))),
+        'stamp': null,
+        'flag': null,
+        'archived': 0,
+        'hidden': 0,
+        'extra': '',
+      };
+
+      // Full decodeDbRow
+      final decoded = decodeDbRow(encSchema, row, cipher: cipher);
+      expect(decoded['balance'], isA<double>());
+      expect(decoded['balance'], 42.0);
+      // Application strict type cast check:
+      final double strictVal = decoded['balance'] as double;
+      expect(strictVal, 42.0);
+
+      // Projected decodeDbRowsProjected
+      final projected = decodeDbRowsProjected(encSchema, [row],
+          columns: ['balance'], cipher: cipher);
+      expect(projected.single['balance'], isA<double>());
+      expect(projected.single['balance'], 42.0);
+      final double projectedStrictVal = projected.single['balance'] as double;
+      expect(projectedStrictVal, 42.0);
+    });
+
+    test('encrypted real with decimal decodes as double', () {
+      final row = {
+        'id': 'aaaaaaaaaaaaaaa',
+        'name': null,
+        'secret': null,
+        'code': null,
+        'blob': null,
+        'balance': base64Encode(cipher.encrypt(utf8.encode('42.5'))),
+        'stamp': null,
+        'flag': null,
+        'archived': 0,
+        'hidden': 0,
+        'extra': '',
+      };
+
+      final decoded = decodeDbRow(encSchema, row, cipher: cipher);
+      expect(decoded['balance'], isA<double>());
+      expect(decoded['balance'], 42.5);
+
+      final projected = decodeDbRowsProjected(encSchema, [row],
+          columns: ['balance'], cipher: cipher);
+      expect(projected.single['balance'], isA<double>());
+      expect(projected.single['balance'], 42.5);
+    });
+
+    test('malformed plaintext for encrypted real throws FormatException', () {
+      final row = {
+        'id': 'aaaaaaaaaaaaaaa',
+        'name': null,
+        'secret': null,
+        'code': null,
+        'blob': null,
+        'balance': base64Encode(cipher.encrypt(utf8.encode('not-a-number'))),
+        'stamp': null,
+        'flag': null,
+        'archived': 0,
+        'hidden': 0,
+        'extra': '',
+      };
+      expect(
+        () => decodeDbRow(encSchema, row, cipher: cipher),
+        throwsA(isA<FormatException>()),
+      );
+      expect(
+        () => decodeDbRowsProjected(encSchema, [row],
+            columns: ['balance'], cipher: cipher),
+        throwsA(isA<FormatException>()),
+      );
+    });
     test('SingleKeyCryptoProvider supplies the same cipher to every field',
         () async {
       final provider = SingleKeyCryptoProvider(cipher);

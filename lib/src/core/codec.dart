@@ -30,7 +30,9 @@ Map<String, Object?> encodeDbRow(
   }
   final extra = <String, Object?>{};
   for (final e in logical.entries) {
-    if (e.key == 'id' || e.key == 'archived' || declared.contains(e.key)) continue;
+    if (e.key == 'id' || e.key == 'archived' || declared.contains(e.key)) {
+      continue;
+    }
     extra[e.key] = e.value;
   }
   row['extra'] = extra.isEmpty ? '' : canonicalize(extra);
@@ -93,7 +95,8 @@ Map<String, Object?> decodeDbRow(
     if (f.encrypted) {
       final fc = cipher ?? cryptoProvider?.getFieldCipher(schema.name, f.name);
       if (fc == null) {
-        throw StateError('Field "${f.name}" is encrypted but no FieldCipher was provided.');
+        throw StateError(
+            'Field "${f.name}" is encrypted but no FieldCipher was provided.');
       }
       final cipherBytes = base64Decode(v as String);
       final plainBytes = fc.decrypt(cipherBytes);
@@ -105,7 +108,7 @@ Map<String, Object?> decodeDbRow(
         case FieldKind.date:
           logical[f.name] = int.parse(plainStr);
         case FieldKind.real:
-          logical[f.name] = num.parse(plainStr);
+          logical[f.name] = double.parse(plainStr);
         case FieldKind.json:
         case FieldKind.jsonList:
           logical[f.name] = jsonDecode(plainStr);
@@ -200,7 +203,7 @@ Map<String, Object?> _decodeDbRowProjected(
         case FieldKind.date:
           logical[name] = int.parse(plainStr);
         case FieldKind.real:
-          logical[name] = num.parse(plainStr);
+          logical[name] = double.parse(plainStr);
         case FieldKind.json:
         case FieldKind.jsonList:
           logical[name] = jsonDecode(plainStr);
@@ -244,7 +247,8 @@ Object? _encodeValue(Field f, Object? v, {FieldCipher? cipher}) {
   if (v == null) return null;
   if (f.encrypted) {
     if (cipher == null) {
-      throw StateError('Field "${f.name}" is encrypted but no FieldCipher was provided.');
+      throw StateError(
+          'Field "${f.name}" is encrypted but no FieldCipher was provided.');
     }
     String plainStr;
     switch (f.kind) {
@@ -277,7 +281,8 @@ Object? _encodeValue(Field f, Object? v, {FieldCipher? cipher}) {
 
 /// Builds the full remote payload map for a logical record:
 /// `{id, ...declared, ...extra, archived?}`. `archived` is `true` or omitted.
-Map<String, Object?> buildPayload(CollectionSchema schema, Map<String, Object?> logical) {
+Map<String, Object?> buildPayload(
+    CollectionSchema schema, Map<String, Object?> logical) {
   final declared = schema.declaredFieldNames;
   final data = <String, Object?>{'id': logical['id']};
   for (final f in schema.fields) {
@@ -287,14 +292,17 @@ Map<String, Object?> buildPayload(CollectionSchema schema, Map<String, Object?> 
     }
   }
   for (final e in logical.entries) {
-    if (e.key == 'id' || e.key == 'archived' || declared.contains(e.key)) continue;
+    if (e.key == 'id' || e.key == 'archived' || declared.contains(e.key)) {
+      continue;
+    }
     data[e.key] = e.value;
   }
   if (logical['archived'] == true) data['archived'] = true;
   return data;
 }
 
-String canonicalPayload(CollectionSchema schema, Map<String, Object?> logical) =>
+String canonicalPayload(
+        CollectionSchema schema, Map<String, Object?> logical) =>
     canonicalize(buildPayload(schema, logical));
 
 String payloadHash(CollectionSchema schema, Map<String, Object?> logical) =>
