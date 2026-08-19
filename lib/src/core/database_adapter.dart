@@ -97,7 +97,7 @@ class DirectSqliteDatabase implements Database {
   /// Hook for tracing executions (e.g. TestHooks / profilers).
   void Function(String sql, List<Object?> params)? onExecute;
 
-  /// Hook for tracing queries.
+  /// Hook for tracing queries (e.g. TestHooks / profilers).
   void Function(String sql, List<Object?> params)? onQuery;
 
   DirectSqliteDatabase(this._db);
@@ -140,7 +140,7 @@ class DirectSqliteDatabase implements Database {
       [List<Object?> parameters = const []]) {
     onQuery?.call(sql, parameters);
     final ResultSet cursor;
-    if (onQuery != null || _statementCache.length >= 256) {
+    if (onQuery != null) {
       cursor = _db.select(sql, parameters);
     } else {
       cursor = getPreparedStatement(sql).select(parameters);
@@ -151,7 +151,7 @@ class DirectSqliteDatabase implements Database {
   @override
   void executeSync(String sql, [List<Object?> parameters = const []]) {
     onExecute?.call(sql, parameters);
-    if (onExecute != null || _statementCache.length >= 256) {
+    if (onExecute != null) {
       _db.execute(sql, parameters);
     } else {
       getPreparedStatement(sql).execute(parameters);
