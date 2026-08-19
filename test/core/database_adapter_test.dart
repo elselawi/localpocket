@@ -395,6 +395,38 @@ void main() {
       expect(a.select().single['v'], 'v1');
       db.close();
     });
+
+      test(
+          'selectSync and executeSync continue using prepared statements after 256 statements',
+          () {
+        final db = cacheDb();
+        // Fill statement cache beyond 256 items
+        for (var i = 0; i < 300; i++) {
+          db.selectSync('SELECT v FROM t WHERE id = $i');
+        }
+
+        // After 300 queries, selectSync for a specific query should populate and reuse the cached prepared statement
+        const targetQuery = 'SELECT v FROM t WHERE id = 100';
+        db.selectSync(targetQuery);
+        final cachedStmt = db.getPreparedStatement(targetQuery);
+
+        // Querying again should return the expected result using the cached statement
+        final res = db.selectSync(targetQuery);
+        expect(res.single['v'], 'v100');
+        expect(identical(db.getPreparedStatement(targetQuery), cachedStmt), isTrue);
+
+        // Also verify executeSync with statements after 256 statements
+        const targetUpdate = 'UPDATE t SET v = ? WHERE id = 100';
+        db.executeSync(targetUpdate, ['v100_updated']);
+        final cachedUpdateStmt = db.getPreparedStatement(targetUpdate);
+        db.executeSync(targetUpdate, ['v100_updated2']);
+        expect(
+            identical(db.getPreparedStatement(targetUpdate), cachedUpdateStmt),
+            isTrue);
+        expect(db.selectSync(targetQuery).single['v'], 'v100_updated2');
+
+        db.close();
+      });
   });
 
   group('handle lifecycle', () {
