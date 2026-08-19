@@ -1,4 +1,5 @@
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/sync/merge.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
@@ -205,8 +206,11 @@ void main() {
       await col.put(record(id: fresh, name: 'y', meta: {'n': 1}));
       final f1 = await col.get(fresh);
       final f2 = await col.get(fresh);
-      expect(identical(f1!['meta'], f2!['meta']), isTrue,
+      expect(identical(f1!['meta'], f2!['meta']), isFalse,
           reason: 'the same cached nested map is returned on each hit');
+
+      expect(deepEquals(f1, f2), isTrue,
+          reason: "when returning from cache we should return a deep copy");
     });
   });
 }

@@ -87,7 +87,7 @@ class PointReadCache {
     // Refresh LRU order
     final val = _cache.remove(id);
     _cache[id] = val;
-    return val == null ? null : Map<String, Object?>.from(val);
+    return val == null ? null : _deepClone(val);
   }
 
   void set(String id, Map<String, Object?>? value) {
@@ -108,6 +108,10 @@ class PointReadCache {
   }
 
   void clear() => _cache.clear();
+
+  Map<String, Object?> _deepClone(Map<String, Object?> map) {
+    return jsonDecode(jsonEncode(map)) as Map<String, Object?>;
+  }
 }
 
 /// The main LocalPocket database handle.
