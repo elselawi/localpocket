@@ -211,6 +211,7 @@ class PbRealtime {
 class _SseParser {
   final BytesBuilder _buffer = BytesBuilder();
   String? _event;
+  final List<String> _data = <String>[];
 
   List<_SseFrame> feed(List<int> bytes) {
     _buffer.add(bytes);
@@ -240,33 +241,56 @@ class _SseParser {
     return -1;
   }
 
+  void _resetFrameState() {
+    _event = null;
+    _data.clear();
+  }
+
+  _SseFrame? _flushFrame() {
+    if (_data.isEmpty) {
+      _resetFrameState();
+      return null;
+    }
+
+    final event = _event;
+    final payload = _data.join('\n');
+    _resetFrameState();
+
+    try {
+      final decoded = jsonDecode(payload);
+      if (decoded is Map) {
+        final map = Map<String, Object?>.from(decoded);
+        final clientId = map['clientId'];
+        if (event == 'PB_CONNECT' && clientId is String) {
+          return _SseFrame(clientId: clientId);
+        }
+        return _SseFrame(data: map);
+      }
+    } catch (_) {}
+    return null;
+  }
+
   _SseFrame? _dispatchLine(String line) {
+    if (line.isEmpty) return _flushFrame();
     if (line.startsWith('PB_CONNECT:')) {
       // Legacy plain-line handshake.
+      _resetFrameState();
       return _SseFrame(clientId: line.substring('PB_CONNECT:'.length).trim());
+    }
+    if (line.startsWith(':')) {
+      // Ignore comments/keepalive frames; they never carry event payload state.
+      return null;
     }
     if (line.startsWith('event:')) {
       _event = line.substring('event:'.length).trim();
       return null;
     }
     if (line.startsWith('data:')) {
-      final json = line.substring('data:'.length).trim();
-      if (json.isEmpty) return null;
-      try {
-        final decoded = jsonDecode(json);
-        if (decoded is Map) {
-          final map = Map<String, Object?>.from(decoded);
-          final event = _event;
-          _event = null;
-          final clientId = map['clientId'];
-          if (event == 'PB_CONNECT' && clientId is String) {
-            return _SseFrame(clientId: clientId);
-          }
-          return _SseFrame(data: map);
-        }
-      } catch (_) {}
+      final value = line.substring('data:'.length).trim();
+      if (value.isNotEmpty) _data.add(value);
       return null;
     }
-    return null; // comments / retry / id / blank
+    // retry / blank / other metadata are ignored and do not affect active state.
+    return null;
   }
 }

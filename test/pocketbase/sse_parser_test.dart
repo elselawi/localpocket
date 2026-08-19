@@ -133,8 +133,54 @@ void main() {
     expect(gaps, hasLength(1), reason: 'exactly one handshake gap close');
   });
 
-  test('multiple data lines are independent frames (pinned behavior)',
-      () async {
+  test('stale event tag is cleared after a blank-line boundary', () async {
+    final fake = FakeTransport();
+    final events = <PbRealtimeEvent>[];
+    final rt = realtime(fake, onEvent: events.add);
+    final controller = StreamController<List<int>>();
+    fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
+    await rt.start();
+
+    final text = 'event:PB_CONNECT\n\n'
+        'event:data\n'
+        'data:{"record":{"id":"r4","store":"widgets","updated":"2026-08-15 10:00:00.000Z","data":{"id":"r4"}},"action":"update"}\n\n';
+    controller.add(utf8.encode(text));
+    await controller.close();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await rt.stop();
+
+    expect(fake.sends, isEmpty,
+        reason: 'a blank line should clear any stale PB_CONNECT tag');
+    expect(events, hasLength(1));
+    expect(events.single.record.id, 'r4');
+  });
+
+  test('comment line does not carry over to the next frame', () async {
+    final fake = FakeTransport();
+    final events = <PbRealtimeEvent>[];
+    final rt = realtime(fake, onEvent: events.add);
+    final controller = StreamController<List<int>>();
+    fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
+    await rt.start();
+
+    final text = 'event:PB_CONNECT\n'
+        ': keepalive\n'
+        '\n'
+        'event:data\n'
+        'data:{"record":{"id":"r5","store":"widgets","updated":"2026-08-15 10:00:00.000Z","data":{"id":"r5"}},"action":"update"}\n\n';
+    controller.add(utf8.encode(text));
+    await controller.close();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await rt.stop();
+
+    expect(fake.sends, isEmpty,
+        reason:
+            'a keepalive comment after a frame should not preserve the old event tag');
+    expect(events, hasLength(1));
+    expect(events.single.record.id, 'r5');
+  });
+
+  test('multi-line JSON payload is concatenated before JSON decode', () async {
     final fake = FakeTransport();
     final events = <PbRealtimeEvent>[];
     final rt = realtime(fake, onEvent: events.add);
@@ -143,32 +189,71 @@ void main() {
     await rt.start();
 
     final text = '$handshake'
-        'event:data\ndata:${jsonEncode({
-          'record': {
-            'id': 'a',
-            'store': 'widgets',
-            'updated': '2026-08-15 10:00:00.000Z',
-            'data': {'id': 'a'}
-          },
-          'action': 'update'
-        })}\n'
-        'data:${jsonEncode({
-          'record': {
-            'id': 'b',
-            'store': 'widgets',
-            'updated': '2026-08-15 10:00:00.000Z',
-            'data': {'id': 'b'}
-          },
-          'action': 'update'
-        })}\n\n';
+        'event:data\n'
+        'data:{"record":{"id":"r6","store":"widgets","updated":"2026-08-15 10:00:00.000Z","data":{"id":"r6"}}\n'
+        'data:,"action":"update"}\n\n';
     controller.add(utf8.encode(text));
     await controller.close();
     await Future<void>.delayed(const Duration(milliseconds: 60));
     await rt.stop();
 
-    // Each data: line produces its own frame (PB always uses one data line
-    // per event; this pins the current behavior rather than SSE accumulation).
-    expect(events.map((e) => e.record.id), ['a', 'b']);
+    expect(events, hasLength(1));
+    expect(events.single.record.id, 'r6');
+    expect(events.single.record.data['id'], 'r6');
+    expect(events.single.action, 'update');
+  });
+
+  test('legacy PB_CONNECT still works while standard handshake remains valid',
+      () async {
+    final fake = FakeTransport();
+    final gaps = <int>[];
+    final rt = realtime(fake, onGapClosed: () => gaps.add(1), onEvent: (_) {});
+    final controller = StreamController<List<int>>();
+    fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
+    await rt.start();
+
+    controller.add(utf8.encode('PB_CONNECT:legacy-client\n\n'));
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    controller.add(utf8
+        .encode('id:h1\nevent:PB_CONNECT\ndata:{"clientId":"cid-123"}\n\n'));
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(fake.sends, hasLength(2),
+        reason: 'both the legacy and standard handshake shapes remain valid');
+    expect(fake.sends[0].body, contains('legacy-client'));
+    expect(fake.sends[1].body, contains('cid-123'));
+    await controller.close();
+    await rt.stop();
+    expect(gaps, hasLength(1),
+        reason:
+            'the stream still closes exactly one gap after the first real handshake');
+  });
+
+  test('non-object JSON payloads and missing required keys are ignored',
+      () async {
+    final fake = FakeTransport();
+    final events = <PbRealtimeEvent>[];
+    final rt = realtime(fake, onEvent: events.add);
+    final controller = StreamController<List<int>>();
+    fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
+    await rt.start();
+
+    final valid = eventFrame('r7', 'n7');
+    final text = 'event:data\n'
+        'data:"not an object"\n\n'
+        'event:data\n'
+        'data:123\n\n'
+        'event:data\n'
+        'data:{"record":{"id":"missing-action","store":"widgets","updated":"2026-08-15 10:00:00.000Z","data":{"id":"missing-action"}}}\n\n'
+        '$valid';
+    controller.add(utf8.encode(text));
+    await controller.close();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await rt.stop();
+
+    expect(events, hasLength(1),
+        reason: 'only the valid event object survives');
+    expect(events.single.record.id, 'r7');
+    expect(events.single.record.data['name'], 'n7');
   });
 
   test('legacy PB_CONNECT line triggers the subscribe POST', () async {
