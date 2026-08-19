@@ -18,6 +18,7 @@ import 'cipher_bridge.dart';
 import 'conflicts_bridge.dart';
 import 'connector.dart';
 import 'conversions.dart';
+import 'lifecycle.dart';
 import 'protocol.dart';
 
 /// Sends an engine-compiled [QueryPlan] to the worker as the single read
@@ -113,6 +114,7 @@ class LocalPocket {
   final ChangeBus changeBus = ChangeBus();
   final PerfCounters perf = PerfCounters();
   final Map<int, StreamController<dynamic>> _workerStreams = {};
+  final WatchSubscriptionTracker _watchTracker = WatchSubscriptionTracker();
 
   /// Optional per-watch transform applied to a worker event value before it is
   /// added to the matching [_workerStreams] controller. Used by watch types
@@ -849,30 +851,39 @@ class WebCollection {
     final watchId = _pocket._nextRequestId++;
 
     controller = StreamController<Map<String, Object?>?>(
-      onListen: () async {
-        _pocket._workerStreams[watchId] = controller;
-        try {
-          final res = (await _pocket._send(WireOp.watchOne, {
-            'watchId': watchId,
-            'store': name,
-            'id': id,
-          })) as Map;
-          final item = decodeWireValue(res['item']) as Map<String, Object?>?;
-          if (!controller.isClosed) {
-            controller.add(item);
+      onListen: () => _pocket._watchTracker.runRegistration(
+        watchId: watchId,
+        register: () async {
+          _pocket._workerStreams[watchId] = controller;
+          try {
+            final res = (await _pocket._send(WireOp.watchOne, {
+              'watchId': watchId,
+              'store': name,
+              'id': id,
+            })) as Map;
+            final item = decodeWireValue(res['item']) as Map<String, Object?>?;
+            if (!controller.isClosed) {
+              controller.add(item);
+            }
+          } catch (e) {
+            if (!controller.isClosed) controller.addError(e);
           }
-        } catch (e) {
-          if (!controller.isClosed) controller.addError(e);
-        }
-      },
-      onCancel: () async {
-        _pocket._workerStreams.remove(watchId);
-        try {
-          await _pocket._send(WireOp.watchCancel, {'watchId': watchId});
-        } catch (_) {}
-      },
+        },
+        unregister: () => _cancelWatch(watchId),
+      ),
+      onCancel: () => _pocket._watchTracker.requestUnregistration(
+        watchId: watchId,
+        unregister: () => _cancelWatch(watchId),
+      ),
     );
     return controller.stream;
+  }
+
+  Future<void> _cancelWatch(int watchId) async {
+    _pocket._workerStreams.remove(watchId);
+    try {
+      await _pocket._send(WireOp.watchCancel, {'watchId': watchId});
+    } catch (_) {}
   }
 
   /// Stream of committed record change events for this collection.
@@ -900,7 +911,8 @@ class WebCollection {
   }
 
   /// Convenience stream for listening to resolution record changes on this collection.
-  Stream<RecordChangeEvent> onResolution({String? field, ChangeAction? action}) {
+  Stream<RecordChangeEvent> onResolution(
+      {String? field, ChangeAction? action}) {
     return events.where((e) {
       if (!e.isResolution) return false;
       if (action != null && e.action != action) return false;
@@ -1102,29 +1114,39 @@ class WebQueryBuilder {
         _core.compilePlan(limitOverride: allMode ? null : (limit ?? 50));
 
     controller = StreamController<List<Map<String, Object?>>>(
-      onListen: () async {
-        _pocket._workerStreams[watchId] = controller;
-        try {
-          final res = await _sendCompiledPlan(_pocket, plan, watchId: watchId);
-          final items = ((res['items'] as List?) ?? const [])
-              .map((i) => (decodeWireValue(i) as Map)
-                  .map((k, v) => MapEntry(k.toString(), v)))
-              .toList();
-          if (!controller.isClosed) {
-            controller.add(items);
+      onListen: () => _pocket._watchTracker.runRegistration(
+        watchId: watchId,
+        register: () async {
+          _pocket._workerStreams[watchId] = controller;
+          try {
+            final res =
+                await _sendCompiledPlan(_pocket, plan, watchId: watchId);
+            final items = ((res['items'] as List?) ?? const [])
+                .map((i) => (decodeWireValue(i) as Map)
+                    .map((k, v) => MapEntry(k.toString(), v)))
+                .toList();
+            if (!controller.isClosed) {
+              controller.add(items);
+            }
+          } catch (e) {
+            if (!controller.isClosed) controller.addError(e);
           }
-        } catch (e) {
-          if (!controller.isClosed) controller.addError(e);
-        }
-      },
-      onCancel: () async {
-        _pocket._workerStreams.remove(watchId);
-        try {
-          await _pocket._send(WireOp.watchCancel, {'watchId': watchId});
-        } catch (_) {}
-      },
+        },
+        unregister: () => _cancelWatch(watchId),
+      ),
+      onCancel: () => _pocket._watchTracker.requestUnregistration(
+        watchId: watchId,
+        unregister: () => _cancelWatch(watchId),
+      ),
     );
     return controller.stream;
+  }
+
+  Future<void> _cancelWatch(int watchId) async {
+    _pocket._workerStreams.remove(watchId);
+    try {
+      await _pocket._send(WireOp.watchCancel, {'watchId': watchId});
+    } catch (_) {}
   }
 }
 
@@ -1622,36 +1644,45 @@ class WebConflicts {
     final watchId = _pocket._nextRequestId++;
 
     controller = StreamController<List<ConflictRecord>>.broadcast(
-      onListen: () async {
-        _pocket._workerStreams[watchId] = controller;
-        // Transform raw wire lists into typed ConflictRecords. The worker's
-        // native conflicts watch emits the initial list immediately on
-        // listen, so no initial snapshot is returned in the request response.
-        _pocket._workerEventDecoders[watchId] = (raw) {
-          final list = (raw as List).cast<Map>();
-          return [
-            for (final m in list)
-              decodeConflictRecord(m.map((k, v) => MapEntry(k.toString(), v)))
-          ];
-        };
-        try {
-          await _pocket._send(WireOp.conflictsWatch, {
-            'watchId': watchId,
-            if (store != null) 'store': store,
-          });
-        } catch (e) {
-          if (!controller.isClosed) controller.addError(e);
-        }
-      },
-      onCancel: () async {
-        _pocket._workerStreams.remove(watchId);
-        _pocket._workerEventDecoders.remove(watchId);
-        try {
-          await _pocket._send(WireOp.watchCancel, {'watchId': watchId});
-        } catch (_) {}
-      },
+      onListen: () => _pocket._watchTracker.runRegistration(
+        watchId: watchId,
+        register: () async {
+          _pocket._workerStreams[watchId] = controller;
+          // Transform raw wire lists into typed ConflictRecords. The worker's
+          // native conflicts watch emits the initial list immediately on
+          // listen, so no initial snapshot is returned in the request response.
+          _pocket._workerEventDecoders[watchId] = (raw) {
+            final list = (raw as List).cast<Map>();
+            return [
+              for (final m in list)
+                decodeConflictRecord(m.map((k, v) => MapEntry(k.toString(), v)))
+            ];
+          };
+          try {
+            await _pocket._send(WireOp.conflictsWatch, {
+              'watchId': watchId,
+              if (store != null) 'store': store,
+            });
+          } catch (e) {
+            if (!controller.isClosed) controller.addError(e);
+          }
+        },
+        unregister: () => _cancelWatch(watchId),
+      ),
+      onCancel: () => _pocket._watchTracker.requestUnregistration(
+        watchId: watchId,
+        unregister: () => _cancelWatch(watchId),
+      ),
     );
     return controller.stream;
+  }
+
+  Future<void> _cancelWatch(int watchId) async {
+    _pocket._workerStreams.remove(watchId);
+    _pocket._workerEventDecoders.remove(watchId);
+    try {
+      await _pocket._send(WireOp.watchCancel, {'watchId': watchId});
+    } catch (_) {}
   }
 
   /// Resolves the open conflict for [store]/[id] with [merged].

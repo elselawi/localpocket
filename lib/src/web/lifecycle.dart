@@ -93,6 +93,50 @@ Future<T> initializeWebWatch<T>({
   }
 }
 
+/// Tracks pending watch registrations and unregistrations across the asynchronous
+/// worker boundary to prevent watcher leaks on early subscription cancellation.
+class WatchSubscriptionTracker {
+  final Set<int> _inFlightRegistrations = {};
+  final Set<int> _inFlightUnregistrations = {};
+
+  /// Runs [register] while tracking [watchId] as in-flight. If an unregistration
+  /// request occurred while [register] was awaiting, [unregister] is invoked immediately.
+  Future<void> runRegistration({
+    required int watchId,
+    required Future<void> Function() register,
+    required Future<void> Function() unregister,
+  }) async {
+    _inFlightRegistrations.add(watchId);
+    try {
+      await register();
+    } finally {
+      _inFlightRegistrations.remove(watchId);
+      if (_inFlightUnregistrations.remove(watchId)) {
+        await unregister();
+      }
+    }
+  }
+
+  /// Requests unregistration for [watchId]. If [watchId] is currently in-flight
+  /// during registration, delays cancellation until registration finishes.
+  Future<void> requestUnregistration({
+    required int watchId,
+    required Future<void> Function() unregister,
+  }) async {
+    if (_inFlightRegistrations.contains(watchId)) {
+      _inFlightUnregistrations.add(watchId);
+      return;
+    }
+    await unregister();
+  }
+
+  bool isRegistrationInFlight(int watchId) =>
+      _inFlightRegistrations.contains(watchId);
+
+  bool isUnregistrationPending(int watchId) =>
+      _inFlightUnregistrations.contains(watchId);
+}
+
 /// Active bounded-chunk upload session (§ file upload).
 class UploadSession {
   final int uploadId;
