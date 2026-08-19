@@ -1,3 +1,5 @@
+import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/sync/sync_backend.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
 
@@ -138,6 +140,27 @@ void main() {
       expect(error.code, 'ValidationException');
       expect(error.message, 'invalid record');
       expect(error.details, {'type': 'ValidationException', 'field': 'id'});
+    });
+
+    test('stableWireErrorType provides deterministic categories and avoids minification artifacts', () {
+      expect(stableWireErrorType(ValidationException('bad')), 'ValidationException');
+      expect(stableWireErrorType(StorageError('disk full')), 'StorageError');
+      expect(stableWireErrorType(UniqueConstraintException(field: 'name')), 'UniqueConstraintException');
+      expect(stableWireErrorType(NotNullConstraintException(field: 'name')), 'NotNullConstraintException');
+      expect(stableWireErrorType(CheckConstraintException('check')), 'CheckConstraintException');
+      expect(stableWireErrorType(RecordNotFoundException('missing')), 'RecordNotFoundException');
+      expect(stableWireErrorType(DestructiveMigrationRefusedError('refused')), 'DestructiveMigrationRefusedError');
+      expect(stableWireErrorType(ReadOnlyTxError('ro')), 'ReadOnlyTxError');
+      expect(stableWireErrorType(TransientNetworkError('net')), 'TransientNetworkError');
+      expect(stableWireErrorType(AuthError('auth')), 'AuthError');
+      expect(stableWireErrorType(ProtocolError('proto')), 'ProtocolError');
+      expect(stableWireErrorType(StateError('state')), 'StateError');
+      expect(stableWireErrorType(ArgumentError('arg')), 'ArgumentError');
+      expect(stableWireErrorType(FormatException('fmt')), 'FormatException');
+      expect(stableWireErrorType(RangeError('range')), 'RangeError');
+      expect(stableWireErrorType(UnsupportedError('unsupported')), 'UnsupportedError');
+      // Unknown exceptions must return the stable fallback 'unknown', not minified runtimeType
+      expect(stableWireErrorType(Exception('custom')), 'unknown');
     });
   });
 

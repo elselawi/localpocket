@@ -54,7 +54,7 @@ void main() {
     final page = await col.query().orderBy('qty').limit(3).fetch();
     await col.query().orderBy('qty').limit(3).keysetAfter(page.nextCursor!);
     // 4. FTS search join.
-    await col.search('"n1"').limit(50).fetch();
+    await col.search('n1').limit(50).fetch();
     // 5. Outbox drain join (raw query — added explicitly below).
     await db.outbox.drain(limit: 10);
     sql.add("SELECT o.* FROM lp_outbox o "
