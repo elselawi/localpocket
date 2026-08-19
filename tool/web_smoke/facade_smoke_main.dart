@@ -4,6 +4,7 @@ import 'dart:js_interop_unsafe';
 
 import 'package:localpocket/src/core/schema.dart';
 import 'package:localpocket/src/web/facade.dart';
+import 'package:localpocket/src/web/facade/web_collections.dart';
 
 Future<void> main() async {
   var stage = 'start';
