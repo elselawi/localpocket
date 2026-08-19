@@ -193,6 +193,40 @@ void main() {
       expect(await pocket.collection('widgets').query().count(), 20);
     });
   });
+  test('compact emits RecordChangeEvent with action purge (EVT-01)', () async {
+    final pocket = await openPocket();
+    addTearDown(pocket.close);
+    const now = 1800000000000;
+    final id = generateRecordId();
+    await seedCleanArchivedRow(pocket, id, lastSeenMs: now - 200000000);
+
+    final events = <RecordChangeEvent>[];
+    final sub = pocket.collection('widgets').events.listen(events.add);
+    final localEvents = <RecordChangeEvent>[];
+    final localSub = pocket.onLocal().listen(localEvents.add);
+
+    final removed = await pocket.compact('widgets',
+        olderThan: const Duration(days: 1), nowMs: now);
+    expect(removed, 1);
+
+    await Future<void>.delayed(Duration.zero);
+    expect(events, hasLength(1));
+    final event = events.single;
+    expect(event.store, 'widgets');
+    expect(event.id, id);
+    expect(event.origin, ChangeOrigin.local);
+    expect(event.action, ChangeAction.purge);
+    expect(event.oldRecord, isNotNull);
+    expect(event.oldRecord?['id'], id);
+    expect(event.newRecord, isNull);
+    expect(event.changedFields, contains('name'));
+
+    expect(localEvents, hasLength(1));
+    expect(localEvents.single.action, ChangeAction.purge);
+
+    await sub.cancel();
+    await localSub.cancel();
+  });
 
   group('pruneOutbox', () {
     test('runs during queued writes without corruption', () async {

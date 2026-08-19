@@ -6,6 +6,7 @@ import 'database_adapter.dart';
 import 'database_factory.dart';
 
 import 'capabilities.dart';
+import 'codec.dart';
 import 'change_bus.dart';
 import 'cipher.dart';
 import 'ddl_compiler.dart';
@@ -580,6 +581,7 @@ class LocalPocket {
     final cutoff = now - olderThan.inMilliseconds;
     var count = 0;
     const chunkSize = 250;
+    final schema = requireTable(store).schema;
     while (true) {
       final rows = await db.rawQuery(
         'SELECT b.id FROM ${DdlCompiler.quote(store)} b '
@@ -594,6 +596,13 @@ class LocalPocket {
         final exec = tx.executor;
         for (final r in rows) {
           final id = r['id'] as String;
+          final existingRows = await exec.rawQuery(
+              'SELECT * FROM ${DdlCompiler.quote(store)} WHERE id = ? LIMIT 1',
+              [id]);
+          final existing = existingRows.isNotEmpty
+              ? decodeDbRow(schema, existingRows.first,
+                  cipher: fieldCipher, cryptoProvider: cryptoProvider)
+              : null;
           final refs = await exec.query('lp_file_refs',
               columns: ['ref_id', 'hash'],
               where: 'store = ? AND record_id = ?',
@@ -619,6 +628,18 @@ class LocalPocket {
               where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
           await exec.delete(store, where: 'id = ?', whereArgs: [id]);
           tx.addChange(ChangeSet(store, {id}));
+          if (existing != null) {
+            final changed = existing.keys.where((k) => k != 'id').toSet();
+            tx.addRecordEvent(RecordChangeEvent(
+              store: store,
+              id: id,
+              origin: ChangeOrigin.local,
+              action: ChangeAction.purge,
+              oldRecord: existing,
+              newRecord: null,
+              changedFields: changed,
+            ));
+          }
           count++;
         }
       });
