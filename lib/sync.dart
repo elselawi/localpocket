@@ -15,22 +15,23 @@ export 'src/sync/mapping.dart'
         normalizeRemoteBatch,
         normalizeRemoteBatchAsync;
 export 'src/sync/merge.dart'
-	show
-		ConflictResolver,
-		RemoteWinsResolver,
-		LocalWinsResolver,
-		SetUnionResolver,
-		CounterResolver,
-		AppendOnlyResolver,
-		CustomResolver,
-		MergeContext,
-		MergeResult,
-		MergeOutcome,
-		MergePolicy,
-		computeDirtyFields,
-		deepEquals,
-		merge3Way,
-		merge3WayAsync;
+    show
+        ConflictResolver,
+        RemoteWinsResolver,
+        LocalWinsResolver,
+        SetUnionResolver,
+        CounterResolver,
+        AppendOnlyResolver,
+        CustomResolver,
+        MergeContext,
+        MergeResult,
+        MergeOutcome,
+        MergePolicy,
+        MergeEngine,
+        computeDirtyFields,
+        deepEquals,
+        merge3Way,
+        merge3WayAsync;
 export 'src/sync/conflicts.dart' show Conflicts, ConflictRecord;
 export 'src/sync/sync_config.dart' show SyncConfig;
 export 'src/sync/status.dart' show SyncEngineState, SyncReport, SyncStatus;
@@ -40,7 +41,7 @@ export 'src/sync/sweeper.dart' show SweepReport, Sweeper;
 export 'src/sync/pusher.dart' show PushReport, Pusher;
 export 'src/files/file_sync_lane.dart' show FileSyncLane, FileSyncReport;
 export 'src/files/blob_store.dart'
-	show BlobStore, MemoryBlobStore, EncryptingBlobStore;
+    show BlobStore, MemoryBlobStore, EncryptingBlobStore;
 export 'src/files/native_blob_store_platform.dart' show NativeBlobStore;
 export 'src/files/files_api.dart' show LocalPocketFiles, FileRef;
 export 'src/sync/engine.dart' show SyncEngine;

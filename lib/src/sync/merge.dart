@@ -322,199 +322,198 @@ Object? resolveFieldValue(
   return remoteVal;
 }
 
-/// 3-way merge over top-level and nested keys:
-///
-/// ```
-/// for key in union(local, remote, base):
-///   l == r -> l
-///   l == b -> r          # only remote changed
-///   r == b -> l          # only local changed
-///   else   -> resolver(collection, key).resolve(l, r, b)   # both changed
-/// ```
-///
-/// Precedence: field-level override > collection-level resolver > package default (RemoteWins).
-FutureOr<MergeResult> merge3WayAsync({
-  required Map<String, Object?> base,
-  required Map<String, Object?> local,
-  required Map<String, Object?> remote,
-  String store = '',
-  String recordId = '',
-  MergePolicy? policy,
-}) async {
-  final dirtyLocal = computeDirtyFields(base, local);
-  final dirtyRemote = computeDirtyFields(base, remote);
+abstract class _ResolverAdapter {
+  const _ResolverAdapter();
 
-  final ctx = MergeContext(
-    store: store,
-    recordId: recordId,
-    base: base,
-    local: local,
-    remote: remote,
-    dirtyLocal: dirtyLocal,
-    dirtyRemote: dirtyRemote,
-  );
+  FutureOr<MergeResult?> invoke(ConflictResolver resolver, MergeContext ctx);
+}
 
-  // 1. Check custom / collection-level resolver first if provided
-  if (policy?.collectionResolver != null) {
-    final customRes = await policy!.collectionResolver!.resolve(ctx);
-    if (customRes == null) {
-      return MergeResult(
-        merged: {...base, ...remote, ...local},
-        needsReview: true,
-        dirtyLocal: dirtyLocal,
-        dirtyRemote: dirtyRemote,
-        note: 'Collection resolver declined resolution',
-      );
+class _AsyncResolverAdapter extends _ResolverAdapter {
+  const _AsyncResolverAdapter();
+
+  @override
+  FutureOr<MergeResult?> invoke(ConflictResolver resolver, MergeContext ctx) =>
+      resolver.resolve(ctx);
+}
+
+class _SyncResolverAdapter extends _ResolverAdapter {
+  const _SyncResolverAdapter();
+
+  @override
+  FutureOr<MergeResult?> invoke(ConflictResolver resolver, MergeContext ctx) {
+    final value = resolver.resolve(ctx);
+    if (value is Future) {
+      throw StateError(
+          'Async ConflictResolver used in sync merge path; use merge3WayAsync');
     }
-    return MergeResult(
-      merged: customRes.merged,
-      needsReview: customRes.needsReview,
-      note: customRes.note,
-      dirtyLocal: dirtyLocal,
-      dirtyRemote: dirtyRemote,
+    return value;
+  }
+}
+
+/// Canonical merge engine with async/sync resolver adapters.
+class MergeEngine {
+  const MergeEngine._();
+
+  /// Runs the core merge algorithm with async custom resolvers.
+  static Future<MergeResult> runAsync({
+    required Map<String, Object?> base,
+    required Map<String, Object?> local,
+    required Map<String, Object?> remote,
+    String store = '',
+    String recordId = '',
+    MergePolicy? policy,
+  }) async {
+    return await _runWithAdapter(
+      base: base,
+      local: local,
+      remote: remote,
+      store: store,
+      recordId: recordId,
+      policy: policy,
+      adapter: const _AsyncResolverAdapter(),
     );
   }
 
-  final keys = {...local.keys, ...remote.keys, ...base.keys};
-  final out = <String, Object?>{};
-  bool needsReview = false;
-
-  for (final k in keys) {
-    final l = local[k];
-    final r = remote[k];
-    final b = base[k];
-
-    // Special handling for the `archived` field
-    if (k == 'archived') {
-      final bArch = b == true;
-      final lArch = l == true;
-      final rArch = r == true;
-      if (lArch == rArch) {
-        out[k] = lArch;
-      } else if (lArch == bArch) {
-        // Only remote changed archive status
-        out[k] = rArch;
-      } else if (rArch == bArch) {
-        // Only local changed archive status
-        out[k] = lArch;
-      } else {
-        // Both changed archive status concurrently
-        final fieldOverride = policy?.fieldOverrides[k];
-        if (fieldOverride != null) {
-          out[k] = resolveFieldValue(k, b, l, r, fieldOverride);
-        } else {
-          out[k] = rArch; // default remote wins
-        }
-      }
-      continue;
-    }
-
-    if (deepEquals(l, r)) {
-      out[k] = l;
-    } else if (deepEquals(l, b)) {
-      out[k] = r; // only remote changed
-    } else if (deepEquals(r, b)) {
-      out[k] = l; // only local changed
-    } else {
-      // Both changed concurrently: check field-level override
-      final fieldOverride = policy?.fieldOverrides[k];
-      if (fieldOverride != null) {
-        if (fieldOverride is CustomResolver) {
-          final fieldCtx = MergeContext(
-            store: store,
-            recordId: recordId,
-            base: {k: b},
-            local: {k: l},
-            remote: {k: r},
-            dirtyLocal: {k},
-            dirtyRemote: {k},
-          );
-          final fieldRes = await fieldOverride.resolve(fieldCtx);
-          if (fieldRes == null || fieldRes.needsReview) {
-            needsReview = true;
-            out[k] = r;
-          } else {
-            out[k] = fieldRes.merged[k];
-          }
-        } else {
-          out[k] = resolveFieldValue(k, b, l, r, fieldOverride);
-        }
-      } else {
-        // Package default: remote wins
-        out[k] = r;
-      }
-    }
-  }
-
-  // If policy says editsUnarchive and local made content edits, unarchive
-  if (policy?.editsUnarchive == true) {
-    final nonArchiveLocalDirty =
-        dirtyLocal.where((f) => f != 'archived').isNotEmpty;
-    if (nonArchiveLocalDirty && out['archived'] == true) {
-      out['archived'] = false;
-    }
-  }
-
-  return MergeResult(
-    merged: out,
-    needsReview: needsReview,
-    dirtyLocal: dirtyLocal,
-    dirtyRemote: dirtyRemote,
-  );
-}
-
-/// Synchronous 3-way merge wrapper (for non-async resolver chains or legacy calls).
-MergeResult merge3Way({
-  required Map<String, Object?> base,
-  required Map<String, Object?> local,
-  required Map<String, Object?> remote,
-  String store = '',
-  String recordId = '',
-  MergePolicy? policy,
-}) {
-  final dirtyLocal = computeDirtyFields(base, local);
-  final dirtyRemote = computeDirtyFields(base, remote);
-
-  final ctx = MergeContext(
-    store: store,
-    recordId: recordId,
-    base: base,
-    local: local,
-    remote: remote,
-    dirtyLocal: dirtyLocal,
-    dirtyRemote: dirtyRemote,
-  );
-
-  if (policy?.collectionResolver != null) {
-    final resOrFuture = policy!.collectionResolver!.resolve(ctx);
-    if (resOrFuture is Future<MergeResult?>) {
+  /// Runs the same core merge logic with sync-only custom resolvers.
+  static MergeResult runSync({
+    required Map<String, Object?> base,
+    required Map<String, Object?> local,
+    required Map<String, Object?> remote,
+    String store = '',
+    String recordId = '',
+    MergePolicy? policy,
+  }) {
+    final result = _runWithAdapter(
+      base: base,
+      local: local,
+      remote: remote,
+      store: store,
+      recordId: recordId,
+      policy: policy,
+      adapter: const _SyncResolverAdapter(),
+    );
+    if (result is Future<MergeResult>) {
       throw StateError(
           'Async ConflictResolver used in sync merge3Way; use merge3WayAsync');
     }
-    final customRes = resOrFuture;
-    if (customRes == null) {
+    return result as MergeResult;
+  }
+
+  static FutureOr<MergeResult> _runWithAdapter({
+    required Map<String, Object?> base,
+    required Map<String, Object?> local,
+    required Map<String, Object?> remote,
+    required String store,
+    required String recordId,
+    required MergePolicy? policy,
+    required _ResolverAdapter adapter,
+  }) {
+    final dirtyLocal = computeDirtyFields(base, local);
+    final dirtyRemote = computeDirtyFields(base, remote);
+
+    final ctx = MergeContext(
+      store: store,
+      recordId: recordId,
+      base: base,
+      local: local,
+      remote: remote,
+      dirtyLocal: dirtyLocal,
+      dirtyRemote: dirtyRemote,
+    );
+
+    if (policy?.collectionResolver != null) {
+      final customResOrFuture =
+          adapter.invoke(policy!.collectionResolver!, ctx);
+      if (customResOrFuture is Future<MergeResult?>) {
+        return customResOrFuture.then((customRes) {
+          if (customRes == null) {
+            return MergeResult(
+              merged: {...base, ...remote, ...local},
+              needsReview: true,
+              dirtyLocal: dirtyLocal,
+              dirtyRemote: dirtyRemote,
+              note: 'Collection resolver declined resolution',
+            );
+          }
+          return MergeResult(
+            merged: customRes.merged,
+            needsReview: customRes.needsReview,
+            note: customRes.note,
+            dirtyLocal: dirtyLocal,
+            dirtyRemote: dirtyRemote,
+          );
+        });
+      }
+
+      final customRes = customResOrFuture;
+      if (customRes == null) {
+        return MergeResult(
+          merged: {...base, ...remote, ...local},
+          needsReview: true,
+          dirtyLocal: dirtyLocal,
+          dirtyRemote: dirtyRemote,
+          note: 'Collection resolver declined resolution',
+        );
+      }
       return MergeResult(
-        merged: {...base, ...remote, ...local},
-        needsReview: true,
+        merged: customRes.merged,
+        needsReview: customRes.needsReview,
+        note: customRes.note,
         dirtyLocal: dirtyLocal,
         dirtyRemote: dirtyRemote,
-        note: 'Collection resolver declined resolution',
       );
     }
-    return MergeResult(
-      merged: customRes.merged,
-      needsReview: customRes.needsReview,
-      note: customRes.note,
+
+    final keys = [...local.keys, ...remote.keys, ...base.keys];
+    return _mergeKeyRange(
+      keys: keys,
+      index: 0,
+      base: base,
+      local: local,
+      remote: remote,
+      out: <String, Object?>{},
+      needsReview: false,
+      policy: policy,
+      store: store,
+      recordId: recordId,
+      adapter: adapter,
       dirtyLocal: dirtyLocal,
       dirtyRemote: dirtyRemote,
     );
   }
 
-  final keys = {...local.keys, ...remote.keys, ...base.keys};
-  final out = <String, Object?>{};
-  bool needsReview = false;
+  static FutureOr<MergeResult> _mergeKeyRange({
+    required List<String> keys,
+    required int index,
+    required Map<String, Object?> base,
+    required Map<String, Object?> local,
+    required Map<String, Object?> remote,
+    required Map<String, Object?> out,
+    required bool needsReview,
+    required MergePolicy? policy,
+    required String store,
+    required String recordId,
+    required _ResolverAdapter adapter,
+    required Set<String> dirtyLocal,
+    required Set<String> dirtyRemote,
+  }) {
+    if (index >= keys.length) {
+      if (policy?.editsUnarchive == true) {
+        final nonArchiveLocalDirty =
+            dirtyLocal.where((f) => f != 'archived').isNotEmpty;
+        if (nonArchiveLocalDirty && out['archived'] == true) {
+          out['archived'] = false;
+        }
+      }
+      return MergeResult(
+        merged: out,
+        needsReview: needsReview,
+        dirtyLocal: dirtyLocal,
+        dirtyRemote: dirtyRemote,
+      );
+    }
 
-  for (final k in keys) {
+    final k = keys[index];
     final l = local[k];
     final r = remote[k];
     final b = base[k];
@@ -537,61 +536,226 @@ MergeResult merge3Way({
           out[k] = rArch;
         }
       }
-      continue;
+      return _mergeKeyRange(
+        keys: keys,
+        index: index + 1,
+        base: base,
+        local: local,
+        remote: remote,
+        out: out,
+        needsReview: needsReview,
+        policy: policy,
+        store: store,
+        recordId: recordId,
+        adapter: adapter,
+        dirtyLocal: dirtyLocal,
+        dirtyRemote: dirtyRemote,
+      );
     }
 
     if (deepEquals(l, r)) {
       out[k] = l;
-    } else if (deepEquals(l, b)) {
+      return _mergeKeyRange(
+        keys: keys,
+        index: index + 1,
+        base: base,
+        local: local,
+        remote: remote,
+        out: out,
+        needsReview: needsReview,
+        policy: policy,
+        store: store,
+        recordId: recordId,
+        adapter: adapter,
+        dirtyLocal: dirtyLocal,
+        dirtyRemote: dirtyRemote,
+      );
+    }
+
+    if (deepEquals(l, b)) {
       out[k] = r;
-    } else if (deepEquals(r, b)) {
+      return _mergeKeyRange(
+        keys: keys,
+        index: index + 1,
+        base: base,
+        local: local,
+        remote: remote,
+        out: out,
+        needsReview: needsReview,
+        policy: policy,
+        store: store,
+        recordId: recordId,
+        adapter: adapter,
+        dirtyLocal: dirtyLocal,
+        dirtyRemote: dirtyRemote,
+      );
+    }
+
+    if (deepEquals(r, b)) {
       out[k] = l;
-    } else {
-      final fieldOverride = policy?.fieldOverrides[k];
-      if (fieldOverride != null) {
-        if (fieldOverride is CustomResolver) {
-          final fieldCtx = MergeContext(
-            store: store,
-            recordId: recordId,
-            base: {k: b},
-            local: {k: l},
-            remote: {k: r},
-            dirtyLocal: {k},
-            dirtyRemote: {k},
-          );
-          final resOrFuture = fieldOverride.resolve(fieldCtx);
-          if (resOrFuture is Future<MergeResult?>) {
-            throw StateError(
-                'Async CustomResolver used in sync merge3Way; use merge3WayAsync');
-          }
-          final fieldRes = resOrFuture;
-          if (fieldRes == null || fieldRes.needsReview) {
-            needsReview = true;
-            out[k] = r;
-          } else {
-            out[k] = fieldRes.merged[k];
-          }
-        } else {
-          out[k] = resolveFieldValue(k, b, l, r, fieldOverride);
+      return _mergeKeyRange(
+        keys: keys,
+        index: index + 1,
+        base: base,
+        local: local,
+        remote: remote,
+        out: out,
+        needsReview: needsReview,
+        policy: policy,
+        store: store,
+        recordId: recordId,
+        adapter: adapter,
+        dirtyLocal: dirtyLocal,
+        dirtyRemote: dirtyRemote,
+      );
+    }
+
+    final fieldOverride = policy?.fieldOverrides[k];
+    if (fieldOverride != null) {
+      if (fieldOverride is CustomResolver) {
+        final fieldCtx = MergeContext(
+          store: store,
+          recordId: recordId,
+          base: {k: b},
+          local: {k: l},
+          remote: {k: r},
+          dirtyLocal: {k},
+          dirtyRemote: {k},
+        );
+        final fieldResOrFuture = adapter.invoke(fieldOverride, fieldCtx);
+        if (fieldResOrFuture is Future<MergeResult?>) {
+          return fieldResOrFuture.then((fieldRes) {
+            var nextNeedsReview = needsReview;
+            if (fieldRes == null || fieldRes.needsReview) {
+              nextNeedsReview = true;
+              out[k] = r;
+            } else {
+              out[k] = fieldRes.merged[k];
+            }
+            return _mergeKeyRange(
+              keys: keys,
+              index: index + 1,
+              base: base,
+              local: local,
+              remote: remote,
+              out: out,
+              needsReview: nextNeedsReview,
+              policy: policy,
+              store: store,
+              recordId: recordId,
+              adapter: adapter,
+              dirtyLocal: dirtyLocal,
+              dirtyRemote: dirtyRemote,
+            );
+          });
         }
-      } else {
-        out[k] = r;
+
+        final fieldRes = fieldResOrFuture;
+        var nextNeedsReview = needsReview;
+        if (fieldRes == null || fieldRes.needsReview) {
+          nextNeedsReview = true;
+          out[k] = r;
+        } else {
+          out[k] = fieldRes.merged[k];
+        }
+        return _mergeKeyRange(
+          keys: keys,
+          index: index + 1,
+          base: base,
+          local: local,
+          remote: remote,
+          out: out,
+          needsReview: nextNeedsReview,
+          policy: policy,
+          store: store,
+          recordId: recordId,
+          adapter: adapter,
+          dirtyLocal: dirtyLocal,
+          dirtyRemote: dirtyRemote,
+        );
       }
-    }
-  }
 
-  if (policy?.editsUnarchive == true) {
-    final nonArchiveLocalDirty =
-        dirtyLocal.where((f) => f != 'archived').isNotEmpty;
-    if (nonArchiveLocalDirty && out['archived'] == true) {
-      out['archived'] = false;
+      out[k] = resolveFieldValue(k, b, l, r, fieldOverride);
+      return _mergeKeyRange(
+        keys: keys,
+        index: index + 1,
+        base: base,
+        local: local,
+        remote: remote,
+        out: out,
+        needsReview: needsReview,
+        policy: policy,
+        store: store,
+        recordId: recordId,
+        adapter: adapter,
+        dirtyLocal: dirtyLocal,
+        dirtyRemote: dirtyRemote,
+      );
     }
-  }
 
-  return MergeResult(
-    merged: out,
-    needsReview: needsReview,
-    dirtyLocal: dirtyLocal,
-    dirtyRemote: dirtyRemote,
+    out[k] = r;
+    return _mergeKeyRange(
+      keys: keys,
+      index: index + 1,
+      base: base,
+      local: local,
+      remote: remote,
+      out: out,
+      needsReview: needsReview,
+      policy: policy,
+      store: store,
+      recordId: recordId,
+      adapter: adapter,
+      dirtyLocal: dirtyLocal,
+      dirtyRemote: dirtyRemote,
+    );
+  }
+}
+
+/// 3-way merge over top-level and nested keys:
+///
+/// ```
+/// for key in union(local, remote, base):
+///   l == r -> l
+///   l == b -> r          # only remote changed
+///   r == b -> l          # only local changed
+///   else   -> resolver(collection, key).resolve(l, r, b)   # both changed
+/// ```
+///
+/// Precedence: field-level override > collection-level resolver > package default (RemoteWins).
+FutureOr<MergeResult> merge3WayAsync({
+  required Map<String, Object?> base,
+  required Map<String, Object?> local,
+  required Map<String, Object?> remote,
+  String store = '',
+  String recordId = '',
+  MergePolicy? policy,
+}) {
+  return MergeEngine.runAsync(
+    base: base,
+    local: local,
+    remote: remote,
+    store: store,
+    recordId: recordId,
+    policy: policy,
+  );
+}
+
+/// Synchronous 3-way merge wrapper (for non-async resolver chains or legacy calls).
+MergeResult merge3Way({
+  required Map<String, Object?> base,
+  required Map<String, Object?> local,
+  required Map<String, Object?> remote,
+  String store = '',
+  String recordId = '',
+  MergePolicy? policy,
+}) {
+  return MergeEngine.runSync(
+    base: base,
+    local: local,
+    remote: remote,
+    store: store,
+    recordId: recordId,
+    policy: policy,
   );
 }

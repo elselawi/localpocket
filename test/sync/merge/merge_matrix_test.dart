@@ -383,6 +383,218 @@ void main() {
       expect(res.merged['d'], 4, reason: 'remote-only key kept');
     });
   });
+
+  group('MergeEngine parity and async adapters', () {
+    test('MergeEngine.runSync and runAsync agree for branch-heavy cases',
+        () async {
+      final cases = <({
+        Map<String, Object?> base,
+        Map<String, Object?> local,
+        Map<String, Object?> remote,
+        MergePolicy? policy
+      })>[
+        (
+          base: {'title': 'old', 'count': 3},
+          local: {'title': 'local', 'count': 4},
+          remote: {'title': 'remote', 'count': 5},
+          policy: null,
+        ),
+        (
+          base: {'archived': false, 'name': 'v0'},
+          local: {'archived': true, 'name': 'v1'},
+          remote: {'archived': false, 'name': 'v0'},
+          policy: const MergePolicy(editsUnarchive: true),
+        ),
+        (
+          base: {
+            'tags': ['a', 'b']
+          },
+          local: {
+            'tags': ['a', 'c']
+          },
+          remote: {
+            'tags': ['b', 'd']
+          },
+          policy:
+              const MergePolicy(fieldOverrides: {'tags': SetUnionResolver()}),
+        ),
+        (
+          base: {'score': 10},
+          local: {'score': 15},
+          remote: {'score': 12},
+          policy:
+              const MergePolicy(fieldOverrides: {'score': CounterResolver()}),
+        ),
+        (
+          base: {'value': 'start'},
+          local: {'value': 'local'},
+          remote: {'value': 'remote'},
+          policy: const MergePolicy(
+            fieldOverrides: {'value': LocalWinsResolver()},
+          ),
+        ),
+      ];
+
+      for (final testCase in cases) {
+        final sync = MergeEngine.runSync(
+          base: testCase.base,
+          local: testCase.local,
+          remote: testCase.remote,
+          store: 'patients',
+          recordId: 'rec-1',
+          policy: testCase.policy,
+        );
+        final async = await MergeEngine.runAsync(
+          base: testCase.base,
+          local: testCase.local,
+          remote: testCase.remote,
+          store: 'patients',
+          recordId: 'rec-1',
+          policy: testCase.policy,
+        );
+
+        expect(sync.merged, equals(async.merged));
+        expect(sync.needsReview, equals(async.needsReview));
+        expect(sync.dirtyLocal, equals(async.dirtyLocal));
+        expect(sync.dirtyRemote, equals(async.dirtyRemote));
+      }
+    });
+
+    test(
+        'sync merge rejects async custom resolvers in both collection and field positions',
+        () {
+      final asyncCollection = CustomResolver((ctx) async => MergeResult(
+            merged: {'value': 'collection'},
+          ));
+      final asyncField = CustomResolver((ctx) async => MergeResult(
+            merged: {'value': 'field'},
+          ));
+
+      expect(
+        () => merge3Way(
+          base: {'value': 'base'},
+          local: {'value': 'local'},
+          remote: {'value': 'remote'},
+          policy: MergePolicy(collectionResolver: asyncCollection),
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(
+        () => merge3Way(
+          base: {'value': 'base'},
+          local: {'value': 'local'},
+          remote: {'value': 'remote'},
+          policy: MergePolicy(fieldOverrides: {'value': asyncField}),
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test(
+        'async merge accepts async custom resolvers and keeps review fallback semantics',
+        () async {
+      final asyncField = CustomResolver((ctx) async => MergeResult(
+            merged: {'value': 'field'},
+          ));
+      final asyncReview = CustomResolver((ctx) async => MergeResult(
+            merged: {'value': 'ignored'},
+            needsReview: true,
+          ));
+      final asyncCollection = CustomResolver((ctx) async => MergeResult(
+            merged: {'value': 'collection', 'extra': 'ok'},
+          ));
+
+      final fieldRes = await merge3WayAsync(
+        base: {'value': 'base'},
+        local: {'value': 'local'},
+        remote: {'value': 'remote'},
+        policy: MergePolicy(fieldOverrides: {'value': asyncField}),
+      );
+      expect(fieldRes.merged['value'], 'field');
+
+      final reviewRes = await merge3WayAsync(
+        base: {'value': 'base'},
+        local: {'value': 'local'},
+        remote: {'value': 'remote'},
+        policy: MergePolicy(fieldOverrides: {'value': asyncReview}),
+      );
+      expect(reviewRes.needsReview, isTrue);
+      expect(reviewRes.merged['value'], 'remote');
+
+      final collectionRes = await merge3WayAsync(
+        base: {'value': 'base'},
+        local: {'value': 'local'},
+        remote: {'value': 'remote'},
+        policy: MergePolicy(collectionResolver: asyncCollection),
+      );
+      expect(collectionRes.merged['value'], 'collection');
+      expect(collectionRes.merged['extra'], 'ok');
+    });
+
+    test('MergeEngine respects collection precedence over field overrides', () {
+      final collection = CustomResolver((ctx) => MergeResult(
+            merged: {'value': 'collection'},
+          ));
+      final field = const LocalWinsResolver();
+
+      final res = MergeEngine.runSync(
+        base: {'value': 'base'},
+        local: {'value': 'local'},
+        remote: {'value': 'remote'},
+        policy: MergePolicy(
+          collectionResolver: collection,
+          fieldOverrides: {'value': field},
+        ),
+      );
+
+      expect(res.merged['value'], 'collection');
+    });
+
+    test('dirty tracking includes nested paths and missing-key unions', () {
+      final base = {
+        'meta': {'a': 1, 'b': 2},
+        'baseOnly': true,
+        'shared': 'x',
+      };
+      final local = {
+        'meta': {'a': 1, 'b': 3, 'c': 4},
+        'shared': 'x',
+      };
+      final remote = {
+        'meta': {'a': 9, 'b': 2},
+        'shared': 'y',
+      };
+
+      final res = MergeEngine.runSync(
+        base: base,
+        local: local,
+        remote: remote,
+      );
+
+      expect(res.dirtyLocal, containsAll(['meta', 'meta.b', 'meta.c']));
+      expect(res.dirtyRemote, containsAll(['meta', 'meta.a', 'shared']));
+      expect(res.merged.containsKey('baseOnly'), isTrue);
+      expect(res.merged['baseOnly'], isNull);
+    });
+
+    test(
+        'archive branch with both sides changed can still be resolved by a field override',
+        () {
+      final policy = const MergePolicy(
+        fieldOverrides: {'archived': LocalWinsResolver()},
+      );
+
+      final res = MergeEngine.runSync(
+        base: {'archived': false},
+        local: {'archived': true},
+        remote: {'archived': false},
+        policy: policy,
+      );
+
+      expect(res.merged['archived'], true);
+    });
+  });
 }
 
 String _short(Object? v) {
