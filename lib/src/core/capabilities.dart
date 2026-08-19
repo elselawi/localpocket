@@ -1,7 +1,6 @@
 import 'database_adapter.dart';
 
 /// Platform profile. The core never imports `dart:io`; the app tells us which
-/// profile to assume so capability probing can skip WAL/mmap on web.
 enum PlatformProfile { native, web }
 
 /// Probing result of the SQLite engine.

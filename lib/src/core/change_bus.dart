@@ -10,6 +10,8 @@ enum ChangeOrigin {
   remote,
 
   /// Resolved via 3-way merge, conflict resolution, or server push settlement transformation.
+  /// when checking if a change came from remote server.
+  /// this also means that it did came from remote server.
   resolution,
 }
 
