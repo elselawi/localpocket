@@ -23,17 +23,114 @@ Future<void> main() async {
       keepUnsyncedArchives: true,
       fields: [Field.text('title', required: true), Field.bool('done')],
     );
+    final articlesSchema = CollectionSchema<Object?>(
+      name: 'articles',
+      version: 1,
+      fields: [
+        Field.text('title', required: true),
+        Field.text('body'),
+      ],
+      fts: const FtsSpec(['title', 'body']),
+    );
     final pocket = await LocalPocket.open(
       path:
           'transaction_watch_lifecycle_${DateTime.now().microsecondsSinceEpoch}',
-      stores: [schema],
+      stores: [schema, articlesSchema],
     );
     final events = pocket.collection('events');
+    final articles = pocket.collection('articles');
     try {
       await events.put({
         'id': 'event0000001234',
         'title': 'initial',
         'done': false,
+      });
+
+      // FTS corpus for transaction search parity (Task 2.1). The archived row
+      // is excluded by default and included by .includeArchived(); all() and
+      // includeHidden() must also be exposed by the tx search builder with the
+      // same compiled-query semantics as the ordinary web search builder.
+      await articles.putAll([
+        {
+          'id': 'art000000000001',
+          'title': 'SQLite full-text search',
+          'body': 'database performance and indexing',
+        },
+        {
+          'id': 'art000000000002',
+          'title': 'Dart on the web',
+          'body': 'database engines run in a worker',
+        },
+        {
+          'id': 'art000000000003',
+          'title': 'Archived record',
+          'body': 'database terms to count',
+        },
+      ]);
+      await articles.archive('art000000000003');
+
+      // Transaction search parity (Task 2.1): the tx search builder must
+      // expose the same query-scope options as the ordinary web search builder
+      // (limit, all, includeArchived, includeHidden) and, for an identical
+      // option set, produce the same ranked ids through the compiled-query
+      // plan into the active transaction session.
+      List<String> idsOf(List<dynamic> hits) =>
+          hits.map((h) => (h as dynamic).id as String).toList();
+      Future<List<String>> normalSearch({
+        required int? limit,
+        required bool archived,
+        required bool hidden,
+      }) async {
+        var b = articles.search('database');
+        if (archived) b = b.includeArchived();
+        if (hidden) b = b.includeHidden();
+        if (limit == null) {
+          b = b.all();
+        } else {
+          b = b.limit(limit);
+        }
+        return idsOf(await b.fetch());
+      }
+
+      await pocket.transaction((tx) async {
+        Future<List<String>> txSearch({
+          required int? limit,
+          required bool archived,
+          required bool hidden,
+        }) async {
+          var b = tx.search('articles', 'database');
+          if (archived) b = b.includeArchived();
+          if (hidden) b = b.includeHidden();
+          if (limit == null) {
+            b = b.all();
+          } else {
+            b = b.limit(limit);
+          }
+          return idsOf(await b.fetch());
+        }
+
+        for (final (limit, archived, hidden) in [
+          (10, false, false),
+          (10, true, false),
+          (10, false, true),
+          (10, true, true),
+          (null, true, true),
+        ]) {
+          final normal = await normalSearch(
+              limit: limit, archived: archived, hidden: hidden);
+          final inTx =
+              await txSearch(limit: limit, archived: archived, hidden: hidden);
+          if (inTx.length != normal.length ||
+              inTx.toSet().difference(normal.toSet()).isNotEmpty) {
+            throw StateError(
+                'tx search parity mismatch for limit=$limit archived=$archived '
+                'hidden=$hidden: tx=$inTx normal=$normal');
+          }
+        }
+        if ((await tx.search('articles', 'zzznonexistent').limit(5).fetch())
+            .isNotEmpty) {
+          throw StateError('tx search absent term must return no hits.');
+        }
       });
 
       // Nested savepoint rollback must not discard the outer transaction.
@@ -56,6 +153,45 @@ Future<void> main() async {
       if ((await events.get('event0000001234'))?['title'] != 'outer') {
         throw StateError(
             'Outer transaction did not commit after savepoint rollback.');
+      }
+
+      // Repeated nested-transaction failures must not leak savepoint
+      // bookkeeping. The worker generates savepoint names from the active
+      // savepoint count (`lp_sp_wire_${sess.savepoints.length}`) and must
+      // release each rolled-back savepoint; otherwise stale names accumulate
+      // and a later nested transaction collides with a recycled name.
+      await pocket.transaction((tx) async {
+        final txEvents = tx.collection('events');
+        await txEvents.patch('event0000001234', {'title': 'repeated-outer'});
+        for (var i = 0; i < 5; i++) {
+          try {
+            await tx.transaction((nested) async {
+              await nested
+                  .collection('events')
+                  .patch('event0000001234', {'title': 'repeated-nested-$i'});
+              throw StateError('force nested rollback $i');
+            });
+          } catch (_) {
+            // expected: the nested savepoint rolled back and released
+          }
+        }
+        // After many rollbacks the next nested transaction must still work:
+        // this fails if a stale savepoint name was recycled.
+        await tx.transaction((nested) async {
+          await nested
+              .collection('events')
+              .patch('event0000001234', {'title': 'repeated-success'});
+        });
+        final inside = await txEvents.get('event0000001234');
+        if (inside?['title'] != 'repeated-success') {
+          throw StateError(
+              'Nested transaction failed after repeated rollbacks: $inside');
+        }
+      });
+      if ((await events.get('event0000001234'))?['title'] !=
+          'repeated-success') {
+        throw StateError(
+            'Outer transaction did not commit repeated nested work.');
       }
 
       // Only one worker transaction session may be active.

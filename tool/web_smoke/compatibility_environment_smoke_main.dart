@@ -42,6 +42,21 @@ Future<void> main() async {
       if (pocket.capabilities.walSupported) {
         throw StateError('Web database incorrectly reports WAL support.');
       }
+      // Capability reporting must reflect the LIVE worker engine, not a
+      // hard-coded facade matrix: a real SQLite version must be reconciled
+      // from the worker probe (never empty/unknown), and FTS5 must be
+      // reported so FTS stores can be opened.
+      if (pocket.capabilities.sqliteVersion.isEmpty) {
+        throw StateError(
+            'Web capabilities did not reconcile a live SQLite version.');
+      }
+      if (!pocket.capabilities.hasFts5) {
+        throw StateError(
+            'Web capabilities must report FTS5 to support FTS stores.');
+      }
+      if (pocket.storageCapabilities.storage.isEmpty) {
+        throw StateError('Storage capability did not report a backend.');
+      }
       if (pocket.storageCapabilities.multiTabSync) {
         throw StateError('Unsupported multi-tab sync was reported.');
       }
@@ -56,9 +71,6 @@ Future<void> main() async {
           await pocket.collection('environment').get('envcheck0000001');
       if (read?['value'] != 'reload-safe') {
         throw StateError('Environment smoke write/read failed.');
-      }
-      if (pocket.storageCapabilities.storage.isEmpty) {
-        throw StateError('Storage capability did not report a backend.');
       }
     } finally {
       await pocket.close();

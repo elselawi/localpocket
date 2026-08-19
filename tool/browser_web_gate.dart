@@ -56,7 +56,6 @@ Future<void> main() async {
     'dart',
     ['run', 'tool/web_smoke_server.dart', root.path, '8124'],
     workingDirectory: root.path,
-    runInShell: Platform.isWindows,
   );
   final serverReady = Completer<void>();
   final serverOutput = <String>[];
@@ -108,7 +107,8 @@ Future<void> main() async {
   } finally {
     await subscription.cancel();
     await errorSubscription.cancel();
-    server.kill(ProcessSignal.sigterm);
+    server.kill();
+    if (Platform.isWindows) Process.runSync('taskkill', ['/F', '/T', '/PID', '${server.pid}']);
     await server.exitCode
         .timeout(const Duration(seconds: 5), onTimeout: () => -1);
   }
