@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 /// Canonical JSON serialization.
+/// i.e. turns a Dart object into a string
 ///
 /// Rules:
 /// - Object keys are sorted lexicographically.
@@ -23,7 +24,9 @@ void _writeCanonical(StringBuffer out, Object? value) {
   } else if (value is int) {
     out.write(value.toString());
   } else if (value is double) {
-    if (value.isFinite && value == value.roundToDouble() && value.abs() < 1e15) {
+    if (value.isFinite &&
+        value == value.roundToDouble() &&
+        value.abs() < 1e15) {
       out.write(value.round().toString());
     } else {
       out.write(value.toString());
@@ -52,6 +55,7 @@ void _writeCanonical(StringBuffer out, Object? value) {
     }
     out.write('}');
   } else {
-    throw ArgumentError('Cannot canonicalize value of type ${value.runtimeType}');
+    throw ArgumentError(
+        'Cannot canonicalize value of type ${value.runtimeType}');
   }
 }
