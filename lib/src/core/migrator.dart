@@ -27,7 +27,8 @@ class Migrator {
   }) async {
     final db = pocket.db;
     final migrations = schema.migrations
-        .where((m) => m.toVersion > fromVersion && m.toVersion <= schema.version)
+        .where(
+            (m) => m.toVersion > fromVersion && m.toVersion <= schema.version)
         .toList()
       ..sort((a, b) => a.toVersion.compareTo(b.toVersion));
 
@@ -51,6 +52,13 @@ class Migrator {
           durationMs: sw.elapsedMilliseconds);
       ver = m.toVersion;
     }
+
+    if (fromVersion < schema.version && ver != schema.version) {
+      throw SchemaRegistrationError(
+        'Missing migration steps for "${schema.name}": migrated to v$ver but expected v${schema.version}.',
+      );
+    }
+
     await db.update('lp_stores', {'schema_ver': schema.version},
         where: 'store = ?', whereArgs: [schema.name]);
   }
@@ -63,7 +71,8 @@ class Migrator {
     required int to,
     int durationMs = 0,
   }) async {
-    final maxRow = await db.rawQuery('SELECT MAX(version) AS m FROM lp_migrations');
+    final maxRow =
+        await db.rawQuery('SELECT MAX(version) AS m FROM lp_migrations');
     final next = (firstIntValue(maxRow) ?? 0) + 1;
     await db.insert('lp_migrations', {
       'version': next,
@@ -76,10 +85,10 @@ class Migrator {
   static Future<void> _additiveMigration(
       LocalPocket pocket, CollectionSchema schema, StoreMigration m) async {
     final db = pocket.db;
-    final existingColumns = (await db.rawQuery(
-                'PRAGMA table_info(${DdlCompiler.quote(schema.name)})'))
-            .map((r) => r['name'])
-            .toSet();
+    final existingColumns = (await db
+            .rawQuery('PRAGMA table_info(${DdlCompiler.quote(schema.name)})'))
+        .map((r) => r['name'])
+        .toSet();
     for (final f in m.addedFields) {
       if (f.required) {
         throw SchemaRegistrationError(
@@ -91,9 +100,9 @@ class Migrator {
         // re-runs this migration; the column already exists.
         continue;
       }
-      await db.execute(
-          'ALTER TABLE ${DdlCompiler.quote(schema.name)} ADD COLUMN '
-          '${DdlCompiler.quote(f.name)} ${f.sqlType}');
+      await db
+          .execute('ALTER TABLE ${DdlCompiler.quote(schema.name)} ADD COLUMN '
+              '${DdlCompiler.quote(f.name)} ${f.sqlType}');
     }
     if (m.transform != null) {
       await _chunkedBackfill(pocket, schema, m);
@@ -176,8 +185,8 @@ class Migrator {
 
     // 2. create the new table from the target schema
     final compiled = DdlCompiler(pocket.capabilities).compile(schema);
-    final createNew = compiled.tableDdl.replaceFirst(
-        DdlCompiler.quote(oldTable), DdlCompiler.quote(newTable));
+    final createNew = compiled.tableDdl
+        .replaceFirst(DdlCompiler.quote(oldTable), DdlCompiler.quote(newTable));
     await db.execute(createNew);
 
     // 3. copy rows (chunked) through the transform
@@ -204,37 +213,41 @@ class Migrator {
     }
 
     // 4. verify counts
-    final oldCount = firstIntValue(await db
-            .rawQuery('SELECT COUNT(*) c FROM ${DdlCompiler.quote(oldTable)}')) ??
+    final oldCount = firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) c FROM ${DdlCompiler.quote(oldTable)}')) ??
         0;
-    final newCount = firstIntValue(await db
-            .rawQuery('SELECT COUNT(*) c FROM ${DdlCompiler.quote(newTable)}')) ??
+    final newCount = firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) c FROM ${DdlCompiler.quote(newTable)}')) ??
         0;
     if (oldCount != newCount) {
-      throw StateError('Rebuild of "${schema.name}" count mismatch: $oldCount vs $newCount.');
+      throw StateError(
+          'Rebuild of "${schema.name}" count mismatch: $oldCount vs $newCount.');
     }
 
     // 5. drop old, 6. rename
     await db.execute('DROP TABLE ${DdlCompiler.quote(oldTable)}');
-    await db.execute('ALTER TABLE ${DdlCompiler.quote(newTable)} RENAME TO ${DdlCompiler.quote(oldTable)}');
+    await db.execute(
+        'ALTER TABLE ${DdlCompiler.quote(newTable)} RENAME TO ${DdlCompiler.quote(oldTable)}');
 
     // 7. recreate indexes + FTS + triggers
     for (final ix in compiled.indexDdl) {
       await db.execute(ix);
     }
     if (schema.fts != null) {
-      await db.execute('DROP TABLE IF EXISTS ${DdlCompiler.quote('${schema.name}_fts')}');
+      await db.execute(
+          'DROP TABLE IF EXISTS ${DdlCompiler.quote('${schema.name}_fts')}');
     }
     for (final f in compiled.ftsDdl) {
       await db.execute(f);
     }
     if (schema.fts != null) {
-      await db.execute("INSERT INTO ${DdlCompiler.quote('${schema.name}_fts')}(${DdlCompiler.quote('${schema.name}_fts')}) VALUES('rebuild')");
+      await db.execute(
+          "INSERT INTO ${DdlCompiler.quote('${schema.name}_fts')}(${DdlCompiler.quote('${schema.name}_fts')}) VALUES('rebuild')");
     }
 
     // 8. verify
-    final verifyCount = firstIntValue(await db
-            .rawQuery('SELECT COUNT(*) c FROM ${DdlCompiler.quote(oldTable)}')) ??
+    final verifyCount = firstIntValue(await db.rawQuery(
+            'SELECT COUNT(*) c FROM ${DdlCompiler.quote(oldTable)}')) ??
         0;
     if (verifyCount != oldCount) {
       throw StateError('Post-rebuild verification of "${schema.name}" failed.');
@@ -266,11 +279,13 @@ class Migrator {
   }
 
   static Future<String?> _kvGet(DatabaseExecutor exec, String key) async {
-    final rows = await exec.query('lp_meta', columns: ['v'], where: 'k = ?', whereArgs: [key]);
+    final rows = await exec.query('lp_meta',
+        columns: ['v'], where: 'k = ?', whereArgs: [key]);
     return rows.isEmpty ? null : rows.first['v'] as String?;
   }
 
-  static Future<void> _kvSet(DatabaseExecutor exec, String key, String value) async {
+  static Future<void> _kvSet(
+      DatabaseExecutor exec, String key, String value) async {
     await exec.insert('lp_meta', {'k': key, 'v': value},
         conflictAlgorithm: ConflictAlgorithm.replace);
   }

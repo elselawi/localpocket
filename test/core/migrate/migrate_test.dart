@@ -54,6 +54,31 @@ void main() {
       expect(tables, hasLength(1));
     });
 
+    test('empty migration list rejects v1 to v2 upgrade', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+
+      final v1 = await openPocket(path: t.path);
+      await v1
+          .collection('widgets')
+          .put(record(id: generateRecordId(), name: 'x', qty: 1));
+      await v1.close();
+
+      await expectLater(
+        openPocket(
+          path: t.path,
+          stores: [v2Schema(migrations: const [])],
+        ),
+        throwsA(
+          isA<SchemaRegistrationError>().having(
+            (e) => e.message,
+            'message',
+            contains('Missing migration steps for "widgets"'),
+          ),
+        ),
+      );
+    });
+
     test('v1 to v2 additive preserves all rows', () async {
       final t = await tempDbPath();
       addTearDown(t.cleanup);
