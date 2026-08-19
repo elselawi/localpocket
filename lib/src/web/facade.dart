@@ -23,8 +23,6 @@ import 'lifecycle.dart';
 import 'protocol.dart';
 
 class LocalPocket {
-  static int _memoryDatabaseSequence = 0;
-
   final String path;
   final Database _remoteDb;
   final WebSqlite _webSqlite;
@@ -79,6 +77,8 @@ class LocalPocket {
     String? wasmAssetPath,
     String? workerAssetPath,
   }) async {
+    validateWebOpenConfig(path: path, encrypted: encrypted);
+
     final wasmPath =
         wasmAssetPath ?? 'assets/packages/localpocket/assets/sqlite3.wasm';
     final workerPath = workerAssetPath ??
@@ -140,42 +140,19 @@ class LocalPocket {
       if (cipherEnvelope != null) 'fieldCipher': cipherEnvelope,
     };
 
-    final ConnectToRecommendedResult connectResult;
-    if (path == ':memory:') {
-      // sqlite3_web uses the database name as a worker identifier even for
-      // in-memory storage. The SQLite ':memory:' sentinel is not a valid
-      // worker database name and causes a null JS database response. Keep the
-      // public path contract while using a unique worker-safe name internally.
-      final memoryName = 'localpocket_memory_${++_memoryDatabaseSequence}';
-      final db = await webSqlite.connect(
-        memoryName,
-        DatabaseImplementation.inMemoryShared,
-        additionalOptions: openArgs.jsify(),
-      );
-      connectResult = ConnectToRecommendedResult(
-        database: db,
-        features: await webSqlite.runFeatureDetection(),
-        implementation: DatabaseImplementation.inMemoryShared,
-      );
-    } else {
-      connectResult = await webSqlite.connectToRecommended(
-        path,
-        additionalOptions: openArgs.jsify(),
-      );
-    }
-
-    if (encrypted) {
-      throw UnsupportedError('SQLCipher is unsupported on web platform.');
-    }
+    final connectResult = await webSqlite.connectToRecommended(
+      path,
+      additionalOptions: openArgs.jsify(),
+    );
 
     final implementation = connectResult.implementation;
     final storageName = implementation.storage.name;
     final persistent = await _requestPersistence();
     final storageCaps = WebStorageCapabilities(
-      storage: path == ':memory:' ? 'memory' : storageName,
-      durable: path != ':memory:' && storageName == 'opfs',
-      persistent: path != ':memory:' && persistent,
-      multiTabStorage: path != ':memory:',
+      storage: storageName,
+      durable: storageName == 'opfs',
+      persistent: persistent,
+      multiTabStorage: true,
       multiTabSync: false,
       worker: true,
     );

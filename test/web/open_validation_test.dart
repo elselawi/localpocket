@@ -58,5 +58,23 @@ void main() {
       expect(() => validateWebOpenConfig(path: 'test_db', encrypted: false),
           returnsNormally);
     });
+
+    test('rejects both :memory: and encrypted=true with UnsupportedError', () {
+      expect(
+        () => validateWebOpenConfig(path: ':memory:', encrypted: true),
+        throwsA(isA<UnsupportedError>()),
+      );
+    });
+
+    test('error message for :memory: provides clear guidance to use named path',
+        () {
+      try {
+        validateWebOpenConfig(path: ':memory:', encrypted: false);
+        fail('Should have thrown UnsupportedError');
+      } on UnsupportedError catch (e) {
+        expect(e.message, contains(':memory:'));
+        expect(e.message, contains('named database path'));
+      }
+    });
   });
 }
