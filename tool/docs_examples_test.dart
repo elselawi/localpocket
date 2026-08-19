@@ -14,17 +14,10 @@ void main(List<String> args) {
 
   // 1. Check example/ directory if present
   if (exampleDir.existsSync()) {
-    final examples = exampleDir
-        .listSync(recursive: true)
-        .whereType<File>()
-        .where((f) => f.path.endsWith('.dart'))
-        .toList();
-    for (final ex in examples) {
-      final res = Process.runSync('dart', ['analyze', ex.path],
-          workingDirectory: root.path);
-      if (res.exitCode != 0) {
-        errors.add('Example file failed analysis: ${ex.path}');
-      }
+    final res = Process.runSync('dart', ['analyze', exampleDir.path],
+        workingDirectory: root.path);
+    if (res.exitCode != 0) {
+      errors.add('Example directory failed analysis');
     }
   }
 
