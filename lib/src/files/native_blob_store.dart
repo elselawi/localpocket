@@ -111,7 +111,6 @@ class NativeBlobStore extends BlobStore {
           }
         }
       }
-
       return computedHash;
     } catch (e) {
       // Deterministic cleanup: never leave a partially-written tmp file behind
