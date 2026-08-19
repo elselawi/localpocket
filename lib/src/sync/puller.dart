@@ -194,26 +194,91 @@ class Puller {
     return applied;
   }
 
+  /// Batch full fetches for sweep self-heals: multiple re-visible or drifted
+  /// records are applied in a single transaction per chunk to avoid per-record
+  /// WAL sync thrashing on native full-durability writes.
+  Future<void> fetchBatch(String store, List<String> ids,
+      {int batchSize = 200}) async {
+    if (ids.isEmpty) return;
+    final queue = List<String>.from(ids);
+    while (queue.isNotEmpty) {
+      final chunk = queue.take(batchSize).toList();
+      queue.removeRange(0, chunk.length);
+
+      final notFoundIds = <String>[];
+      final fetched = <RemoteRecord>[];
+      for (final id in chunk) {
+        RemoteRecord? rec;
+        try {
+          rec = await backend.getRecord(id);
+        } on NotFoundError {
+          notFoundIds.add(id);
+          continue;
+        } on AuthError {
+          rethrow;
+        } on SyncError {
+          continue; // transient: leave as-is
+        }
+        if (rec == null) {
+          notFoundIds.add(id);
+          continue;
+        }
+        fetched.add(rec);
+      }
+      if (notFoundIds.isNotEmpty) {
+        await markHiddenMany(store, notFoundIds);
+      }
+      if (fetched.isEmpty) continue;
+
+      final schema = pocket.requireTable(store).schema;
+      final normalized = [
+        for (final remote in fetched) normalizeSingleRemote(schema, remote)
+      ];
+      await pocket.transaction((tx) async {
+        final exec = tx.executor;
+        final srById = <String, SyncRowState>{};
+        final localById = <String, Map<String, Object?>>{};
+        final pageIds = [for (final item in normalized) item.remote.id];
+        const probePage = 500;
+        for (var i = 0; i < pageIds.length; i += probePage) {
+          final chunkIds =
+              pageIds.sublist(i, (i + probePage).clamp(0, pageIds.length));
+          final ph = List.filled(chunkIds.length, '?').join(', ');
+          final srRows = await exec.rawQuery(
+              'SELECT * FROM lp_sync_row WHERE store = ? AND record_id IN ($ph)',
+              [store, ...chunkIds]);
+          for (final r in srRows) {
+            srById[r['record_id'] as String] = SyncRowState.fromRow(r);
+          }
+          final domRows = await exec.query(pocket.requireTable(store).tableName,
+              where: 'id IN ($ph)', whereArgs: chunkIds);
+          for (final r in domRows) {
+            localById[r['id'] as String] = decodeDbRow(schema, r,
+                cipher: pocket.fieldCipher,
+                cryptoProvider: pocket.cryptoProvider);
+          }
+        }
+        final written = <String>{};
+        for (final item in normalized) {
+          final r = item.remote;
+          if (written.contains(r.id)) {
+            await applyNormalizedRemote(tx, store, item);
+          } else {
+            await applyNormalizedRemote(tx, store, item,
+                prefetchedSyncRow: srById[r.id],
+                prefetchedLocalRow: localById[r.id],
+                prefetchedRowChecked: true,
+                prefetchedSyncRowChecked: true);
+            written.add(r.id);
+          }
+        }
+      });
+    }
+  }
+
   /// A targeted full fetch of one record (sweep self-heal / re-visibility).
   Future<void> fetchOne(String store, String id) async {
-    RemoteRecord? rec;
-    try {
-      rec = await backend.getRecord(id);
-    } on NotFoundError {
-      await _markHidden(store, id);
-      return;
-    } on AuthError {
-      rethrow;
-    } on SyncError {
-      return; // transient: leave as-is
-    }
-    if (rec == null) {
-      await _markHidden(store, id);
-      return;
-    }
-    await pocket.transaction((tx) async {
-      await applyRemote(tx, store, rec!);
-    });
+    await fetchBatch(store, [id]);
   }
 
   // --------------------------------------------------------------- applier --
@@ -625,46 +690,69 @@ class Puller {
     }
   }
 
-  /// Marks a record hidden (permission loss or server delete — never a local
+  /// Marks multiple records hidden (permission loss or server delete — never a local
   /// delete). Used by the sweep and targeted 404s.
-  Future<void> markHidden(String store, String id) async {
-    await pocket.transaction((tx) async {
-      final exec = tx.executor;
-      final schema = pocket.requireTable(store).schema;
-      final existingRows = await exec.query(
-          pocket.requireTable(store).tableName,
-          where: 'id = ?',
-          whereArgs: [id],
-          limit: 1);
-      final oldRow = existingRows.isNotEmpty
-          ? decodeDbRow(schema, existingRows.first,
-              cipher: pocket.fieldCipher, cryptoProvider: pocket.cryptoProvider)
-          : null;
-      await exec.update(
+  Future<void> markHiddenMany(String store, List<String> ids,
+      {int batchSize = 500}) async {
+    if (ids.isEmpty) return;
+    final queue = List<String>.from(ids);
+    while (queue.isNotEmpty) {
+      final chunk = queue.take(batchSize).toList();
+      queue.removeRange(0, chunk.length);
+
+      await pocket.transaction((tx) async {
+        final exec = tx.executor;
+        final schema = pocket.requireTable(store).schema;
+        final table = pocket.requireTable(store).tableName;
+
+        final ph = List.filled(chunk.length, '?').join(', ');
+        final existingRows = await exec.query(
+          table,
+          where: 'id IN ($ph)',
+          whereArgs: chunk,
+        );
+        final oldRowsById = <String, Map<String, Object?>>{};
+        for (final r in existingRows) {
+          final id = r['id'] as String;
+          oldRowsById[id] = decodeDbRow(schema, r,
+              cipher: pocket.fieldCipher,
+              cryptoProvider: pocket.cryptoProvider);
+        }
+
+        await exec.update(
           'lp_sync_row',
-          {
-            'access_state': 'hidden',
-          },
-          where: 'store = ? AND record_id = ?',
-          whereArgs: [store, id]);
-      final table = pocket.requireTable(store).tableName;
-      await exec.update(table, {'hidden': 1}, where: 'id = ?', whereArgs: [id]);
-      // Hidden transitions change the default query/FTS/watch scope and must
-      // invalidate the point-read cache and refresh watchers.
-      tx.addChange(ChangeSet(store, {id}));
-      if (oldRow != null) {
-        tx.addRecordEvent(RecordChangeEvent(
-          store: store,
-          id: id,
-          origin: ChangeOrigin.remote,
-          action: ChangeAction.hide,
-          oldRecord: oldRow,
-          newRecord: {...oldRow, 'hidden': true},
-          changedFields: const {'hidden'},
-        ));
-      }
-    });
+          {'access_state': 'hidden'},
+          where: 'store = ? AND record_id IN ($ph)',
+          whereArgs: [store, ...chunk],
+        );
+        await exec.update(
+          table,
+          {'hidden': 1},
+          where: 'id IN ($ph)',
+          whereArgs: chunk,
+        );
+
+        tx.addChange(ChangeSet(store, chunk.toSet()));
+        for (final id in chunk) {
+          final oldRow = oldRowsById[id];
+          if (oldRow != null) {
+            tx.addRecordEvent(RecordChangeEvent(
+              store: store,
+              id: id,
+              origin: ChangeOrigin.remote,
+              action: ChangeAction.hide,
+              oldRecord: oldRow,
+              newRecord: {...oldRow, 'hidden': true},
+              changedFields: const {'hidden'},
+            ));
+          }
+        }
+      });
+    }
   }
 
-  Future<void> _markHidden(String store, String id) => markHidden(store, id);
+  /// Marks a record hidden (permission loss or server delete — never a local
+  /// delete). Used by the sweep and targeted 404s.
+  Future<void> markHidden(String store, String id) =>
+      markHiddenMany(store, [id]);
 }

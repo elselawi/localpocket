@@ -103,15 +103,19 @@ class Sweeper {
       // Set-based sync-row probe for the whole page instead of
       // one readSyncRow query per remote id.
       final srById = await _probeSyncRows(store, [for (final r in page) r.id]);
+      final needsFetch = <String>[];
       for (final r in page) {
         final sr = srById[r.id];
         if (sr == null ||
             sr.accessState == AccessState.hidden ||
             sr.remoteUpdated != r.updated) {
           // Missed by the watermark / re-visible / drifted: targeted fetch.
-          await puller.fetchOne(store, r.id);
-          fetched++;
+          needsFetch.add(r.id);
         }
+      }
+      if (needsFetch.isNotEmpty) {
+        await puller.fetchBatch(store, needsFetch);
+        fetched += needsFetch.length;
       }
       cursorId = page.last.id;
       if (page.length < config.maxPage) break;
@@ -124,15 +128,19 @@ class Sweeper {
         'SELECT record_id, access_state FROM lp_sync_row '
         'WHERE store = ? AND record_id LIKE ?',
         [store, '$prefix%']);
+    final toHide = <String>[];
     for (final r in localRows) {
       final id = r['record_id'] as String;
       if (!remoteSeen.contains(id)) {
         // Already-hidden rows are skipped: re-hiding would only churn the
         // change bus and inflate the reported hidden count.
         if (r['access_state'] == AccessState.hidden.name) continue;
-        await puller.markHidden(store, id);
-        hidden++;
+        toHide.add(id);
       }
+    }
+    if (toHide.isNotEmpty) {
+      await puller.markHiddenMany(store, toHide);
+      hidden += toHide.length;
     }
 
     // Optional purge of long-hidden rows. Only rows with no pending local

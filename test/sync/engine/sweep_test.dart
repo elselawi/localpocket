@@ -105,6 +105,43 @@ void main() {
       expect(row!.remoteUpdated, h.mock.records[id]!.updated);
     });
 
+    test('sweep self-heals batch into one full-durability transaction',
+        () async {
+      final db = await tempDbPath();
+      addTearDown(() async => db.cleanup());
+      final recorder = <String>[];
+      final hooks = TestHooks(onExecute: recorder.add);
+      final h = await EngineHarness.create(
+        config: testConfig(sweepInterval: Duration.zero, maxPage: 25),
+        testHooks: hooks,
+        path: db.path,
+      );
+      addTearDown(h.close);
+
+      final ids = <String>[];
+      for (var i = 0; i < 12; i++) {
+        final id = h.mock.seed(
+          store: 'widgets',
+          data: {'name': 'v$i'},
+          id: bucketAId(),
+        );
+        ids.add(id);
+      }
+      await h.engine.syncNow();
+      recorder.clear();
+
+      for (final id in ids) {
+        h.mock.mutate(id, {'id': id, 'name': 'server-v2-$id'});
+      }
+
+      await h.engine.sweeper.sweepBucket('widgets', 0);
+
+      final fullCount =
+          recorder.where((sql) => sql == 'PRAGMA synchronous=FULL').length;
+      expect(fullCount, lessThanOrEqualTo(2),
+          reason: 'self-heals should batch a once-per-page transaction');
+    });
+
     test('targeted 404 marks hidden', () async {
       final h = await EngineHarness.create(
           config: testConfig(sweepInterval: Duration.zero));
@@ -550,6 +587,344 @@ void main() {
       final blobs = await h.pocket.db
           .query('lp_blobs', where: 'hash = ?', whereArgs: ['refhash']);
       expect(blobs.single['refcount'], 0, reason: 'blob refcount released');
+    });
+  });
+
+  group('batched sweep and fetch operations (SWP-01)', () {
+    test('mass server deletion batches markHidden in single transaction',
+        () async {
+      final db = await tempDbPath();
+      addTearDown(() async => db.cleanup());
+      final recorder = <String>[];
+      final hooks = TestHooks(onExecute: recorder.add);
+      final h = await EngineHarness.create(
+        config: testConfig(sweepInterval: Duration.zero, maxPage: 50),
+        testHooks: hooks,
+        path: db.path,
+      );
+      addTearDown(h.close);
+
+      final ids = <String>[];
+      for (var i = 0; i < 20; i++) {
+        ids.add(h.mock.seed(
+          store: 'widgets',
+          data: {'name': 'del_$i'},
+          id: bucketAId(),
+        ));
+      }
+      await h.engine.syncNow();
+      for (final id in ids) {
+        expect(await hiddenColumn(h.pocket, id), 0);
+      }
+
+      // Delete all 20 records server-side.
+      for (final id in ids) {
+        h.mock.delete(id);
+      }
+      recorder.clear();
+
+      final report = await h.engine.sweeper.sweepBucket('widgets', 0);
+      expect(report.hidden, 20);
+
+      for (final id in ids) {
+        expect(await hiddenColumn(h.pocket, id), 1);
+        expect(await h.pocket.collection('widgets').get(id), isNotNull,
+            reason: 'local bytes retained');
+      }
+
+      final fullCount =
+          recorder.where((sql) => sql == 'PRAGMA synchronous=FULL').length;
+      expect(fullCount, lessThanOrEqualTo(2),
+          reason: 'mass hiding should commit in a batched transaction');
+    });
+
+    test('fetchBatch handles mixed outcomes (success, 404, transient error)',
+        () async {
+      final h = await EngineHarness.create(
+          config: testConfig(sweepInterval: Duration.zero));
+      addTearDown(h.close);
+
+      final okId1 = h.mock
+          .seed(store: 'widgets', data: {'name': 'ok1_v1'}, id: bucketAId());
+      final okId2 = h.mock
+          .seed(store: 'widgets', data: {'name': 'ok2_v1'}, id: bucketAId());
+      final notFoundId = h.mock
+          .seed(store: 'widgets', data: {'name': 'nf_v1'}, id: bucketAId());
+      final transId = h.mock
+          .seed(store: 'widgets', data: {'name': 'trans_v1'}, id: bucketAId());
+      await h.engine.syncNow();
+
+      // Mutate remote records.
+      h.mock.mutate(okId1, {'id': okId1, 'name': 'ok1_v2'});
+      h.mock.mutate(okId2, {'id': okId2, 'name': 'ok2_v2'});
+      h.mock.delete(notFoundId); // 404 on getRecord
+
+      // Script getRecord: transId throws transient error, notFoundId throws 404
+      h.mock.script('getRecord', [
+        MockReturn(h.mock.records[okId1]!.toRemote()),
+        MockThrow(NotFoundError()),
+        MockThrow(TransientNetworkError()),
+        MockReturn(h.mock.records[okId2]!.toRemote()),
+      ]);
+
+      await h.engine.puller
+          .fetchBatch('widgets', [okId1, notFoundId, transId, okId2]);
+
+      // okId1 and okId2 applied
+      expect(
+          (await h.pocket.collection('widgets').get(okId1))!['name'], 'ok1_v2');
+      expect(
+          (await h.pocket.collection('widgets').get(okId2))!['name'], 'ok2_v2');
+
+      // notFoundId marked hidden
+      expect(await hiddenColumn(h.pocket, notFoundId), 1);
+
+      // transId left unchanged and visible
+      expect((await h.pocket.collection('widgets').get(transId))!['name'],
+          'trans_v1');
+      expect(await hiddenColumn(h.pocket, transId), 0);
+    });
+
+    test('fetchBatch respects batchSize chunking across transactions',
+        () async {
+      final db = await tempDbPath();
+      addTearDown(() async => db.cleanup());
+      final recorder = <String>[];
+      final hooks = TestHooks(onExecute: recorder.add);
+      final h = await EngineHarness.create(
+        config: testConfig(sweepInterval: Duration.zero),
+        testHooks: hooks,
+        path: db.path,
+      );
+      addTearDown(h.close);
+
+      final ids = <String>[];
+      for (var i = 0; i < 15; i++) {
+        ids.add(h.mock.seed(
+          store: 'widgets',
+          data: {'name': 'chunk_$i'},
+          id: bucketAId(),
+        ));
+      }
+      await h.engine.syncNow();
+
+      for (final id in ids) {
+        h.mock.mutate(id, {'id': id, 'name': 'updated_$id'});
+      }
+      recorder.clear();
+
+      // Fetch with batchSize = 5 -> should run 3 chunk transactions.
+      await h.engine.puller.fetchBatch('widgets', ids, batchSize: 5);
+
+      for (final id in ids) {
+        expect((await h.pocket.collection('widgets').get(id))!['name'],
+            'updated_$id');
+      }
+
+      final fullCount =
+          recorder.where((sql) => sql == 'PRAGMA synchronous=FULL').length;
+      expect(fullCount, equals(3),
+          reason:
+              '15 items in chunks of 5 should execute exactly 3 write transactions');
+    });
+
+    test('markHiddenMany emits ChangeSet and RecordChangeEvents for all items',
+        () async {
+      final h = await EngineHarness.create(
+          config: testConfig(sweepInterval: Duration.zero));
+      addTearDown(h.close);
+
+      final ids = <String>[];
+      for (var i = 0; i < 5; i++) {
+        ids.add(h.mock.seed(
+          store: 'widgets',
+          data: {'name': 'item_$i'},
+          id: bucketAId(),
+        ));
+      }
+      await h.engine.syncNow();
+
+      final changeSets = <ChangeSet>[];
+      final recordEvents = <RecordChangeEvent>[];
+      final sub1 = h.pocket.changeBus.stream.listen(changeSets.add);
+      final sub2 = h.pocket.changeBus.events.listen(recordEvents.add);
+      addTearDown(sub1.cancel);
+      addTearDown(sub2.cancel);
+
+      await h.engine.puller.markHiddenMany('widgets', ids);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(changeSets.any((c) => c.ids.containsAll(ids)), isTrue);
+      final hideEvents = recordEvents
+          .where((e) => e.store == 'widgets' && e.action == ChangeAction.hide)
+          .toList();
+      expect(hideEvents.length, equals(5));
+      expect(hideEvents.map((e) => e.id).toSet(), equals(ids.toSet()));
+    });
+
+    test('fetchBatch resolves 3-way merge on dirty record in batch', () async {
+      final h = await EngineHarness.create(
+          config: testConfig(sweepInterval: Duration.zero));
+      addTearDown(h.close);
+
+      final cleanId = h.mock.seed(
+          store: 'widgets',
+          data: {'name': 'clean', 'qty': 10, 'price': 5.0},
+          id: bucketAId());
+      final dirtyId = h.mock.seed(
+          store: 'widgets',
+          data: {'name': 'dirty', 'qty': 10, 'price': 5.0},
+          id: bucketAId());
+      await h.engine.syncNow();
+
+      // Locally edit dirtyId (name -> 'dirty_local', qty -> 10)
+      await h.pocket
+          .collection('widgets')
+          .patch(dirtyId, {'name': 'dirty_local'});
+
+      // Server updates price on dirtyId, and name on cleanId
+      h.mock.mutate(dirtyId, {
+        'id': dirtyId,
+        'name': 'dirty',
+        'qty': 10,
+        'price': 99.0,
+      });
+      h.mock.mutate(cleanId, {
+        'id': cleanId,
+        'name': 'clean_v2',
+        'qty': 10,
+        'price': 5.0,
+      });
+
+      await h.engine.puller.fetchBatch('widgets', [cleanId, dirtyId]);
+
+      // cleanId updated cleanly
+      expect((await h.pocket.collection('widgets').get(cleanId))!['name'],
+          'clean_v2');
+
+      // dirtyId 3-way merged: local 'dirty_local' name preserved + server price 99.0 accepted
+      final merged = await h.pocket.collection('widgets').get(dirtyId);
+      expect(merged!['name'], 'dirty_local');
+      expect(merged['price'], 99.0);
+      final syncRow = await sr(h.pocket, dirtyId);
+      expect(syncRow!.syncState, SyncState.dirty,
+          reason: 'still dirty with pending push');
+    });
+
+    test('fetchBatch quarantines map failure without breaking valid siblings',
+        () async {
+      final h = await EngineHarness.create(
+          config: testConfig(sweepInterval: Duration.zero));
+      addTearDown(h.close);
+
+      final validId = h.mock
+          .seed(store: 'widgets', data: {'name': 'valid_v1'}, id: bucketAId());
+      final badId = bucketAId();
+      await h.engine.syncNow();
+
+      h.mock.mutate(validId, {'id': validId, 'name': 'valid_v2'});
+      // Record with invalid schema value (e.g. integer for string field 'name')
+      final badRecord = RemoteRecord(
+        id: badId,
+        store: 'widgets',
+        updated: h.mock.nextUpdated(),
+        data: {'id': badId, 'name': 12345}, // type mismatch for 'name'
+      );
+
+      h.mock.script('getRecord', [
+        MockReturn(h.mock.records[validId]!.toRemote()),
+        MockReturn(badRecord),
+      ]);
+
+      await h.engine.puller.fetchBatch('widgets', [validId, badId]);
+
+      // Valid record applied
+      expect((await h.pocket.collection('widgets').get(validId))!['name'],
+          'valid_v2');
+
+      // Bad record quarantined
+      final badSyncRow = await sr(h.pocket, badId);
+      expect(badSyncRow!.syncState, SyncState.quarantine);
+      final deadLetters = await h.pocket.db
+          .query('lp_dead_letter', where: 'record_id = ?', whereArgs: [badId]);
+      expect(deadLetters, isNotEmpty);
+    });
+
+    test('fetchBatch handles duplicate ids within the same batch idempotently',
+        () async {
+      final h = await EngineHarness.create(
+          config: testConfig(sweepInterval: Duration.zero));
+      addTearDown(h.close);
+
+      final id = h.mock
+          .seed(store: 'widgets', data: {'name': 'initial'}, id: bucketAId());
+      await h.engine.syncNow();
+
+      h.mock.mutate(id, {'id': id, 'name': 'dup_updated'});
+
+      // Deliver duplicate id in fetch list
+      await h.engine.puller.fetchBatch('widgets', [id, id]);
+
+      expect((await h.pocket.collection('widgets').get(id))!['name'],
+          'dup_updated');
+      final rows = await h.pocket.db
+          .rawQuery('SELECT COUNT(*) c FROM widgets WHERE id = ?', [id]);
+      expect(rows.first['c'], 1);
+    });
+
+    test(
+        'full sweep with mixed unchanged, drifted, revived, and deleted records',
+        () async {
+      final h = await EngineHarness.create(
+          config: testConfig(sweepInterval: Duration.zero));
+      addTearDown(h.close);
+
+      final unchangedId = h.mock
+          .seed(store: 'widgets', data: {'name': 'unchanged'}, id: bucketAId());
+      final driftedId = h.mock
+          .seed(store: 'widgets', data: {'name': 'drift_v1'}, id: bucketAId());
+      final reviveId = h.mock
+          .seed(store: 'widgets', data: {'name': 'revive_v1'}, id: bucketAId());
+      final deletedId = h.mock
+          .seed(store: 'widgets', data: {'name': 'deleted'}, id: bucketAId());
+      await h.engine.syncNow();
+
+      // 1. Hide reviveId locally
+      h.mock.delete(reviveId);
+      await h.engine.sweeper.sweepBucket('widgets', 0);
+      expect(await hiddenColumn(h.pocket, reviveId), 1);
+
+      // 2. Server states for bucket 0:
+      // - unchangedId: untouched
+      // - driftedId: modified
+      // - reviveId: re-seeded on server (revived)
+      // - deletedId: deleted on server
+      h.mock.mutate(driftedId, {'id': driftedId, 'name': 'drift_v2'});
+      h.mock.seed(
+          store: 'widgets',
+          data: {'name': 'revive_v2'},
+          id: reviveId,
+          updated: h.mock.nextUpdated());
+      h.mock.delete(deletedId);
+
+      final report = await h.engine.sweeper.sweepBucket('widgets', 0);
+      expect(report.scanned, 3); // unchanged, drifted, revive
+      expect(report.fetched, 2); // drifted + revive
+      expect(report.hidden, 1); // deleted
+
+      expect((await h.pocket.collection('widgets').get(unchangedId))!['name'],
+          'unchanged');
+      expect(await hiddenColumn(h.pocket, unchangedId), 0);
+
+      expect((await h.pocket.collection('widgets').get(driftedId))!['name'],
+          'drift_v2');
+      expect(await hiddenColumn(h.pocket, driftedId), 0);
+
+      expect((await h.pocket.collection('widgets').get(reviveId))!['name'],
+          'revive_v2');
+      expect(await hiddenColumn(h.pocket, reviveId), 0);
+
+      expect(await hiddenColumn(h.pocket, deletedId), 1);
     });
   });
 }
