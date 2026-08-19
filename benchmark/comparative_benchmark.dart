@@ -482,14 +482,14 @@ class HivePeer extends BenchmarkPeer {
   @override
   String get name => 'Hive';
 
-  late Box<Map> _box;
+  late Box<Map<String, Object?>> _box;
   late Directory _dir;
 
   @override
   Future<void> setup() async {
     _dir = await Directory.systemTemp.createTemp('hive_bench_');
     Hive.init(_dir.path);
-    _box = await Hive.openBox<Map>('widgets');
+    _box = await Hive.openBox<Map<String, Object?>>('widgets');
   }
 
   @override
@@ -522,7 +522,7 @@ class HivePeer extends BenchmarkPeer {
       final end = start + 500;
       final sw = Stopwatch()..start();
       // Hive has no secondary indexes; table scan with limit
-      final matches = <Map>[];
+      final matches = <Map<String, Object?>>[];
       for (final val in _box.values) {
         final q = val['qty'] as int?;
         if (q != null && q >= start && q < end) {
