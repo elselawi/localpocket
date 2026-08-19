@@ -24,6 +24,15 @@ class _ThrowingHintsBackend extends MockSyncBackend {
   }
 }
 
+/// A backend whose `prepare` blocks until [gate] completes.
+class _GatedPrepareBackend extends MockSyncBackend {
+  Completer<void>? gate;
+  @override
+  Future<void> prepare() async {
+    await gate?.future;
+  }
+}
+
 /// A backend whose `listChanges` blocks until [gate] completes.
 class _GatedListBackend extends MockSyncBackend {
   Completer<void>? gate;
@@ -374,6 +383,50 @@ void main() {
       expect(h.engine.state, SyncEngineState.closed);
       expect(mock.maxConcurrentListChanges, 1,
           reason: 'never overlapped, even across stop');
+    });
+
+    test('stop during start() prepare does not leave zombie timers or workers',
+        () async {
+      final mock = _GatedPrepareBackend();
+      final gate = Completer<void>();
+      mock.gate = gate;
+
+      final h = await EngineHarness.create(
+        mock: mock,
+        start: false,
+        config: const SyncConfig(
+          syncInterval: Duration(milliseconds: 20),
+          pushDebounce: Duration(milliseconds: 10),
+        ),
+      );
+      addTearDown(h.close);
+
+      // Start the engine - it will suspend in prepare()
+      final startFuture = h.engine.start();
+      expect(h.engine.state, SyncEngineState.opening);
+      expect(h.engine.isRunning, isTrue);
+
+      // Stop while start() is awaiting prepare()
+      await h.engine.stop();
+      expect(h.engine.state, SyncEngineState.closed);
+      expect(h.engine.isRunning, isFalse);
+
+      // Release backend.prepare()
+      gate.complete();
+      await startFuture;
+
+      // Verify engine remains closed and is not running
+      expect(h.engine.state, SyncEngineState.closed);
+      expect(h.engine.isRunning, isFalse);
+
+      // Add a write and wait longer than syncInterval to ensure no zombie timers or listeners fire
+      final listCallsBefore = mock.listChangesCalls;
+      await h.pocket.collection('widgets').put(record(name: 'test_zombie'));
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(mock.listChangesCalls, listCallsBefore,
+          reason:
+              'no background timer or local write trigger should run after stop');
     });
   });
 

@@ -144,8 +144,11 @@ class SyncEngine {
     // Adapter warm-up (batch probe etc.) before any push decision.
     try {
       await backend.prepare();
+      if (!_started) return;
       pusher.batchEnabled = backend.capabilities.batchEnabled;
-    } catch (_) {}
+    } catch (_) {
+      if (!_started) return;
+    }
     try {
       _changesSub = pocket.changes.listen(handleLocalWrite);
       _hintsSub = backend.hints().listen(handleHint);
@@ -157,7 +160,9 @@ class SyncEngine {
     }
     _syncTimer = Timer.periodic(config.syncInterval, (_) => handleTimer());
     _transition(_effectiveIdle());
-    await syncNow();
+    if (_started) {
+      await syncNow();
+    }
   }
 
   /// Stops timers, realtime subscriptions, and in-flight sync coordination.
