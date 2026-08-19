@@ -13,6 +13,8 @@ final class DedicatedOnlyConnector implements WorkerConnector {
     return WorkerConnector.defaultWorkers(workerUrl).spawnDedicatedWorker();
   }
 
+  // never called, this is a documented limitation
+  // required by :memory: path
   @override
   WorkerHandle? spawnSharedWorker() => null;
 }

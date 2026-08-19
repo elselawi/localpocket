@@ -107,8 +107,8 @@ class LocalPocket {
   final Database _remoteDb;
   final WebSqlite _webSqlite;
   final List<String> _blobUrlsToRevoke;
-  final SqliteCapabilities capabilities;
-  final WebStorageCapabilities storageCapabilities;
+  SqliteCapabilities capabilities;
+  WebStorageCapabilities storageCapabilities;
   final Map<String, CollectionSchema> _storeMap = {};
   final ChangeBus changeBus = ChangeBus();
   final PerfCounters perf = PerfCounters();
@@ -157,7 +157,8 @@ class LocalPocket {
     String? wasmAssetPath,
     String? workerAssetPath,
   }) async {
-    final wasmPath = wasmAssetPath ?? 'assets/sqlite3.wasm';
+    final wasmPath =
+        wasmAssetPath ?? 'assets/packages/localpocket/assets/sqlite3.wasm';
     final workerPath = workerAssetPath ??
         'assets/packages/localpocket/assets/localpocket_worker.js';
 
@@ -178,7 +179,13 @@ class LocalPocket {
       wasmBlobUrl = await loadAssetAsBlobUrl(wasmPath, 'application/wasm');
       blobUrls.add(wasmBlobUrl);
     } catch (_) {
-      wasmBlobUrl = 'assets/sqlite3.wasm';
+      try {
+        wasmBlobUrl =
+            await loadAssetAsBlobUrl('assets/sqlite3.wasm', 'application/wasm');
+        blobUrls.add(wasmBlobUrl);
+      } catch (_) {
+        wasmBlobUrl = 'assets/packages/localpocket/assets/sqlite3.wasm';
+      }
     }
 
     late LocalPocket pocket;
@@ -278,6 +285,44 @@ class LocalPocket {
       'maxDocBytes': maxDocBytes,
       'destructiveBackup': destructiveBackup,
     });
+
+    // Reconcile the facade's capability snapshot against the worker's LIVE
+    // capabilities. The worker probes the actual SQLite build during open
+    // (SqliteCapabilities.probe), so a changed WASM asset, alternate build, or
+    // storage restriction is reflected here instead of trusting a hard-coded
+    // facade matrix. Falls back to the facade's initial values on any failure
+    // so open() does not fail just because capability discovery glitched.
+    try {
+      final remote = await pocket._send(WireOp.capabilities) as Map;
+      final remoteMap = remote.map((k, v) => MapEntry(k.toString(), v));
+      final caps = SqliteCapabilities(
+        sqliteVersion: remoteMap['sqliteVersion'] as String? ??
+            pocket.capabilities.sqliteVersion,
+        hasStrict:
+            remoteMap['hasStrict'] as bool? ?? pocket.capabilities.hasStrict,
+        walSupported: remoteMap['walSupported'] as bool? ??
+            pocket.capabilities.walSupported,
+        hasFts5: remoteMap['hasFts5'] as bool? ?? pocket.capabilities.hasFts5,
+        platform: PlatformProfile.web,
+      );
+      pocket.capabilities = caps;
+      pocket.storageCapabilities = WebStorageCapabilities(
+        storage: remoteMap['storage'] as String? ??
+            pocket.storageCapabilities.storage,
+        durable:
+            remoteMap['durable'] as bool? ?? pocket.storageCapabilities.durable,
+        persistent: remoteMap['persistent'] as bool? ??
+            pocket.storageCapabilities.persistent,
+        multiTabStorage: remoteMap['multiTabStorage'] as bool? ??
+            pocket.storageCapabilities.multiTabStorage,
+        multiTabSync: remoteMap['multiTabSync'] as bool? ??
+            pocket.storageCapabilities.multiTabSync,
+        worker:
+            remoteMap['worker'] as bool? ?? pocket.storageCapabilities.worker,
+      );
+    } catch (_) {
+      // Keep the facade's initial hard-coded fallback snapshot.
+    }
 
     return pocket;
   }
@@ -474,6 +519,7 @@ class LocalPocket {
     final res = (await _send(WireOp.compact, {
       'store': store,
       'olderThanMs': olderThan.inMilliseconds,
+      if (nowMs != null) 'nowMs': nowMs,
     })) as Map;
     return (res['compacted'] as int?) ?? 0;
   }
@@ -527,21 +573,6 @@ class LocalPocket {
   /// Informs the sync engine of online/offline connectivity changes.
   Future<void> setConnectivity(bool online) async {
     await _send(WireOp.syncSetConnectivity, {'online': online});
-  }
-
-  /// Temporary task-2 spike: prove the worker-owned blob store round-trips
-  /// bytes in a real browser. Replaced by the real `files` facade in task 4.
-  Future<Map<String, Object?>> filesProbe({
-    required String store,
-    required String recordId,
-    required List<int> bytes,
-  }) async {
-    final res = (await _send(WireOp.fileProbe, {
-      'store': store,
-      'recordId': recordId,
-      'bytes': encodeWireValue(Uint8List.fromList(bytes)),
-    })) as Map;
-    return res.map((k, v) => MapEntry(k.toString(), v));
   }
 
   /// Uploads [bytes] to a record attachment via bounded chunks (task 3).
@@ -1225,6 +1256,9 @@ class WebTxSearchQueryBuilder {
   final int sessionId;
   final String term;
   int? _limit;
+  bool _all = false;
+  bool _includeArchived = false;
+  bool _includeHidden = false;
 
   WebTxSearchQueryBuilder._(
       this._pocket, this.schema, this.sessionId, this.term);
@@ -1234,10 +1268,28 @@ class WebTxSearchQueryBuilder {
     return this;
   }
 
+  WebTxSearchQueryBuilder all() {
+    _all = true;
+    return this;
+  }
+
+  WebTxSearchQueryBuilder includeArchived() {
+    _includeArchived = true;
+    return this;
+  }
+
+  WebTxSearchQueryBuilder includeHidden() {
+    _includeHidden = true;
+    return this;
+  }
+
   Future<List<SearchResult>> fetch() async {
     if (term.trim().isEmpty) return const [];
     final core = SearchQueryBuilder.compileOnly(schema, term);
     if (_limit != null) core.limit(_limit!);
+    if (_all) core.all();
+    if (_includeArchived) core.includeArchived();
+    if (_includeHidden) core.includeHidden();
     final res = await _sendCompiledPlan(_pocket, core.compilePlan(),
         sessionId: sessionId);
     return ((res['results'] as List?) ?? const []).map((raw) {

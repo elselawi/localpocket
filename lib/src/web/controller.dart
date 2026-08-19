@@ -29,7 +29,9 @@ import '../sync/status.dart';
 import 'cipher_bridge.dart';
 import 'conflicts_bridge.dart';
 import 'conversions.dart';
+import 'lifecycle.dart';
 import 'protocol.dart';
+import 'wire_args.dart';
 
 /// Database controller that opens the SQLite connection in the dedicated worker
 /// and boots the existing [LocalPocket] engine around it.
@@ -188,10 +190,9 @@ class _TxSession {
 
 /// Active watcher registration in the worker (§7.2).
 class _ActiveWatcher {
-  final int watchId;
   final Future<void> Function() cancel;
 
-  _ActiveWatcher(this.watchId, this.cancel);
+  _ActiveWatcher(this.cancel);
 }
 
 /// Minimal worker-owned token bridge. The page remains responsible for refresh;
@@ -212,32 +213,6 @@ final class _WebTokenProvider implements TokenProvider {
   String get identity => identityValue;
 }
 
-/// Active bounded-chunk upload session (§ file upload).
-class _UploadSession {
-  final int uploadId;
-  final String store;
-  final String recordId;
-  final String field;
-  final String name;
-  final int expectedSize;
-  final String? expectedSha256;
-  int receivedBytes = 0;
-  final List<Uint8List> chunks = [];
-
-  _UploadSession({
-    required this.uploadId,
-    required this.store,
-    required this.recordId,
-    required this.field,
-    required this.name,
-    required this.expectedSize,
-    this.expectedSha256,
-  });
-}
-
-/// Maximum chunk size for bounded file uploads (256 KiB).
-const int _maxUploadChunkBytes = 262144;
-
 /// The worker database wrapping [CommonDatabase] and hosting the full
 /// [LocalPocket] engine.
 final class LocalPocketWorkerDatabase extends WorkerDatabase {
@@ -248,7 +223,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
   _TxSession? _activeSession;
   int _nextSessionId = 1;
   final Map<int, _ActiveWatcher> _watchers = {};
-  final Map<int, _UploadSession> _uploadSessions = {};
+  final UploadSessionRegistry _uploadSessions = UploadSessionRegistry();
   int _nextUploadId = 1;
   SyncEngine? _syncEngine;
   _WebTokenProvider? _tokenProvider;
@@ -309,29 +284,9 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
         req.requestId,
         WireErrorCode.localpocket,
         e.toString(),
-        {'type': _stableErrorType(e)},
+        {'type': stableWireErrorType(e)},
       );
     }
-  }
-
-  /// dart2js minifies `runtimeType.toString()`, so it cannot be used as a
-  /// stable wire error category. Preserve explicit categories for errors that
-  /// cross the public protocol; unknown application exceptions retain their
-  /// diagnostic runtime type as a last resort.
-  static String _stableErrorType(Object error) {
-    if (error is ValidationException) return 'ValidationException';
-    if (error is StorageError) return 'StorageError';
-    if (error is StaleCursorError) return 'StaleCursorError';
-    if (error is SchemaRegistrationError) return 'SchemaRegistrationError';
-    if (error is FtsUnavailableError) return 'FtsUnavailableError';
-    if (error is MissingLimitError) return 'MissingLimitError';
-    if (error is ProtocolEnvelopeException) return 'ProtocolEnvelopeException';
-    if (error is StateError) return 'StateError';
-    if (error is ArgumentError) return 'ArgumentError';
-    if (error is FormatException) return 'FormatException';
-    if (error is RangeError) return 'RangeError';
-    if (error is UnsupportedError) return 'UnsupportedError';
-    return error.runtimeType.toString();
   }
 
   static Map<String, Object?>? _dartifyPayload(JSAny payload) {
@@ -391,10 +346,10 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     WireOp.syncSetConnectivity: _handleSyncSetConnectivity,
     WireOp.syncUpdateAuth: _handleSyncUpdateAuth,
     WireOp.syncStatus: _handleSyncStatus,
-    WireOp.fileProbe: _handleFileProbe,
     WireOp.fileUploadBegin: _handleFileUploadBegin,
     WireOp.fileUploadChunk: _handleFileUploadChunk,
     WireOp.fileUploadFinish: _handleFileUploadFinish,
+    WireOp.fileUploadAbort: _handleFileUploadAbort,
     WireOp.fileList: _handleFileList,
     WireOp.fileOpen: _handleFileOpen,
     WireOp.fileRemove: _handleFileRemove,
@@ -414,6 +369,9 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     WebRequest req,
     CustomClientDatabaseRequest clientReq,
   ) async {
+    // Note: `clientReq` is passed by sqlite3_web's handleCustomRequest. It is
+    // part of the dispatch context interface, while `req` contains our decoded
+    // protocol payload.
     final handler = _handlers[req.op];
     if (handler == null) {
       throw ProtocolEnvelopeException('Unhandled operation: ${req.op}');
@@ -434,21 +392,34 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleCapabilities(
       ClientConnection connection, WebRequest req) async {
+    // Report the LIVE engine capabilities probed against this worker's actual
+    // SQLite build (SqliteCapabilities.probe runs during worker open), not a
+    // hard-coded matrix that could drift from a changed WASM asset or an
+    // alternate build. `walSupported` is always false on web (TRUNCATE mode).
+    final caps = pocket.capabilities;
+    final journalMode =
+        rawDatabase.select('PRAGMA journal_mode').first.columnAt(0);
     return {
       'storage': 'opfs',
       'durable': true,
       'persistent': true,
-      'journal': 'truncate',
+      'journal': journalMode,
       'multiTabStorage': true,
       'multiTabSync': false,
       'worker': true,
+      // live engine capability snapshot (see SqliteCapabilities.toJson)
+      'sqliteVersion': caps.sqliteVersion,
+      'hasStrict': caps.hasStrict,
+      'walSupported': caps.walSupported,
+      'hasFts5': caps.hasFts5,
     };
   }
 
   Future<Object?> _handleGet(
       ClientConnection connection, WebRequest req) async {
-    final store = req.args['store'] as String;
-    final id = req.args['id'] as String;
+    final w = WireArgs(req.args);
+    final store = w.requireString('store', op: 'get');
+    final id = w.requireString('id', op: 'get');
     final col = pocket.collection(store);
     final doc = await col.get(id);
     return encodeWireValue(doc);
@@ -456,8 +427,10 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleMutateBatch(
       ClientConnection connection, WebRequest req) async {
-    final store = req.args['store'] as String;
-    final mutations = (req.args['mutations'] as List).cast<Map>();
+    final w = WireArgs(req.args);
+    final store = w.requireString('store', op: 'mutate_batch');
+    final mutations =
+        w.requireList('mutations', op: 'mutate_batch').cast<Map>();
 
     if (mutations.length == 1) {
       final m = mutations.first;
@@ -515,7 +488,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleOpen(
       ClientConnection connection, WebRequest req) async {
-    final storesRaw = req.args['stores'] as List?;
+    final storesRaw = WireArgs(req.args).optionalList('stores');
     if (storesRaw != null) {
       for (final s in storesRaw) {
         final schema = LocalPocketDatabaseController.parseSchema(s);
@@ -537,7 +510,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleAnalyze(
       ClientConnection connection, WebRequest req) async {
-    final store = req.args['store'] as String?;
+    final store = WireArgs(req.args).optionalString('store');
     await pocket.analyze(store);
     return {'ok': true};
   }
@@ -550,30 +523,32 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleVacuum(
       ClientConnection connection, WebRequest req) async {
-    final pages = req.args['pages'] as int?;
+    final pages = WireArgs(req.args).optionalInt('pages');
     await pocket.vacuum(pages: pages);
     return {'ok': true};
   }
 
   Future<Object?> _handlePruneOutbox(
       ClientConnection connection, WebRequest req) async {
-    final maxEntries = req.args['maxEntries'] as int? ?? 10000;
+    final maxEntries = WireArgs(req.args).optionalInt('maxEntries') ?? 10000;
     final pruned = await pocket.pruneOutbox(maxEntries: maxEntries);
     return {'pruned': pruned};
   }
 
   Future<Object?> _handleCompact(
       ClientConnection connection, WebRequest req) async {
-    final store = req.args['store'] as String;
-    final olderThanMs = req.args['olderThanMs'] as int;
+    final w = WireArgs(req.args);
+    final store = w.requireString('store', op: 'compact');
+    final olderThanMs = w.requireInt('olderThanMs', op: 'compact');
+    final nowMs = w.optionalInt('nowMs');
     final count = await pocket.compact(store,
-        olderThan: Duration(milliseconds: olderThanMs));
+        olderThan: Duration(milliseconds: olderThanMs), nowMs: nowMs);
     return {'compacted': count};
   }
 
   Future<Object?> _handleRunMaintenance(
       ClientConnection connection, WebRequest req) async {
-    final olderThanMs = req.args['compactOlderThanMs'] as int? ??
+    final olderThanMs = WireArgs(req.args).optionalInt('compactOlderThanMs') ??
         const Duration(days: 90).inMilliseconds;
     await pocket.runMaintenance(
         compactOlderThan: Duration(milliseconds: olderThanMs));
@@ -608,18 +583,21 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleTxGet(
       ClientConnection connection, WebRequest req) async {
-    final sess = _requireSession(req.args['sessionId'] as int?);
-    final store = req.args['store'] as String;
-    final id = req.args['id'] as String;
+    final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
+    final w = WireArgs(req.args);
+    final store = w.requireString('store', op: 'tx_get');
+    final id = w.requireString('id', op: 'tx_get');
     final doc = await sess.tx.collection(store).get(id);
     return encodeWireValue(doc);
   }
 
   Future<Object?> _handleTxMutateBatch(
       ClientConnection connection, WebRequest req) async {
-    final sess = _requireSession(req.args['sessionId'] as int?);
-    final store = req.args['store'] as String;
-    final mutations = (req.args['mutations'] as List).cast<Map>();
+    final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
+    final w = WireArgs(req.args);
+    final store = w.requireString('store', op: 'tx_mutate_batch');
+    final mutations =
+        w.requireList('mutations', op: 'tx_mutate_batch').cast<Map>();
     final txCol = sess.tx.collection(store);
     for (final m in mutations) {
       final action = m['action'] as String;
@@ -645,7 +623,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleTxSavepoint(
       ClientConnection connection, WebRequest req) async {
-    final sess = _requireSession(req.args['sessionId'] as int?);
+    final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
     final spName = 'lp_sp_wire_${sess.savepoints.length}';
     sess.savepoints.add(spName);
     await sess.tx.executor.execute('SAVEPOINT $spName');
@@ -654,16 +632,26 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleTxRollbackTo(
       ClientConnection connection, WebRequest req) async {
-    final sess = _requireSession(req.args['sessionId'] as int?);
-    final spName = req.args['savepoint'] as String;
+    final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
+    final spName =
+        WireArgs(req.args).requireString('savepoint', op: 'tx_rollback_to');
+    // Mirror the native nested-transaction failure path (Tx._withSavepoint):
+    // ROLLBACK TO discards the savepoint's work but leaves the savepoint
+    // active, so it must also be RELEASEd and dropped from bookkeeping.
+    // Otherwise stale names accumulate in sess.savepoints and subsequent
+    // nested transactions (`lp_sp_wire_${sess.savepoints.length}`) can
+    // collide or grow unbounded.
     await sess.tx.executor.execute('ROLLBACK TO $spName');
+    await sess.tx.executor.execute('RELEASE $spName');
+    sess.savepoints.remove(spName);
     return {'ok': true};
   }
 
   Future<Object?> _handleTxRelease(
       ClientConnection connection, WebRequest req) async {
-    final sess = _requireSession(req.args['sessionId'] as int?);
-    final spName = req.args['savepoint'] as String;
+    final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
+    final spName =
+        WireArgs(req.args).requireString('savepoint', op: 'tx_release');
     await sess.tx.executor.execute('RELEASE $spName');
     sess.savepoints.remove(spName);
     return {'ok': true};
@@ -671,7 +659,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleTxCommit(
       ClientConnection connection, WebRequest req) async {
-    final sess = _requireSession(req.args['sessionId'] as int?);
+    final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
     _activeSession = null;
     sess.completer.complete();
     return {'ok': true};
@@ -679,7 +667,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleTxRollback(
       ClientConnection connection, WebRequest req) async {
-    final sess = _requireSession(req.args['sessionId'] as int?);
+    final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
     _activeSession = null;
     sess.completer.completeError(RemoteLocalPocketException(
         code: 'rollback', message: 'Transaction rolled back.'));
@@ -688,7 +676,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleWatchQuery(
       ClientConnection connection, WebRequest req) async {
-    final watchId = req.args['watchId'] as int;
+    final watchId = WireArgs(req.args).requireInt('watchId', op: 'watch_query');
     final plan = _parseCompiledPlan(req.args);
     final watcher = _CompiledWatcher(
       pocket,
@@ -706,11 +694,20 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
         }.jsify()));
       },
     );
-    watcher.start();
-    _watchers[watchId] = _ActiveWatcher(watchId, () async {
+    final registration = _ActiveWatcher(() async {
       watcher.dispose();
     });
-    final initialItems = await watcher.initial();
+    final initialItems = await initializeWebWatch<List<Map<String, Object?>>>(
+      start: watcher.start,
+      register: () => _watchers[watchId] = registration,
+      initialize: watcher.initial,
+      cleanup: () async {
+        if (identical(_watchers[watchId], registration)) {
+          _watchers.remove(watchId);
+        }
+        await registration.cancel();
+      },
+    );
     return {
       'watchId': watchId,
       'items': initialItems.map(encodeWireValue).toList(),
@@ -719,23 +716,36 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleWatchOne(
       ClientConnection connection, WebRequest req) async {
-    final watchId = req.args['watchId'] as int;
-    final store = req.args['store'] as String;
-    final id = req.args['id'] as String;
+    final aw = WireArgs(req.args);
+    final watchId = aw.requireInt('watchId', op: 'watch_one');
+    final store = aw.requireString('store', op: 'watch_one');
+    final id = aw.requireString('id', op: 'watch_one');
     final table = pocket.requireTable(store);
     final watcher = OneWatcher(pocket, table, id);
-    final sub = watcher.start().listen((item) {
-      unawaited(connection.customRequest({
-        'v': webProtocolVersion,
-        'op': WireOp.workerEvent,
-        'watchId': watchId,
-        'value': encodeWireValue(item),
-      }.jsify()));
+    late final StreamSubscription<Map<String, Object?>?> sub;
+    final registration = _ActiveWatcher(() async {
+      await sub.cancel();
     });
-    _watchers[watchId] = _ActiveWatcher(watchId, () async {
-      sub.cancel();
-    });
-    final doc = await pocket.collection(store).get(id);
+    final doc = await initializeWebWatch<Map<String, Object?>?>(
+      start: () {
+        sub = watcher.start().listen((item) {
+          unawaited(connection.customRequest({
+            'v': webProtocolVersion,
+            'op': WireOp.workerEvent,
+            'watchId': watchId,
+            'value': encodeWireValue(item),
+          }.jsify()));
+        });
+      },
+      register: () => _watchers[watchId] = registration,
+      initialize: () => pocket.collection(store).get(id),
+      cleanup: () async {
+        if (identical(_watchers[watchId], registration)) {
+          _watchers.remove(watchId);
+        }
+        await registration.cancel();
+      },
+    );
     return {
       'watchId': watchId,
       'item': encodeWireValue(doc),
@@ -744,7 +754,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleWatchCancel(
       ClientConnection connection, WebRequest req) async {
-    final wid = req.args['watchId'] as int;
+    final wid = WireArgs(req.args).requireInt('watchId', op: 'watch_cancel');
     final watcher = _watchers.remove(wid);
     if (watcher != null) {
       await watcher.cancel();
@@ -754,13 +764,14 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleSyncStart(
       ClientConnection connection, WebRequest req) async {
-    final baseUrl = req.args['baseUrl'] as String?;
+    final w = WireArgs(req.args);
+    final baseUrl = w.optionalString('baseUrl');
     if (baseUrl == null || baseUrl.isEmpty) {
       throw ValidationException('syncStart requires baseUrl.');
     }
     await _stopSync();
-    final token = req.args['token'] as String?;
-    final scopeId = req.args['scopeId'] as String? ?? 'web-sync';
+    final token = w.optionalString('token');
+    final scopeId = w.optionalString('scopeId') ?? 'web-sync';
     final provider = _WebTokenProvider(token, scopeId);
     final backend = PocketBaseBackend(
       baseUrl: Uri.parse(baseUrl),
@@ -828,8 +839,10 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
       ClientConnection connection, WebRequest req) async {
     final engine = _syncEngine;
     if (engine == null) throw StateError('Sync is not started.');
-    final online = req.args['online'];
-    if (online is! bool) throw ValidationException('online must be bool.');
+    final online = WireArgs(req.args).requireBool(
+      'online',
+      op: 'sync_set_connectivity',
+    );
     await engine.setConnectivity(online);
     return {'ok': true};
   }
@@ -841,7 +854,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     if (provider == null || engine == null) {
       throw StateError('Sync is not started.');
     }
-    provider.value = req.args['token'] as String?;
+    provider.value = WireArgs(req.args).optionalString('token');
     await engine.markAuthValid();
     return {'ok': true};
   }
@@ -853,110 +866,39 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
         : _encodeSyncStatus(_lastSyncStatus!);
   }
 
-  /// Temporary task-2 spike: prove the worker-owned blob store round-trips
-  /// bytes inside the dedicated worker. Calls `pocket.files.attach` then
-  /// `pocket.files.open`, and compares the re-read bytes to the original.
-  /// Replaced by real file RPC in task 4.
-  Future<Object?> _handleFileProbe(
-      ClientConnection connection, WebRequest req) async {
-    final store = req.args['store'] as String;
-    final recordId = req.args['recordId'] as String;
-    final bytes = decodeWireValue(req.args['bytes']) as List<int>;
-
-    final ref = await pocket.files.attach(
-      store: store,
-      recordId: recordId,
-      bytes: Stream.value(bytes),
-      expectedSize: bytes.length,
-    );
-
-    final stream = await pocket.files.open(
-      store: store,
-      recordId: recordId,
-      refId: ref.refId,
-    );
-    final readBack = <int>[];
-    await for (final chunk in stream) {
-      readBack.addAll(chunk);
-    }
-
-    final listed = await pocket.files.list(
-      store: store,
-      recordId: recordId,
-    );
-
-    return {
-      'hash': ref.hash,
-      'state': ref.state,
-      'refCount': listed.length,
-      'readBack': readBack,
-      'match':
-          bytes.length == readBack.length && _intListEquals(bytes, readBack),
-    };
-  }
-
-  static bool _intListEquals(List<int> a, List<int> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
-
   Future<Object?> _handleFileUploadBegin(
       ClientConnection connection, WebRequest req) async {
+    final w = WireArgs(req.args);
     final uploadId = _nextUploadId++;
-    final session = _UploadSession(
+    _uploadSessions.begin(
       uploadId: uploadId,
-      store: req.args['store'] as String,
-      recordId: req.args['recordId'] as String,
-      field: req.args['field'] as String? ?? 'imgs',
-      name: req.args['name'] as String? ?? 'blob.bin',
-      expectedSize: req.args['size'] as int,
-      expectedSha256: req.args['expectedSha256'] as String?,
+      store: w.requireString('store', op: 'file_upload_begin'),
+      recordId: w.requireString('recordId', op: 'file_upload_begin'),
+      field: w.optionalString('field') ?? 'imgs',
+      name: w.optionalString('name') ?? 'blob.bin',
+      expectedSize: w.requireInt('size', op: 'file_upload_begin'),
+      expectedSha256: w.optionalString('expectedSha256'),
     );
-    // Max ~4 GiB. Do NOT use (1 << 32): in dart2js that is 1 (JS shift is mod 32).
-    const maxFileBytes = 4294967296; // 2^32
-    if (session.expectedSize < 0 || session.expectedSize > maxFileBytes) {
-      throw ValidationException('Invalid file size: ${session.expectedSize}');
-    }
-    _uploadSessions[uploadId] = session;
     return {'uploadId': uploadId};
   }
 
   Future<Object?> _handleFileUploadChunk(
       ClientConnection connection, WebRequest req) async {
-    final uploadId = req.args['uploadId'] as int;
-    final session = _uploadSessions[uploadId];
-    if (session == null) {
-      throw ValidationException('Unknown upload session: $uploadId');
-    }
+    final uploadId =
+        WireArgs(req.args).requireInt('uploadId', op: 'file_upload_chunk');
     final bytes = decodeWireValue(req.args['chunk']) as List<int>;
-    if (bytes.length > _maxUploadChunkBytes) {
-      throw ValidationException(
-          'Chunk too large: ${bytes.length} > $_maxUploadChunkBytes');
-    }
-    session.chunks.add(Uint8List.fromList(bytes));
-    session.receivedBytes += bytes.length;
-    if (session.receivedBytes > session.expectedSize) {
-      throw ValidationException(
-          'Upload exceeds declared size ${session.expectedSize}');
-    }
+    _uploadSessions.addChunk(
+      uploadId: uploadId,
+      chunk: Uint8List.fromList(bytes),
+    );
     return {'ok': true};
   }
 
   Future<Object?> _handleFileUploadFinish(
       ClientConnection connection, WebRequest req) async {
-    final uploadId = req.args['uploadId'] as int;
-    final session = _uploadSessions.remove(uploadId);
-    if (session == null) {
-      throw ValidationException('Unknown upload session: $uploadId');
-    }
-    if (session.receivedBytes != session.expectedSize) {
-      throw ValidationException(
-          'Upload size mismatch: expected ${session.expectedSize} '
-          'but got ${session.receivedBytes}');
-    }
+    final uploadId =
+        WireArgs(req.args).requireInt('uploadId', op: 'file_upload_finish');
+    final session = _uploadSessions.takeForFinish(uploadId);
 
     // Reassemble the byte stream from the bounded chunks.
     Stream<List<int>> stream() async* {
@@ -983,6 +925,14 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     };
   }
 
+  Future<Object?> _handleFileUploadAbort(
+      ClientConnection connection, WebRequest req) async {
+    final uploadId =
+        WireArgs(req.args).requireInt('uploadId', op: 'file_upload_abort');
+    _uploadSessions.abort(uploadId);
+    return {'ok': true};
+  }
+
   static Map<String, Object?> _encodeFileRef(FileRef ref) => {
         'refId': ref.refId,
         'store': ref.store,
@@ -998,22 +948,24 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleFileList(
       ClientConnection connection, WebRequest req) async {
+    final w = WireArgs(req.args);
     final refs = await pocket.files.list(
-      store: req.args['store'] as String,
-      recordId: req.args['recordId'] as String,
-      field: req.args['field'] as String? ?? 'imgs',
+      store: w.requireString('store', op: 'file_list'),
+      recordId: w.requireString('recordId', op: 'file_list'),
+      field: w.optionalString('field') ?? 'imgs',
     );
     return {'refs': refs.map(_encodeFileRef).toList()};
   }
 
   Future<Object?> _handleFileOpen(
       ClientConnection connection, WebRequest req) async {
+    final w = WireArgs(req.args);
     final stream = await pocket.files.open(
-      store: req.args['store'] as String,
-      recordId: req.args['recordId'] as String,
-      field: req.args['field'] as String? ?? 'imgs',
-      index: req.args['index'] as int? ?? 0,
-      refId: req.args['refId'] as String?,
+      store: w.requireString('store', op: 'file_open'),
+      recordId: w.requireString('recordId', op: 'file_open'),
+      field: w.optionalString('field') ?? 'imgs',
+      index: w.optionalInt('index') ?? 0,
+      refId: w.optionalString('refId'),
     );
     final allBytes = <int>[];
     await for (final chunk in stream) {
@@ -1027,24 +979,26 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleFileRemove(
       ClientConnection connection, WebRequest req) async {
+    final w = WireArgs(req.args);
     await pocket.files.remove(
-      store: req.args['store'] as String,
-      recordId: req.args['recordId'] as String,
-      field: req.args['field'] as String? ?? 'imgs',
-      index: req.args['index'] as int? ?? 0,
-      refId: req.args['refId'] as String?,
+      store: w.requireString('store', op: 'file_remove'),
+      recordId: w.requireString('recordId', op: 'file_remove'),
+      field: w.optionalString('field') ?? 'imgs',
+      index: w.optionalInt('index') ?? 0,
+      refId: w.optionalString('refId'),
     );
     return {'ok': true};
   }
 
   Future<Object?> _handleFileGc(
       ClientConnection connection, WebRequest req) async {
+    final w = WireArgs(req.args);
     final cleaned = await pocket.files.gc(
       blobGrace: Duration(
-          milliseconds: req.args['blobGraceMs'] as int? ??
+          milliseconds: w.optionalInt('blobGraceMs') ??
               const Duration(days: 7).inMilliseconds),
       tmpGrace: Duration(
-          milliseconds: req.args['tmpGraceMs'] as int? ??
+          milliseconds: w.optionalInt('tmpGraceMs') ??
               const Duration(hours: 24).inMilliseconds),
     );
     return {'cleaned': cleaned};
@@ -1052,30 +1006,33 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleFileEnforceStorageCap(
       ClientConnection connection, WebRequest req) async {
-    final evicted = await pocket.files
-        .enforceStorageCap(maxBytes: req.args['maxBytes'] as int);
+    final w = WireArgs(req.args);
+    final evicted = await pocket.files.enforceStorageCap(
+        maxBytes: w.requireInt('maxBytes', op: 'file_enforce_storage_cap'));
     return {'evicted': evicted};
   }
 
   Future<Object?> _handleConflictsList(
       ClientConnection connection, WebRequest req) async {
-    final store = req.args['store'] as String?;
+    final store = WireArgs(req.args).optionalString('store');
     final conflicts = await pocket.conflicts.listOpen(store: store);
     return {'conflicts': conflicts.map(encodeConflictRecord).toList()};
   }
 
   Future<Object?> _handleConflictsGet(
       ClientConnection connection, WebRequest req) async {
-    final store = req.args['store'] as String;
-    final id = req.args['id'] as String;
+    final w = WireArgs(req.args);
+    final store = w.requireString('store', op: 'conflicts_get');
+    final id = w.requireString('id', op: 'conflicts_get');
     final conflict = await pocket.conflicts.get(store, id);
     return conflict == null ? null : encodeConflictRecord(conflict);
   }
 
   Future<Object?> _handleConflictsResolve(
       ClientConnection connection, WebRequest req) async {
-    final store = req.args['store'] as String;
-    final id = req.args['id'] as String;
+    final w = WireArgs(req.args);
+    final store = w.requireString('store', op: 'conflicts_resolve');
+    final id = w.requireString('id', op: 'conflicts_resolve');
     final merged = decodeWireValue(req.args['merged']) as Map<String, Object?>;
     await pocket.conflicts.resolve(store: store, id: id, merged: merged);
     return {'ok': true};
@@ -1083,24 +1040,27 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   Future<Object?> _handleConflictsAcceptLocal(
       ClientConnection connection, WebRequest req) async {
-    final store = req.args['store'] as String;
-    final id = req.args['id'] as String;
+    final w = WireArgs(req.args);
+    final store = w.requireString('store', op: 'conflicts_accept_local');
+    final id = w.requireString('id', op: 'conflicts_accept_local');
     await pocket.conflicts.acceptLocal(store, id);
     return {'ok': true};
   }
 
   Future<Object?> _handleConflictsAcceptRemote(
       ClientConnection connection, WebRequest req) async {
-    final store = req.args['store'] as String;
-    final id = req.args['id'] as String;
+    final w = WireArgs(req.args);
+    final store = w.requireString('store', op: 'conflicts_accept_remote');
+    final id = w.requireString('id', op: 'conflicts_accept_remote');
     await pocket.conflicts.acceptRemote(store, id);
     return {'ok': true};
   }
 
   Future<Object?> _handleConflictsWatch(
       ClientConnection connection, WebRequest req) async {
-    final watchId = req.args['watchId'] as int;
-    final store = req.args['store'] as String?;
+    final w = WireArgs(req.args);
+    final watchId = w.requireInt('watchId', op: 'conflicts_watch');
+    final store = w.optionalString('store');
     // The engine's own conflicts watch drives the stream: it emits the
     // initial list immediately on listen and then on every change (add,
     // resolve, modify), so every emission is forwarded as a worker event and
@@ -1113,7 +1073,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
         'value': encodeWireValue(conflicts.map(encodeConflictRecord).toList()),
       }.jsify()));
     });
-    _watchers[watchId] = _ActiveWatcher(watchId, () async {
+    _watchers[watchId] = _ActiveWatcher(() async {
       sub.cancel();
     });
     return {'watchId': watchId};
@@ -1126,6 +1086,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
       await w.cancel();
     }
     _watchers.clear();
+    _uploadSessions.clear();
     if (_activeSession != null && !_activeSession!.completer.isCompleted) {
       _activeSession!.completer
           .completeError(DatabaseWorkerClosedException('Database closed.'));

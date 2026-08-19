@@ -8,6 +8,9 @@
 /// fail open with a typed [ProtocolMismatchException], never a generic error.
 library;
 
+import '../core/errors.dart';
+import '../sync/sync_backend.dart';
+
 /// Protocol version for every envelope. Bump on any incompatible change.
 /// v2: all reads are compiled query plans (`compiled_query`); descriptor-based
 /// query operations were removed.
@@ -66,10 +69,10 @@ class WireOp {
 
   // File operations (§ files). Bounded chunked upload, then metadata RPC
   // delegating to the worker-owned pocket.files.
-  static const String fileProbe = 'file_probe';
   static const String fileUploadBegin = 'file_upload_begin';
   static const String fileUploadChunk = 'file_upload_chunk';
   static const String fileUploadFinish = 'file_upload_finish';
+  static const String fileUploadAbort = 'file_upload_abort';
   static const String fileList = 'file_list';
   static const String fileOpen = 'file_open';
   static const String fileRemove = 'file_remove';
@@ -123,10 +126,10 @@ class WireOp {
     syncResume,
     syncUpdateAuth,
     syncSetConnectivity,
-    fileProbe,
     fileUploadBegin,
     fileUploadChunk,
     fileUploadFinish,
+    fileUploadAbort,
     fileList,
     fileOpen,
     fileRemove,
@@ -157,6 +160,62 @@ class WireErrorCode {
 
   /// A typed LocalPocket error (validation, storage, ...) was thrown remotely.
   static const String localpocket = 'localpocket';
+
+  /// Fallback category when an unclassified remote exception occurs.
+  static const String unknown = 'unknown';
+}
+
+/// Maps an arbitrary error object to a stable, minification-safe wire error
+/// category string.
+String stableWireErrorType(Object error) {
+  // LocalPocket core errors
+  if (error is LocalPocketError) {
+    if (error is ValidationException) return 'ValidationException';
+    if (error is UniqueConstraintException) return 'UniqueConstraintException';
+    if (error is NotNullConstraintException) return 'NotNullConstraintException';
+    if (error is CheckConstraintException) return 'CheckConstraintException';
+    if (error is PrimaryKeyConstraintException) return 'PrimaryKeyConstraintException';
+    if (error is ForeignKeyConstraintException) return 'ForeignKeyConstraintException';
+    if (error is StorageError) return 'StorageError';
+    if (error is RecordNotFoundException) return 'RecordNotFoundException';
+    if (error is SchemaTooNewError) return 'SchemaTooNewError';
+    if (error is FtsUnavailableError) return 'FtsUnavailableError';
+    if (error is SchemaRegistrationError) return 'SchemaRegistrationError';
+    if (error is StaleCursorError) return 'StaleCursorError';
+    if (error is ChangeBusOverflowError) return 'ChangeBusOverflowError';
+    if (error is MissingLimitError) return 'MissingLimitError';
+    if (error is ConflictBlockedError) return 'ConflictBlockedError';
+    if (error is DestructiveMigrationRefusedError) return 'DestructiveMigrationRefusedError';
+    if (error is ReadOnlyTxError) return 'ReadOnlyTxError';
+    return 'LocalPocketError';
+  }
+
+  // Sync & transport errors
+  if (error is SyncError) {
+    if (error is TransientNetworkError) return 'TransientNetworkError';
+    if (error is ServerBusyError) return 'ServerBusyError';
+    if (error is ServerError) return 'ServerError';
+    if (error is AuthError) return 'AuthError';
+    if (error is ForbiddenError) return 'ForbiddenError';
+    if (error is NotFoundError) return 'NotFoundError';
+    if (error is PayloadError) return 'PayloadError';
+    if (error is ProtocolError) return 'ProtocolError';
+    if (error is DuplicateIdError) return 'DuplicateIdError';
+    if (error is BatchFailedError) return 'BatchFailedError';
+    return 'SyncError';
+  }
+
+  // Standard Dart exceptions
+  if (error is ProtocolEnvelopeException) return 'ProtocolEnvelopeException';
+  if (error is DatabaseWorkerClosedException) return 'DatabaseWorkerClosedException';
+  if (error is ProtocolMismatchException) return 'ProtocolMismatchException';
+  if (error is RangeError) return 'RangeError';
+  if (error is StateError) return 'StateError';
+  if (error is ArgumentError) return 'ArgumentError';
+  if (error is FormatException) return 'FormatException';
+  if (error is UnsupportedError) return 'UnsupportedError';
+
+  return WireErrorCode.unknown;
 }
 
 /// A request envelope sent from the facade to the worker.

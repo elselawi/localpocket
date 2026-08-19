@@ -237,6 +237,8 @@ class LocalPocket {
     bool destructiveBackup = true,
     TestHooks? testHooks,
     BlobStore? blobStore,
+    String? wasmAssetPath,
+    String? workerAssetPath,
   }) async {
     if (encrypted && platform == PlatformProfile.web) {
       throw UnsupportedError('SQLCipher is unsupported on web platform.');

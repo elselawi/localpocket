@@ -137,7 +137,7 @@ class Pusher {
         return const PushReport(pushed: 1);
       }
       // Same id, different content: fall through to the update path.
-      return _pushUpdateWithBase(op, sr, fetched);
+      return await _pushUpdateWithBase(op, sr, fetched);
     } on AuthError {
       onAuthError();
       return const PushReport(hadError: true);
