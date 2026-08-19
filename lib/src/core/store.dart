@@ -153,6 +153,7 @@ class Collection {
 
   Future<void> _purge(String id) async {
     _ensureWritable();
+    final existing = await _readLogical(id);
     final exec = _tx!.executor;
     // 1. Drop file refs and decrement blob refcounts
     final refs = await exec.query(
@@ -184,6 +185,18 @@ class Collection {
     // 4. Delete domain row
     await exec.delete(_table.tableName, where: 'id = ?', whereArgs: [id]);
     _tx!.addChange(ChangeSet(name, {id}));
+    if (existing != null) {
+      final changed = {...existing.keys}..remove('id');
+      _tx!.addRecordEvent(RecordChangeEvent(
+        store: name,
+        id: id,
+        origin: ChangeOrigin.local,
+        action: ChangeAction.purge,
+        oldRecord: existing,
+        newRecord: null,
+        changedFields: changed,
+      ));
+    }
   }
 
   Future<void> _patch(String id, Map<String, Object?> changes) async {
@@ -334,6 +347,15 @@ class Collection {
     hooks?.mutationCrashPoint?.call('after-outbox');
 
     _tx?.addChange(ChangeSet(name, {id}));
+    _tx?.addRecordEvent(RecordChangeEvent(
+      store: name,
+      id: id,
+      origin: ChangeOrigin.local,
+      action: ChangeAction.update,
+      oldRecord: currentPayload,
+      newRecord: merged,
+      changedFields: dirtyFields.toSet(),
+    ));
   }
 
   Future<void> _mutate(MutationAction action,
@@ -456,6 +478,39 @@ class Collection {
       precomputedPayload: payloadJson,
     );
     hooks?.mutationCrashPoint?.call('after-outbox');
+
+    final ChangeAction changeAction;
+    switch (action) {
+      case MutationAction.create:
+      case MutationAction.createOrUpdate:
+        changeAction =
+            existingRow == null ? ChangeAction.create : ChangeAction.update;
+      case MutationAction.update:
+        changeAction = ChangeAction.update;
+      case MutationAction.archive:
+        changeAction = ChangeAction.archive;
+      case MutationAction.restore:
+        changeAction = ChangeAction.restore;
+    }
+
+    final Set<String> changedFieldsSet;
+    if (action == MutationAction.archive || action == MutationAction.restore) {
+      changedFieldsSet = {'archived'};
+    } else if (existingRow == null) {
+      changedFieldsSet = logical.keys.where((k) => k != 'id').toSet();
+    } else {
+      changedFieldsSet = dirtyFields.toSet();
+    }
+
+    _tx?.addRecordEvent(RecordChangeEvent(
+      store: name,
+      id: recordId,
+      origin: ChangeOrigin.local,
+      action: changeAction,
+      oldRecord: existingRow,
+      newRecord: logical,
+      changedFields: changedFieldsSet,
+    ));
 
     if (!coalesceChanges) {
       _tx?.addChange(ChangeSet(name, {recordId}));
@@ -665,6 +720,15 @@ class Collection {
             'schema_ver': schema.version,
           });
         }
+        _tx?.addRecordEvent(RecordChangeEvent(
+          store: name,
+          id: rid,
+          origin: ChangeOrigin.local,
+          action: ChangeAction.create,
+          oldRecord: null,
+          newRecord: logical,
+          changedFields: logical.keys.where((k) => k != 'id').toSet(),
+        ));
       } catch (e) {
         throw translateConstraintError(e);
       }
@@ -829,4 +893,71 @@ class Collection {
   /// Watches the record at [id], re-emitting only when that record changes.
   Stream<Map<String, Object?>?> watchOne(String id) =>
       OneWatcher(_pocket, _table, id).start();
+
+  /// Stream of committed record change events for this collection.
+  Stream<RecordChangeEvent> get events =>
+      _pocket.events.where((e) => e.store == name);
+
+  /// Convenience stream for listening to local record changes on this collection.
+  Stream<RecordChangeEvent> onLocal({String? field, ChangeAction? action}) {
+    return events.where((e) {
+      if (!e.isLocal) return false;
+      if (action != null && e.action != action) return false;
+      if (field != null && !e.hasFieldChange(field)) return false;
+      return true;
+    });
+  }
+
+  /// Convenience stream for listening to remote record changes on this collection.
+  Stream<RecordChangeEvent> onRemote({String? field, ChangeAction? action}) {
+    return events.where((e) {
+      if (!e.isRemote) return false;
+      if (action != null && e.action != action) return false;
+      if (field != null && !e.hasFieldChange(field)) return false;
+      return true;
+    });
+  }
+
+  /// Convenience stream for listening to resolution record changes on this collection.
+  Stream<RecordChangeEvent> onResolution(
+      {String? field, ChangeAction? action}) {
+    return events.where((e) {
+      if (!e.isResolution) return false;
+      if (action != null && e.action != action) return false;
+      if (field != null && !e.hasFieldChange(field)) return false;
+      return true;
+    });
+  }
+
+  /// Convenience stream for listening to changes on a specific field.
+  Stream<RecordChangeEvent> onFieldChange(
+    String field, {
+    ChangeOrigin? origin,
+    ChangeAction? action,
+  }) {
+    return events.where((e) {
+      if (origin != null && e.origin != origin) return false;
+      if (action != null && e.action != action) return false;
+      return e.hasFieldChange(field);
+    });
+  }
+
+  /// Convenience stream for listening to a specific field transition from [from] to [to].
+  Stream<RecordChangeEvent> onFieldTransition(
+    String field, {
+    Object? from = const _SentinelUnset(),
+    Object? to = const _SentinelUnset(),
+    ChangeOrigin? origin,
+    ChangeAction? action,
+  }) {
+    return events.where((e) {
+      if (origin != null && e.origin != origin) return false;
+      if (action != null && e.action != action) return false;
+      return e.isFieldTransition(field, from: from, to: to);
+    });
+  }
+}
+
+class _SentinelUnset {
+  const _SentinelUnset();
 }

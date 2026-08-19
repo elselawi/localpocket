@@ -24,7 +24,8 @@ Flutter / Dart Application
   - [Step 3: CRUD & Keyset Queries](#step-3-crud--keyset-queries)
   - [Step 4: Native Aggregates & FTS5 Search](#step-4-native-aggregates--fts5-search)
   - [Step 5: Reactive Live Watches](#step-5-reactive-live-watches)
-  - [Step 6: Synchronize with PocketBase](#step-6-synchronize-with-pocketbase)
+  - [Step 6: Local & Remote Change Hooks](#step-6-local--remote-change-hooks)
+  - [Step 7: Synchronize with PocketBase](#step-7-synchronize-with-pocketbase)
 - [PocketBase Server Requirements & Setup](#pocketbase-server-requirements--setup)
 - [Conflict Resolution & 3-Way Merge](#conflict-resolution--3-way-merge)
   - [Precedence & Built-in Resolvers](#precedence--built-in-resolvers)
@@ -225,7 +226,61 @@ await recordSub.cancel();
 
 ---
 
-### Step 6: Synchronize with PocketBase
+### Step 6: Local & Remote Change Hooks
+
+While `watch()` provides query snapshot streams for UI rendering, **Change Hooks** (`events`, `onLocal`, `onRemote`, `onResolution`) emit post-commit discrete mutation events carrying `oldRecord`, `newRecord`, `changedFields`, `origin`, and `action`.
+
+Use hooks to trigger out-of-band side effects like sending push notifications, displaying local alerts, driving analytics, or logging audit trails.
+
+```dart
+final tasks = db.collection('tasks');
+
+// 1. Listen for LOCAL changes (e.g. user completes a task -> send push notification to server)
+tasks.onFieldTransition('completed', from: false, to: true, origin: ChangeOrigin.local)
+    .listen((event) {
+      print('Task ${event.id} marked done locally by user.');
+      print('Old: ${event.oldRecord}');
+      print('New: ${event.newRecord}');
+      // Trigger out-of-band push notification or analytics...
+    });
+
+// 2. Listen for REMOTE changes (e.g. task updated from another client -> show local device notification)
+tasks.onRemote(field: 'status').listen((event) {
+  final oldStatus = event.oldValue('status');
+  final newStatus = event.newValue('status');
+  print('Task "${event.newRecord?['title']}" moved from $oldStatus to $newStatus on server.');
+  // NotificationService.show(...);
+});
+
+// 3. Listen for 3-WAY MERGE / CONFLICT resolutions
+tasks.onResolution().listen((event) {
+  print('Task ${event.id} was merged/resolved. Modified fields: ${event.changedFields}');
+});
+
+// 4. Global database event stream across all stores
+db.events.whereLocal().whereField('priority').listen((event) {
+  print('Local priority change in store "${event.store}" for record ${event.id}');
+});
+```
+
+#### Event Model (`RecordChangeEvent`)
+
+| Property / Method | Type | Description |
+|---|---|---|
+| `store` | `String` | Collection name |
+| `id` | `String` | Record ID |
+| `origin` | `ChangeOrigin` | `local` (user code), `remote` (sync pull), or `resolution` (3-way merge / conflict resolution) |
+| `action` | `ChangeAction` | `create`, `update`, `archive`, `restore`, `purge`, `hide` |
+| `oldRecord` | `Map<String, Object?>?` | Logical state before mutation (`null` on creation) |
+| `newRecord` | `Map<String, Object?>?` | Logical state after mutation (`null` on purge) |
+| `changedFields` | `Set<String>` | Set of modified field names |
+| `hasFieldChange(field)` | `bool` | Checks if `field` was modified |
+| `isFieldTransition(field, {from, to})` | `bool` | Checks for a specific `from` $\rightarrow$ `to` transition |
+| `oldValue(field)` / `newValue(field)` | `Object?` | Field value before and after the change |
+
+---
+
+### Step 7: Synchronize with PocketBase
 
 Connect your database to a remote PocketBase server:
 

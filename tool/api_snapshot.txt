@@ -4,7 +4,7 @@
 === lib/localpocket.dart ===
 export 'src/core/canonical_json.dart' show canonicalize;
 export 'src/core/capabilities.dart' show SqliteCapabilities, PlatformProfile;
-export 'src/core/change_bus.dart' show ChangeSet, ChangeBus;
+export 'src/core/change_bus.dart' show ChangeSet, ChangeBus, RecordChangeEvent, ChangeOrigin, ChangeAction, RecordChangeEventStreamExtension;
 export 'src/core/cipher.dart'
 export 'src/core/codec.dart'
 export 'src/core/database_adapter.dart'

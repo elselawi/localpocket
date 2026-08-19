@@ -11,6 +11,7 @@ import '../core/local_pocket.dart';
 import '../core/sql_utils.dart';
 import '../core/store.dart';
 import '../core/transaction.dart';
+import 'merge.dart';
 import 'sync_tables.dart';
 
 /// The captured optimistic-concurrency base of a dirty row.
@@ -438,6 +439,13 @@ class Outbox {
       final editedDuringRequest = currentOutbox.isNotEmpty &&
           currentOutbox.first['payload_json'] != settlement.op.payloadJson;
       if (!editedDuringRequest) {
+        final oldRows = await exec.query(table.tableName,
+            where: 'id = ?', whereArgs: [id], limit: 1);
+        final oldLogical = oldRows.isNotEmpty
+            ? decodeDbRow(schema, oldRows.first,
+                cipher: pocket.fieldCipher,
+                cryptoProvider: pocket.cryptoProvider)
+            : null;
         final dbRow = encodeDbRow(
           schema,
           id: id,
@@ -451,6 +459,18 @@ class Outbox {
         // The merged domain write is a real content change: publish it so
         // query/watch subscribers refresh.
         tx.addChange(ChangeSet(store, {id}));
+        final changedFields = computeDirtyFields(
+            oldLogical ?? const {}, settlement.mergedLogical!)
+          ..remove('id');
+        tx.addRecordEvent(RecordChangeEvent(
+          store: store,
+          id: id,
+          origin: ChangeOrigin.resolution,
+          action: ChangeAction.update,
+          oldRecord: oldLogical,
+          newRecord: settlement.mergedLogical!,
+          changedFields: changedFields,
+        ));
       }
     }
 
@@ -499,6 +519,17 @@ class Outbox {
           where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
       await _markClean(exec, store, id, settlement.serverUpdated, nowMs);
       tx.addChange(ChangeSet(store, {id}));
+      final changedFields = computeDirtyFields(currentLogical, serverLogical)
+        ..remove('id');
+      tx.addRecordEvent(RecordChangeEvent(
+        store: store,
+        id: id,
+        origin: ChangeOrigin.resolution,
+        action: ChangeAction.update,
+        oldRecord: currentLogical,
+        newRecord: serverLogical,
+        changedFields: changedFields,
+      ));
     } else {
       final serverHash = sha256Hex(settlement.serverDataJson);
       await exec.update(

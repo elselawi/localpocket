@@ -301,6 +301,17 @@ class Conflicts {
 
       tx.addChange(ChangeSet(store, {id}));
       tx.addChange(ChangeSet('lp_conflicts', {id}));
+      final changedFields = computeDirtyFields(record.local, mergedWithId)
+        ..remove('id');
+      tx.addRecordEvent(RecordChangeEvent(
+        store: store,
+        id: id,
+        origin: ChangeOrigin.resolution,
+        action: ChangeAction.update,
+        oldRecord: record.local,
+        newRecord: mergedWithId,
+        changedFields: changedFields,
+      ));
     });
   }
 

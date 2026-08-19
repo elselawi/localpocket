@@ -152,4 +152,175 @@ void main() {
       expect(cs.ids, {'a'});
     });
   });
+
+  group('RecordChangeEvent', () {
+    test('getters and field checks work correctly', () {
+      final event = RecordChangeEvent(
+        store: 'tasks',
+        id: 't1',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.update,
+        oldRecord: {'id': 't1', 'title': 'Old', 'done': false, 'tags': ['a']},
+        newRecord: {'id': 't1', 'title': 'New', 'done': true, 'tags': ['a', 'b']},
+        changedFields: {'title', 'done', 'tags'},
+      );
+
+      expect(event.isLocal, isTrue);
+      expect(event.isRemote, isFalse);
+      expect(event.isResolution, isFalse);
+
+      expect(event.hasFieldChange('title'), isTrue);
+      expect(event.hasFieldChange('done'), isTrue);
+      expect(event.hasFieldChange('tags'), isTrue);
+      expect(event.hasFieldChange('missing'), isFalse);
+
+      expect(event.oldValue('title'), 'Old');
+      expect(event.newValue('title'), 'New');
+      expect(event.oldValue('missing'), isNull);
+
+      // Transition matching
+      expect(event.isFieldTransition('done', from: false, to: true), isTrue);
+      expect(event.isFieldTransition('done', from: true, to: false), isFalse);
+      expect(event.isFieldTransition('done', to: true), isTrue);
+      expect(event.isFieldTransition('done', from: false), isTrue);
+      expect(event.isFieldTransition('title', to: 'New'), isTrue);
+      expect(event.isFieldTransition('tags', to: ['a', 'b']), isTrue);
+      expect(event.isFieldTransition('missing', to: 'anything'), isFalse);
+    });
+
+    test('field transition handles null values explicitly', () {
+      final event = RecordChangeEvent(
+        store: 'tasks',
+        id: 't2',
+        origin: ChangeOrigin.remote,
+        action: ChangeAction.update,
+        oldRecord: {'id': 't2', 'assignedTo': null},
+        newRecord: {'id': 't2', 'assignedTo': 'alice'},
+        changedFields: {'assignedTo'},
+      );
+
+      expect(event.isRemote, isTrue);
+      expect(event.isFieldTransition('assignedTo', from: null, to: 'alice'), isTrue);
+      expect(event.isFieldTransition('assignedTo', from: 'bob', to: 'alice'), isFalse);
+    });
+
+    test('equality and hashCode support deep collection comparison', () {
+      final e1 = RecordChangeEvent(
+        store: 'tasks',
+        id: 't1',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.create,
+        oldRecord: null,
+        newRecord: {'title': 'Task 1', 'meta': {'priority': 1}},
+        changedFields: {'title', 'meta'},
+      );
+
+      final e2 = RecordChangeEvent(
+        store: 'tasks',
+        id: 't1',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.create,
+        oldRecord: null,
+        newRecord: {'title': 'Task 1', 'meta': {'priority': 1}},
+        changedFields: {'title', 'meta'},
+      );
+
+      final e3 = RecordChangeEvent(
+        store: 'tasks',
+        id: 't1',
+        origin: ChangeOrigin.remote,
+        action: ChangeAction.create,
+        oldRecord: null,
+        newRecord: {'title': 'Task 1', 'meta': {'priority': 1}},
+        changedFields: {'title', 'meta'},
+      );
+
+      expect(e1, equals(e2));
+      expect(e1.hashCode, equals(e2.hashCode));
+      expect(e1, isNot(equals(e3)));
+    });
+
+    test('toJson and fromJson round-trip accurately', () {
+      final event = RecordChangeEvent(
+        store: 'tasks',
+        id: 't1',
+        origin: ChangeOrigin.resolution,
+        action: ChangeAction.update,
+        oldRecord: {'title': 'A', 'done': false},
+        newRecord: {'title': 'B', 'done': true},
+        changedFields: {'title', 'done'},
+      );
+
+      final json = event.toJson();
+      final restored = RecordChangeEvent.fromJson(json);
+
+      expect(restored.store, 'tasks');
+      expect(restored.id, 't1');
+      expect(restored.origin, ChangeOrigin.resolution);
+      expect(restored.action, ChangeAction.update);
+      expect(restored.oldRecord, {'title': 'A', 'done': false});
+      expect(restored.newRecord, {'title': 'B', 'done': true});
+      expect(restored.changedFields, {'title', 'done'});
+      expect(restored, equals(event));
+    });
+
+    test('Stream extension methods filter correctly', () async {
+      final controller = StreamController<RecordChangeEvent>.broadcast();
+      final stream = controller.stream;
+
+      final localEvents = <RecordChangeEvent>[];
+      final remoteEvents = <RecordChangeEvent>[];
+      final resolutionEvents = <RecordChangeEvent>[];
+      final tasksEvents = <RecordChangeEvent>[];
+      final doneTransitions = <RecordChangeEvent>[];
+
+      stream.whereLocal().listen(localEvents.add);
+      stream.whereRemote().listen(remoteEvents.add);
+      stream.whereResolution().listen(resolutionEvents.add);
+      stream.whereStore('tasks').listen(tasksEvents.add);
+      stream.whereFieldTransition('done', from: false, to: true).listen(doneTransitions.add);
+
+      final e1 = RecordChangeEvent(
+        store: 'tasks',
+        id: 't1',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.update,
+        oldRecord: {'done': false},
+        newRecord: {'done': true},
+        changedFields: {'done'},
+      );
+      final e2 = RecordChangeEvent(
+        store: 'users',
+        id: 'u1',
+        origin: ChangeOrigin.remote,
+        action: ChangeAction.create,
+        oldRecord: null,
+        newRecord: {'name': 'Alice'},
+        changedFields: {'name'},
+      );
+      final e3 = RecordChangeEvent(
+        store: 'tasks',
+        id: 't2',
+        origin: ChangeOrigin.resolution,
+        action: ChangeAction.update,
+        oldRecord: {'done': true},
+        newRecord: {'done': false},
+        changedFields: {'done'},
+      );
+
+      controller.add(e1);
+      controller.add(e2);
+      controller.add(e3);
+
+      await Future<void>.delayed(Duration.zero);
+
+      expect(localEvents, [e1]);
+      expect(remoteEvents, [e2]);
+      expect(resolutionEvents, [e3]);
+      expect(tasksEvents, [e1, e3]);
+      expect(doneTransitions, [e1]);
+
+      await controller.close();
+    });
+  });
 }

@@ -229,6 +229,8 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
   _WebTokenProvider? _tokenProvider;
   StreamSubscription<SyncStatus>? _syncStatusSubscription;
   SyncStatus? _lastSyncStatus;
+  final Set<ClientConnection> _connections = {};
+  StreamSubscription<RecordChangeEvent>? _eventSubscription;
 
   LocalPocketWorkerDatabase({
     required this.rawDatabase,
@@ -244,6 +246,17 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     ClientConnection connection,
     CustomClientDatabaseRequest request,
   ) async {
+    _connections.add(connection);
+    _eventSubscription ??= pocket.events.listen((event) {
+      for (final conn in _connections) {
+        unawaited(conn.customRequest({
+          'v': webProtocolVersion,
+          'op': WireOp.recordEvent,
+          'event': encodeWireValue(event.toJson()),
+        }.jsify()));
+      }
+    });
+
     final rawPayload = request.request;
     if (rawPayload == null) {
       return _encodeError(0, WireErrorCode.protocolEnvelope, 'Payload is null');
@@ -1092,6 +1105,9 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
           .completeError(DatabaseWorkerClosedException('Database closed.'));
     }
     _activeSession = null;
+    await _eventSubscription?.cancel();
+    _eventSubscription = null;
+    _connections.clear();
     await pocket.close();
     return {'ok': true};
   }

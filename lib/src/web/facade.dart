@@ -428,6 +428,16 @@ class LocalPocket {
         }
         return;
       }
+      if (event['op'] == WireOp.recordEvent) {
+        final rawEvent = event['event'];
+        if (rawEvent is Map) {
+          final decoded = (decodeWireValue(rawEvent) as Map)
+              .map((k, v) => MapEntry(k.toString(), v));
+          final recordEvent = RecordChangeEvent.fromJson(decoded);
+          changeBus.emitEvent(recordEvent);
+        }
+        return;
+      }
       if (event['op'] != WireOp.workerEvent) {
         return;
       }
@@ -702,6 +712,39 @@ class LocalPocket {
 
   Stream<ChangeSet> get changes => changeBus.stream;
 
+  /// Emits detailed committed record change events (old vs new, origin, action, changedFields).
+  Stream<RecordChangeEvent> get events => changeBus.events;
+
+  /// Convenience stream for listening to local record changes across collections.
+  Stream<RecordChangeEvent> onLocal({
+    String? store,
+    String? field,
+    ChangeAction? action,
+  }) {
+    return events.where((e) {
+      if (!e.isLocal) return false;
+      if (store != null && e.store != store) return false;
+      if (action != null && e.action != action) return false;
+      if (field != null && !e.hasFieldChange(field)) return false;
+      return true;
+    });
+  }
+
+  /// Convenience stream for listening to remote record changes across collections.
+  Stream<RecordChangeEvent> onRemote({
+    String? store,
+    String? field,
+    ChangeAction? action,
+  }) {
+    return events.where((e) {
+      if (!e.isRemote) return false;
+      if (store != null && e.store != store) return false;
+      if (action != null && e.action != action) return false;
+      if (field != null && !e.hasFieldChange(field)) return false;
+      return true;
+    });
+  }
+
   /// Worker-owned synchronization status snapshots.
   Stream<Map<String, Object?>> get syncStatus => _syncStatusController.stream;
 
@@ -830,6 +873,68 @@ class WebCollection {
       },
     );
     return controller.stream;
+  }
+
+  /// Stream of committed record change events for this collection.
+  Stream<RecordChangeEvent> get events =>
+      _pocket.events.where((e) => e.store == name);
+
+  /// Convenience stream for listening to local record changes on this collection.
+  Stream<RecordChangeEvent> onLocal({String? field, ChangeAction? action}) {
+    return events.where((e) {
+      if (!e.isLocal) return false;
+      if (action != null && e.action != action) return false;
+      if (field != null && !e.hasFieldChange(field)) return false;
+      return true;
+    });
+  }
+
+  /// Convenience stream for listening to remote record changes on this collection.
+  Stream<RecordChangeEvent> onRemote({String? field, ChangeAction? action}) {
+    return events.where((e) {
+      if (!e.isRemote) return false;
+      if (action != null && e.action != action) return false;
+      if (field != null && !e.hasFieldChange(field)) return false;
+      return true;
+    });
+  }
+
+  /// Convenience stream for listening to resolution record changes on this collection.
+  Stream<RecordChangeEvent> onResolution({String? field, ChangeAction? action}) {
+    return events.where((e) {
+      if (!e.isResolution) return false;
+      if (action != null && e.action != action) return false;
+      if (field != null && !e.hasFieldChange(field)) return false;
+      return true;
+    });
+  }
+
+  /// Convenience stream for listening to changes on a specific field.
+  Stream<RecordChangeEvent> onFieldChange(
+    String field, {
+    ChangeOrigin? origin,
+    ChangeAction? action,
+  }) {
+    return events.where((e) {
+      if (origin != null && e.origin != origin) return false;
+      if (action != null && e.action != action) return false;
+      return e.hasFieldChange(field);
+    });
+  }
+
+  /// Convenience stream for listening to a specific field transition from [from] to [to].
+  Stream<RecordChangeEvent> onFieldTransition(
+    String field, {
+    Object? from = const _SentinelUnset(),
+    Object? to = const _SentinelUnset(),
+    ChangeOrigin? origin,
+    ChangeAction? action,
+  }) {
+    return events.where((e) {
+      if (origin != null && e.origin != origin) return false;
+      if (action != null && e.action != action) return false;
+      return e.isFieldTransition(field, from: from, to: to);
+    });
   }
 
   WebQueryBuilder query() => WebQueryBuilder._(_pocket, schema);
@@ -1472,6 +1577,10 @@ class WebLocalPocketFiles {
 
   Future<int> enforceStorageCap({required int maxBytes}) =>
       _pocket.filesEnforceStorageCap(maxBytes: maxBytes);
+}
+
+class _SentinelUnset {
+  const _SentinelUnset();
 }
 
 /// Main-thread conflicts API over the worker-owned engine.

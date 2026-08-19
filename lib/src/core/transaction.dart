@@ -15,15 +15,21 @@ class Tx {
   final LocalPocket _pocket;
   final DatabaseExecutor _executor;
   final List<ChangeSet> _changes;
+  final List<RecordChangeEvent> _recordEvents;
 
   /// Whether this handle rejects mutations.
   final bool readOnly;
   final _SavepointCounter _sp;
 
   /// Internal: constructed by [LocalPocket].
-  Tx.internal(this._pocket, this._executor, this._changes,
-      {this.readOnly = false})
-      : _sp = _SavepointCounter();
+  Tx.internal(
+    this._pocket,
+    this._executor,
+    this._changes, {
+    List<RecordChangeEvent>? recordEvents,
+    this.readOnly = false,
+  })  : _recordEvents = recordEvents ?? [],
+        _sp = _SavepointCounter();
 
   DatabaseExecutor get executor => _executor;
 
@@ -44,6 +50,11 @@ class Tx {
   void addChange(ChangeSet change) {
     _changes.add(change);
     _pocket.perf.recordRowsWritten(change.ids.length);
+  }
+
+  /// Buffers a detailed post-commit record change event (emitted after commit only).
+  void addRecordEvent(RecordChangeEvent event) {
+    _recordEvents.add(event);
   }
 
   /// Scoped collection access bound to this transaction.
@@ -69,10 +80,15 @@ class Tx {
     // Rolled-back savepoint work must not leak post-commit notifications or
     // rows-written accounting: snapshot both before running the nested body.
     final changeCountBefore = _changes.length;
+    final eventCountBefore = _recordEvents.length;
     final rowsBefore = _pocket.perf.rowsWritten;
     try {
-      final nested = Tx.internal(_pocket, _executor, _changes)
-        .._sp.setParentName(name);
+      final nested = Tx.internal(
+        _pocket,
+        _executor,
+        _changes,
+        recordEvents: _recordEvents,
+      ).._sp.setParentName(name);
       final result = await nested.runInZone(() => action(nested));
       await _executor.execute('RELEASE $name');
       return result;
@@ -81,10 +97,13 @@ class Tx {
         await _executor.execute('ROLLBACK TO $name');
         await _executor.execute('RELEASE $name');
       } catch (_) {}
-      // Drop any ChangeSet buffered by the rolled-back savepoint and revert
+      // Drop any ChangeSet and RecordChangeEvent buffered by the rolled-back savepoint and revert
       // the rows-written counter to its pre-savepoint value.
       if (_changes.length > changeCountBefore) {
         _changes.removeRange(changeCountBefore, _changes.length);
+      }
+      if (_recordEvents.length > eventCountBefore) {
+        _recordEvents.removeRange(eventCountBefore, _recordEvents.length);
       }
       _pocket.perf.recordRowsWritten(rowsBefore - _pocket.perf.rowsWritten);
       rethrow;

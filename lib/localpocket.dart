@@ -56,7 +56,7 @@ export 'src/core/query.dart'
         SearchResult,
         SearchQueryBuilder;
 export 'src/core/query_plan.dart' show QueryPlan;
-export 'src/core/change_bus.dart' show ChangeSet, ChangeBus;
+export 'src/core/change_bus.dart' show ChangeSet, ChangeBus, RecordChangeEvent, ChangeOrigin, ChangeAction, RecordChangeEventStreamExtension;
 export 'src/core/watch.dart';
 export 'src/sync/sync_tables.dart'
     show

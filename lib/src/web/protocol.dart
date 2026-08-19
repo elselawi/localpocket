@@ -23,6 +23,7 @@ class WireOp {
   static const String close = 'close';
   static const String health = 'health';
   static const String workerEvent = 'worker_event';
+  static const String recordEvent = 'record_event';
   static const String capabilities = 'capabilities';
 
   // Collection CRUD & Mutation Batches
@@ -96,6 +97,8 @@ class WireOp {
     open,
     close,
     health,
+    workerEvent,
+    recordEvent,
     capabilities,
     get,
     mutateBatch,
@@ -172,10 +175,16 @@ String stableWireErrorType(Object error) {
   if (error is LocalPocketError) {
     if (error is ValidationException) return 'ValidationException';
     if (error is UniqueConstraintException) return 'UniqueConstraintException';
-    if (error is NotNullConstraintException) return 'NotNullConstraintException';
+    if (error is NotNullConstraintException) {
+      return 'NotNullConstraintException';
+    }
     if (error is CheckConstraintException) return 'CheckConstraintException';
-    if (error is PrimaryKeyConstraintException) return 'PrimaryKeyConstraintException';
-    if (error is ForeignKeyConstraintException) return 'ForeignKeyConstraintException';
+    if (error is PrimaryKeyConstraintException) {
+      return 'PrimaryKeyConstraintException';
+    }
+    if (error is ForeignKeyConstraintException) {
+      return 'ForeignKeyConstraintException';
+    }
     if (error is StorageError) return 'StorageError';
     if (error is RecordNotFoundException) return 'RecordNotFoundException';
     if (error is SchemaTooNewError) return 'SchemaTooNewError';
@@ -185,7 +194,9 @@ String stableWireErrorType(Object error) {
     if (error is ChangeBusOverflowError) return 'ChangeBusOverflowError';
     if (error is MissingLimitError) return 'MissingLimitError';
     if (error is ConflictBlockedError) return 'ConflictBlockedError';
-    if (error is DestructiveMigrationRefusedError) return 'DestructiveMigrationRefusedError';
+    if (error is DestructiveMigrationRefusedError) {
+      return 'DestructiveMigrationRefusedError';
+    }
     if (error is ReadOnlyTxError) return 'ReadOnlyTxError';
     return 'LocalPocketError';
   }
@@ -207,7 +218,9 @@ String stableWireErrorType(Object error) {
 
   // Standard Dart exceptions
   if (error is ProtocolEnvelopeException) return 'ProtocolEnvelopeException';
-  if (error is DatabaseWorkerClosedException) return 'DatabaseWorkerClosedException';
+  if (error is DatabaseWorkerClosedException) {
+    return 'DatabaseWorkerClosedException';
+  }
   if (error is ProtocolMismatchException) return 'ProtocolMismatchException';
   if (error is RangeError) return 'RangeError';
   if (error is StateError) return 'StateError';

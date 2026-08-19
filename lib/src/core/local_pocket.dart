@@ -439,13 +439,17 @@ class LocalPocket {
     }
     try {
       final changes = <ChangeSet>[];
+      final recordEvents = <RecordChangeEvent>[];
       final result = await db.transaction((txn) async {
-        final tx = Tx.internal(this, txn, changes);
+        final tx = Tx.internal(this, txn, changes, recordEvents: recordEvents);
         return tx.runInZone(() => action(tx));
       });
       for (final cs in changes) {
         _tables[cs.store]?.readCache.invalidate(cs.ids);
         changeBus.emit(cs);
+      }
+      for (final event in recordEvents) {
+        changeBus.emitEvent(event);
       }
       return result;
     } finally {
@@ -640,6 +644,39 @@ class LocalPocket {
 
   /// Emits committed local changes for the registered stores.
   Stream<ChangeSet> get changes => changeBus.stream;
+
+  /// Emits detailed committed record change events (old vs new, origin, action, changedFields).
+  Stream<RecordChangeEvent> get events => changeBus.events;
+
+  /// Convenience stream for listening to local record changes across collections.
+  Stream<RecordChangeEvent> onLocal({
+    String? store,
+    String? field,
+    ChangeAction? action,
+  }) {
+    return events.where((e) {
+      if (!e.isLocal) return false;
+      if (store != null && e.store != store) return false;
+      if (action != null && e.action != action) return false;
+      if (field != null && !e.hasFieldChange(field)) return false;
+      return true;
+    });
+  }
+
+  /// Convenience stream for listening to remote record changes across collections.
+  Stream<RecordChangeEvent> onRemote({
+    String? store,
+    String? field,
+    ChangeAction? action,
+  }) {
+    return events.where((e) {
+      if (!e.isRemote) return false;
+      if (store != null && e.store != store) return false;
+      if (action != null && e.action != action) return false;
+      if (field != null && !e.hasFieldChange(field)) return false;
+      return true;
+    });
+  }
 
   /// Optimizes SQLite statistics and closes the database connection.
   ///

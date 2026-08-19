@@ -326,6 +326,16 @@ class Puller {
           prefetchedSyncRow: sr,
           syncRowChecked: true);
       tx.addChange(ChangeSet(store, {remote.id}));
+      final changedFields = computeDirtyFields(const {}, logical)..remove('id');
+      tx.addRecordEvent(RecordChangeEvent(
+        store: store,
+        id: remote.id,
+        origin: ChangeOrigin.remote,
+        action: ChangeAction.create,
+        oldRecord: null,
+        newRecord: logical,
+        changedFields: changedFields,
+      ));
       return;
     }
 
@@ -354,6 +364,16 @@ class Puller {
           prefetchedSyncRow: sr,
           syncRowChecked: true);
       tx.addChange(ChangeSet(store, {remote.id}));
+      final changedFields = computeDirtyFields(localRow, logical)..remove('id');
+      tx.addRecordEvent(RecordChangeEvent(
+        store: store,
+        id: remote.id,
+        origin: ChangeOrigin.remote,
+        action: ChangeAction.update,
+        oldRecord: localRow,
+        newRecord: logical,
+        changedFields: changedFields,
+      ));
       return;
     }
 
@@ -435,6 +455,16 @@ class Puller {
           newPayloadJson: canonicalize(merged));
       await _touchSeen(tx, store, remote.id, remote.updated);
       tx.addChange(ChangeSet(store, {remote.id}));
+      final changedFields = computeDirtyFields(localRow, merged)..remove('id');
+      tx.addRecordEvent(RecordChangeEvent(
+        store: store,
+        id: remote.id,
+        origin: ChangeOrigin.resolution,
+        action: ChangeAction.update,
+        oldRecord: localRow,
+        newRecord: merged,
+        changedFields: changedFields,
+      ));
       return;
     }
 
@@ -600,6 +630,16 @@ class Puller {
   Future<void> markHidden(String store, String id) async {
     await pocket.transaction((tx) async {
       final exec = tx.executor;
+      final schema = pocket.requireTable(store).schema;
+      final existingRows = await exec.query(
+          pocket.requireTable(store).tableName,
+          where: 'id = ?',
+          whereArgs: [id],
+          limit: 1);
+      final oldRow = existingRows.isNotEmpty
+          ? decodeDbRow(schema, existingRows.first,
+              cipher: pocket.fieldCipher, cryptoProvider: pocket.cryptoProvider)
+          : null;
       await exec.update(
           'lp_sync_row',
           {
@@ -612,6 +652,17 @@ class Puller {
       // Hidden transitions change the default query/FTS/watch scope and must
       // invalidate the point-read cache and refresh watchers.
       tx.addChange(ChangeSet(store, {id}));
+      if (oldRow != null) {
+        tx.addRecordEvent(RecordChangeEvent(
+          store: store,
+          id: id,
+          origin: ChangeOrigin.remote,
+          action: ChangeAction.hide,
+          oldRecord: oldRow,
+          newRecord: {...oldRow, 'hidden': true},
+          changedFields: const {'hidden'},
+        ));
+      }
     });
   }
 

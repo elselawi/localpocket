@@ -45,13 +45,15 @@ class _ConnectPageState extends State<ConnectPage> {
     });
     try {
       await widget.state.openPocketBase();
-      if (mounted)
+      if (mounted) {
         setState(
           () => _notice = 'PocketBase mode ready — enter a server URL below.',
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = 'Could not open PocketBase mode: $e');
+      }
     } finally {
       if (mounted) setState(() => _connecting = false);
     }
