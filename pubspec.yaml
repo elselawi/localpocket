@@ -17,7 +17,6 @@ dependencies:
   meta: ^1.9.0
   http: ^1.6.0
   cryptography: ^2.9.0
-  material: ^1.0.1
 
 flutter:
   assets:
@@ -33,3 +32,4 @@ dev_dependencies:
   hive: ^2.2.3
   drift: ^2.34.3
   isar: ^3.1.0+1
+  material: ^1.0.1

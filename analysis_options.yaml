@@ -1,6 +1,16 @@
 include: package:lints/recommended.yaml
 
 analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
   language:
     strict-casts: true
     strict-inference: true
+    # TODO: we might turn this on
+    # strict-raw-types: true
