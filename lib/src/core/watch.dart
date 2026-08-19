@@ -85,10 +85,9 @@ class QueryWatcher {
 
   Future<List<Map<String, Object?>>> _runQuery() async {
     // Watches are bounded; a query without an explicit limit defaults to 50.
-    if (_query.limitValue == null && !_query.allMode) {
-      _query.limit(50);
-    }
-    final page = await _query.fetch();
+    final int? internalLimit =
+        _query.limitValue == null && !_query.allMode ? 50 : null;
+    final page = await _query.fetch(internalLimit: internalLimit);
     return page.items;
   }
 

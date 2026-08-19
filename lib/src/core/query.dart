@@ -504,8 +504,8 @@ class QueryBuilder {
   // -------------------------------------------------------------- execution --
 
   /// Executes the query and returns one page of records.
-  Future<Page> fetch() async {
-    final limit = _resolveLimit();
+  Future<Page> fetch({int? internalLimit}) async {
+    final limit = internalLimit ?? _resolveLimit();
     // A zero limit is a degenerate (but legal) page: nothing to return and
     // nothing to paginate from.
     if (limit == 0) {
