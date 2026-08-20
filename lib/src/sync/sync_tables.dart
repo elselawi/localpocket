@@ -114,20 +114,126 @@ const List<String> syncSystemDdl = [
   'CREATE INDEX IF NOT EXISTS ix_filerefs_record ON lp_file_refs (store, record_id)',
 ];
 
-/// Parses [row] into [T], converting any malformed value (wrong SQLite type,
-/// unknown enum string, broken JSON, …) into a typed [StorageError]
-/// corruption failure instead of leaking a raw `TypeError`/`ArgumentError`/
-/// `FormatException`. These tables are written exclusively by the package, so
-/// a row that fails to parse indicates disk corruption or a version mismatch.
-T _parseRow<T>(String table, T Function() build) {
-  try {
-    return build();
-  } on StorageError {
-    rethrow;
-  } catch (e) {
-    throw StorageError('Corrupt $table row: $e');
-  }
+/// Ordered columns of `lp_outbox` — the single source of truth for the
+/// prepared-statement fast path and every map-based insert/update path.
+const List<String> outboxColumns = [
+  'store',
+  'record_id',
+  'kind',
+  'payload_json',
+  'base_updated',
+  'base_hash',
+  'dirty_fields',
+  'op_id',
+  'created_at',
+  'updated_at',
+  'depends_on_op',
+];
+
+/// Ordered columns of `lp_sync_row`.
+const List<String> syncRowColumns = [
+  'store',
+  'record_id',
+  'remote_updated',
+  'last_seen_at',
+  'base_updated',
+  'base_hash',
+  'base_json',
+  'sync_state',
+  'dirty_fields',
+  'local_rev',
+  'access_state',
+  'op_id',
+  'attempt_count',
+  'next_retry_at',
+  'last_error',
+  'schema_ver',
+];
+
+/// JSON encoding of the "all fields changed" `dirty_fields` marker used when
+/// a row is created or wholesale replaced.
+const String kAllDirtyFieldsJson = '["*"]';
+
+/// Builds a full `lp_outbox` row for a dirty local mutation.
+Map<String, Object?> buildOutboxRow({
+  required String store,
+  required String recordId,
+  required OutboxKind kind,
+  required String payloadJson,
+  String? baseUpdated,
+  String baseHash = '',
+  required String dirtyFieldsJson,
+  required String opId,
+  required int createdAt,
+  required int updatedAt,
+  String? dependsOnOp,
+}) {
+  return {
+    'store': store,
+    'record_id': recordId,
+    'kind': kind.name,
+    'payload_json': payloadJson,
+    'base_updated': baseUpdated,
+    'base_hash': baseHash,
+    'dirty_fields': dirtyFieldsJson,
+    'op_id': opId,
+    'created_at': createdAt,
+    'updated_at': updatedAt,
+    'depends_on_op': dependsOnOp,
+  };
 }
+
+/// Builds a full `lp_sync_row` row for a dirty local mutation.
+Map<String, Object?> buildSyncRow({
+  required String store,
+  required String recordId,
+  String? remoteUpdated,
+  int? lastSeenAt,
+  String? baseUpdated,
+  String baseHash = '',
+  String? baseJson,
+  required SyncState syncState,
+  required String dirtyFieldsJson,
+  required int localRev,
+  AccessState accessState = AccessState.visible,
+  String? opId,
+  int attemptCount = 0,
+  int nextRetryAt = 0,
+  String? lastError,
+  required int schemaVer,
+}) {
+  return {
+    'store': store,
+    'record_id': recordId,
+    'remote_updated': remoteUpdated,
+    'last_seen_at': lastSeenAt,
+    'base_updated': baseUpdated,
+    'base_hash': baseHash,
+    'base_json': baseJson,
+    'sync_state': syncState.name,
+    'dirty_fields': dirtyFieldsJson,
+    'local_rev': localRev,
+    'access_state': accessState.name,
+    'op_id': opId,
+    'attempt_count': attemptCount,
+    'next_retry_at': nextRetryAt,
+    'last_error': lastError,
+    'schema_ver': schemaVer,
+  };
+}
+
+/// Values of [row] in [columns] order — used to bind a map-shaped row to the
+/// prepared-statement fast path so the column list lives in exactly one place.
+List<Object?> rowValuesInOrder(
+        Map<String, Object?> row, List<String> columns) =>
+    [for (final c in columns) row[c]];
+
+/// `"c1", "c2", …` for an INSERT column list.
+String quotedColumnList(List<String> columns) =>
+    columns.map((c) => '"$c"').join(', ');
+
+/// `?, ?, …` placeholders for [count] columns.
+String placeholders(int count) => List.filled(count, '?').join(', ');
 
 class SyncRowState {
   final String store;

@@ -209,19 +209,19 @@ class Outbox {
         <String>{...?outboxOp?.dirtyFields, ...dirtyFields}.toList()..sort();
     final createdAt = outboxOp?.createdAt ?? now;
 
-    final outboxMap = <String, Object?>{
-      'store': store,
-      'record_id': id,
-      'kind': opKind!.name,
-      'payload_json': payloadJson,
-      'base_updated': baseUpdated,
-      'base_hash': baseHash,
-      'dirty_fields': jsonEncode(mergedDirty),
-      'op_id': opId,
-      'created_at': createdAt,
-      'updated_at': now,
-      'depends_on_op': outboxOp?.dependsOnOp,
-    };
+    final outboxMap = buildOutboxRow(
+      store: store,
+      recordId: id,
+      kind: opKind!,
+      payloadJson: payloadJson,
+      baseUpdated: baseUpdated,
+      baseHash: baseHash,
+      dirtyFieldsJson: jsonEncode(mergedDirty),
+      opId: opId,
+      createdAt: createdAt,
+      updatedAt: now,
+      dependsOnOp: outboxOp?.dependsOnOp,
+    );
     if (outboxOp == null) {
       await exec.insert('lp_outbox', outboxMap);
     } else {
@@ -230,24 +230,24 @@ class Outbox {
     }
 
     final prevRev = syncRow?.localRev ?? 0;
-    final syncRowMap = <String, Object?>{
-      'store': store,
-      'record_id': id,
-      'remote_updated': syncRow?.remoteUpdated,
-      'last_seen_at': syncRow?.lastSeenAt,
-      'base_updated': baseUpdated,
-      'base_hash': baseHash,
-      'base_json': baseJson,
-      'sync_state': 'dirty',
-      'dirty_fields': jsonEncode(mergedDirty),
-      'local_rev': prevRev + 1,
-      'access_state': syncRow?.accessState.name ?? 'visible',
-      'op_id': opId,
-      'attempt_count': clearError ? 0 : (syncRow?.attemptCount ?? 0),
-      'next_retry_at': clearError ? 0 : (syncRow?.nextRetryAt ?? 0),
-      'last_error': clearError ? null : syncRow?.lastError,
-      'schema_ver': schema.version,
-    };
+    final syncRowMap = buildSyncRow(
+      store: store,
+      recordId: id,
+      remoteUpdated: syncRow?.remoteUpdated,
+      lastSeenAt: syncRow?.lastSeenAt,
+      baseUpdated: baseUpdated,
+      baseHash: baseHash,
+      baseJson: baseJson,
+      syncState: SyncState.dirty,
+      dirtyFieldsJson: jsonEncode(mergedDirty),
+      localRev: prevRev + 1,
+      accessState: syncRow?.accessState ?? AccessState.visible,
+      opId: opId,
+      attemptCount: clearError ? 0 : (syncRow?.attemptCount ?? 0),
+      nextRetryAt: clearError ? 0 : (syncRow?.nextRetryAt ?? 0),
+      lastError: clearError ? null : syncRow?.lastError,
+      schemaVer: schema.version,
+    );
     if (syncRow == null) {
       await exec.insert('lp_sync_row', syncRowMap);
     } else {

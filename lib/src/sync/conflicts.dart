@@ -252,18 +252,21 @@ class Conflicts {
 
       if (existingOp.isEmpty) {
         final now = _pocket.now();
-        await exec.insert('lp_outbox', {
-          'op_id': _pocket.outbox.generateOpId(),
-          'store': store,
-          'record_id': id,
-          'kind': isArchived ? 'archive' : 'upsert',
-          'payload_json': mergedPayload,
-          'base_updated': remoteUpdated,
-          'base_hash': remoteHash,
-          'dirty_fields': jsonEncode(dirtyFields),
-          'created_at': now,
-          'updated_at': now,
-        });
+        await exec.insert(
+          'lp_outbox',
+          buildOutboxRow(
+            store: store,
+            recordId: id,
+            kind: isArchived ? OutboxKind.archive : OutboxKind.upsert,
+            payloadJson: mergedPayload,
+            baseUpdated: remoteUpdated,
+            baseHash: remoteHash,
+            dirtyFieldsJson: jsonEncode(dirtyFields),
+            opId: _pocket.outbox.generateOpId(),
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
       } else {
         await exec.update(
           'lp_outbox',

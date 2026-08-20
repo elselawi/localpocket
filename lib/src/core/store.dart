@@ -590,11 +590,15 @@ class Collection with ChangeBusAwareStore {
     final db = _pocket.db;
 
     // If using DirectSqliteDatabase, we can bind directly to prepared statements
-    // with fixed column lists for max insertion throughput.
-    final insertOutboxSql =
-        'INSERT INTO lp_outbox ("store", "record_id", "kind", "payload_json", "base_updated", "base_hash", "dirty_fields", "op_id", "created_at", "updated_at", "depends_on_op") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-    final insertSyncRowSql =
-        'INSERT INTO lp_sync_row ("store", "record_id", "remote_updated", "last_seen_at", "base_updated", "base_hash", "base_json", "sync_state", "dirty_fields", "local_rev", "access_state", "op_id", "attempt_count", "next_retry_at", "last_error", "schema_ver") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    // with fixed column lists for max insertion throughput. Column names/order
+    // come from the shared `outboxColumns`/`syncRowColumns` constants so the
+    // prepared-statement and map-based paths can never drift.
+    final insertOutboxSql = 'INSERT INTO lp_outbox '
+        '(${quotedColumnList(outboxColumns)}) '
+        'VALUES (${placeholders(outboxColumns.length)})';
+    final insertSyncRowSql = 'INSERT INTO lp_sync_row '
+        '(${quotedColumnList(syncRowColumns)}) '
+        'VALUES (${placeholders(syncRowColumns.length)})';
 
     for (final (rid, record) in records) {
       final logical = _logicalFromRecord(record, rid);
@@ -609,6 +613,25 @@ class Collection with ChangeBusAwareStore {
         cryptoProvider: _pocket.cryptoProvider,
       );
       final opId = _pocket.outbox.generateOpId();
+      final outboxRow = buildOutboxRow(
+        store: name,
+        recordId: rid,
+        kind: OutboxKind.upsert,
+        payloadJson: payloadJson,
+        dirtyFieldsJson: kAllDirtyFieldsJson,
+        opId: opId,
+        createdAt: now,
+        updatedAt: now,
+      );
+      final syncRow = buildSyncRow(
+        store: name,
+        recordId: rid,
+        syncState: SyncState.dirty,
+        dirtyFieldsJson: kAllDirtyFieldsJson,
+        localRev: 1,
+        opId: opId,
+        schemaVer: schema.version,
+      );
       try {
         if (db is DirectSqliteDatabase &&
             _pocket.testHooks?.onExecute == null) {
@@ -617,70 +640,16 @@ class Collection with ChangeBusAwareStore {
           final domainSql =
               'INSERT INTO "${_table.tableName}" ($cols) VALUES ($ph)';
           db.getPreparedStatement(domainSql).execute(row.values.toList());
-          db.getPreparedStatement(insertOutboxSql).execute([
-            name,
-            rid,
-            OutboxKind.upsert.name,
-            payloadJson,
-            null,
-            '',
-            '["*"]',
-            opId,
-            now,
-            now,
-            null
-          ]);
-          db.getPreparedStatement(insertSyncRowSql).execute([
-            name,
-            rid,
-            null,
-            null,
-            null,
-            '',
-            null,
-            SyncState.dirty.name,
-            '["*"]',
-            1,
-            AccessState.visible.name,
-            opId,
-            0,
-            0,
-            null,
-            schema.version
-          ]);
+          db
+              .getPreparedStatement(insertOutboxSql)
+              .execute(rowValuesInOrder(outboxRow, outboxColumns));
+          db
+              .getPreparedStatement(insertSyncRowSql)
+              .execute(rowValuesInOrder(syncRow, syncRowColumns));
         } else {
           await exec.insert(_table.tableName, row);
-          await exec.insert('lp_outbox', {
-            'store': name,
-            'record_id': rid,
-            'kind': OutboxKind.upsert.name,
-            'payload_json': payloadJson,
-            'base_updated': null,
-            'base_hash': '',
-            'dirty_fields': '["*"]',
-            'op_id': opId,
-            'created_at': now,
-            'updated_at': now,
-            'depends_on_op': null,
-          });
-          await exec.insert('lp_sync_row', {
-            'store': name,
-            'record_id': rid,
-            'remote_updated': null,
-            'last_seen_at': null,
-            'base_updated': null,
-            'base_hash': '',
-            'base_json': null,
-            'sync_state': SyncState.dirty.name,
-            'dirty_fields': '["*"]',
-            'local_rev': 1,
-            'access_state': AccessState.visible.name,
-            'op_id': opId,
-            'attempt_count': 0,
-            'next_retry_at': 0,
-            'last_error': null,
-            'schema_ver': schema.version,
-          });
+          await exec.insert('lp_outbox', outboxRow);
+          await exec.insert('lp_sync_row', syncRow);
         }
         _tx?.addRecordEvent(RecordChangeEvent(
           store: name,
