@@ -119,11 +119,14 @@ class OneWatcher extends CoalescedWatcher<Map<String, Object?>?> {
 
 String computeSnapshotDigest(
   List<Map<String, Object?>> items, {
+  bool ordered = false,
   void Function(int bytes)? onDigestBytes,
 }) {
-  final parts = <String>[];
-  for (final r in items) {
-    parts.add(canonicalize(r));
+  final parts = <String>[
+    for (final r in items) canonicalize(r),
+  ];
+  if (!ordered) {
+    parts.sort();
   }
   final joined = parts.join('|');
   onDigestBytes?.call(joined.length);
