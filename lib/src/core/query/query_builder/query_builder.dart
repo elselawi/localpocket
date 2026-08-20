@@ -331,11 +331,18 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// is appended dynamically because it varies per call. The key is built from
   /// shape components (store, scope, where/or fragments, columns, order), so
   /// argument values never pollute the cache.
+  /// Insertion-ordered cache with true LRU semantics (promote-on-hit): the
+  /// most recently used template is moved to the tail on every hit, so a hot
+  /// query is never evicted just because it was inserted early.
   static final Map<String, String> _sqlTemplateCache = {};
 
   static String _cachedSqlTemplate(String key, String Function() build) {
-    final hit = _sqlTemplateCache[key];
-    if (hit != null) return hit;
+    final hit = _sqlTemplateCache.remove(key);
+    if (hit != null) {
+      // Promote to the most-recently-used tail.
+      _sqlTemplateCache[key] = hit;
+      return hit;
+    }
     final sql = build();
     if (_sqlTemplateCache.length >= 512) {
       _sqlTemplateCache.remove(_sqlTemplateCache.keys.first);

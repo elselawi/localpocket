@@ -89,6 +89,12 @@ abstract class Database extends DatabaseExecutor {
 }
 
 /// A direct synchronous-backed implementation of [Database] wrapping [CommonDatabase].
+///
+/// On native platforms all SQLite work executes SYNCHRONOUSLY on the calling
+/// isolate. The `Future`-returning methods here (and on the public
+/// `LocalPocket` API) provide API-level asynchrony only — they do NOT move
+/// work to a background isolate. Large scans or heavy maintenance should be
+/// run from a dedicated isolate to avoid blocking the UI isolate.
 class DirectSqliteDatabase implements Database {
   final Map<String, CommonPreparedStatement> _statementCache = {};
   final CommonDatabase _db;
@@ -123,15 +129,20 @@ class DirectSqliteDatabase implements Database {
 
   @override
   CommonPreparedStatement getPreparedStatement(String sql) {
-    var stmt = _statementCache[sql];
-    if (stmt == null) {
-      if (_statementCache.length >= 256) {
-        final oldest = _statementCache.keys.first;
-        _statementCache.remove(oldest)?.close();
-      }
-      stmt = _db.prepare(sql);
+    var stmt = _statementCache.remove(sql);
+    if (stmt != null) {
+      // Promote to the most-recently-used tail so a hot statement is never
+      // evicted for being inserted early (true LRU on the insertion-ordered
+      // map).
       _statementCache[sql] = stmt;
+      return stmt;
     }
+    if (_statementCache.length >= 256) {
+      final oldest = _statementCache.keys.first;
+      _statementCache.remove(oldest)?.close();
+    }
+    stmt = _db.prepare(sql);
+    _statementCache[sql] = stmt;
     return stmt;
   }
 

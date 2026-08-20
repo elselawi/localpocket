@@ -427,6 +427,33 @@ void main() {
 
       db.close();
     });
+
+    test('LRU promotion keeps a hot statement cached under eviction pressure',
+        () {
+      final db = cacheDb();
+      // Fill the 256-entry cache with distinct statements (insertion order
+      // 0..255). ids 1000+ do not exist in `t`; we only need the statements.
+      const first = 'SELECT v FROM t WHERE id = 0';
+      for (var i = 0; i < 256; i++) {
+        db.selectSync('SELECT v FROM t WHERE id = $i');
+      }
+      // Refresh the FIRST statement: promote-on-hit moves it to the
+      // most-recently-used tail of the LRU chain.
+      final hot = db.getPreparedStatement(first);
+
+      // Insert 255 more distinct statements; each insertion evicts the current
+      // least-recently-used entry. Without promote-on-hit (plain FIFO) the
+      // first statement would be evicted on the very first insert.
+      for (var i = 1000; i < 1255; i++) {
+        db.selectSync('SELECT v FROM t WHERE id = $i');
+      }
+
+      expect(identical(db.getPreparedStatement(first), hot), isTrue,
+          reason: 'a promoted statement survives eviction (true LRU)');
+      expect(db.selectSync(first).single['v'], 'v0',
+          reason: 'the surviving statement is still correct');
+      db.close();
+    });
   });
 
   group('handle lifecycle', () {
