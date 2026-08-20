@@ -59,20 +59,7 @@ class OpQueue {
       for (final op in candidates)
         if (op.dependsOnOp != null) op.dependsOnOp!,
     };
-    final blocked = <String>{};
-    if (dependencyIds.isNotEmpty) {
-      final ids = dependencyIds.toList();
-      final placeholders = List.filled(ids.length, '?').join(', ');
-      final outboxRows = await pocket.db.rawQuery(
-          'SELECT op_id FROM lp_outbox WHERE op_id IN ($placeholders)', ids);
-      blocked.addAll(outboxRows.map((row) => row['op_id'] as String));
-      // A failed-but-retryable queue op still gates its dependents.
-      final queueRows = await pocket.db.rawQuery(
-          "SELECT op_id FROM lp_op_queue WHERE op_id IN ($placeholders) "
-          "AND state IN ('pending','failed')",
-          ids);
-      blocked.addAll(queueRows.map((row) => row['op_id'] as String));
-    }
+    final blocked = await queryBlockedDependencyOpIds(pocket.db, dependencyIds);
 
     final result = <OpQueueRow>[];
     for (final op in candidates) {

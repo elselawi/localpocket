@@ -299,3 +299,102 @@ List<String> _decodeStringList(Object? v) {
             'dirty-field member is ${item.runtimeType}, expected String')
   ];
 }
+
+/// Resolves dependency `op_id`s that are still pending/failed in `lp_outbox` or `lp_op_queue`.
+Future<Set<String>> queryBlockedDependencyOpIds(
+  dynamic db,
+  Iterable<String> dependencyIds,
+) async {
+  final blocked = <String>{};
+  final ids = dependencyIds.toList();
+  if (ids.isEmpty) return blocked;
+
+  final ph = List.filled(ids.length, '?').join(', ');
+  final outboxRows =
+      await db.rawQuery('SELECT op_id FROM lp_outbox WHERE op_id IN ($ph)', ids)
+          as List<Map<String, Object?>>;
+  blocked.addAll(outboxRows.map((row) => row['op_id'] as String));
+  final queueRows = await db.rawQuery(
+      "SELECT op_id FROM lp_op_queue WHERE op_id IN ($ph) AND state IN ('pending','failed')",
+      ids) as List<Map<String, Object?>>;
+  blocked.addAll(queueRows.map((row) => row['op_id'] as String));
+  return blocked;
+}
+
+/// Upserts a blob entry in `lp_blobs`, setting or incrementing refcount and updating last_access.
+Future<void> upsertBlobReference(
+  dynamic exec, {
+  required String hash,
+  required int size,
+  required int now,
+}) async {
+  final existing = await exec.query(
+    'lp_blobs',
+    columns: ['hash'],
+    where: 'hash = ?',
+    whereArgs: [hash],
+    limit: 1,
+  ) as List<Map<String, Object?>>;
+  if (existing.isEmpty) {
+    await exec.insert('lp_blobs', {
+      'hash': hash,
+      'size': size,
+      'state': 'local',
+      'refcount': 1,
+      'last_access': now,
+      'created_at': now,
+    });
+  } else {
+    await exec.execute(
+      'UPDATE lp_blobs SET refcount = refcount + 1, last_access = ? WHERE hash = ?',
+      [now, hash],
+    );
+  }
+}
+
+/// Decrements refcount for a blob in `lp_blobs` without letting it drop below 0.
+Future<void> decrementBlobReference(
+  dynamic exec,
+  String hash,
+) async {
+  if (hash.isEmpty) return;
+  await exec.execute(
+    'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
+    [hash],
+  );
+}
+
+/// Cleans up file refs, blob refcounts, conflicts, op queue entries, outbox,
+/// and sync row metadata for a vanished/purged record.
+Future<void> vanishRecordMetadata(
+  dynamic exec,
+  String store,
+  String recordId, {
+  bool deleteSyncAndOutbox = false,
+}) async {
+  final refs = await exec.query('lp_file_refs',
+      columns: ['ref_id', 'hash'],
+      where: 'store = ? AND record_id = ?',
+      whereArgs: [store, recordId]) as List<Map<String, Object?>>;
+  for (final r in refs) {
+    await exec
+        .delete('lp_file_refs', where: 'ref_id = ?', whereArgs: [r['ref_id']]);
+    final hash = r['hash'] as String?;
+    if (hash != null && hash.isNotEmpty) {
+      await decrementBlobReference(exec, hash);
+    }
+  }
+
+  await exec.delete('lp_conflicts',
+      where: 'store = ? AND record_id = ?', whereArgs: [store, recordId]);
+  await exec.update('lp_op_queue', {'state': 'done'},
+      where: "store = ? AND record_id = ? AND state IN ('pending','failed')",
+      whereArgs: [store, recordId]);
+
+  if (deleteSyncAndOutbox) {
+    await exec.delete('lp_outbox',
+        where: 'store = ? AND record_id = ?', whereArgs: [store, recordId]);
+    await exec.delete('lp_sync_row',
+        where: 'store = ? AND record_id = ?', whereArgs: [store, recordId]);
+  }
+}

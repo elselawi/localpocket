@@ -76,30 +76,9 @@ class Puller {
         final c = cursor;
         final exec = tx.executor;
         final schema = pocket.requireTable(store).schema;
-        // Set-based sync/domain probe for the whole page: one
-        // chunked query per table instead of two per record.
-        final srById = <String, SyncRowState>{};
-        final localById = <String, Map<String, Object?>>{};
         final pageIds = [for (final item in normalizedBatch) item.remote.id];
-        const probePage = 500;
-        for (var i = 0; i < pageIds.length; i += probePage) {
-          final chunk =
-              pageIds.sublist(i, (i + probePage).clamp(0, pageIds.length));
-          final ph = List.filled(chunk.length, '?').join(', ');
-          final srRows = await exec.rawQuery(
-              'SELECT * FROM lp_sync_row WHERE store = ? AND record_id IN ($ph)',
-              [store, ...chunk]);
-          for (final r in srRows) {
-            srById[r['record_id'] as String] = SyncRowState.fromRow(r);
-          }
-          final domRows = await exec.query(pocket.requireTable(store).tableName,
-              where: 'id IN ($ph)', whereArgs: chunk);
-          for (final r in domRows) {
-            localById[r['id'] as String] = decodeDbRow(schema, r,
-                cipher: pocket.fieldCipher,
-                cryptoProvider: pocket.cryptoProvider);
-          }
-        }
+        final (srById, localById) =
+            await _probeBatchRows(exec, store, schema, pageIds);
         final written = <String>{};
         for (final item in normalizedBatch) {
           final r = item.remote;
@@ -236,28 +215,9 @@ class Puller {
       ];
       await pocket.transaction((tx) async {
         final exec = tx.executor;
-        final srById = <String, SyncRowState>{};
-        final localById = <String, Map<String, Object?>>{};
         final pageIds = [for (final item in normalized) item.remote.id];
-        const probePage = 500;
-        for (var i = 0; i < pageIds.length; i += probePage) {
-          final chunkIds =
-              pageIds.sublist(i, (i + probePage).clamp(0, pageIds.length));
-          final ph = List.filled(chunkIds.length, '?').join(', ');
-          final srRows = await exec.rawQuery(
-              'SELECT * FROM lp_sync_row WHERE store = ? AND record_id IN ($ph)',
-              [store, ...chunkIds]);
-          for (final r in srRows) {
-            srById[r['record_id'] as String] = SyncRowState.fromRow(r);
-          }
-          final domRows = await exec.query(pocket.requireTable(store).tableName,
-              where: 'id IN ($ph)', whereArgs: chunkIds);
-          for (final r in domRows) {
-            localById[r['id'] as String] = decodeDbRow(schema, r,
-                cipher: pocket.fieldCipher,
-                cryptoProvider: pocket.cryptoProvider);
-          }
-        }
+        final (srById, localById) =
+            await _probeBatchRows(exec, store, schema, pageIds);
         final written = <String>{};
         for (final item in normalized) {
           final r = item.remote;
@@ -279,6 +239,36 @@ class Puller {
   /// A targeted full fetch of one record (sweep self-heal / re-visibility).
   Future<void> fetchOne(String store, String id) async {
     await fetchBatch(store, [id]);
+  }
+
+  Future<(Map<String, SyncRowState>, Map<String, Map<String, Object?>>)>
+      _probeBatchRows(
+    DatabaseExecutor exec,
+    String store,
+    CollectionSchema schema,
+    List<String> pageIds,
+  ) async {
+    final srById = <String, SyncRowState>{};
+    final localById = <String, Map<String, Object?>>{};
+    const probePage = 500;
+    for (var i = 0; i < pageIds.length; i += probePage) {
+      final chunk =
+          pageIds.sublist(i, (i + probePage).clamp(0, pageIds.length));
+      final ph = List.filled(chunk.length, '?').join(', ');
+      final srRows = await exec.rawQuery(
+          'SELECT * FROM lp_sync_row WHERE store = ? AND record_id IN ($ph)',
+          [store, ...chunk]);
+      for (final r in srRows) {
+        srById[r['record_id'] as String] = SyncRowState.fromRow(r);
+      }
+      final domRows = await exec.query(pocket.requireTable(store).tableName,
+          where: 'id IN ($ph)', whereArgs: chunk);
+      for (final r in domRows) {
+        localById[r['id'] as String] = decodeDbRow(schema, r,
+            cipher: pocket.fieldCipher, cryptoProvider: pocket.cryptoProvider);
+      }
+    }
+    return (srById, localById);
   }
 
   // --------------------------------------------------------------- applier --
@@ -474,7 +464,7 @@ class Puller {
         return;
       }
       // 3-way merge: remote is the trunk; local changes apply on top.
-      final basePayload = _parsePayload(sr?.baseJson);
+      final basePayload = parsePayloadJson(sr?.baseJson);
       final policy = MergePolicy(
         collectionResolver:
             schema.conflictPolicy.collectionResolver is ConflictResolver
@@ -536,13 +526,6 @@ class Puller {
     // 4. error / quarantine: leave; human/ops action required.
   }
 
-  Map<String, Object?> _parsePayload(String? json) {
-    if (json == null || json.isEmpty) return const {};
-    final decoded = jsonDecode(json);
-    if (decoded is Map) return Map<String, Object?>.from(decoded);
-    return const {};
-  }
-
   Future<void> _recordPullConflict(
     DatabaseExecutor exec,
     String store,
@@ -552,7 +535,7 @@ class Puller {
     Map<String, Object?> localPayload,
     MergeResult outcome,
   ) async {
-    final basePayload = _parsePayload(sr?.baseJson);
+    final basePayload = parsePayloadJson(sr?.baseJson);
     final remotePayload = buildPayload(schema, normalizeRemote(schema, remote));
     final dirtyLocal = computeDirtyFields(basePayload, localPayload).toList()
       ..sort();

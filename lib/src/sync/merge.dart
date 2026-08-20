@@ -422,46 +422,31 @@ class MergeEngine {
     );
 
     if (policy?.collectionResolver != null) {
+      MergeResult handleCustomResult(MergeResult? customRes) {
+        if (customRes == null) {
+          return MergeResult(
+            merged: {...base, ...remote, ...local},
+            needsReview: true,
+            dirtyLocal: dirtyLocal,
+            dirtyRemote: dirtyRemote,
+            note: 'Collection resolver declined resolution',
+          );
+        }
+        return MergeResult(
+          merged: customRes.merged,
+          needsReview: customRes.needsReview,
+          note: customRes.note,
+          dirtyLocal: dirtyLocal,
+          dirtyRemote: dirtyRemote,
+        );
+      }
+
       final customResOrFuture =
           adapter.invoke(policy!.collectionResolver!, ctx);
       if (customResOrFuture is Future<MergeResult?>) {
-        return customResOrFuture.then((customRes) {
-          if (customRes == null) {
-            return MergeResult(
-              merged: {...base, ...remote, ...local},
-              needsReview: true,
-              dirtyLocal: dirtyLocal,
-              dirtyRemote: dirtyRemote,
-              note: 'Collection resolver declined resolution',
-            );
-          }
-          return MergeResult(
-            merged: customRes.merged,
-            needsReview: customRes.needsReview,
-            note: customRes.note,
-            dirtyLocal: dirtyLocal,
-            dirtyRemote: dirtyRemote,
-          );
-        });
+        return customResOrFuture.then(handleCustomResult);
       }
-
-      final customRes = customResOrFuture;
-      if (customRes == null) {
-        return MergeResult(
-          merged: {...base, ...remote, ...local},
-          needsReview: true,
-          dirtyLocal: dirtyLocal,
-          dirtyRemote: dirtyRemote,
-          note: 'Collection resolver declined resolution',
-        );
-      }
-      return MergeResult(
-        merged: customRes.merged,
-        needsReview: customRes.needsReview,
-        note: customRes.note,
-        dirtyLocal: dirtyLocal,
-        dirtyRemote: dirtyRemote,
-      );
+      return handleCustomResult(customResOrFuture);
     }
 
     final keys = [...local.keys, ...remote.keys, ...base.keys];

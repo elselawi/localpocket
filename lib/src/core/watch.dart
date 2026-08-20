@@ -59,26 +59,48 @@ class QueryWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
 
 /// `watchOne` fast path: re-fetches only when the ChangeSet mentions the id
 /// (or is an unknown/external change).
-class OneWatcher {
-  final LocalPocket _pocket;
+class OneWatcher extends CoalescedWatcher<Map<String, Object?>?> {
   final StoreTable _table;
   final String id;
-  final Duration coalesceWindow;
-
   StreamController<Map<String, Object?>?>? _controller;
-  StreamSubscription<ChangeSet>? _sub;
-  Timer? _timer;
-  bool _running = false;
-  bool _dirty = false;
-  String? _digest;
 
-  OneWatcher(this._pocket, this._table, this.id,
-      {this.coalesceWindow = const Duration(milliseconds: 16)});
+  OneWatcher(super.pocket, this._table, this.id, {super.coalesceWindow});
 
-  Stream<Map<String, Object?>?> start() {
+  @override
+  bool shouldInvalidate(ChangeSet cs) {
+    if (cs.store != _table.schema.name) return false;
+    if (cs.ids.isNotEmpty && !cs.ids.contains(id)) return false;
+    return true;
+  }
+
+  @override
+  Future<Map<String, Object?>?> fetchSnapshot() async {
+    final rows = await pocket.db
+        .query(_table.tableName, where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty) return null;
+    return decodeDbRow(
+      _table.schema,
+      rows.first,
+      cipher: pocket.fieldCipher,
+      cryptoProvider: pocket.cryptoProvider,
+    );
+  }
+
+  @override
+  String computeDigest(Map<String, Object?>? data) =>
+      data == null ? '<null>' : sha256Hex(canonicalize(data));
+
+  @override
+  void onEmit(Map<String, Object?>? data) => _controller?.add(data);
+
+  @override
+  void onError(Object error, StackTrace stackTrace) =>
+      _controller?.addError(error, stackTrace);
+
+  Stream<Map<String, Object?>?> startStream() {
     _controller = StreamController<Map<String, Object?>?>(
       onListen: () {
-        _sub = _pocket.changes.listen(_onChange);
+        start();
         _refresh();
       },
       onCancel: dispose,
@@ -86,52 +108,9 @@ class OneWatcher {
     return _controller!.stream;
   }
 
-  void _onChange(ChangeSet cs) {
-    if (cs.store != _table.schema.name) return;
-    if (cs.ids.isNotEmpty && !cs.ids.contains(id)) return;
-    if (_running) {
-      _dirty = true;
-      return;
-    }
-    _timer?.cancel();
-    _timer = Timer(coalesceWindow, _refresh);
-  }
-
-  Future<void> _refresh() async {
-    _running = true;
-    try {
-      final rows = await _pocket.db
-          .query(_table.tableName, where: 'id = ?', whereArgs: [id], limit: 1);
-      Map<String, Object?>? logical;
-      if (rows.isNotEmpty) {
-        logical = decodeDbRow(
-          _table.schema,
-          rows.first,
-          cipher: _pocket.fieldCipher,
-          cryptoProvider: _pocket.cryptoProvider,
-        );
-      }
-      final digest =
-          logical == null ? '<null>' : sha256Hex(canonicalize(logical));
-      if (digest != _digest) {
-        _digest = digest;
-        _controller?.add(logical);
-      }
-    } catch (e) {
-      _controller?.addError(e);
-    } finally {
-      _running = false;
-      if (_dirty) {
-        _dirty = false;
-        _timer?.cancel();
-        _timer = Timer(coalesceWindow, _refresh);
-      }
-    }
-  }
-
+  @override
   void dispose() {
-    _timer?.cancel();
-    _sub?.cancel();
+    super.dispose();
     _controller?.close();
   }
 }

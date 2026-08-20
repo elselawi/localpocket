@@ -242,27 +242,7 @@ class FileSyncLane {
 
     await pocket.transaction((tx) async {
       final exec = tx.executor;
-      final existing = await exec.query(
-        'lp_blobs',
-        where: 'hash = ?',
-        whereArgs: [hash],
-        limit: 1,
-      );
-      if (existing.isEmpty) {
-        await exec.insert('lp_blobs', {
-          'hash': hash,
-          'size': size,
-          'state': 'local',
-          'refcount': 1,
-          'last_access': now,
-          'created_at': now,
-        });
-      } else {
-        await exec.execute(
-          'UPDATE lp_blobs SET refcount = refcount + 1, last_access = ? WHERE hash = ?',
-          [now, hash],
-        );
-      }
+      await upsertBlobReference(exec, hash: hash, size: size, now: now);
 
       await exec.update(
         'lp_file_refs',

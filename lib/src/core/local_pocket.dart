@@ -601,29 +601,8 @@ class LocalPocket with ChangeBusAwareLP {
               ? decodeDbRow(schema, existingRows.first,
                   cipher: fieldCipher, cryptoProvider: cryptoProvider)
               : null;
-          final refs = await exec.query('lp_file_refs',
-              columns: ['ref_id', 'hash'],
-              where: 'store = ? AND record_id = ?',
-              whereArgs: [store, id]);
-          for (final ref in refs) {
-            await exec.delete('lp_file_refs',
-                where: 'ref_id = ?', whereArgs: [ref['ref_id']]);
-            await exec.execute(
-                'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
-                [ref['hash']]);
-          }
-          // A compacted row must not leave an open conflict or queued file ops
-          // behind (a later drain could otherwise act on the vanished record).
-          await exec.delete('lp_conflicts',
-              where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
-          await exec.update('lp_op_queue', {'state': 'done'},
-              where:
-                  "store = ? AND record_id = ? AND state IN ('pending','failed')",
-              whereArgs: [store, id]);
-          await exec.delete('lp_outbox',
-              where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
-          await exec.delete('lp_sync_row',
-              where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+          await vanishRecordMetadata(exec, store, id,
+              deleteSyncAndOutbox: true);
           await exec.delete(store, where: 'id = ?', whereArgs: [id]);
           tx.addChange(ChangeSet(store, {id}));
           if (existing != null) {

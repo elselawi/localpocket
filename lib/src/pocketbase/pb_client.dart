@@ -235,73 +235,47 @@ class PbClient {
 
   /// Sends with the bearer token; on 401 refreshes once and retries.
   /// Transport failures map to [TransientNetworkError] for the engine.
-  Future<HttpResponse> _sendAuth(String method, Uri uri, {String? body}) async {
-    try {
-      final token = await auth.token();
-      var res = await _send(method, uri, token: token.value, body: body);
-      if (res.status == 401) {
-        final fresh = await auth.refreshNow();
-        res = await _send(method, uri, token: fresh.value, body: body);
-      }
-      return res;
-    } on HttpTransportException catch (e) {
-      throw TransientNetworkError(e.message);
-    }
+  Future<HttpResponse> _sendAuth(String method, Uri uri, {String? body}) {
+    return _withAuthRetry(
+        (token) => _send(method, uri, token: token, body: body),
+        (res) => res.status);
   }
 
-  Future<HttpResponse> _sendMultipartAuth(HttpMultipartRequest request) async {
-    try {
-      final token = await auth.token();
-      var authorized = HttpMultipartRequest(
+  Future<HttpResponse> _sendMultipartAuth(HttpMultipartRequest request) {
+    return _withAuthRetry((token) {
+      final authorized = HttpMultipartRequest(
         method: request.method,
         url: request.url,
-        headers: {...request.headers, 'Authorization': 'Bearer ${token.value}'},
+        headers: {...request.headers, 'Authorization': 'Bearer $token'},
         fields: request.fields,
         files: request.files,
       );
-      var res = await transport.sendMultipart(authorized);
-      if (res.status == 401) {
-        final fresh = await auth.refreshNow();
-        authorized = HttpMultipartRequest(
-          method: request.method,
-          url: request.url,
-          headers: {
-            ...request.headers,
-            'Authorization': 'Bearer ${fresh.value}'
-          },
-          fields: request.fields,
-          files: request.files,
-        );
-        res = await transport.sendMultipart(authorized);
-      }
-      return res;
-    } on HttpTransportException catch (e) {
-      throw TransientNetworkError(e.message);
-    }
+      return transport.sendMultipart(authorized);
+    }, (res) => res.status);
   }
 
-  Future<StreamedHttpResponse> _openStreamAuth(HttpRequest request) async {
-    try {
-      final token = await auth.token();
-      var authorized = HttpRequest(
+  Future<StreamedHttpResponse> _openStreamAuth(HttpRequest request) {
+    return _withAuthRetry((token) {
+      final authorized = HttpRequest(
         method: request.method,
         url: request.url,
-        headers: {...request.headers, 'Authorization': 'Bearer ${token.value}'},
+        headers: {...request.headers, 'Authorization': 'Bearer $token'},
         body: request.body,
       );
-      var res = await transport.openStream(authorized);
-      if (res.status == 401) {
+      return transport.openStream(authorized);
+    }, (res) => res.status);
+  }
+
+  Future<T> _withAuthRetry<T>(
+    Future<T> Function(String token) sendFn,
+    int Function(T res) getStatus,
+  ) async {
+    try {
+      final token = await auth.token();
+      var res = await sendFn(token.value);
+      if (getStatus(res) == 401) {
         final fresh = await auth.refreshNow();
-        authorized = HttpRequest(
-          method: request.method,
-          url: request.url,
-          headers: {
-            ...request.headers,
-            'Authorization': 'Bearer ${fresh.value}'
-          },
-          body: request.body,
-        );
-        res = await transport.openStream(authorized);
+        res = await sendFn(fresh.value);
       }
       return res;
     } on HttpTransportException catch (e) {

@@ -260,24 +260,7 @@ class Outbox {
 
   Future<void> _vanishFileRefs(
       DatabaseExecutor exec, String store, String id) async {
-    final refs = await exec.query('lp_file_refs',
-        columns: ['ref_id', 'hash'],
-        where: 'store = ? AND record_id = ?',
-        whereArgs: [store, id]);
-    for (final r in refs) {
-      await exec.delete('lp_file_refs',
-          where: 'ref_id = ?', whereArgs: [r['ref_id']]);
-      final hash = r['hash'] as String?;
-      if (hash != null && hash.isNotEmpty) {
-        await exec.execute(
-            'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
-            [hash]);
-      }
-    }
-    // Cancel queued file ops for this record (pending AND retryable-failed).
-    await exec.update('lp_op_queue', {'state': 'done'},
-        where: "store = ? AND record_id = ? AND state IN ('pending','failed')",
-        whereArgs: [store, id]);
+    await vanishRecordMetadata(exec, store, id, deleteSyncAndOutbox: false);
   }
 
   // -------------------------------------------------------------- draining --
@@ -313,18 +296,7 @@ class Outbox {
       for (final op in ops)
         if (op.dependsOnOp != null) op.dependsOnOp!,
     };
-    final blocked = <String>{};
-    if (depIds.isNotEmpty) {
-      final depList = depIds.toList();
-      final ph = List.filled(depList.length, '?').join(', ');
-      final inOutbox = await pocket.db.rawQuery(
-          'SELECT op_id FROM lp_outbox WHERE op_id IN ($ph)', depList);
-      blocked.addAll(inOutbox.map((r) => r['op_id'] as String));
-      final inQueue = await pocket.db.rawQuery(
-          "SELECT op_id FROM lp_op_queue WHERE op_id IN ($ph) AND state IN ('pending','failed')",
-          depList);
-      blocked.addAll(inQueue.map((r) => r['op_id'] as String));
-    }
+    final blocked = await queryBlockedDependencyOpIds(pocket.db, depIds);
 
     final result = <OutboxOp>[];
     for (final op in ops) {
@@ -708,22 +680,7 @@ class Outbox {
     return pocket.transaction((tx) async {
       final exec = tx.executor;
       final now = DateTime.now().millisecondsSinceEpoch;
-      final existing = await exec.query('lp_blobs',
-          columns: ['hash'], where: 'hash = ?', whereArgs: [hash], limit: 1);
-      if (existing.isEmpty) {
-        await exec.insert('lp_blobs', {
-          'hash': hash,
-          'size': size,
-          'state': 'local',
-          'refcount': 1,
-          'last_access': now,
-          'created_at': now,
-        });
-      } else {
-        await exec.execute(
-            'UPDATE lp_blobs SET refcount = refcount + 1, last_access = ? WHERE hash = ?',
-            [now, hash]);
-      }
+      await upsertBlobReference(exec, hash: hash, size: size, now: now);
       await exec.insert('lp_file_refs', {
         'ref_id': generateOpId(),
         'store': store,

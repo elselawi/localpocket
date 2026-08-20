@@ -741,7 +741,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     });
     final doc = await initializeWebWatch<Map<String, Object?>?>(
       start: () {
-        sub = watcher.start().listen((item) {
+        sub = watcher.startStream().listen((item) {
           unawaited(connection.customRequest({
             'v': webProtocolVersion,
             'op': WireOp.workerEvent,

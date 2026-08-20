@@ -4,6 +4,8 @@
 /// instead of stalling the store.
 library;
 
+import 'dart:convert';
+
 import '../core/canonical_json.dart';
 import '../core/codec.dart';
 import '../core/hashing.dart';
@@ -168,4 +170,14 @@ Map<String, Object?> normalizeRemote(
   }
   logical['archived'] = data['archived'] == true;
   return logical;
+}
+
+/// Parses a payload JSON string into a Map, returning an empty map on null/empty/invalid payload.
+Map<String, Object?> parsePayloadJson(String? json) {
+  if (json == null || json.isEmpty) return const {};
+  try {
+    final decoded = jsonDecode(json);
+    if (decoded is Map) return Map<String, Object?>.from(decoded);
+  } catch (_) {}
+  return const {};
 }

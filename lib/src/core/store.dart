@@ -159,34 +159,8 @@ class Collection with ChangeBusAwareStore {
     _ensureWritable();
     final existing = await _readLogical(id);
     final exec = _tx!.executor;
-    // 1. Drop file refs and decrement blob refcounts
-    final refs = await exec.query(
-      'lp_file_refs',
-      where: 'store = ? AND record_id = ?',
-      whereArgs: [name, id],
-    );
-    for (final r in refs) {
-      final hash = r['hash'] as String;
-      await exec.delete('lp_file_refs',
-          where: 'ref_id = ?', whereArgs: [r['ref_id']]);
-      await exec.execute(
-        'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
-        [hash],
-      );
-    }
-    // 2. Remove the open conflict (if any) and neutralize queued file ops so
-    //    a later file-lane drain can never act on a purged record.
-    await exec.delete('lp_conflicts',
-        where: 'store = ? AND record_id = ?', whereArgs: [name, id]);
-    await exec.update('lp_op_queue', {'state': 'done'},
-        where: "store = ? AND record_id = ? AND state IN ('pending','failed')",
-        whereArgs: [name, id]);
-    // 3. Delete outbox and sync rows
-    await exec.delete('lp_outbox',
-        where: 'store = ? AND record_id = ?', whereArgs: [name, id]);
-    await exec.delete('lp_sync_row',
-        where: 'store = ? AND record_id = ?', whereArgs: [name, id]);
-    // 4. Delete domain row
+    await vanishRecordMetadata(exec, name, id, deleteSyncAndOutbox: true);
+    // Delete domain row
     await exec.delete(_table.tableName, where: 'id = ?', whereArgs: [id]);
     _tx!.addChange(ChangeSet(name, {id}));
     if (existing != null) {
@@ -250,6 +224,11 @@ class Collection with ChangeBusAwareStore {
       return;
     }
 
+    await _fallbackPatch(id, changes, sr: sr, op: op);
+  }
+
+  Future<void> _fallbackPatch(String id, Map<String, Object?> changes,
+      {SyncRowState? sr, OutboxOp? op}) async {
     final existing = await _readLogical(id);
     if (existing == null) {
       throw RecordNotFoundException('No record $name/$id to patch.');
@@ -278,36 +257,14 @@ class Collection with ChangeBusAwareStore {
     }
     if (currentPayload is! Map<String, Object?>) {
       // Defensive: corrupt payload — fall back to the full read path.
-      final existing = await _readLogical(id);
-      if (existing == null) {
-        throw RecordNotFoundException('No record $name/$id to patch.');
-      }
-      final merged = <String, Object?>{...existing, ...changes};
-      await _mutate(MutationAction.update,
-          record: {'id': id, ...merged},
-          id: id,
-          existing: existing,
-          prefetchedSyncRow: sr,
-          prefetchedOp: op);
-      return;
+      return _fallbackPatch(id, changes, sr: sr, op: op);
     }
     // A payload that names a different record is corruption: treating it as
     // the desired state would drop the real record's fields. Fall back to the
     // authoritative domain row.
     final payloadId = currentPayload['id'];
     if (payloadId != null && payloadId != id) {
-      final existing = await _readLogical(id);
-      if (existing == null) {
-        throw RecordNotFoundException('No record $name/$id to patch.');
-      }
-      final merged = <String, Object?>{...existing, ...changes};
-      await _mutate(MutationAction.update,
-          record: {'id': id, ...merged},
-          id: id,
-          existing: existing,
-          prefetchedSyncRow: sr,
-          prefetchedOp: op);
-      return;
+      return _fallbackPatch(id, changes, sr: sr, op: op);
     }
 
     final merged = <String, Object?>{...currentPayload, ...changes};
@@ -896,5 +853,5 @@ class Collection with ChangeBusAwareStore {
 
   /// Watches the record at [id], re-emitting only when that record changes.
   Stream<Map<String, Object?>?> watchOne(String id) =>
-      OneWatcher(_pocket, _table, id).start();
+      OneWatcher(_pocket, _table, id).startStream();
 }

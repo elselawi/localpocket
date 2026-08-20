@@ -167,28 +167,7 @@ class LocalPocketFiles {
       }
 
       // 1. Update lp_blobs (refcount++)
-      final existingBlob = await exec.query(
-        'lp_blobs',
-        columns: ['hash', 'refcount'],
-        where: 'hash = ?',
-        whereArgs: [hash],
-        limit: 1,
-      );
-      if (existingBlob.isEmpty) {
-        await exec.insert('lp_blobs', {
-          'hash': hash,
-          'size': size,
-          'state': 'local',
-          'refcount': 1,
-          'last_access': now,
-          'created_at': now,
-        });
-      } else {
-        await exec.execute(
-          'UPDATE lp_blobs SET refcount = refcount + 1, last_access = ? WHERE hash = ?',
-          [now, hash],
-        );
-      }
+      await upsertBlobReference(exec, hash: hash, size: size, now: now);
 
       // Check if record has a pending create op in outbox (depends_on_op)
       final outboxRows = await exec.query(
