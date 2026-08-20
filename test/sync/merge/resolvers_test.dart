@@ -204,7 +204,8 @@ void main() {
       expect(res.needsReview, isTrue);
     });
 
-    test('declined collection resolver preserves remote-only and local-only '
+    test(
+        'declined collection resolver preserves remote-only and local-only '
         'changes', () {
       // Base: name/phone/city. Local changed only `phone`; remote changed
       // only `city`. A naive `{...base, ...remote, ...local}` fallback would
@@ -213,8 +214,8 @@ void main() {
       final local = {'name': 'Alice', 'phone': '222', 'city': 'London'};
       final remote = {'name': 'Alice', 'phone': '111', 'city': 'Paris'};
 
-      final policy = MergePolicy(
-          collectionResolver: CustomResolver((ctx) => null));
+      final policy =
+          MergePolicy(collectionResolver: CustomResolver((ctx) => null));
 
       final res = merge3Way(
         base: base,
@@ -224,8 +225,7 @@ void main() {
       );
 
       expect(res.needsReview, isTrue);
-      expect(res.merged['phone'], '222',
-          reason: 'local-only change preserved');
+      expect(res.merged['phone'], '222', reason: 'local-only change preserved');
       expect(res.merged['city'], 'Paris',
           reason: 'remote-only change preserved (not overwritten by base)');
       expect(res.merged['name'], 'Alice');
@@ -566,16 +566,14 @@ void main() {
   });
 
   group('declined collection resolver conservative merge', () {
-    Map<String, Object?> declineMerge(
-            Map<String, Object?> base,
-            Map<String, Object?> local,
-            Map<String, Object?> remote) =>
+    Map<String, Object?> declineMerge(Map<String, Object?> base,
+            Map<String, Object?> local, Map<String, Object?> remote) =>
         merge3Way(
           base: base,
           local: local,
           remote: remote,
-          policy: MergePolicy(
-              collectionResolver: CustomResolver((ctx) => null)),
+          policy:
+              MergePolicy(collectionResolver: CustomResolver((ctx) => null)),
         ).merged;
 
     test('local-only added keys are preserved', () {
@@ -630,22 +628,26 @@ void main() {
 
     test('nested maps are compared as a whole (top-level contract)', () {
       final merged = declineMerge(
-        {'meta': {'a': 1, 'b': 2}},
-        {'meta': {'a': 1, 'b': 2}},
-        {'meta': {'a': 1, 'b': 2, 'c': 3}},
+        {
+          'meta': {'a': 1, 'b': 2}
+        },
+        {
+          'meta': {'a': 1, 'b': 2}
+        },
+        {
+          'meta': {'a': 1, 'b': 2, 'c': 3}
+        },
       );
       expect(merged['meta'], {'a': 1, 'b': 2, 'c': 3},
           reason: 'local unchanged (l == base) -> remote nested map wins');
     });
 
-    test('a field changed on both sides differently escalates to review',
-        () {
+    test('a field changed on both sides differently escalates to review', () {
       final res = merge3Way(
         base: {'v': 1},
         local: {'v': 2},
         remote: {'v': 3},
-        policy: MergePolicy(
-            collectionResolver: CustomResolver((ctx) => null)),
+        policy: MergePolicy(collectionResolver: CustomResolver((ctx) => null)),
       );
       expect(res.needsReview, isTrue);
       expect(res.merged['v'], 3,
@@ -656,16 +658,24 @@ void main() {
       // A map with int keys would crash `Map<String, Object?>.from`; the
       // guard treats it as an opaque value and only marks the parent dirty.
       final dirty = computeDirtyFields(
-        {'m': {1: 'a', 2: 'b'}},
-        {'m': {1: 'x', 2: 'b'}},
+        {
+          'm': {1: 'a', 2: 'b'}
+        },
+        {
+          'm': {1: 'x', 2: 'b'}
+        },
       );
       expect(dirty, {'m'},
           reason: 'non-JSON maps are not recursed (no meta.m sub-paths)');
 
       // String-keyed maps still recurse to dot-notation sub-paths.
       final nested = computeDirtyFields(
-        {'meta': {'name': 'a', 'city': 'x'}},
-        {'meta': {'name': 'b', 'city': 'x'}},
+        {
+          'meta': {'name': 'a', 'city': 'x'}
+        },
+        {
+          'meta': {'name': 'b', 'city': 'x'}
+        },
       );
       expect(nested, containsAll(['meta', 'meta.name']));
     });

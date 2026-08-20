@@ -13,9 +13,9 @@ void main() {
       ],
     );
     final query = QueryBuilder.compileOnly(schema)
-      .where('qty', inValues: [1, 2, 3], between: (0, 10))
-      .orderBy('qty')
-      .limit(4);
+        .where('qty', inValues: [1, 2, 3], between: (0, 10))
+        .orderBy('qty')
+        .limit(4);
 
     final plan = query.compilePlan(limitOverride: 5);
     expect(plan.operation, 'query');
@@ -39,11 +39,11 @@ void main() {
       ],
     );
     final query = QueryBuilder.compileOnly(schema)
-      .where('qty', between: (1, 9))
-      .select(['id', 'name'])
-      .includeArchived()
-      .includeHidden()
-      .limit(3);
+        .where('qty', between: (1, 9))
+        .select(['id', 'name'])
+        .includeArchived()
+        .includeHidden()
+        .limit(3);
     final plan = query.compilePlan(limitOverride: 4);
     expect(plan.schemaVersion, 2);
     expect(plan.sql, contains('"qty" >= ? AND "qty" < ?'));

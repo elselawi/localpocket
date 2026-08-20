@@ -478,9 +478,8 @@ void main() {
         ids.add(id);
         await h.pocket.collection('widgets').put(record(id: id, name: 'n$i'));
       }
-      final op0 = (await h.pocket.outbox
-          .readOp(h.pocket.db, 'widgets', ids[0]))!
-          .opId;
+      final op0 =
+          (await h.pocket.outbox.readOp(h.pocket.db, 'widgets', ids[0]))!.opId;
       final rec0 = RemoteRecord(
           id: ids[0],
           store: 'widgets',

@@ -795,14 +795,13 @@ void main() {
       expect(await h.pocket.collection('widgets').query().count(), 1);
     });
 
-    test('conflict escalation is counted as conflicts, not applied',
-        () async {
+    test('conflict escalation is counted as conflicts, not applied', () async {
       final schema = CollectionSchema<Object?>(
         name: 'widgets',
         version: 1,
         fields: [Field.text('name', required: true), Field.int('qty')],
-        conflictPolicy: ConflictPolicy(
-            collectionResolver: CustomResolver((ctx) => null)),
+        conflictPolicy:
+            ConflictPolicy(collectionResolver: CustomResolver((ctx) => null)),
       );
       final h = await EngineHarness.create(stores: [schema]);
       addTearDown(h.close);
@@ -822,8 +821,7 @@ void main() {
       final report = await h.engine.puller.pullStore('widgets');
       expect(report.conflicts, 1,
           reason: 'the escalated merge is counted as a conflict');
-      expect(report.applied, 0,
-          reason: 'a conflict is not an applied record');
+      expect(report.applied, 0, reason: 'a conflict is not an applied record');
       final open = await h.pocket.conflicts.listOpen();
       expect(open.map((c) => c.recordId), contains(id),
           reason: 'the conflict row is open');

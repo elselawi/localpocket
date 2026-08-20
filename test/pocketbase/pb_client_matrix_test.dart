@@ -590,8 +590,7 @@ void main() {
             }
           }));
       final b = backendWith(fake);
-      await expectLater(
-          b.pushBatch(twoOps()), throwsA(isA<ProtocolError>()));
+      await expectLater(b.pushBatch(twoOps()), throwsA(isA<ProtocolError>()));
     });
 
     test('empty batch returns an empty result list', () async {

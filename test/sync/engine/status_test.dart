@@ -96,8 +96,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       final afterError = statuses.last;
       expect(afterError.lastSyncAt, isNotNull);
-      expect(afterError.lastError, isNotNull,
-          reason: 'the cycle had an error');
+      expect(afterError.lastError, isNotNull, reason: 'the cycle had an error');
       expect(
         afterError.lastSuccessfulSyncAt,
         anyOf(isNull, isNot(equals(afterError.lastSyncAt))),

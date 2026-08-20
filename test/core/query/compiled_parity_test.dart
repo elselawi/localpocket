@@ -135,10 +135,8 @@ void main() {
     expect(res['value'], expected);
   }
 
-  Future<void> expectAggregateParity(
-      QueryBuilder Function(QueryBuilder) shape,
-      String fn,
-      String field) async {
+  Future<void> expectAggregateParity(QueryBuilder Function(QueryBuilder) shape,
+      String fn, String field) async {
     var native = pocket.collection('widgets').query();
     native = shape(native);
     var compiled = QueryBuilder.compileOnly(widgets);
