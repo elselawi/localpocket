@@ -828,7 +828,7 @@ class QueryBuilder {
   /// Reactive stream of query results.
   /// Watches this query and emits after committed matching changes.
   Stream<List<Map<String, Object?>>> watch() =>
-      QueryWatcher(_requirePocket, this).start();
+      QueryWatcher(_requirePocket, this).startStream();
 }
 
 /// A ranked search result from an FTS5 full-text query.
