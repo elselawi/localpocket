@@ -109,7 +109,7 @@ abstract class SearchHandle {
 }
 
 class NativeSearchHandle implements SearchHandle {
-  final SearchQueryBuilder _builder;
+  final SearchBuilder _builder;
   NativeSearchHandle(this._builder);
 
   @override
@@ -142,10 +142,10 @@ class NativeSearchHandle implements SearchHandle {
 
 class CompiledSearchHandle implements SearchHandle {
   final LocalPocket _pocket;
-  final SearchQueryBuilder _builder;
+  final SearchBuilder _builder;
 
   CompiledSearchHandle(this._pocket, CollectionSchema schema, String term)
-      : _builder = SearchQueryBuilder.compileOnly(schema, term);
+      : _builder = SearchBuilder.compileOnly(schema, term);
 
   @override
   SearchHandle limit(int n) {

@@ -1,10 +1,12 @@
-import 'package:localpocket/src/core/query.dart';
+import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/core/query/query_builder/query_forwarder.dart';
+import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/core/query/search_builder/search_forwarder.dart';
 import 'package:localpocket/src/core/schema.dart';
-import 'package:localpocket/src/core/store.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade.dart';
-import 'package:localpocket/src/web/facade/page_from_compiled.dart';
-import 'package:localpocket/src/web/facade/send_plan.dart';
+import 'package:localpocket/src/web/facade/query/web_query_forwarder.dart';
+import 'package:localpocket/src/web/facade/search/web_search_forwarder.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
 class WebTx {
@@ -45,193 +47,47 @@ class WebTx {
   }
 }
 
-class WebTxQueryBuilder {
+class WebTxQueryBuilder
+    with
+        QueryForwarder<WebTxQueryBuilder>,
+        WebCompiledQueryForwarder<WebTxQueryBuilder> {
   final LocalPocket _pocket;
   final CollectionSchema schema;
+  @override
   final int sessionId;
   final QueryBuilder _core;
 
   WebTxQueryBuilder._(this._pocket, this.schema, this.sessionId)
       : _core = QueryBuilder.compileOnly(schema);
 
-  WebTxQueryBuilder where(
-    String field, {
-    Object? eq,
-    Object? neq,
-    Object? gt,
-    Object? gte,
-    Object? lt,
-    Object? lte,
-    List<Object?>? inValues,
-    (Object?, Object?)? between,
-    String? startsWith,
-    String? endsWith,
-    String? contains,
-    bool? isNull,
-    bool? isNotNull,
-  }) {
-    _core.where(
-      field,
-      eq: eq,
-      neq: neq,
-      gt: gt,
-      gte: gte,
-      lt: lt,
-      lte: lte,
-      inValues: inValues,
-      between: between,
-      startsWith: startsWith,
-      endsWith: endsWith,
-      contains: contains,
-      isNull: isNull,
-      isNotNull: isNotNull,
-    );
-    return this;
-  }
+  @override
+  LocalPocket get pocket => _pocket;
 
-  WebTxQueryBuilder orWhere(List<Map<String, Object?>> groups) {
-    _core.orWhere(groups);
-    return this;
-  }
-
-  WebTxQueryBuilder orderBy(String field, {bool desc = false}) {
-    _core.orderBy(field, desc: desc);
-    return this;
-  }
-
-  WebTxQueryBuilder limit(int n) {
-    _core.limit(n);
-    return this;
-  }
-
-  WebTxQueryBuilder all() {
-    _core.all();
-    return this;
-  }
-
-  WebTxQueryBuilder select(List<String> fields) {
-    _core.select(fields);
-    return this;
-  }
-
-  WebTxQueryBuilder includeArchived() {
-    _core.includeArchived();
-    return this;
-  }
-
-  WebTxQueryBuilder includeHidden() {
-    _core.includeHidden();
-    return this;
-  }
-
-  Future<Page> fetch({String? cursor}) async {
-    final limit = _core.limitValue;
-    final allMode = _core.allMode;
-    final plan = _core.compilePlan(
-      limitOverride: allMode || limit == null ? null : limit + 1,
-      cursor: cursor,
-    );
-    final res = await sendCompiledPlan(_pocket, plan,
-        sessionId: sessionId, pageLimit: limit);
-    return pageFromCompiled(_core, res);
-  }
-
-  Future<Page> keysetAfter(String cursor) => fetch(cursor: cursor);
-
-  Future<int> count() async {
-    final res = await sendCompiledPlan(_pocket, _core.compileCountPlan(),
-        sessionId: sessionId);
-    return (res['value'] as int?) ?? 0;
-  }
-
-  Future<int> countDistinct(String field) async {
-    final res = await sendCompiledPlan(
-        _pocket, _core.compileCountDistinctPlan(field),
-        sessionId: sessionId);
-    return (res['value'] as int?) ?? 0;
-  }
-
-  Future<List<Object?>> distinct(String field) async {
-    final res = await sendCompiledPlan(
-        _pocket, _core.compileDistinctPlan(field),
-        sessionId: sessionId);
-    return (res['values'] as List).map(decodeWireValue).toList();
-  }
-
-  Future<List<String>> ids() async {
-    final res = await sendCompiledPlan(_pocket, _core.compileIdsPlan(),
-        sessionId: sessionId);
-    return (res['ids'] as List).cast<String>();
-  }
-
-  Future<String> explain() async {
-    final res = await sendCompiledPlan(_pocket, _core.compileExplainPlan(),
-        sessionId: sessionId);
-    return res['plan'] as String;
-  }
-
-  Future<num?> _aggregate(String fn, String field) async {
-    final res = await sendCompiledPlan(
-        _pocket, _core.compileAggregatePlan(fn, field),
-        sessionId: sessionId);
-    final raw = res['value'];
-    return raw == null ? null : raw as num;
-  }
-
-  Future<num?> sum(String field) => _aggregate('SUM', field);
-  Future<num?> avg(String field) => _aggregate('AVG', field);
-  Future<num?> min(String field) => _aggregate('MIN', field);
-  Future<num?> max(String field) => _aggregate('MAX', field);
+  @override
+  QueryBuilder get queryCore => _core;
 }
 
-class WebTxSearchQueryBuilder {
+class WebTxSearchQueryBuilder
+    with
+        SearchForwarder<WebTxSearchQueryBuilder>,
+        WebCompiledSearchForwarder<WebTxSearchQueryBuilder> {
   final LocalPocket _pocket;
   final CollectionSchema schema;
+  @override
   final int sessionId;
+  @override
   final String term;
-  int? _limit;
-  bool _all = false;
-  bool _includeArchived = false;
-  bool _includeHidden = false;
+  final SearchBuilder _core;
 
   WebTxSearchQueryBuilder._(
-      this._pocket, this.schema, this.sessionId, this.term);
+      this._pocket, this.schema, this.sessionId, this.term)
+      : _core = SearchBuilder.compileOnly(schema, term);
 
-  WebTxSearchQueryBuilder limit(int n) {
-    _limit = n;
-    return this;
-  }
+  @override
+  LocalPocket get pocket => _pocket;
 
-  WebTxSearchQueryBuilder all() {
-    _all = true;
-    return this;
-  }
-
-  WebTxSearchQueryBuilder includeArchived() {
-    _includeArchived = true;
-    return this;
-  }
-
-  WebTxSearchQueryBuilder includeHidden() {
-    _includeHidden = true;
-    return this;
-  }
-
-  Future<List<SearchResult>> fetch() async {
-    if (term.trim().isEmpty) return const [];
-    final core = SearchQueryBuilder.compileOnly(schema, term);
-    if (_limit != null) core.limit(_limit!);
-    if (_all) core.all();
-    if (_includeArchived) core.includeArchived();
-    if (_includeHidden) core.includeHidden();
-    final res = await sendCompiledPlan(_pocket, core.compilePlan(),
-        sessionId: sessionId);
-    return ((res['results'] as List?) ?? const []).map((raw) {
-      final row = (raw as Map).map((k, v) => MapEntry(k.toString(), v));
-      return SearchResult(
-          id: row['id'] as String, score: (row['score'] as num).toDouble());
-    }).toList();
-  }
+  @override
+  SearchBuilder get searchCore => _core;
 }
 
 /// Main-thread collection bound to a transaction session.

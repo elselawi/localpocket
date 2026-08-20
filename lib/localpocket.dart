@@ -48,15 +48,21 @@ export 'src/core/local_pocket.dart'
     if (dart.library.js_interop) 'src/web/facade.dart' show LocalPocket;
 export 'src/core/transaction.dart' show Tx;
 export 'src/core/store.dart' show Collection, Page, MutationAction;
-export 'src/core/query.dart'
-    show
-        QueryBuilder,
-        WhereClause,
-        OrderClause,
-        SearchResult,
-        SearchQueryBuilder;
+export 'src/core/query/query_builder/query_builder.dart';
+export 'src/core/query/query_builder/query_dsl.dart';
+export 'src/core/query/query_builder/query_forwarder.dart';
+export 'src/core/query/search_builder/search_builder.dart';
+export 'src/core/query/search_builder/search_dsl.dart';
+export 'src/core/query/search_builder/search_forwarder.dart';
 export 'src/core/query_plan.dart' show QueryPlan;
-export 'src/core/change_bus.dart' show ChangeSet, ChangeBus, RecordChangeEvent, ChangeOrigin, ChangeAction, RecordChangeEventStreamExtension;
+export 'src/core/change_bus.dart'
+    show
+        ChangeSet,
+        ChangeBus,
+        RecordChangeEvent,
+        ChangeOrigin,
+        ChangeAction,
+        RecordChangeEventStreamExtension;
 export 'src/core/watch.dart';
 export 'src/sync/sync_tables.dart'
     show

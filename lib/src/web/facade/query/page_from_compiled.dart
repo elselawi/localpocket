@@ -1,4 +1,4 @@
-import 'package:localpocket/src/core/query.dart';
+import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/core/store.dart';
 import 'package:localpocket/src/web/conversions.dart';
 

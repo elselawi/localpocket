@@ -1,20 +1,11 @@
 import 'dart:convert';
 
+import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/codec.dart';
+import 'package:localpocket/src/core/local_pocket.dart';
+import 'package:localpocket/src/core/query_plan.dart';
+import 'package:localpocket/src/core/sql_utils.dart';
 import 'package:collection/collection.dart';
-
-import 'canonical_json.dart';
-import 'hashing.dart';
-import 'package:sqlite3/common.dart' show SqliteException;
-
-import 'codec.dart';
-import 'ddl_compiler.dart';
-import 'errors.dart';
-import 'local_pocket.dart';
-import 'query_plan.dart';
-import 'schema.dart';
-import 'sql_utils.dart';
-import 'store.dart';
-import 'watch.dart';
 
 class WhereClause {
   final String sql;
@@ -35,7 +26,7 @@ class _CursorData {
 
 /// Parameterized query builder. No user input is ever string
 /// interpolated into SQL; values travel as bound parameters.
-class QueryBuilder {
+class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   final LocalPocket? _pocket;
   final CollectionSchema _schema;
 
@@ -83,6 +74,7 @@ class QueryBuilder {
   ///
   /// Values are bound as SQL parameters. Multiple supplied operators are
   /// combined with `AND`.
+  @override
   QueryBuilder where(
     String field, {
     Object? eq,
@@ -142,6 +134,7 @@ class QueryBuilder {
   ///
   /// Empty groups and empty lists are ignored (no-op): `orWhere([])` adds no
   /// predicate rather than emitting invalid SQL.
+  @override
   QueryBuilder orWhere(List<Map<String, Object?>> groups) {
     final groupSqls = <String>[];
     final args = <Object?>[];
@@ -164,6 +157,7 @@ class QueryBuilder {
       s.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_');
 
   /// Adds an ordering term. An `id` tie-breaker is added automatically.
+  @override
   QueryBuilder orderBy(String field, {bool desc = false}) {
     _checkQueryable(field);
     _order.add(OrderClause(field, desc: desc));
@@ -174,6 +168,7 @@ class QueryBuilder {
   ///
   /// A limit is required unless [all] is selected. Use modest limits for UI
   /// screens and keyset pagination for large collections.
+  @override
   QueryBuilder limit(int n) {
     if (n < 0) {
       throw ValidationException('Limit must be non-negative, got $n.');
@@ -187,6 +182,7 @@ class QueryBuilder {
   ///
   /// Use with care for large collections because all matching rows are
   /// materialized in memory.
+  @override
   QueryBuilder all() {
     _all = true;
     return this;
@@ -203,18 +199,21 @@ class QueryBuilder {
   /// ```
   ///
   /// Projection of undeclared overflow keys falls back to full decoding.
+  @override
   QueryBuilder select(List<String> fields) {
     _select = fields;
     return this;
   }
 
   /// Includes records marked as archived.
+  @override
   QueryBuilder includeArchived() {
     _includeArchived = true;
     return this;
   }
 
   /// Includes records hidden by synchronization visibility state.
+  @override
   QueryBuilder includeHidden() {
     _includeHidden = true;
     return this;
@@ -829,183 +828,4 @@ class QueryBuilder {
   /// Watches this query and emits after committed matching changes.
   Stream<List<Map<String, Object?>>> watch() =>
       QueryWatcher(_requirePocket, this).startStream();
-}
-
-/// A ranked search result from an FTS5 full-text query.
-class SearchResult {
-  /// ID of the matching record.
-  final String id;
-
-  /// SQLite FTS ranking score.
-  final double score;
-
-  /// Creates a ranked search result.
-  const SearchResult({required this.id, required this.score});
-
-  @override
-  String toString() => 'SearchResult(id: $id, score: $score)';
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is SearchResult && other.id == id && other.score == score;
-
-  @override
-  int get hashCode => Object.hash(id, score);
-}
-
-/// Query builder for FTS5 full-text search.
-class SearchQueryBuilder {
-  final LocalPocket? _pocket;
-  final CollectionSchema _schema;
-  final String _term;
-  int? _limit;
-  bool _all = false;
-  bool _includeArchived = false;
-  bool _includeHidden = false;
-
-  SearchQueryBuilder.internal(this._pocket, this._schema, this._term) {
-    if (_schema.fts == null) {
-      throw FtsUnavailableError(
-          'Store "${_schema.name}" does not have FTS enabled.');
-    }
-    final pocket = _pocket;
-    if (pocket != null && !pocket.capabilities.hasFts5) {
-      throw FtsUnavailableError('FTS5 is not available on this SQLite engine.');
-    }
-  }
-
-  /// Compile-only constructor used by the web query-plan transport.
-  SearchQueryBuilder.compileOnly(CollectionSchema schema, String term)
-      : _pocket = null,
-        _schema = schema,
-        _term = term {
-    if (_schema.fts == null) {
-      throw FtsUnavailableError(
-          'Store "${_schema.name}" does not have FTS enabled.');
-    }
-  }
-
-  /// Limits the number of ranked matches returned by [fetch].
-  SearchQueryBuilder limit(int n) {
-    _limit = n;
-    return this;
-  }
-
-  /// Returns all matching FTS results instead of requiring a limit.
-  SearchQueryBuilder all() {
-    _all = true;
-    return this;
-  }
-
-  SearchQueryBuilder includeArchived() {
-    _includeArchived = true;
-    return this;
-  }
-
-  SearchQueryBuilder includeHidden() {
-    _includeHidden = true;
-    return this;
-  }
-
-  int? _resolveLimit() {
-    if (_all) return null;
-    if (_limit == null) {
-      throw MissingLimitError(
-          'Search query on "${_schema.name}" requires .limit(n) or .all().');
-    }
-    return _limit;
-  }
-
-  (String, List<Object?>) _compile({int? limitOverride}) {
-    _validateSearchTerm(_term);
-    final store = _schema.name;
-    final ftsTable = '${store}_fts';
-    final where = <String>['${DdlCompiler.quote(ftsTable)} MATCH ?'];
-    final args = <Object?>[_term];
-
-    if (!_includeArchived) where.add('b.archived = 0');
-    if (!_includeHidden) where.add('b.hidden = 0');
-
-    final whereSql = ' WHERE ${where.join(' AND ')}';
-    final limit = limitOverride ?? _resolveLimit();
-    final limitSql = limit == null ? '' : ' LIMIT $limit';
-
-    final sql = 'SELECT b.id, rank AS score '
-        'FROM ${DdlCompiler.quote(ftsTable)} '
-        'JOIN ${DdlCompiler.quote(store)} b ON b.rowid = ${DdlCompiler.quote(ftsTable)}.rowid'
-        '$whereSql ORDER BY rank$limitSql';
-    return (sql, args);
-  }
-
-  /// Compiled SQL + args, for tests.
-  (String, List<Object?>) debugCompile() => _compile();
-
-  /// Compiles a typed plan for the web query-plan transport.
-  QueryPlan compilePlan({int? limitOverride}) {
-    final (sql, args) = _compile(limitOverride: limitOverride);
-    return QueryPlan(
-      operation: 'search',
-      compilerVersion: queryCompilerVersion,
-      store: _schema.name,
-      schemaVersion: _schema.version,
-      schemaFingerprint: sha256Hex(canonicalize(_schema.toJson())),
-      sql: sql,
-      args: List<Object?>.unmodifiable(args),
-      limit: limitOverride ?? _resolveLimit(),
-      projection: null,
-      shape: jsonEncode(
-          {'term': _term, 'a': _includeArchived, 'h': _includeHidden}),
-    );
-  }
-
-  static void _validateSearchTerm(String term) {
-    final trimmed = term.trim();
-    if (trimmed.isEmpty) return;
-    // Reject the expression forms that SQLite FTS5 reports as syntax errors.
-    // This runs for native and compile-only/web paths so both boundaries expose
-    // the same typed ValidationException.
-    if (trimmed.contains('"') ||
-        RegExp(r'(^|\s)(AND|OR|NOT)(\s|$)', caseSensitive: false)
-            .hasMatch(trimmed) ||
-        trimmed.startsWith('-') ||
-        RegExp(r'\b(AND|OR|NOT)\s*$', caseSensitive: false).hasMatch(trimmed)) {
-      throw ValidationException('Invalid search term: $term');
-    }
-  }
-
-  /// Executes the FTS query and returns ranked results.
-  ///
-  /// ```dart
-  /// final matches = await db.collection('articles')
-  ///     .search('sqlite performance')
-  ///     .limit(10)
-  ///     .fetch();
-  /// ```
-  ///
-  /// An empty or whitespace-only term is a valid no-op that returns no
-  /// results. Terms that FTS5 rejects (malformed expressions, unbalanced
-  /// quotes, bare operators) throw a typed [ValidationException] instead of a
-  /// raw SQLite error.
-  Future<List<SearchResult>> fetch() async {
-    if (_term.trim().isEmpty) return const [];
-    final pocket = _pocket;
-    if (pocket == null) {
-      throw StateError(
-          'A compile-only SearchQueryBuilder cannot execute fetch().');
-    }
-    final (sql, args) = _compile();
-    try {
-      final rows = await pocket.traceQuery(sql, args);
-      return [
-        for (final r in rows)
-          SearchResult(
-            id: r['id'] as String,
-            score: (r['score'] as num).toDouble(),
-          )
-      ];
-    } on SqliteException catch (e) {
-      throw ValidationException('Invalid search term: ${e.message}');
-    }
-  }
 }

@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:collection/collection.dart';
+import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
 import 'database_adapter.dart';
 
 import 'change_bus.dart';
@@ -9,7 +11,6 @@ import 'errors.dart';
 import 'hashing.dart';
 import 'ids.dart';
 import 'local_pocket.dart';
-import 'query.dart';
 import 'schema.dart';
 import 'transaction.dart';
 import 'watch.dart';
@@ -848,8 +849,8 @@ class Collection with ChangeBusAwareStore {
   /// Starts a full-text search on the collection's configured FTS fields.
   ///
   /// The schema must define [FtsSpec] and the SQLite engine must provide FTS5.
-  SearchQueryBuilder search(String term) =>
-      SearchQueryBuilder.internal(_pocket, _schema, term);
+  SearchBuilder search(String term) =>
+      SearchBuilder.internal(_pocket, _schema, term);
 
   /// Watches the record at [id], re-emitting only when that record changes.
   Stream<Map<String, Object?>?> watchOne(String id) =>

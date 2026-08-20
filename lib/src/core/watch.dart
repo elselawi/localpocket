@@ -1,11 +1,12 @@
 import 'dart:async';
 
+import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
+
 import 'canonical_json.dart';
 import 'change_bus.dart';
 import 'codec.dart';
 import 'hashing.dart';
 import 'local_pocket.dart';
-import 'query.dart';
 
 /// Watch implementation: transaction-scoped invalidation + re-query.
 /// Emissions only ever happen after commit; identical snapshots do not emit;

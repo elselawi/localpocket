@@ -260,7 +260,7 @@ void main() {
           .search('database')
           .limit(10)
           .fetch();
-      final compiled = SearchQueryBuilder.compileOnly(articles, 'database')
+      final compiled = SearchBuilder.compileOnly(articles, 'database')
         ..limit(10);
       final res = await executeCompiledQuery(pocket,
           (sql, args) => pocket.traceQuery(sql, args), compiled.compilePlan());
