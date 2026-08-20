@@ -182,20 +182,40 @@ void main() {
       expect(local!['name'], 'edited');
     });
 
-    test('push 403 errors keeps local', () async {
+    test('push 403 parks the op in blocked and requeues on recovery', () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);
 
       final id = generateRecordId();
       await h.pocket.collection('widgets').put(record(id: id, name: 'mine'));
       h.mock.script('createRecord', [MockThrow(ForbiddenError())]);
-      await h.engine.syncNow();
+      final report = await h.engine.syncNow();
 
-      final dl = await deadLetters(h.pocket);
-      expect(dl.any((r) => r['kind'] == 'forbidden_push'), isTrue);
+      // A 403 is recoverable: the op is parked in `blocked`, never dead-lettered.
+      expect(report.blocked, 1,
+          reason: '403 parks the op in blocked, reported by the engine');
+      expect(report.deadLettered, 0,
+          reason: 'forbidden pushes are recoverable, never dead-lettered');
+      expect(await deadLetters(h.pocket), isEmpty);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.blocked);
+      final op = await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id);
+      expect(op, isNotNull, reason: 'op retained for requeue');
       final local = await h.pocket.collection('widgets').get(id);
       expect(local!['name'], 'mine', reason: 'local copy kept');
-      expect(h.mock.records.containsKey(id), isFalse);
+      expect(h.mock.records.containsKey(id), isFalse,
+          reason: 'nothing hit the server while forbidden');
+
+      // Drain excludes blocked ops: a second cycle must not retry or move it.
+      await h.engine.syncNow();
+      expect(h.mock.createCalls, 1, reason: 'blocked op is not retried');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.blocked);
+
+      // Once permissions recover, requeue and push succeeds.
+      expect(await h.pocket.outbox.requeueBlocked(), 1);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.dirty);
+      await h.engine.syncNow();
+      expect(h.mock.records.containsKey(id), isTrue);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean);
     });
 
     test('batch off per record fallback', () async {
@@ -433,7 +453,8 @@ void main() {
       expect(local!['name'], 'edited');
     });
 
-    test('getRecord forbidden dead-letters forbidden push', () async {
+    test('getRecord forbidden parks the op in blocked (no dead letter)',
+        () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);
       final id = h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
@@ -442,11 +463,21 @@ void main() {
       h.mock.script('getRecord', [MockThrow(ForbiddenError())]);
 
       final report = await h.engine.syncNow();
-      expect(report.deadLettered, 1);
-      final dl = await deadLetters(h.pocket);
-      expect(dl.any((r) => r['kind'] == 'forbidden_push'), isTrue);
+      expect(report.blocked, 1, reason: '403 parks the op in blocked');
+      expect(report.deadLettered, 0,
+          reason: 'forbidden pushes are recoverable, never dead-lettered');
+      expect(await deadLetters(h.pocket), isEmpty);
       final local = await h.pocket.collection('widgets').get(id);
       expect(local!['name'], 'edited');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.blocked);
+      final op = await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id);
+      expect(op, isNotNull);
+
+      // Requeue + retry: the now-permitted update reaches the server.
+      expect(await h.pocket.outbox.requeueBlocked(), 1);
+      await h.engine.syncNow();
+      expect(h.mock.records[id]!.data['name'], 'edited');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean);
     });
 
     test('getRecord busy throttles the lane and honors retry-after', () async {

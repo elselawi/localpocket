@@ -65,14 +65,15 @@ class SyncStore {
         'sweep_bucket': -1,
       });
     } else {
-      await exec.update('lp_sync_state',
-          {'cursor_updated': updated, 'cursor_id': id},
+      await exec.update(
+          'lp_sync_state', {'cursor_updated': updated, 'cursor_id': id},
           where: 'scope = ? AND store = ?', whereArgs: [scope, store]);
     }
   }
 
   Future<void> clearCursor(String store) async {
-    await pocket.db.update('lp_sync_state', {'cursor_updated': null, 'cursor_id': null},
+    await pocket.db.update(
+        'lp_sync_state', {'cursor_updated': null, 'cursor_id': null},
         where: 'scope = ? AND store = ?', whereArgs: [scope, store]);
   }
 
@@ -102,8 +103,8 @@ class SyncStore {
         'sweep_at': sweepAt,
       });
     } else {
-      await exec.update('lp_sync_state',
-          {'sweep_bucket': bucket, 'sweep_at': sweepAt},
+      await exec.update(
+          'lp_sync_state', {'sweep_bucket': bucket, 'sweep_at': sweepAt},
           where: 'scope = ? AND store = ?', whereArgs: [scope, store]);
     }
   }
@@ -112,25 +113,27 @@ class SyncStore {
 
   Future<int> countPending() async =>
       firstIntValue(await pocket.db.rawQuery(
-              "SELECT COUNT(*) AS c FROM lp_sync_row WHERE sync_state IN ('dirty','in_flight')")) ??
+          "SELECT COUNT(*) AS c FROM lp_sync_row WHERE sync_state IN ('dirty','in_flight')")) ??
       0;
 
   Future<int> countConflicts() async =>
       firstIntValue(await pocket.db.rawQuery(
-              "SELECT COUNT(*) AS c FROM lp_sync_row WHERE sync_state = 'conflict'")) ??
+          "SELECT COUNT(*) AS c FROM lp_sync_row WHERE sync_state = 'conflict'")) ??
       0;
 
   Future<int> countHidden() async =>
       firstIntValue(await pocket.db.rawQuery(
-              "SELECT COUNT(*) AS c FROM lp_sync_row WHERE access_state = 'hidden'")) ??
+          "SELECT COUNT(*) AS c FROM lp_sync_row WHERE access_state = 'hidden'")) ??
       0;
 
-  Future<({int pending, int conflicts, int hidden})> countAllStatus() async {
+  Future<({int pending, int conflicts, int hidden, int blocked})>
+      countAllStatus() async {
     final rows = await pocket.db.rawQuery('''
       SELECT
         SUM(CASE WHEN sync_state IN ('dirty', 'in_flight') THEN 1 ELSE 0 END) AS pending,
         SUM(CASE WHEN sync_state = 'conflict' THEN 1 ELSE 0 END) AS conflicts,
-        SUM(CASE WHEN access_state = 'hidden' THEN 1 ELSE 0 END) AS hidden
+        SUM(CASE WHEN access_state = 'hidden' THEN 1 ELSE 0 END) AS hidden,
+        SUM(CASE WHEN sync_state = 'blocked' THEN 1 ELSE 0 END) AS blocked
       FROM lp_sync_row
     ''');
     final row = rows.isEmpty ? const <String, Object?>{} : rows.first;
@@ -138,6 +141,7 @@ class SyncStore {
       pending: (row['pending'] as int?) ?? 0,
       conflicts: (row['conflicts'] as int?) ?? 0,
       hidden: (row['hidden'] as int?) ?? 0,
+      blocked: (row['blocked'] as int?) ?? 0,
     );
   }
 }

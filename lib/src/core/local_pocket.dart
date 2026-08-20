@@ -552,7 +552,7 @@ class LocalPocket with ChangeBusAwareLP {
         final oldest = await exec.rawQuery(
           'SELECT o.store, o.record_id FROM lp_outbox o '
           'JOIN lp_sync_row s ON s.store = o.store AND s.record_id = o.record_id '
-          "WHERE s.sync_state NOT IN ('dirty', 'conflict') "
+          "WHERE s.sync_state NOT IN ('dirty', 'conflict', 'blocked') "
           'ORDER BY o.created_at ASC LIMIT ?',
           [excess],
         );

@@ -5,7 +5,7 @@ import 'dart:convert';
 
 import '../core/errors.dart';
 
-enum SyncState { clean, dirty, inFlight, conflict, error, quarantine }
+enum SyncState { clean, dirty, inFlight, conflict, error, quarantine, blocked }
 
 enum AccessState { visible, hidden }
 
@@ -36,7 +36,7 @@ const List<String> syncSystemDdl = [
   'CREATE INDEX IF NOT EXISTS ix_syncrow_dirty ON lp_sync_row (next_retry_at) '
       "WHERE sync_state IN ('dirty','in_flight','conflict')",
   'CREATE INDEX IF NOT EXISTS ix_syncrow_attention ON lp_sync_row (store, sync_state) '
-      "WHERE sync_state IN ('conflict','error','quarantine')",
+      "WHERE sync_state IN ('conflict','error','quarantine','blocked')",
   "CREATE INDEX IF NOT EXISTS ix_syncrow_hidden ON lp_sync_row (store, record_id) "
       "WHERE access_state = 'hidden'",
   '''CREATE TABLE IF NOT EXISTS lp_outbox (

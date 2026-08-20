@@ -29,6 +29,9 @@ class SyncReport {
   /// Number of operations moved to dead-letter storage.
   final int deadLettered;
 
+  /// Number of operations parked in the recoverable `blocked` state.
+  final int blocked;
+
   /// Whether the cycle encountered an error.
   final bool hadError;
 
@@ -38,13 +41,14 @@ class SyncReport {
     this.swept = const {},
     this.pushed = 0,
     this.deadLettered = 0,
+    this.blocked = 0,
     this.hadError = false,
   });
 
   @override
   String toString() =>
       'SyncReport(pulled: $pulled, swept: $swept, pushed: $pushed, '
-      'deadLettered: $deadLettered, hadError: $hadError)';
+      'deadLettered: $deadLettered, blocked: $blocked, hadError: $hadError)';
 }
 
 /// Current synchronization status suitable for a status indicator.
@@ -60,6 +64,9 @@ class SyncStatus {
 
   /// Number of hidden local records.
   final int hidden;
+
+  /// Number of records parked in the recoverable `blocked` state.
+  final int blocked;
 
   /// Most recent error, when available.
   final String? lastError;
@@ -78,6 +85,7 @@ class SyncStatus {
     required this.pending,
     required this.conflicts,
     required this.hidden,
+    this.blocked = 0,
     this.lastError,
     this.lastSyncAt,
     this.lastSuccessfulSyncAt,

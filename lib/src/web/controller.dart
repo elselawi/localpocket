@@ -1134,6 +1134,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
         'pending': status.pending,
         'conflicts': status.conflicts,
         'hidden': status.hidden,
+        'blocked': status.blocked,
         if (status.lastError != null) 'lastError': status.lastError,
         if (status.lastSyncAt != null)
           'lastSyncAt': encodeWireValue(status.lastSyncAt),

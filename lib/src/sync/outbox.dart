@@ -274,9 +274,9 @@ class Outbox {
   Future<List<OutboxOp>> drain(
       {String? store, int limit = 25, int? now}) async {
     final n = now ?? pocket.now();
-    final where =
-        StringBuffer("s.sync_state NOT IN ('error','quarantine','conflict') "
-            'AND (s.next_retry_at IS NULL OR s.next_retry_at <= ?)');
+    final where = StringBuffer(
+        "s.sync_state NOT IN ('error','quarantine','conflict','blocked') "
+        'AND (s.next_retry_at IS NULL OR s.next_retry_at <= ?)');
     final args = <Object?>[n];
     if (store != null) {
       where.write(' AND o.store = ?');
@@ -623,6 +623,52 @@ class Outbox {
           },
           where: 'store = ? AND record_id = ?',
           whereArgs: [store, id]);
+    });
+  }
+
+  /// Marks a pushed op as BLOCKED — a recoverable permission failure (e.g. a
+  /// 403 from a temporarily-revoked write). Unlike dead-lettering, the outbox
+  /// op is KEPT and the row can be requeued via [requeueBlocked] once
+  /// permission is restored, so no local edit is ever stranded.
+  Future<void> markBlocked({
+    required String store,
+    required String id,
+    String? error,
+  }) {
+    return pocket.transaction((tx) async {
+      final exec = tx.executor;
+      await exec.update(
+          'lp_sync_row',
+          {
+            'sync_state': SyncState.blocked.name,
+            'last_error': error,
+            'next_retry_at': 0,
+          },
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [store, id]);
+    });
+  }
+
+  /// Requeues blocked operations back to `dirty` so the next push retries
+  /// them. Call when permissions may have been restored (e.g. auth recovery or
+  /// a visibility/permission change). Returns the number of requeued rows.
+  Future<int> requeueBlocked({String? store}) {
+    return pocket.transaction((tx) async {
+      final exec = tx.executor;
+      final where =
+          store == null ? 'sync_state = ?' : 'sync_state = ? AND store = ?';
+      final args = store == null
+          ? [SyncState.blocked.name]
+          : [SyncState.blocked.name, store];
+      return exec.update(
+          'lp_sync_row',
+          {
+            'sync_state': SyncState.dirty.name,
+            'last_error': null,
+            'next_retry_at': 0,
+          },
+          where: where,
+          whereArgs: args);
     });
   }
 

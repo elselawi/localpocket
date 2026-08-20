@@ -20,11 +20,16 @@ class PushReport {
   final int pushed;
   final int deadLettered;
   final int conflicted;
+
+  /// Operations parked in the recoverable `blocked` state (a 403 that may be
+  /// temporary). They are requeued when permissions are restored.
+  final int blocked;
   final bool hadError;
   const PushReport({
     this.pushed = 0,
     this.deadLettered = 0,
     this.conflicted = 0,
+    this.blocked = 0,
     this.hadError = false,
   });
 }
@@ -71,6 +76,7 @@ class Pusher {
         pushed: report.pushed + r.pushed,
         deadLettered: report.deadLettered + r.deadLettered,
         conflicted: report.conflicted + r.conflicted,
+        blocked: report.blocked + r.blocked,
         hadError: report.hadError || r.hadError,
       );
     }
@@ -106,8 +112,12 @@ class Pusher {
       onAuthError();
       return const PushReport(hadError: true);
     } on ForbiddenError {
-      await _deadLetter(op, 'forbidden_push');
-      return const PushReport(deadLettered: 1);
+      // A forbidden push is RECOVERABLE (permissions may be restored): keep
+      // the op, park the row in `blocked`, and requeue on permission recovery
+      // — never dead-letter a local edit over a transient 403.
+      await pocket.outbox.markBlocked(
+          store: op.store, id: op.recordId, error: 'forbidden_push');
+      return const PushReport(blocked: 1);
     } on PayloadError catch (e) {
       if (catchPayloadError) {
         await _deadLetter(op, 'validation_push', error: e.message);
@@ -214,6 +224,7 @@ class Pusher {
     var pushed = 0;
     var dead = 0;
     var conflicted = 0;
+    var blocked = 0;
 
     // Pre-flight GETs gate every write.
     final outboxPayloadByOpId = <String, String>{};
@@ -244,8 +255,9 @@ class Pusher {
         onAuthError();
         return PushReport(hadError: true);
       } on ForbiddenError {
-        await _deadLetter(op, 'forbidden_push');
-        dead++;
+        await pocket.outbox.markBlocked(
+            store: op.store, id: op.recordId, error: 'forbidden_push');
+        blocked++;
         continue;
       } on SyncError catch (e) {
         final r = await _retry(op, sr, e);
@@ -311,12 +323,16 @@ class Pusher {
               pushed: pushed,
               deadLettered: dead,
               conflicted: conflicted,
+              blocked: blocked,
               hadError: true);
         }
       }
     }
     return PushReport(
-        pushed: pushed, deadLettered: dead, conflicted: conflicted);
+        pushed: pushed,
+        deadLettered: dead,
+        conflicted: conflicted,
+        blocked: blocked);
   }
 
   /// Maximum operations per remote batch request: min of the configured limit
@@ -611,7 +627,16 @@ class Pusher {
             'detected_at': _nowMs(),
           },
           conflictAlgorithm: ConflictAlgorithm.replace);
-      await exec.update('lp_sync_row', {'sync_state': 'conflict'},
+      await exec.update(
+          'lp_sync_row',
+          {
+            'sync_state': 'conflict',
+            // The conflicted remote IS the base for resolution, recorded in
+            // base_* (not remote_updated — seen-vs-applied separation).
+            'base_json': canonicalize(remotePayload),
+            'base_hash': payloadHash(schema, remotePayload),
+            'base_updated': fetched.updated,
+          },
           where: 'store = ? AND record_id = ?',
           whereArgs: [op.store, op.recordId]);
       tx.addChange(ChangeSet(op.store, {op.recordId}));
