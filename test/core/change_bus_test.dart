@@ -160,8 +160,18 @@ void main() {
         id: 't1',
         origin: ChangeOrigin.local,
         action: ChangeAction.update,
-        oldRecord: {'id': 't1', 'title': 'Old', 'done': false, 'tags': ['a']},
-        newRecord: {'id': 't1', 'title': 'New', 'done': true, 'tags': ['a', 'b']},
+        oldRecord: {
+          'id': 't1',
+          'title': 'Old',
+          'done': false,
+          'tags': ['a']
+        },
+        newRecord: {
+          'id': 't1',
+          'title': 'New',
+          'done': true,
+          'tags': ['a', 'b']
+        },
         changedFields: {'title', 'done', 'tags'},
       );
 
@@ -200,8 +210,10 @@ void main() {
       );
 
       expect(event.isRemote, isTrue);
-      expect(event.isFieldTransition('assignedTo', from: null, to: 'alice'), isTrue);
-      expect(event.isFieldTransition('assignedTo', from: 'bob', to: 'alice'), isFalse);
+      expect(event.isFieldTransition('assignedTo', from: null, to: 'alice'),
+          isTrue);
+      expect(event.isFieldTransition('assignedTo', from: 'bob', to: 'alice'),
+          isFalse);
     });
 
     test('equality and hashCode support deep collection comparison', () {
@@ -211,7 +223,10 @@ void main() {
         origin: ChangeOrigin.local,
         action: ChangeAction.create,
         oldRecord: null,
-        newRecord: {'title': 'Task 1', 'meta': {'priority': 1}},
+        newRecord: {
+          'title': 'Task 1',
+          'meta': {'priority': 1}
+        },
         changedFields: {'title', 'meta'},
       );
 
@@ -221,7 +236,10 @@ void main() {
         origin: ChangeOrigin.local,
         action: ChangeAction.create,
         oldRecord: null,
-        newRecord: {'title': 'Task 1', 'meta': {'priority': 1}},
+        newRecord: {
+          'title': 'Task 1',
+          'meta': {'priority': 1}
+        },
         changedFields: {'title', 'meta'},
       );
 
@@ -231,7 +249,10 @@ void main() {
         origin: ChangeOrigin.remote,
         action: ChangeAction.create,
         oldRecord: null,
-        newRecord: {'title': 'Task 1', 'meta': {'priority': 1}},
+        newRecord: {
+          'title': 'Task 1',
+          'meta': {'priority': 1}
+        },
         changedFields: {'title', 'meta'},
       );
 
@@ -278,7 +299,9 @@ void main() {
       stream.whereRemote().listen(remoteEvents.add);
       stream.whereResolution().listen(resolutionEvents.add);
       stream.whereStore('tasks').listen(tasksEvents.add);
-      stream.whereFieldTransition('done', from: false, to: true).listen(doneTransitions.add);
+      stream
+          .whereFieldTransition('done', from: false, to: true)
+          .listen(doneTransitions.add);
 
       final e1 = RecordChangeEvent(
         store: 'tasks',
@@ -321,6 +344,59 @@ void main() {
       expect(doneTransitions, [e1]);
 
       await controller.close();
+    });
+
+    test(
+        'shared record-event match helper supports origin/action/store/field filters',
+        () {
+      final event = RecordChangeEvent(
+        store: 'tasks',
+        id: 't1',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.update,
+        oldRecord: {'done': false, 'title': 'Old'},
+        newRecord: {'done': true, 'title': 'New'},
+        changedFields: {'done', 'title'},
+      );
+
+      expect(
+        event.matches(
+          store: 'tasks',
+          origin: ChangeOrigin.local,
+          action: ChangeAction.update,
+          field: 'done',
+        ),
+        isTrue,
+      );
+      expect(
+        event.matches(
+          store: 'tasks',
+          origin: ChangeOrigin.remote,
+          action: ChangeAction.update,
+          field: 'done',
+        ),
+        isFalse,
+      );
+      expect(
+        event.matches(
+          store: 'tasks',
+          action: ChangeAction.update,
+          field: 'done',
+          from: false,
+          to: true,
+        ),
+        isTrue,
+      );
+
+      final filtered = Stream.fromIterable([event])
+          .whereMatches(
+            origin: ChangeOrigin.local,
+            action: ChangeAction.update,
+            field: 'done',
+          )
+          .toList();
+
+      expect(filtered, completion([event]));
     });
   });
 }

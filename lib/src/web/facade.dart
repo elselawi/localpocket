@@ -22,7 +22,7 @@ import 'conversions.dart';
 import 'lifecycle.dart';
 import 'protocol.dart';
 
-class LocalPocket {
+class LocalPocket with ChangeBusAwareLP {
   final String path;
   final Database _remoteDb;
   final WebSqlite _webSqlite;
@@ -30,7 +30,6 @@ class LocalPocket {
   SqliteCapabilities capabilities;
   WebStorageCapabilities storageCapabilities;
   final Map<String, CollectionSchema> _storeMap = {};
-  final ChangeBus changeBus = ChangeBus();
   final PerfCounters perf = PerfCounters();
   final Map<int, StreamController<dynamic>> workerStreams = {};
   final WatchSubscriptionTracker watchTracker = WatchSubscriptionTracker();
@@ -609,41 +608,6 @@ class LocalPocket {
       'maxBytes': maxBytes,
     })) as Map;
     return (res['evicted'] as int?) ?? 0;
-  }
-
-  Stream<ChangeSet> get changes => changeBus.stream;
-
-  /// Emits detailed committed record change events (old vs new, origin, action, changedFields).
-  Stream<RecordChangeEvent> get events => changeBus.events;
-
-  /// Convenience stream for listening to local record changes across collections.
-  Stream<RecordChangeEvent> onLocal({
-    String? store,
-    String? field,
-    ChangeAction? action,
-  }) {
-    return events.where((e) {
-      if (!e.isLocal) return false;
-      if (store != null && e.store != store) return false;
-      if (action != null && e.action != action) return false;
-      if (field != null && !e.hasFieldChange(field)) return false;
-      return true;
-    });
-  }
-
-  /// Convenience stream for listening to remote record changes across collections.
-  Stream<RecordChangeEvent> onRemote({
-    String? store,
-    String? field,
-    ChangeAction? action,
-  }) {
-    return events.where((e) {
-      if (!e.isRemote) return false;
-      if (store != null && e.store != store) return false;
-      if (action != null && e.action != action) return false;
-      if (field != null && !e.hasFieldChange(field)) return false;
-      return true;
-    });
   }
 
   /// Worker-owned synchronization status snapshots.

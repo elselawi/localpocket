@@ -133,7 +133,7 @@ class PointReadCache {
 ///
 /// [LocalPocket] owns the SQLite connection and serializes writes. Always call
 /// [close] when the application or test no longer needs the database.
-class LocalPocket {
+class LocalPocket with ChangeBusAwareLP {
   /// The database path supplied to [open].
   final String path;
 
@@ -144,7 +144,6 @@ class LocalPocket {
   final SqliteCapabilities capabilities;
   late final WriteQueue writeQueue;
   final PerfCounters perf;
-  final ChangeBus changeBus;
 
   /// Maximum canonical document size accepted by local writes.
   final int maxDocBytes;
@@ -198,8 +197,7 @@ class LocalPocket {
     this.blobStore,
     this.fieldCipher,
     this.cryptoProvider,
-  })  : perf = PerfCounters(),
-        changeBus = ChangeBus() {
+  }) : perf = PerfCounters() {
     writeQueue = WriteQueue(onQueueDepthChanged: perf.queueChanged);
     outbox = Outbox.internal(this);
     opQueue = OpQueue.internal(this);
@@ -665,42 +663,6 @@ class LocalPocket {
       _tables[s]?.readCache.clear();
       changeBus.emit(ChangeSet(s, const {}));
     }
-  }
-
-  /// Emits committed local changes for the registered stores.
-  Stream<ChangeSet> get changes => changeBus.stream;
-
-  /// Emits detailed committed record change events (old vs new, origin, action, changedFields).
-  Stream<RecordChangeEvent> get events => changeBus.events;
-
-  /// Convenience stream for listening to local record changes across collections.
-  Stream<RecordChangeEvent> onLocal({
-    String? store,
-    String? field,
-    ChangeAction? action,
-  }) {
-    return events.where((e) {
-      if (!e.isLocal) return false;
-      if (store != null && e.store != store) return false;
-      if (action != null && e.action != action) return false;
-      if (field != null && !e.hasFieldChange(field)) return false;
-      return true;
-    });
-  }
-
-  /// Convenience stream for listening to remote record changes across collections.
-  Stream<RecordChangeEvent> onRemote({
-    String? store,
-    String? field,
-    ChangeAction? action,
-  }) {
-    return events.where((e) {
-      if (!e.isRemote) return false;
-      if (store != null && e.store != store) return false;
-      if (action != null && e.action != action) return false;
-      if (field != null && !e.hasFieldChange(field)) return false;
-      return true;
-    });
   }
 
   /// Optimizes SQLite statistics and closes the database connection.

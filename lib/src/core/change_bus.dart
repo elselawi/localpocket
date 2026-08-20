@@ -112,6 +112,32 @@ class RecordChangeEvent {
     return true;
   }
 
+  /// Returns true when the event matches the provided filter envelope.
+  bool matches({
+    String? store,
+    ChangeOrigin? origin,
+    ChangeAction? action,
+    String? field,
+    Object? from = _sentinelUnset,
+    Object? to = _sentinelUnset,
+  }) {
+    if (store != null && this.store != store) return false;
+    if (origin != null && this.origin != origin) return false;
+    if (action != null && this.action != action) return false;
+
+    if (field != null) {
+      if (!hasFieldChange(field)) return false;
+      if (!identical(from, _sentinelUnset) || !identical(to, _sentinelUnset)) {
+        return isFieldTransition(field, from: from, to: to);
+      }
+    } else if (!identical(from, _sentinelUnset) ||
+        !identical(to, _sentinelUnset)) {
+      return false;
+    }
+
+    return true;
+  }
+
   /// Converts this event to a JSON map.
   Map<String, Object?> toJson() => {
         'store': store,
@@ -196,13 +222,39 @@ extension RecordChangeEventStreamExtension on Stream<RecordChangeEvent> {
   Stream<RecordChangeEvent> whereField(String field) =>
       where((e) => e.hasFieldChange(field));
 
+  /// Filters for events matching a shared filter envelope.
+  Stream<RecordChangeEvent> whereMatches({
+    String? store,
+    ChangeOrigin? origin,
+    ChangeAction? action,
+    String? field,
+    Object? from = _sentinelUnset,
+    Object? to = _sentinelUnset,
+  }) =>
+      where((e) => e.matches(
+            store: store,
+            origin: origin,
+            action: action,
+            field: field,
+            from: from,
+            to: to,
+          ));
+
   /// Filters for a specific field transition.
   Stream<RecordChangeEvent> whereFieldTransition(
     String field, {
     Object? from = _sentinelUnset,
     Object? to = _sentinelUnset,
+    ChangeOrigin? origin,
+    ChangeAction? action,
   }) =>
-      where((e) => e.isFieldTransition(field, from: from, to: to));
+      whereMatches(
+        field: field,
+        from: from,
+        to: to,
+        origin: origin,
+        action: action,
+      );
 }
 
 /// A post-commit change notification for one store.
@@ -263,4 +315,105 @@ class ChangeBus {
     _controller.close();
     _eventController.close();
   }
+}
+
+mixin ChangeBusAwareLP {
+  final ChangeBus changeBus = ChangeBus();
+
+  Stream<ChangeSet> get changes => changeBus.stream;
+
+  /// Emits detailed committed record change events (old vs new, origin, action, changedFields).
+  Stream<RecordChangeEvent> get events => changeBus.events;
+
+  /// Convenience stream for listening to local record changes across collections.
+  Stream<RecordChangeEvent> onLocal({
+    String? store,
+    String? field,
+    ChangeAction? action,
+  }) =>
+      events.whereMatches(
+        store: store,
+        origin: ChangeOrigin.local,
+        action: action,
+        field: field,
+      );
+
+  /// Convenience stream for listening to remote record changes across collections.
+  Stream<RecordChangeEvent> onRemote({
+    String? store,
+    String? field,
+    ChangeAction? action,
+  }) =>
+      events.whereMatches(
+        store: store,
+        origin: ChangeOrigin.remote,
+        action: action,
+        field: field,
+      );
+}
+
+mixin ChangeBusAwareStore {
+  String get name;
+
+  Stream<RecordChangeEvent> get recordEvents;
+
+  Stream<RecordChangeEvent> get events =>
+      recordEvents.where((e) => e.store == name);
+
+  /// Convenience stream for listening to local record changes on this collection.
+  Stream<RecordChangeEvent> onLocal({String? field, ChangeAction? action}) =>
+      events.whereMatches(
+        origin: ChangeOrigin.local,
+        action: action,
+        field: field,
+      );
+
+  /// Convenience stream for listening to remote record changes on this collection.
+  Stream<RecordChangeEvent> onRemote({String? field, ChangeAction? action}) =>
+      events.whereMatches(
+        origin: ChangeOrigin.remote,
+        action: action,
+        field: field,
+      );
+
+  /// Convenience stream for listening to resolution record changes on this collection.
+  Stream<RecordChangeEvent> onResolution(
+          {String? field, ChangeAction? action}) =>
+      events.whereMatches(
+        origin: ChangeOrigin.resolution,
+        action: action,
+        field: field,
+      );
+
+  /// Convenience stream for listening to changes on a specific field.
+  Stream<RecordChangeEvent> onFieldChange(
+    String field, {
+    ChangeOrigin? origin,
+    ChangeAction? action,
+  }) =>
+      events.whereMatches(
+        origin: origin,
+        action: action,
+        field: field,
+      );
+
+  /// Convenience stream for listening to a specific field transition from [from] to [to].
+  Stream<RecordChangeEvent> onFieldTransition(
+    String field, {
+    Object? from = const _SentinelUnset(),
+    Object? to = const _SentinelUnset(),
+    ChangeOrigin? origin,
+    ChangeAction? action,
+  }) =>
+      events.whereMatches(
+        origin: origin,
+        action: action,
+        field: field,
+        from: from,
+        to: to,
+      );
+}
+
+class _SentinelUnset {
+  const _SentinelUnset();
 }

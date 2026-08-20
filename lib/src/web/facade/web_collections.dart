@@ -11,13 +11,19 @@ import 'package:localpocket/src/web/facade/send_plan.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
 /// Main-thread collection proxy.
-class WebCollection {
+class WebCollection with ChangeBusAwareStore {
   final LocalPocket _pocket;
   final CollectionSchema schema;
 
   WebCollection.ins(this._pocket, this.schema);
 
+  LocalPocket get pocket => _pocket;
+
+  @override
   String get name => schema.name;
+
+  @override
+  Stream<RecordChangeEvent> get recordEvents => _pocket.events;
 
   Future<Map<String, Object?>?> get(String id) async {
     final res = await _pocket.send(WireOp.get, {'store': name, 'id': id});
@@ -122,69 +128,6 @@ class WebCollection {
     try {
       await _pocket.send(WireOp.watchCancel, {'watchId': watchId});
     } catch (_) {}
-  }
-
-  /// Stream of committed record change events for this collection.
-  Stream<RecordChangeEvent> get events =>
-      _pocket.events.where((e) => e.store == name);
-
-  /// Convenience stream for listening to local record changes on this collection.
-  Stream<RecordChangeEvent> onLocal({String? field, ChangeAction? action}) {
-    return events.where((e) {
-      if (!e.isLocal) return false;
-      if (action != null && e.action != action) return false;
-      if (field != null && !e.hasFieldChange(field)) return false;
-      return true;
-    });
-  }
-
-  /// Convenience stream for listening to remote record changes on this collection.
-  Stream<RecordChangeEvent> onRemote({String? field, ChangeAction? action}) {
-    return events.where((e) {
-      if (!e.isRemote) return false;
-      if (action != null && e.action != action) return false;
-      if (field != null && !e.hasFieldChange(field)) return false;
-      return true;
-    });
-  }
-
-  /// Convenience stream for listening to resolution record changes on this collection.
-  Stream<RecordChangeEvent> onResolution(
-      {String? field, ChangeAction? action}) {
-    return events.where((e) {
-      if (!e.isResolution) return false;
-      if (action != null && e.action != action) return false;
-      if (field != null && !e.hasFieldChange(field)) return false;
-      return true;
-    });
-  }
-
-  /// Convenience stream for listening to changes on a specific field.
-  Stream<RecordChangeEvent> onFieldChange(
-    String field, {
-    ChangeOrigin? origin,
-    ChangeAction? action,
-  }) {
-    return events.where((e) {
-      if (origin != null && e.origin != origin) return false;
-      if (action != null && e.action != action) return false;
-      return e.hasFieldChange(field);
-    });
-  }
-
-  /// Convenience stream for listening to a specific field transition from [from] to [to].
-  Stream<RecordChangeEvent> onFieldTransition(
-    String field, {
-    Object? from = const _SentinelUnset(),
-    Object? to = const _SentinelUnset(),
-    ChangeOrigin? origin,
-    ChangeAction? action,
-  }) {
-    return events.where((e) {
-      if (origin != null && e.origin != origin) return false;
-      if (action != null && e.action != action) return false;
-      return e.isFieldTransition(field, from: from, to: to);
-    });
   }
 
   WebQueryBuilder query() => WebQueryBuilder._(_pocket, schema);
@@ -435,8 +378,4 @@ class WebSearchQueryBuilder {
       );
     }).toList();
   }
-}
-
-class _SentinelUnset {
-  const _SentinelUnset();
 }
