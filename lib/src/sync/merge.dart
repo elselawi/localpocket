@@ -396,7 +396,7 @@ class MergeEngine {
       throw StateError(
           'Async ConflictResolver used in sync merge3Way; use merge3WayAsync');
     }
-    return result as MergeResult;
+    return result;
   }
 
   static FutureOr<MergeResult> _runWithAdapter({
