@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:convert' show ChunkedConversionSink;
 import 'dart:js_interop';
 import 'dart:typed_data';
-import 'package:crypto/crypto.dart';
 // ignore: implementation_imports
 import 'package:sqlite3/src/wasm/js_interop/new_file_system_access.dart';
 import 'package:web/web.dart' show FileSystemDirectoryHandle;
@@ -26,16 +24,8 @@ class WebBlobStore extends BlobStore {
   final String _rootPrefix;
   final Map<String, Uint8List> _memoryFallback = {};
 
-  static final RegExp _hashRe = RegExp(r'^[0-9a-f]{64}$');
-
   WebBlobStore({String rootPrefix = 'localpocket_blobs'})
       : _rootPrefix = rootPrefix;
-
-  void _validateHash(String hash) {
-    if (!_hashRe.hasMatch(hash)) {
-      throw ArgumentError('Invalid blob hash "$hash": must be 64 hex chars.');
-    }
-  }
 
   /// The OPFS root directory for this store's blobs, or `null` when OPFS is
   /// unavailable (for example in a worker without storage, or non-secure
@@ -59,54 +49,31 @@ class WebBlobStore extends BlobStore {
     String? key,
   }) async {
     final builder = BytesBuilder(copy: false);
-    final output = <Digest>[];
-    final byteSink = sha256.startChunkedConversion(
-      ChunkedConversionSink<Digest>.withCallback(
-          (List<Digest> d) => output.addAll(d)),
+    final result = await processAndValidateBlobStream(
+      bytes,
+      onChunk: (chunk) => builder.add(chunk),
+      expectedSha256: expectedSha256,
+      expectedSize: expectedSize,
+      key: key,
     );
+    final data = builder.takeBytes();
 
-    var totalBytes = 0;
-    try {
-      await for (final chunk in bytes) {
-        builder.add(chunk);
-        byteSink.add(chunk);
-        totalBytes += chunk.length;
-      }
-      byteSink.close();
-
-      if (expectedSize != null && totalBytes != expectedSize) {
-        throw StateError(
-            'Size mismatch: expected $expectedSize but got $totalBytes');
-      }
-
-      final computedHash = key ?? output.single.toString();
-      _validateHash(computedHash);
-      if (expectedSha256 != null && computedHash != expectedSha256) {
-        throw StateError(
-            'SHA-256 mismatch: expected $expectedSha256 but got $computedHash');
-      }
-
-      final data = builder.takeBytes();
-
-      final opfs = await _getOpfsDir();
-      if (opfs != null) {
-        final fileHandle = await opfs.openFile(computedHash, create: true);
-        final writable = await fileHandle.createWritable().toDart;
-        await writable.write(data.buffer.toJS).toDart;
-        await writable.close().toDart;
-      } else {
-        _memoryFallback[computedHash] = data;
-      }
-
-      return computedHash;
-    } catch (e) {
-      rethrow;
+    final opfs = await _getOpfsDir();
+    if (opfs != null) {
+      final fileHandle = await opfs.openFile(result.hash, create: true);
+      final writable = await fileHandle.createWritable().toDart;
+      await writable.write(data.buffer.toJS).toDart;
+      await writable.close().toDart;
+    } else {
+      _memoryFallback[result.hash] = data;
     }
+
+    return result.hash;
   }
 
   @override
   Future<Stream<List<int>>> open(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     if (_memoryFallback.containsKey(hash)) {
       return Stream.value(_memoryFallback[hash]!);
     }
@@ -127,7 +94,7 @@ class WebBlobStore extends BlobStore {
 
   @override
   Future<void> delete(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     _memoryFallback.remove(hash);
 
     final opfs = await _getOpfsDir();
@@ -140,7 +107,7 @@ class WebBlobStore extends BlobStore {
 
   @override
   Future<bool> exists(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     if (_memoryFallback.containsKey(hash)) return true;
 
     final opfs = await _getOpfsDir();
@@ -157,7 +124,7 @@ class WebBlobStore extends BlobStore {
 
   @override
   Future<int?> size(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     if (_memoryFallback.containsKey(hash)) {
       return _memoryFallback[hash]!.length;
     }
@@ -200,7 +167,7 @@ class WebBlobStore extends BlobStore {
         await for (final element in opfs.list()) {
           final entry = element;
           final name = entry.name;
-          if (_hashRe.hasMatch(name)) result.add(name);
+          if (BlobStore.validHashPattern.hasMatch(name)) result.add(name);
         }
       } catch (_) {}
     }

@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import 'blob_store.dart';
@@ -22,17 +20,6 @@ class NativeBlobStore extends BlobStore {
 
   String get _blobsDir => p.join(rootDir, 'blobs');
   String get _tmpDir => p.join(rootDir, 'tmp');
-
-  /// A stored blob identity must be a full lowercase hex SHA-256. Anything else
-  /// (short keys, path separators, traversal) is rejected so a hostile key can
-  /// never escape the blob shard directories.
-  static final RegExp _hashRe = RegExp(r'^[0-9a-f]{64}$');
-
-  void _validateHash(String hash) {
-    if (!_hashRe.hasMatch(hash)) {
-      throw ArgumentError('Invalid blob hash "$hash": must be 64 hex chars.');
-    }
-  }
 
   String _shardDir(String hash) => p.join(_blobsDir, hash.substring(0, 2));
   String _blobPath(String hash) => p.join(_shardDir(hash), hash);
@@ -54,34 +41,19 @@ class NativeBlobStore extends BlobStore {
   }) async {
     final tmpFile = File(p.join(_tmpDir, _nextTmpId()));
     final sink = tmpFile.openWrite();
-    final output = <Digest>[];
-    final byteSink = sha256.startChunkedConversion(
-      ChunkedConversionSink<Digest>.withCallback((d) => output.addAll(d)),
-    );
 
-    var totalBytes = 0;
     try {
-      await for (final chunk in bytes) {
-        sink.add(chunk);
-        byteSink.add(chunk);
-        totalBytes += chunk.length;
-      }
-      byteSink.close();
+      final result = await processAndValidateBlobStream(
+        bytes,
+        onChunk: (chunk) => sink.add(chunk),
+        expectedSha256: expectedSha256,
+        expectedSize: expectedSize,
+        key: key,
+      );
       await sink.flush();
       await sink.close();
 
-      if (expectedSize != null && totalBytes != expectedSize) {
-        throw StateError(
-            'Size mismatch: expected $expectedSize but got $totalBytes');
-      }
-
-      final computedHash = key ?? output.single.toString();
-      _validateHash(computedHash);
-      if (expectedSha256 != null && computedHash != expectedSha256) {
-        throw StateError(
-            'SHA-256 mismatch: expected $expectedSha256 but got $computedHash');
-      }
-
+      final computedHash = result.hash;
       final targetDir = Directory(_shardDir(computedHash));
       if (!await targetDir.exists()) {
         await targetDir.create(recursive: true);
@@ -129,7 +101,7 @@ class NativeBlobStore extends BlobStore {
 
   @override
   Future<Stream<List<int>>> open(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     final path = _blobPath(hash);
     final file = File(path);
     if (!await file.exists()) {
@@ -140,7 +112,7 @@ class NativeBlobStore extends BlobStore {
 
   @override
   Future<void> delete(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     final path = _blobPath(hash);
     final file = File(path);
     if (await file.exists()) {
@@ -150,13 +122,13 @@ class NativeBlobStore extends BlobStore {
 
   @override
   Future<bool> exists(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     return File(_blobPath(hash)).exists();
   }
 
   @override
   Future<int?> size(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     final file = File(_blobPath(hash));
     if (!await file.exists()) return null;
     return file.length();
@@ -194,7 +166,7 @@ class NativeBlobStore extends BlobStore {
             final name = p.basename(file.path);
             // Malformed/non-hash files in a shard are ignored, never returned
             // as (or confused with) real blob identities.
-            if (_hashRe.hasMatch(name)) hashes.add(name);
+            if (BlobStore.validHashPattern.hasMatch(name)) hashes.add(name);
           }
         }
       }

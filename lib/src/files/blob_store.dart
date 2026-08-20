@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show ChunkedConversionSink;
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
@@ -10,6 +11,15 @@ import '../core/cipher.dart';
 abstract class BlobStore {
   /// Creates a blob-store implementation.
   const BlobStore();
+
+  static final RegExp validHashPattern = RegExp(r'^[0-9a-f]{64}$');
+
+  /// Validates that [hash] is a 64-character lowercase hex SHA-256 digest.
+  static void validateHash(String hash) {
+    if (!validHashPattern.hasMatch(hash)) {
+      throw ArgumentError('Invalid blob hash "$hash": must be 64 hex chars.');
+    }
+  }
 
   /// Puts bytes into the blob store atomically.
   /// Computes SHA-256 while streaming.
@@ -40,21 +50,59 @@ abstract class BlobStore {
   Future<List<String>> listHashes();
 }
 
+/// Result of streaming validation containing the verified hash and byte count.
+class StreamValidationResult {
+  final String hash;
+  final int totalBytes;
+
+  const StreamValidationResult({required this.hash, required this.totalBytes});
+}
+
+/// Consumes a byte stream while computing its SHA-256 digest, verifying size
+/// and expected hash constraints, and optionally piping chunks to [onChunk].
+Future<StreamValidationResult> processAndValidateBlobStream(
+  Stream<List<int>> bytes, {
+  FutureOr<void> Function(List<int> chunk)? onChunk,
+  String? expectedSha256,
+  int? expectedSize,
+  String? key,
+}) async {
+  final output = <Digest>[];
+  final byteSink = sha256.startChunkedConversion(
+    ChunkedConversionSink<Digest>.withCallback((d) => output.addAll(d)),
+  );
+
+  var totalBytes = 0;
+  await for (final chunk in bytes) {
+    if (onChunk != null) {
+      await onChunk(chunk);
+    }
+    byteSink.add(chunk);
+    totalBytes += chunk.length;
+  }
+  byteSink.close();
+
+  if (expectedSize != null && totalBytes != expectedSize) {
+    throw StateError(
+        'Size mismatch: expected $expectedSize but got $totalBytes');
+  }
+
+  final computedHash = key ?? output.single.toString();
+  BlobStore.validateHash(computedHash);
+
+  if (expectedSha256 != null && computedHash != expectedSha256) {
+    throw StateError(
+        'SHA-256 mismatch: expected $expectedSha256 but got $computedHash');
+  }
+
+  return StreamValidationResult(hash: computedHash, totalBytes: totalBytes);
+}
+
 /// In-memory implementation of BlobStore, useful for hermetic testing and web mock.
 class MemoryBlobStore extends BlobStore {
   final Map<String, Uint8List> _blobs = {};
   final Map<String, int> _lastModified = {};
   final List<String> _tmpFiles = [];
-
-  /// Mirrors [NativeBlobStore]: a stored identity must be a 64-char hex
-  /// SHA-256 so both implementations reject the same malformed/traversal keys.
-  static final RegExp _hashRe = RegExp(r'^[0-9a-f]{64}$');
-
-  void _validateHash(String hash) {
-    if (!_hashRe.hasMatch(hash)) {
-      throw ArgumentError('Invalid blob hash "$hash": must be 64 hex chars.');
-    }
-  }
 
   @override
   Future<String> put(
@@ -64,28 +112,21 @@ class MemoryBlobStore extends BlobStore {
     String? key,
   }) async {
     final builder = BytesBuilder(copy: false);
-    await for (final chunk in bytes) {
-      builder.add(chunk);
-    }
-    final data = builder.takeBytes();
-    if (expectedSize != null && data.length != expectedSize) {
-      throw StateError(
-          'Size mismatch: expected $expectedSize but got ${data.length}');
-    }
-    final hash = key ?? sha256.convert(data).toString();
-    _validateHash(hash);
-    if (expectedSha256 != null && hash != expectedSha256) {
-      throw StateError(
-          'SHA-256 mismatch: expected $expectedSha256 but got $hash');
-    }
-    _blobs[hash] = data;
-    _lastModified[hash] = DateTime.now().millisecondsSinceEpoch;
-    return hash;
+    final result = await processAndValidateBlobStream(
+      bytes,
+      onChunk: (chunk) => builder.add(chunk),
+      expectedSha256: expectedSha256,
+      expectedSize: expectedSize,
+      key: key,
+    );
+    _blobs[result.hash] = builder.takeBytes();
+    _lastModified[result.hash] = DateTime.now().millisecondsSinceEpoch;
+    return result.hash;
   }
 
   @override
   Future<Stream<List<int>>> open(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     final data = _blobs[hash];
     if (data == null) {
       throw StateError('Blob not found: $hash');
@@ -95,20 +136,20 @@ class MemoryBlobStore extends BlobStore {
 
   @override
   Future<void> delete(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     _blobs.remove(hash);
     _lastModified.remove(hash);
   }
 
   @override
   Future<bool> exists(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     return _blobs.containsKey(hash);
   }
 
   @override
   Future<int?> size(String hash) async {
-    _validateHash(hash);
+    BlobStore.validateHash(hash);
     return _blobs[hash]?.length;
   }
 
