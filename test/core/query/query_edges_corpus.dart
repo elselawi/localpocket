@@ -189,7 +189,7 @@ class CompiledSearchHandle implements SearchHandle {
 }
 
 class NativeQueryHandle implements QueryHandle {
-  final QueryBuilder _builder;
+  QueryBuilder _builder;
   NativeQueryHandle(this._builder);
 
   @override
@@ -209,7 +209,9 @@ class NativeQueryHandle implements QueryHandle {
     bool? isNull,
     bool? isNotNull,
   }) {
-    _builder.where(
+    // QueryBuilder is immutable: every DSL method returns a new copy that
+    // must be retained, or the predicate is silently dropped.
+    _builder = _builder.where(
       field,
       eq: eq,
       neq: neq,
@@ -230,43 +232,43 @@ class NativeQueryHandle implements QueryHandle {
 
   @override
   QueryHandle orWhere(List<Map<String, Object?>> groups) {
-    _builder.orWhere(groups);
+    _builder = _builder.orWhere(groups);
     return this;
   }
 
   @override
   QueryHandle orderBy(String field, {bool desc = false}) {
-    _builder.orderBy(field, desc: desc);
+    _builder = _builder.orderBy(field, desc: desc);
     return this;
   }
 
   @override
   QueryHandle limit(int n) {
-    _builder.limit(n);
+    _builder = _builder.limit(n);
     return this;
   }
 
   @override
   QueryHandle all() {
-    _builder.all();
+    _builder = _builder.all();
     return this;
   }
 
   @override
   QueryHandle select(List<String> fields) {
-    _builder.select(fields);
+    _builder = _builder.select(fields);
     return this;
   }
 
   @override
   QueryHandle includeArchived() {
-    _builder.includeArchived();
+    _builder = _builder.includeArchived();
     return this;
   }
 
   @override
   QueryHandle includeHidden() {
-    _builder.includeHidden();
+    _builder = _builder.includeHidden();
     return this;
   }
 
@@ -309,7 +311,7 @@ class NativeQueryHandle implements QueryHandle {
 
 class CompiledQueryHandle implements QueryHandle {
   final LocalPocket _pocket;
-  final QueryBuilder _builder;
+  QueryBuilder _builder;
 
   CompiledQueryHandle(this._pocket, CollectionSchema schema)
       : _builder = QueryBuilder.compileOnly(schema);
@@ -331,7 +333,9 @@ class CompiledQueryHandle implements QueryHandle {
     bool? isNull,
     bool? isNotNull,
   }) {
-    _builder.where(
+    // QueryBuilder is immutable: every DSL method returns a new copy that
+    // must be retained, or the predicate is silently dropped.
+    _builder = _builder.where(
       field,
       eq: eq,
       neq: neq,
@@ -352,43 +356,43 @@ class CompiledQueryHandle implements QueryHandle {
 
   @override
   QueryHandle orWhere(List<Map<String, Object?>> groups) {
-    _builder.orWhere(groups);
+    _builder = _builder.orWhere(groups);
     return this;
   }
 
   @override
   QueryHandle orderBy(String field, {bool desc = false}) {
-    _builder.orderBy(field, desc: desc);
+    _builder = _builder.orderBy(field, desc: desc);
     return this;
   }
 
   @override
   QueryHandle limit(int n) {
-    _builder.limit(n);
+    _builder = _builder.limit(n);
     return this;
   }
 
   @override
   QueryHandle all() {
-    _builder.all();
+    _builder = _builder.all();
     return this;
   }
 
   @override
   QueryHandle select(List<String> fields) {
-    _builder.select(fields);
+    _builder = _builder.select(fields);
     return this;
   }
 
   @override
   QueryHandle includeArchived() {
-    _builder.includeArchived();
+    _builder = _builder.includeArchived();
     return this;
   }
 
   @override
   QueryHandle includeHidden() {
-    _builder.includeHidden();
+    _builder = _builder.includeHidden();
     return this;
   }
 

@@ -80,11 +80,12 @@ void main() {
 
   /// Walks every page through BOTH the native API and the compiled runner and
   /// asserts identical items, cursors, and hasMore transitions.
-  Future<void> expectPagedParity(void Function(QueryBuilder) shape) async {
-    final native = pocket.collection('widgets').query();
-    shape(native);
-    final compiled = QueryBuilder.compileOnly(widgets);
-    shape(compiled);
+  Future<void> expectPagedParity(
+      QueryBuilder Function(QueryBuilder) shape) async {
+    var native = pocket.collection('widgets').query();
+    native = shape(native);
+    var compiled = QueryBuilder.compileOnly(widgets);
+    compiled = shape(compiled);
 
     final limit = native.limitValue;
     final allMode = native.allMode;
@@ -120,11 +121,12 @@ void main() {
         reason: 'compiled plan cursor must match native cursor');
   }
 
-  Future<void> expectCountParity(void Function(QueryBuilder) shape) async {
-    final native = pocket.collection('widgets').query();
-    shape(native);
-    final compiled = QueryBuilder.compileOnly(widgets);
-    shape(compiled);
+  Future<void> expectCountParity(
+      QueryBuilder Function(QueryBuilder) shape) async {
+    var native = pocket.collection('widgets').query();
+    native = shape(native);
+    var compiled = QueryBuilder.compileOnly(widgets);
+    compiled = shape(compiled);
     final expected = await native.count();
     final res = await executeCompiledQuery(
         pocket,
@@ -134,11 +136,13 @@ void main() {
   }
 
   Future<void> expectAggregateParity(
-      void Function(QueryBuilder) shape, String fn, String field) async {
-    final native = pocket.collection('widgets').query();
-    shape(native);
-    final compiled = QueryBuilder.compileOnly(widgets);
-    shape(compiled);
+      QueryBuilder Function(QueryBuilder) shape,
+      String fn,
+      String field) async {
+    var native = pocket.collection('widgets').query();
+    native = shape(native);
+    var compiled = QueryBuilder.compileOnly(widgets);
+    compiled = shape(compiled);
     final expected = await switch (fn) {
       'SUM' => native.sum(field),
       'AVG' => native.avg(field),
@@ -154,11 +158,11 @@ void main() {
   }
 
   Future<void> expectDistinctParity(
-      void Function(QueryBuilder) shape, String field) async {
-    final native = pocket.collection('widgets').query();
-    shape(native);
-    final compiled = QueryBuilder.compileOnly(widgets);
-    shape(compiled);
+      QueryBuilder Function(QueryBuilder) shape, String field) async {
+    var native = pocket.collection('widgets').query();
+    native = shape(native);
+    var compiled = QueryBuilder.compileOnly(widgets);
+    compiled = shape(compiled);
     final expected = await native.distinct(field);
     final res = await executeCompiledQuery(
         pocket,
@@ -167,22 +171,24 @@ void main() {
     expect(res['values'], expected);
   }
 
-  Future<void> expectIdsParity(void Function(QueryBuilder) shape) async {
-    final native = pocket.collection('widgets').query();
-    shape(native);
-    final compiled = QueryBuilder.compileOnly(widgets);
-    shape(compiled);
+  Future<void> expectIdsParity(
+      QueryBuilder Function(QueryBuilder) shape) async {
+    var native = pocket.collection('widgets').query();
+    native = shape(native);
+    var compiled = QueryBuilder.compileOnly(widgets);
+    compiled = shape(compiled);
     final expected = await native.ids();
     final res = await executeCompiledQuery(pocket,
         (sql, args) => pocket.traceQuery(sql, args), compiled.compileIdsPlan());
     expect(res['ids'], expected);
   }
 
-  Future<void> expectExplainParity(void Function(QueryBuilder) shape) async {
-    final native = pocket.collection('widgets').query();
-    shape(native);
-    final compiled = QueryBuilder.compileOnly(widgets);
-    shape(compiled);
+  Future<void> expectExplainParity(
+      QueryBuilder Function(QueryBuilder) shape) async {
+    var native = pocket.collection('widgets').query();
+    native = shape(native);
+    var compiled = QueryBuilder.compileOnly(widgets);
+    compiled = shape(compiled);
     final expected = await native.explain();
     final res = await executeCompiledQuery(
         pocket,
@@ -276,9 +282,9 @@ void main() {
 
   test('compiled plan is rejected for a mismatched schema fingerprint',
       () async {
-    final compiled = QueryBuilder.compileOnly(widgets)..limit(1);
+    final compiled = QueryBuilder.compileOnly(widgets).limit(1);
     final plan = compiled.compilePlan();
-    final fresh = QueryBuilder.compileOnly(widgets)..limit(1);
+    final fresh = QueryBuilder.compileOnly(widgets).limit(1);
     // The fingerprint is a deterministic function of the schema.
     expect(plan.schemaFingerprint, fresh.compilePlan().schemaFingerprint);
     // The worker rejects plans whose fingerprint does not match the live
