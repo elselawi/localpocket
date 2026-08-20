@@ -191,7 +191,6 @@ String stableWireErrorType(Object error) {
     if (error is FtsUnavailableError) return 'FtsUnavailableError';
     if (error is SchemaRegistrationError) return 'SchemaRegistrationError';
     if (error is StaleCursorError) return 'StaleCursorError';
-    if (error is ChangeBusOverflowError) return 'ChangeBusOverflowError';
     if (error is MissingLimitError) return 'MissingLimitError';
     if (error is ConflictBlockedError) return 'ConflictBlockedError';
     if (error is DestructiveMigrationRefusedError) {

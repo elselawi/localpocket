@@ -79,14 +79,6 @@ class StaleCursorError extends LocalPocketError {
   StaleCursorError(super.message);
 }
 
-/// Thrown when a subscriber's pending change queue overflows its buffer cap.
-class ChangeBusOverflowError extends LocalPocketError {
-  final int queueSize;
-  ChangeBusOverflowError(this.queueSize, [String? message])
-      : super(message ??
-            'ChangeBus queue overflowed with $queueSize pending events.');
-}
-
 /// A query was executed without a limit and without `.all()`.
 class MissingLimitError extends LocalPocketError {
   MissingLimitError([String? message])

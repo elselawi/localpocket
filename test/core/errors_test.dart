@@ -318,13 +318,6 @@ void main() {
       expect(e.message, 'NOT NULL constraint violated on "name".');
     });
 
-    test('ChangeBusOverflowError carries the queue size', () {
-      final e = ChangeBusOverflowError(12345);
-      expect(e.queueSize, 12345);
-      expect(e.message, contains('12345'));
-      expect(e.message, contains('overflow'));
-    });
-
     test('all LocalPocketError types are sealed subclasses', () {
       // Static check that the sealed hierarchy is exhaustive over the public
       // subtypes listed in the errors library.
