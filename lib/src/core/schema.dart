@@ -1,6 +1,25 @@
 /// Schema declaration model.
 library;
 
+import 'errors.dart';
+
+/// Reconstructs a schema model from JSON, converting any malformed value
+/// (wrong type, unknown enum string, missing required key, …) into a typed
+/// [StorageError] instead of leaking a raw `TypeError`/`ArgumentError`/
+/// `FormatException`. Schema definitions are persisted in
+/// `lp_stores.definition_json` and cross the web worker boundary, so a value
+/// that fails to parse indicates corruption or a version mismatch — matching
+/// the corrupt-row contract of the `lp_*` row models.
+T _parseSchemaJson<T>(T Function() build) {
+  try {
+    return build();
+  } on StorageError {
+    rethrow;
+  } catch (e) {
+    throw StorageError('Malformed schema JSON: $e');
+  }
+}
+
 /// Supported logical field types.
 enum FieldKind { text, int, real, bool, date, enumValue, json, jsonList, ref }
 
@@ -131,37 +150,38 @@ class Field {
         'enforceFk': enforceFk,
       };
 
-  static Field fromJson(Map<String, Object?> j) {
-    final kind = FieldKind.values.byName(j['kind'] as String);
-    final name = j['name'] as String;
-    final required = j['required'] == true;
-    final encrypted = j['encrypted'] == true;
-    switch (kind) {
-      case FieldKind.text:
-        return Field.text(name,
-            required: required,
-            uniqueWhenActive: j['uniqueWhenActive'] == true,
-            encrypted: encrypted);
-      case FieldKind.int:
-        return Field.int(name, required: required, encrypted: encrypted);
-      case FieldKind.real:
-        return Field.real(name, required: required, encrypted: encrypted);
-      case FieldKind.bool:
-        return Field.bool(name, required: required);
-      case FieldKind.date:
-        return Field.date(name, required: required);
-      case FieldKind.enumValue:
-        return Field.enumValue(name, (j['enumValues'] as List).cast<String>(),
-            required: required);
-      case FieldKind.json:
-        return Field.json(name, encrypted: encrypted);
-      case FieldKind.jsonList:
-        return Field.jsonList(name, encrypted: encrypted);
-      case FieldKind.ref:
-        return Field.ref(name,
-            to: j['refTo'] as String, enforceFk: j['enforceFk'] == true);
-    }
-  }
+  static Field fromJson(Map<String, Object?> j) => _parseSchemaJson(() {
+        final kind = FieldKind.values.byName(j['kind'] as String);
+        final name = j['name'] as String;
+        final required = j['required'] == true;
+        final encrypted = j['encrypted'] == true;
+        switch (kind) {
+          case FieldKind.text:
+            return Field.text(name,
+                required: required,
+                uniqueWhenActive: j['uniqueWhenActive'] == true,
+                encrypted: encrypted);
+          case FieldKind.int:
+            return Field.int(name, required: required, encrypted: encrypted);
+          case FieldKind.real:
+            return Field.real(name, required: required, encrypted: encrypted);
+          case FieldKind.bool:
+            return Field.bool(name, required: required);
+          case FieldKind.date:
+            return Field.date(name, required: required);
+          case FieldKind.enumValue:
+            return Field.enumValue(
+                name, (j['enumValues'] as List).cast<String>(),
+                required: required);
+          case FieldKind.json:
+            return Field.json(name, encrypted: encrypted);
+          case FieldKind.jsonList:
+            return Field.jsonList(name, encrypted: encrypted);
+          case FieldKind.ref:
+            return Field.ref(name,
+                to: j['refTo'] as String, enforceFk: j['enforceFk'] == true);
+        }
+      });
 }
 
 /// Controls which records are included in an index.
@@ -188,11 +208,12 @@ class IndexSpec {
         'scope': scope.name,
       };
 
-  static IndexSpec fromJson(Map<String, Object?> j) => IndexSpec(
-        (j['columns'] as List).cast<String>(),
-        unique: j['unique'] == true,
-        scope: IndexScope.values.byName(j['scope'] as String),
-      );
+  static IndexSpec fromJson(Map<String, Object?> j) =>
+      _parseSchemaJson(() => IndexSpec(
+            (j['columns'] as List).cast<String>(),
+            unique: j['unique'] == true,
+            scope: IndexScope.values.byName(j['scope'] as String),
+          ));
 }
 
 /// Enables FTS5 over the declared text fields in [fields].
@@ -208,7 +229,7 @@ class FtsSpec {
 
   /// Reconstructs an FTS config from a JSON-compatible map.
   static FtsSpec fromJson(Map<String, Object?> j) =>
-      FtsSpec((j['fields'] as List).cast<String>());
+      _parseSchemaJson(() => FtsSpec((j['fields'] as List).cast<String>()));
 }
 
 /// A store schema migration step.
@@ -247,14 +268,15 @@ class StoreMigration {
         'addedFields': [for (final field in addedFields) field.toJson()],
       };
 
-  static StoreMigration fromJson(Map<String, Object?> json) => StoreMigration(
-        toVersion: json['toVersion'] as int,
-        destructive: json['destructive'] == true,
-        addedFields: [
-          for (final field in (json['addedFields'] as List? ?? const []))
-            Field.fromJson(field as Map<String, Object?>),
-        ],
-      );
+  static StoreMigration fromJson(Map<String, Object?> json) =>
+      _parseSchemaJson(() => StoreMigration(
+            toVersion: json['toVersion'] as int,
+            destructive: json['destructive'] == true,
+            addedFields: [
+              for (final field in (json['addedFields'] as List? ?? const []))
+                Field.fromJson(field as Map<String, Object?>),
+            ],
+          ));
 }
 
 /// A lazy, deterministic, never-pushed document-format migration.
@@ -372,26 +394,27 @@ class CollectionSchema<T> {
         'migrations': [for (final migration in migrations) migration.toJson()],
       };
 
-  factory CollectionSchema.fromJson(Map<String, Object?> j) => CollectionSchema(
-        name: j['name'] as String,
-        version: j['version'] as int,
-        fields: [
-          for (final f in (j['fields'] as List))
-            Field.fromJson(f as Map<String, Object?>)
-        ],
-        indexes: [
-          for (final ix in (j['indexes'] as List))
-            IndexSpec.fromJson(ix as Map<String, Object?>)
-        ],
-        keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
-        fts: j['fts'] is Map
-            ? FtsSpec.fromJson(j['fts'] as Map<String, Object?>)
-            : null,
-        migrations: [
-          for (final migration in (j['migrations'] as List? ?? const []))
-            StoreMigration.fromJson(migration as Map<String, Object?>),
-        ],
-      );
+  factory CollectionSchema.fromJson(Map<String, Object?> j) =>
+      _parseSchemaJson(() => CollectionSchema(
+            name: j['name'] as String,
+            version: j['version'] as int,
+            fields: [
+              for (final f in (j['fields'] as List))
+                Field.fromJson(f as Map<String, Object?>)
+            ],
+            indexes: [
+              for (final ix in (j['indexes'] as List))
+                IndexSpec.fromJson(ix as Map<String, Object?>)
+            ],
+            keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
+            fts: j['fts'] is Map
+                ? FtsSpec.fromJson(j['fts'] as Map<String, Object?>)
+                : null,
+            migrations: [
+              for (final migration in (j['migrations'] as List? ?? const []))
+                StoreMigration.fromJson(migration as Map<String, Object?>),
+            ],
+          ));
 }
 
 /// Applies document migrations `from+1 .. to` to a logical document.

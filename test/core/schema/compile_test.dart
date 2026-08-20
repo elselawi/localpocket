@@ -552,5 +552,125 @@ void main() {
       addTearDown(p.close);
       expect(p.storeNames, containsAll(['alpha', 'beta']));
     });
+
+    test('enum literal with a quote survives CREATE TABLE and enforces the '
+        'CHECK at write time', () async {
+      final schema = CollectionSchema<Object?>(
+        name: 't',
+        version: 1,
+        fields: [
+          Field.enumValue('e', ["it's", 'ok'])
+        ],
+      );
+      final compiled = DdlCompiler(caps).compile(schema);
+      expect(compiled.tableDdl, contains("CHECK (\"e\" IN ('it''s', 'ok'))"));
+
+      final pocket = await openPocket(stores: [schema]);
+      addTearDown(pocket.close);
+      final col = pocket.collection('t');
+      final id = generateRecordId();
+      // The escaped literal round-trips through the real constraint.
+      await col.put({'id': id, 'e': "it's"});
+      expect((await col.get(id))!['e'], "it's");
+
+      // A value outside the enum is rejected by the validation guard before
+      // it reaches the CHECK constraint.
+      await expectLater(
+          col.put({'id': generateRecordId(), 'e': 'out'}),
+          throwsA(isA<ValidationException>().having((e) => e.message, 'message',
+              contains('must be one of it\'s, ok'))));
+
+      // The compiled CHECK itself is a working backstop: a raw INSERT that
+      // bypasses validation is still rejected by SQLite as a CHECK violation.
+      await expectLater(
+          pocket.db.execute(
+              "INSERT INTO t (id, e, archived, hidden) VALUES (?, 'out', 0, 0)",
+              [generateRecordId()]),
+          throwsA(isA<sqlite.SqliteException>().having(
+              (e) => e.message,
+              'message',
+              contains('CHECK constraint failed'))));
+    });
+
+    test('ref field already covered by a declared index skips the auto '
+        'index', () {
+      final compiled = DdlCompiler(caps).compile(CollectionSchema(
+        name: 't',
+        version: 1,
+        fields: [
+          Field.text('name'),
+          Field.ref('owner_id', to: 'owners')
+        ],
+        indexes: const [IndexSpec(['owner_id'])],
+      ));
+      final ownerIndexes =
+          compiled.indexDdl.where((d) => d.contains('"owner_id"'));
+      expect(ownerIndexes, hasLength(1),
+          reason: 'the declared index exists; no duplicate auto index is '
+              'emitted for the same name');
+      expect(ownerIndexes.single, contains('CREATE INDEX "ix_t_live_owner_id"'));
+    });
+
+    test('ref field covered by a composite index also skips the auto index',
+        () {
+      final compiled = DdlCompiler(caps).compile(CollectionSchema(
+        name: 't',
+        version: 1,
+        fields: [
+          Field.text('name'),
+          Field.ref('owner_id', to: 'owners')
+        ],
+        indexes: const [IndexSpec(['owner_id', 'name'])],
+      ));
+      final ownerIndexes =
+          compiled.indexDdl.where((d) => d.contains('"owner_id"'));
+      expect(ownerIndexes, hasLength(1),
+          reason: 'coverage is per-field, not per exact column list');
+    });
+
+    test('multi-field update trigger fires when either FTS field changes',
+        () async {
+      final schema = CollectionSchema<Object?>(
+        name: 'articles',
+        version: 1,
+        fields: [
+          Field.text('title', required: true),
+          Field.text('body'),
+          Field.text('meta'),
+        ],
+        fts: const FtsSpec(['title', 'body']),
+      );
+      final compiled = DdlCompiler(caps).compile(schema);
+      final update =
+          compiled.ftsDdl.firstWhere((d) => d.contains('AFTER UPDATE'));
+      expect(
+          update,
+          contains('WHEN new."title" IS NOT old."title" OR '
+              'new."body" IS NOT old."body"'));
+
+      final pocket = await openPocket(stores: [schema]);
+      addTearDown(pocket.close);
+      final col = pocket.collection('articles');
+      final id = generateRecordId();
+      await col.put(
+          {'id': id, 'title': 'alpha', 'body': 'bravo', 'meta': 'charlie'});
+
+      // Change only the second field: the first field's token stays indexed.
+      await col.patch(id, {'body': 'delta'});
+      expect((await col.search('alpha').limit(10).fetch()), hasLength(1));
+      expect((await col.search('bravo').limit(10).fetch()), isEmpty);
+      expect((await col.search('delta').limit(10).fetch()), hasLength(1));
+
+      // Change only the first field: the second field's token stays indexed.
+      await col.patch(id, {'title': 'epsilon'});
+      expect((await col.search('bravo').limit(10).fetch()), isEmpty);
+      expect((await col.search('epsilon').limit(10).fetch()), hasLength(1));
+
+      // Change a non-FTS field: the trigger must not fire and the index is
+      // left untouched.
+      await col.patch(id, {'meta': 'foxtrot'});
+      expect((await col.search('epsilon').limit(10).fetch()), hasLength(1));
+      expect((await col.search('delta').limit(10).fetch()), hasLength(1));
+    });
   });
 }

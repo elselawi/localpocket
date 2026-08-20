@@ -457,5 +457,46 @@ void main() {
       expect(emitted.single.ids, hasLength(100));
       expect(emitted.single.ids, unorderedEquals(ids));
     });
+
+    test('an empty batch is a complete no-op', () async {
+      final pocket = await openPocket();
+      addTearDown(pocket.close);
+      final col = pocket.collection('widgets');
+      final emitted = <ChangeSet>[];
+      final sub = pocket.changes.listen(emitted.add);
+      addTearDown(sub.cancel);
+      final rowsBefore = pocket.perf.rowsWritten;
+
+      await col.putAll(const []);
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(emitted, isEmpty, reason: 'no change event for an empty batch');
+      expect(await col.query().count(), 0);
+      expect(pocket.perf.rowsWritten - rowsBefore, 0,
+          reason: 'no rows written');
+      final outboxRows = await pocket.db.rawQuery(
+          'SELECT COUNT(*) AS c FROM lp_outbox WHERE store = ?',
+          ['widgets']);
+      expect(outboxRows.first['c'], 0, reason: 'no outbox rows queued');
+    });
+
+    test('an empty batch inside a transaction is a complete no-op', () async {
+      final pocket = await openPocket();
+      addTearDown(pocket.close);
+      final emitted = <ChangeSet>[];
+      final sub = pocket.changes.listen(emitted.add);
+      addTearDown(sub.cancel);
+
+      await pocket.transaction((tx) async {
+        await tx.collection('widgets').putAll(const []);
+        await tx.collection('widgets').put(record(
+            id: generateRecordId(), name: 'sibling'));
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(emitted, hasLength(1),
+          reason: 'only the sibling write emits; the empty batch adds nothing');
+      expect(emitted.single.ids, hasLength(1));
+    });
   });
 }

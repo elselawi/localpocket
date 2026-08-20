@@ -420,6 +420,163 @@ void main() {
       expect(schema.validator!({'name': 'blocked'}), ['name is blocked']);
     });
   });
+
+  group('malformed schema JSON', () {
+    // Schema `fromJson` guards against corruption: any malformed value (wrong
+    // type, unknown enum string, missing required key) surfaces as a typed
+    // `StorageError` naming the failure — never a raw TypeError/ArgumentError.
+    // Definitions are persisted in `lp_stores.definition_json` and cross the
+    // web worker boundary, so an opaque cast error would be undiagnosable.
+    Matcher storageError() => isA<StorageError>().having(
+        (e) => e.message, 'message', contains('Malformed schema JSON'));
+
+    test('Field.fromJson with a missing kind throws StorageError', () {
+      expect(() => Field.fromJson({'name': 'x'}), throwsA(storageError()));
+    });
+
+    test('Field.fromJson with an unknown kind string throws StorageError', () {
+      expect(
+          () => Field.fromJson({'name': 'x', 'kind': 'bogus'}),
+          throwsA(storageError()));
+    });
+
+    test('Field.fromJson with a ref but no refTo throws StorageError', () {
+      expect(
+          () => Field.fromJson({'name': 'owner', 'kind': 'ref'}),
+          throwsA(storageError()));
+    });
+
+    test('Field.fromJson with an enum but no enumValues throws StorageError',
+        () {
+      expect(
+          () => Field.fromJson({'name': 'size', 'kind': 'enumValue'}),
+          throwsA(storageError()));
+    });
+
+    test('Field.fromJson with non-list enumValues throws StorageError', () {
+      expect(
+          () => Field.fromJson(
+              {'name': 'size', 'kind': 'enumValue', 'enumValues': 'S'}),
+          throwsA(storageError()));
+    });
+
+    test('Field.fromJson with a non-string member in enumValues throws '
+        'StorageError', () {
+      expect(
+          () => Field.fromJson(
+              {'name': 'size', 'kind': 'enumValue', 'enumValues': [1, 2]}),
+          throwsA(storageError()));
+    });
+
+    test('CollectionSchema.fromJson without a name throws StorageError', () {
+      expect(
+          () => CollectionSchema<Object?>.fromJson(
+              {'version': 1, 'fields': const []}),
+          throwsA(storageError()));
+    });
+
+    test('CollectionSchema.fromJson without a version throws StorageError', () {
+      expect(
+          () => CollectionSchema<Object?>.fromJson(
+              {'name': 'x', 'fields': const []}),
+          throwsA(storageError()));
+    });
+
+    test('CollectionSchema.fromJson without fields throws StorageError', () {
+      expect(
+          () => CollectionSchema<Object?>.fromJson({'name': 'x', 'version': 1}),
+          throwsA(storageError()));
+    });
+
+    test('CollectionSchema.fromJson without indexes throws StorageError', () {
+      expect(
+          () => CollectionSchema<Object?>.fromJson(
+              {'name': 'x', 'version': 1, 'fields': const []}),
+          throwsA(storageError()));
+    });
+
+    test('CollectionSchema.fromJson with a non-map field entry throws '
+        'StorageError', () {
+      expect(
+          () => CollectionSchema<Object?>.fromJson(
+              {'name': 'x', 'version': 1, 'fields': const ['nope']}),
+          throwsA(storageError()));
+    });
+
+    test('CollectionSchema.fromJson with a non-map index entry throws '
+        'StorageError', () {
+      expect(
+          () => CollectionSchema<Object?>.fromJson({
+            'name': 'x',
+            'version': 1,
+            'fields': const [],
+            'indexes': const ['nope'],
+          }),
+          throwsA(storageError()));
+    });
+
+    test('CollectionSchema.fromJson with a malformed migration entry throws '
+        'StorageError', () {
+      expect(
+          () => CollectionSchema<Object?>.fromJson({
+            'name': 'x',
+            'version': 1,
+            'fields': const [],
+            'indexes': const [],
+            'migrations': const ['nope'],
+          }),
+          throwsA(storageError()));
+    });
+
+    test('IndexSpec.fromJson with an unknown scope throws StorageError', () {
+      expect(
+          () => IndexSpec.fromJson({'columns': const ['a'], 'scope': 'bogus'}),
+          throwsA(storageError()));
+    });
+
+    test('FtsSpec.fromJson without fields throws StorageError', () {
+      expect(() => FtsSpec.fromJson(const {}), throwsA(storageError()));
+    });
+
+    test('StoreMigration.fromJson with a non-int toVersion throws '
+        'StorageError', () {
+      expect(
+          () => StoreMigration.fromJson(
+              {'toVersion': 'two', 'addedFields': const []}),
+          throwsA(storageError()));
+    });
+
+    test('a nested corruption surfaces a single unwrapped StorageError', () {
+      // A corrupt field inside a schema must not double-wrap the message.
+      try {
+        CollectionSchema<Object?>.fromJson({
+          'name': 'x',
+          'version': 1,
+          'fields': [
+            {'name': 'broken', 'kind': 'bogus'}
+          ],
+          'indexes': const [],
+        });
+        fail('expected StorageError');
+      } on StorageError catch (e) {
+        expect(e.message, contains('Malformed schema JSON'));
+        expect(e.message, isNot(contains('Malformed schema JSON: Malformed')),
+            reason: 'a nested failure must not be wrapped twice');
+      }
+    });
+
+    test('CollectionSchema.fromJson round-trips the schema produced by '
+        'toJson', () {
+      final schema = widgetsSchema(
+        fts: const FtsSpec(['name', 'body']),
+      );
+      final rt = CollectionSchema<Object?>.fromJson(schema.toJson());
+      expect(rt.name, schema.name);
+      expect(rt.version, schema.version);
+      expect(rt.fields.map((f) => f.name), schema.fields.map((f) => f.name));
+      expect(rt.fts!.fields, const ['name', 'body']);
+    });
+  });
 }
 
 Map<String, Object?> _addVersion(Map<String, Object?> doc) => {

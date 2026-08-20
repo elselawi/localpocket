@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:localpocket/localpocket.dart';
+import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
@@ -46,6 +47,27 @@ void main() {
           .collection('widgets')
           .put(record(id: generateRecordId(), name: 'x'));
       await pocket.walCheckpoint();
+    });
+
+    test('walCheckpoint is a no-op when the engine lacks WAL support', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+      final executed = <String>[];
+      final db = DirectSqliteDatabase(sqlite3.sqlite3.open(t.path));
+      db.onExecute = (sql, _) => executed.add(sql);
+      // A web-profile open never applies WAL, so the probe reports
+      // walSupported == false — the guard branch is reachable.
+      final pocket =
+          await openPocket(path: t.path, database: db, platform: PlatformProfile.web);
+      addTearDown(pocket.close);
+      expect(pocket.capabilities.walSupported, isFalse,
+          reason: 'web profile reports no WAL');
+
+      executed.clear();
+      await pocket.walCheckpoint();
+      expect(
+          executed.where((s) => s.contains('wal_checkpoint')).toList(), isEmpty,
+          reason: 'walCheckpoint must not touch the engine without WAL');
     });
 
     test('vacuum with and without pages', () async {

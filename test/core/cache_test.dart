@@ -1,4 +1,5 @@
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/local_pocket.dart' show PointReadCache;
 import 'package:localpocket/src/sync/merge.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
@@ -211,6 +212,69 @@ void main() {
 
       expect(deepEquals(f1, f2), isTrue,
           reason: "when returning from cache we should return a deep copy");
+    });
+  });
+
+  group('point-read cache LRU boundary', () {
+    test('the 257th entry evicts the oldest key', () {
+      final cache = PointReadCache();
+      for (var i = 0; i < 256; i++) {
+        cache.set('id_$i', {'n': i});
+      }
+      expect(cache.containsKey('id_0'), isTrue);
+
+      cache.set('id_256', {'n': 256});
+      expect(cache.containsKey('id_0'), isFalse,
+          reason: 'at capacity, the oldest key is evicted');
+      expect(cache.containsKey('id_256'), isTrue);
+      expect(cache.containsKey('id_1'), isTrue,
+          reason: 'only the single oldest key is evicted');
+    });
+
+    test('a get refresh protects an entry from eviction', () {
+      final cache = PointReadCache();
+      for (var i = 0; i < 256; i++) {
+        cache.set('id_$i', {'n': i});
+      }
+      // Refresh id_5 so it becomes the most-recently-used entry.
+      cache.get('id_5');
+
+      cache.set('id_256', {'n': 256});
+      expect(cache.containsKey('id_0'), isFalse,
+          reason: 'the untouched oldest entry is evicted');
+      expect(cache.containsKey('id_5'), isTrue,
+          reason: 'the refreshed entry survives');
+    });
+
+    test('re-setting an existing key moves it to the most-recent end', () {
+      final cache = PointReadCache();
+      for (var i = 0; i < 256; i++) {
+        cache.set('id_$i', {'n': i});
+      }
+      // Re-setting the oldest key at capacity removes and re-adds it, so the
+      // next eviction falls on the following key.
+      cache.set('id_0', {'n': 999});
+
+      cache.set('id_256', {'n': 256});
+      expect(cache.containsKey('id_1'), isFalse,
+          reason: 'id_0 was refreshed, so id_1 is now the oldest');
+      expect(cache.containsKey('id_0'), isTrue,
+          reason: 'the re-set key survives and its value is updated');
+      expect(cache.get('id_0')!['n'], 999);
+    });
+
+    test('negative entries participate in the LRU chain', () {
+      final cache = PointReadCache();
+      for (var i = 0; i < 256; i++) {
+        cache.set('id_$i', i.isEven ? {'n': i} : null);
+      }
+      cache.get('id_0'); // refresh a negative entry
+      cache.set('id_256', {'n': 256});
+
+      expect(cache.containsKey('id_0'), isTrue,
+          reason: 'refreshed negative entry survives eviction');
+      expect(cache.containsKey('id_1'), isFalse,
+          reason: 'the oldest entry (id_1) is evicted');
     });
   });
 }

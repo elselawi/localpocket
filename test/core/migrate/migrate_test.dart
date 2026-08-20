@@ -1,4 +1,5 @@
 import 'package:localpocket/localpocket.dart';
+import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
@@ -112,6 +113,44 @@ void main() {
       final stores = await v2.db
           .query('lp_stores', where: 'store = ?', whereArgs: ['widgets']);
       expect(stores.first['schema_ver'], 2);
+    });
+
+    test('additive resume skips a column that already exists', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+
+      final v1 = await openPocket(path: t.path);
+      final id = generateRecordId();
+      await v1
+          .collection('widgets')
+          .put(record(id: id, name: 'x', qty: 1));
+      await v1.close();
+
+      // Simulate a crash between the ALTER and the ledger bump: the column
+      // exists on disk but lp_stores.schema_ver is still 1 and no migration
+      // row was recorded. Reopening re-runs the migration and must skip the
+      // already-present column instead of failing with "duplicate column".
+      final conn = sqlite.sqlite3.open(t.path);
+      conn.execute('ALTER TABLE "widgets" ADD COLUMN "nickname" TEXT');
+      conn.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+      conn.close();
+
+      final v2 = await openPocket(path: t.path, stores: [
+        v2Schema(migrations: [
+          StoreMigration(toVersion: 2, addedFields: [Field.text('nickname')]),
+        ])
+      ]);
+      addTearDown(v2.close);
+
+      final stores = await v2.db
+          .query('lp_stores', where: 'store = ?', whereArgs: ['widgets']);
+      expect(stores.first['schema_ver'], 2,
+          reason: 'the migration completes despite the pre-existing column');
+      expect((await v2.collection('widgets').get(id))!['name'], 'x',
+          reason: 'the row survives the resume');
+      final ledger = await v2.db.rawQuery(
+          "SELECT name FROM lp_migrations WHERE name = 'migrate:widgets:v2'");
+      expect(ledger, hasLength(1));
     });
 
     test('backfill chunking 10k per txn resumes after crash', () async {
