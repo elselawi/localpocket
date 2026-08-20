@@ -151,7 +151,8 @@ void main() {
           'status': status,
         };
 
-    test('shorter response settles only the ops it can map by index', () async {
+    test('shorter response is a ProtocolError (exact coverage required)',
+        () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
       final op0 = generateRecordId();
@@ -161,13 +162,15 @@ void main() {
       ));
       final b = await backend(server);
 
-      final results = await b.pushBatch(twoOps());
-      expect(results.length, 1);
-      expect(results.first.opId, 'a', reason: 'mapped back by request index');
-      expect(results.first.ok, isTrue);
+      await expectLater(
+        b.pushBatch(twoOps()),
+        throwsA(isA<ProtocolError>()),
+        reason: 'one result for two requests: a missing response is detected',
+      );
     });
 
-    test('longer response is truncated to the request length', () async {
+    test('longer response is a ProtocolError (exact coverage required)',
+        () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
       final a = generateRecordId();
@@ -183,10 +186,11 @@ void main() {
       ));
       final b = await backend(server);
 
-      final results = await b.pushBatch(twoOps());
-      expect(results.length, 2, reason: 'never more results than requests');
-      expect(results[0].opId, 'a');
-      expect(results[1].opId, 'b');
+      await expectLater(
+        b.pushBatch(twoOps()),
+        throwsA(isA<ProtocolError>()),
+        reason: 'three results for two requests: extra entries are a server bug',
+      );
     });
 
     test('malformed record body raises ProtocolError', () async {

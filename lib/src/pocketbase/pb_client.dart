@@ -199,11 +199,24 @@ class PbClient {
       throw ProtocolError('Batch response is not a list or envelope.');
     }
     // PB answers by REQUEST ORDER (it cannot echo client opIds), so results
-    // map back by index — never by a server-supplied id.
-    return [
-      for (var i = 0; i < results.length && i < ops.length; i++)
-        if (results[i] is Map) _parsePushResult(results[i] as Map, ops[i].opId),
-    ];
+    // map back by index — never by a server-supplied id. The wire contract is
+    // exact: one entry per request, every entry a JSON object. A shorter or
+    // longer array (or a non-object entry) is a server bug and must never be
+    // silently truncated or skipped — mapping by index on a partial array can
+    // settle the wrong op.
+    if (results.length != ops.length) {
+      throw ProtocolError(
+          'Batch response has ${results.length} results for ${ops.length} requests.');
+    }
+    final parsed = <PushResult>[];
+    for (var i = 0; i < ops.length; i++) {
+      final entry = results[i];
+      if (entry is! Map) {
+        throw ProtocolError('Batch response entry $i is not a JSON object.');
+      }
+      parsed.add(_parsePushResult(entry, ops[i].opId));
+    }
+    return parsed;
   }
 
   /// Batch capability probe: 403 = the batch API is disabled; 200/3xx/400

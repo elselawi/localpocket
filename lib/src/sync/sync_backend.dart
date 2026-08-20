@@ -377,7 +377,16 @@ abstract class SyncBackend {
   }
 
   /// Transactional batch. Throws [BatchFailedError] when the whole batch
-  /// fails; otherwise returns one [PushResult] per op.
+  /// fails as a unit.
+  ///
+  /// Response contract:
+  /// - Every returned [PushResult.opId] MUST reference an op in [ops] and be
+  ///   unique. Violations raise [ProtocolError]; the engine retries the batch
+  ///   per-op with backoff (nothing is settled or dead-lettered).
+  /// - Partial responses ARE allowed and explicitly defined: the engine
+  ///   settles exactly the ops the response names and leaves the unnamed ops
+  ///   pending for the next cycle. Returning a subset therefore declares that
+  ///   only the named ops were processed.
   Future<List<PushResult>> pushBatch(List<PushOp> ops);
 
   /// Realtime doorbell; may be an empty stream (polling fallback).

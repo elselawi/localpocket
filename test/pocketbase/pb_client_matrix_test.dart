@@ -433,25 +433,24 @@ void main() {
       }
     });
 
-    test('empty list yields no results; fewer/more clamp by request length',
+    test('empty/fewer/more results are ProtocolErrors (exact coverage)',
         () async {
+      Future<void> expectProtocolError(FakeTransport t) async {
+        final b = backendWith(t);
+        await expectLater(b.pushBatch(twoOps()), throwsA(isA<ProtocolError>()));
+      }
+
       final empty = FakeTransport();
       empty.sendStatus(200, '[]');
-      final b1 = backendWith(empty);
-      expect(await b1.pushBatch(twoOps()), isEmpty);
+      await expectProtocolError(empty);
 
       final fewer = FakeTransport();
       fewer.sendStatus(200, jsonEncode([item('r1')]));
-      final b2 = backendWith(fewer);
-      final r2 = await b2.pushBatch(twoOps());
-      expect(r2.length, 1);
-      expect(r2.single.opId, 'a');
+      await expectProtocolError(fewer);
 
       final more = FakeTransport();
       more.sendStatus(200, jsonEncode([item('r1'), item('r2'), item('r3')]));
-      final b3 = backendWith(more);
-      final r3 = await b3.pushBatch(twoOps());
-      expect(r3.length, 2, reason: 'never more results than requests');
+      await expectProtocolError(more);
     });
 
     test('results map back by request index, not by content', () async {
@@ -465,21 +464,19 @@ void main() {
       expect(results[1].record!.id, 'r1');
     });
 
-    test('non-map items are skipped (index mapping still holds)', () async {
+    test('non-map entries are ProtocolErrors (never skipped)', () async {
       final fake = FakeTransport();
       fake.sendStatus(
           200,
           jsonEncode([
-            'junk', // non-map -> skipped
+            'junk', // non-map -> protocol violation, not silently skipped
             {'body': item('r1')['body'], 'status': 200},
           ]));
       final b = backendWith(fake);
-      final results = await b.pushBatch(twoOps());
-      expect(results.length, 1,
-          reason: 'only the map item at index 1 is mapped');
-      expect(results.single.opId, 'b',
-          reason: 'mapped by absolute request index (index 1 -> op b)');
-      expect(results.single.ok, isTrue);
+      await expectLater(
+        b.pushBatch(twoOps()),
+        throwsA(isA<ProtocolError>()),
+      );
     });
 
     test('missing status/body handled without crashing', () async {
@@ -556,6 +553,53 @@ void main() {
       await expectStatus(401, AuthError);
       await expectStatus(429, ServerBusyError);
       await expectStatus(500, ServerError);
+    });
+
+    test('envelope forms with wrong cardinality are ProtocolErrors', () async {
+      for (final body in [
+        {
+          'data': {
+            'results': [item('r1')]
+          }
+        },
+        {
+          'results': [item('r1'), item('r2'), item('r3')]
+        },
+      ]) {
+        final fake = FakeTransport();
+        fake.sendStatus(200, jsonEncode(body));
+        final b = backendWith(fake);
+        await expectLater(
+          b.pushBatch(twoOps()),
+          throwsA(isA<ProtocolError>()),
+          reason: 'envelope cardinality must match the request count: $body',
+        );
+      }
+    });
+
+    test('envelope form with a non-map entry is a ProtocolError', () async {
+      final fake = FakeTransport();
+      fake.sendStatus(
+          200,
+          jsonEncode({
+            'data': {
+              'results': [
+                'junk',
+                {'body': item('r2')['body'], 'status': 200},
+              ]
+            }
+          }));
+      final b = backendWith(fake);
+      await expectLater(
+          b.pushBatch(twoOps()), throwsA(isA<ProtocolError>()));
+    });
+
+    test('empty batch returns an empty result list', () async {
+      final fake = FakeTransport();
+      fake.sendStatus(200, '[]');
+      final b = backendWith(fake);
+      final results = await b.pushBatch(const []);
+      expect(results, isEmpty);
     });
 
     test('probe status contract: only live answers enable', () async {

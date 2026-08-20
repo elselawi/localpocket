@@ -220,9 +220,20 @@ void main() {
       expect(await h.engine.syncStore.countPending(), 0);
     });
 
-    test('duplicate opId in the response settles once, no crash', () async {
-      final (h, ids) = await threeCreates();
+    test('duplicate opId in the response retries the whole request', () async {
+      var clock = 1000000;
+      final mock = MockSyncBackend()..batchEnabled = true;
+      final h = await EngineHarness.create(
+          mock: mock,
+          config: testConfig(
+              backoffBase: const Duration(seconds: 1), now: () => clock));
       addTearDown(h.close);
+      final ids = <String>[];
+      for (var i = 0; i < 3; i++) {
+        final id = generateRecordId();
+        ids.add(id);
+        await h.pocket.collection('widgets').put(record(id: id, name: 'n$i'));
+      }
       final op0 = await opIdFor(h, ids[0]);
       final rec = RemoteRecord(
           id: ids[0],
@@ -245,11 +256,23 @@ void main() {
         ])
       ]);
 
-      await h.engine.syncNow();
-      expect((await sr(h.pocket, ids[0]))!.syncState, SyncState.clean);
-      expect((await sr(h.pocket, ids[1]))!.syncState, SyncState.clean);
-      expect((await sr(h.pocket, ids[2]))!.syncState, SyncState.dirty);
+      final report = await h.engine.syncNow();
+      expect(report.hadError, isTrue,
+          reason: 'duplicate-op response is a protocol violation');
+      // Every op was retried with backoff: none settled, none dead-lettered.
+      for (final id in ids) {
+        expect((await sr(h.pocket, id))!.syncState, SyncState.dirty,
+            reason: 'op $id retried, never acked by a duplicate op');
+        expect((await sr(h.pocket, id))!.attemptCount, 1,
+            reason: 'op $id recorded a retry');
+      }
       expect(await deadLetters(h.pocket), isEmpty);
+
+      // Healthy retry converges once the backoff window elapses.
+      clock += 2000;
+      h.mock.script('pushBatch', const []);
+      await h.engine.syncNow();
+      expect(await h.engine.syncStore.countPending(), 0);
     });
 
     test('per-item failures dead-letter only the failing ops', () async {
@@ -287,19 +310,19 @@ void main() {
       expect(dl.map((r) => r['record_id']).toSet(), {ids[1], ids[2]});
     });
 
-    test('result entries that are not maps are skipped at the client level',
+    test('non-map batch entries raise ProtocolError at the client level',
         () async {
-      // Client-level: the adapter maps back by index and silently skips
-      // non-map entries — the ops it cannot map stay pending.
+      // Client-level: the adapter requires one JSON-object entry per request
+      // and maps back by index; a non-map entry is a protocol violation, not
+      // something to silently skip.
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
       server.batchEnabled = true;
       server.batchResponseScript.add((
         200,
         [
-          {'body': <String, Object?>{}, 'status': 'not-an-int'},
           'not-a-map',
-          null,
+          {'body': <String, Object?>{}, 'status': 'not-an-int'},
         ]
       ));
       final backend = PocketBaseBackend(
@@ -309,28 +332,23 @@ void main() {
       addTearDown(backend.close);
       await backend.prepare();
 
-      final result = await backend.pushBatch([
-        PushOp(
-            opId: 'a',
-            store: 'widgets',
-            id: generateRecordId(),
-            dataJson: '{"name":"a"}',
-            upsert: true),
-        PushOp(
-            opId: 'b',
-            store: 'widgets',
-            id: generateRecordId(),
-            dataJson: '{"name":"b"}',
-            upsert: true),
-      ]);
-
-      // Only the first entry was a map: the non-map entries were skipped, so
-      // a single non-conforming (status) entry parses but is not `ok`, and
-      // the skipped ops cannot be settled by the adapter.
-      expect(result.length, 1);
-      expect(result.first.opId, 'a');
-      expect(result.first.ok, isFalse);
-      expect(result.first.error, isNotNull);
+      await expectLater(
+        backend.pushBatch([
+          PushOp(
+              opId: 'a',
+              store: 'widgets',
+              id: generateRecordId(),
+              dataJson: '{"name":"a"}',
+              upsert: true),
+          PushOp(
+              opId: 'b',
+              store: 'widgets',
+              id: generateRecordId(),
+              dataJson: '{"name":"b"}',
+              upsert: true),
+        ]),
+        throwsA(isA<ProtocolError>()),
+      );
       expect(server.records, isEmpty,
           reason: 'scripted response: nothing applied');
     });
@@ -448,6 +466,84 @@ void main() {
       final dl = await deadLetters(h.pocket);
       expect(dl.length, 1);
       expect(dl.single['record_id'], poison);
+    });
+
+    test('duplicate opId in a split half leaves that half pending', () async {
+      final h = await EngineHarness.create(
+          mock: MockSyncBackend()..batchEnabled = true);
+      addTearDown(h.close);
+      final ids = <String>[];
+      for (var i = 0; i < 4; i++) {
+        final id = generateRecordId();
+        ids.add(id);
+        await h.pocket.collection('widgets').put(record(id: id, name: 'n$i'));
+      }
+      final op0 = (await h.pocket.outbox
+          .readOp(h.pocket.db, 'widgets', ids[0]))!
+          .opId;
+      final rec0 = RemoteRecord(
+          id: ids[0],
+          store: 'widgets',
+          updated: '2026-02-03 04:05:06.000Z',
+          data: {'id': ids[0], 'name': 'n0'});
+      // Full batch poisons -> binary split. The FIRST half echoes the same
+      // opId twice (protocol violation); the second half uses default success.
+      h.mock.script('pushBatch', [
+        MockThrow(BatchFailedError('poison in batch')),
+        MockReturn([
+          PushResult(opId: op0, ok: true, record: rec0, pushedJson: null),
+          PushResult(opId: op0, ok: true, record: rec0, pushedJson: null),
+        ]),
+      ]);
+
+      final report = await h.engine.syncNow();
+      expect(report.hadError, isTrue,
+          reason: 'a duplicate-op half is a protocol violation');
+      expect(report.pushed, 2, reason: 'the healthy half settles');
+      // The duplicate half is left pending (retryable), never dead-lettered.
+      expect(await h.engine.syncStore.countPending(), 2);
+      expect(await deadLetters(h.pocket), isEmpty);
+
+      h.mock.script('pushBatch', const []);
+      await h.engine.syncNow();
+      expect(await h.engine.syncStore.countPending(), 0);
+    });
+
+    test('unknown opId in a split half leaves that half pending', () async {
+      final h = await EngineHarness.create(
+          mock: MockSyncBackend()..batchEnabled = true);
+      addTearDown(h.close);
+      final ids = <String>[];
+      for (var i = 0; i < 4; i++) {
+        final id = generateRecordId();
+        ids.add(id);
+        await h.pocket.collection('widgets').put(record(id: id, name: 'n$i'));
+      }
+      final rec0 = RemoteRecord(
+          id: ids[0],
+          store: 'widgets',
+          updated: '2026-02-03 04:05:06.000Z',
+          data: {'id': ids[0], 'name': 'n0'});
+      // First half answers with an opId that was never sent.
+      h.mock.script('pushBatch', [
+        MockThrow(BatchFailedError('poison in batch')),
+        MockReturn([
+          PushResult(
+              opId: 'never-sent', ok: true, record: rec0, pushedJson: null),
+        ]),
+      ]);
+
+      final report = await h.engine.syncNow();
+      expect(report.hadError, isTrue,
+          reason: 'an unknown-op half is a protocol violation');
+      expect(report.pushed, 2, reason: 'the healthy half settles');
+      expect(await h.engine.syncStore.countPending(), 2,
+          reason: 'the unknown-op half is left pending');
+      expect(await deadLetters(h.pocket), isEmpty);
+
+      h.mock.script('pushBatch', const []);
+      await h.engine.syncNow();
+      expect(await h.engine.syncStore.countPending(), 0);
     });
   });
 }

@@ -365,13 +365,27 @@ class Pusher {
     try {
       final results = await backend.pushBatch(toSend);
       final byOpId = {for (final op in toSend) op.opId: op};
-      final settlements = <PushSettlement>[];
+      // Exact-response validation: every returned opId must be known and
+      // unique. Missing ops are tolerated — a partial response settles the
+      // named ops and leaves the rest pending for the next cycle (this is
+      // the explicitly defined partial-response protocol; see the
+      // SyncBackend.pushBatch contract). Validate the whole response before
+      // any settlement side effect so a malformed response cannot partially
+      // apply.
+      final returnedIds = <String>{};
       for (final r in results) {
-        final sent = byOpId[r.opId];
-        if (sent == null) {
+        if (!returnedIds.add(r.opId)) {
+          throw ProtocolError(
+              'Batch response references duplicate op ${r.opId}.');
+        }
+        if (!byOpId.containsKey(r.opId)) {
           throw ProtocolError(
               'Batch response references unknown op ${r.opId}.');
         }
+      }
+      final settlements = <PushSettlement>[];
+      for (final r in results) {
+        final sent = byOpId[r.opId]!;
         if (r.ok && r.record != null) {
           settlements.add(PushSettlement(
             op: _makeOutboxOp(sent,
@@ -449,8 +463,24 @@ class Pusher {
     for (final half in [ops.sublist(0, mid), ops.sublist(mid)]) {
       try {
         final results = await backend.pushBatch(half);
+        final byOpId = {for (final op in half) op.opId: op};
+        // Same exact-response validation as the main batch path: every
+        // returned opId must be known and unique. A ProtocolError here is
+        // caught below as a SyncError, leaving this half pending (retry
+        // later) instead of crashing the cycle with an untyped StateError.
+        final returnedIds = <String>{};
         for (final r in results) {
-          final sent = half.firstWhere((o) => o.opId == r.opId);
+          if (!returnedIds.add(r.opId)) {
+            throw ProtocolError(
+                'Batch response references duplicate op ${r.opId}.');
+          }
+          if (!byOpId.containsKey(r.opId)) {
+            throw ProtocolError(
+                'Batch response references unknown op ${r.opId}.');
+          }
+        }
+        for (final r in results) {
+          final sent = byOpId[r.opId]!;
           if (r.ok && r.record != null) {
             await _settle(
               _makeOutboxOp(sent, payloadJson: outboxPayloadByOpId[sent.opId]),
