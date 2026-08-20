@@ -19,11 +19,11 @@ void main() {
     final id = generateRecordId();
     await pocket.collection('widgets').put(record(id: id, name: 'x'));
 
-    Future<Map<String, Object?>> row() async => (await pocket.db.query(
-            'lp_outbox',
-            where: 'store = ? AND record_id = ?',
-            whereArgs: ['widgets', id]))
-        .single;
+    Future<Map<String, Object?>> row() async =>
+        (await pocket.db.query('lp_outbox',
+                where: 'store = ? AND record_id = ?',
+                whereArgs: ['widgets', id]))
+            .single;
 
     expect((await row())['created_at'], clock);
     expect((await row())['updated_at'], clock);
@@ -48,8 +48,8 @@ void main() {
     await pocket.outbox
         .ack('widgets', id, serverUpdated: '2026-01-01 00:00:00.000Z');
     final sr = (await pocket.db.query('lp_sync_row',
-        where: 'store = ? AND record_id = ?',
-        whereArgs: ['widgets', id])).single;
+            where: 'store = ? AND record_id = ?', whereArgs: ['widgets', id]))
+        .single;
     expect(sr['last_seen_at'], clock,
         reason: 'settlement last-seen uses the injected clock');
   });

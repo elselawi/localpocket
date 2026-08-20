@@ -161,6 +161,24 @@ class Sweeper {
       }
     }
 
+    // Quarantined records are retried out-of-band: the pull cursor advances
+    // past a malformed record (so the store never stalls), so a dedicated
+    // re-fetch is required. Re-fetch quarantined rows in this bucket whose
+    // backoff deadline has passed; a now-valid record is re-applied (clearing
+    // quarantine) and a still-malformed one is re-quarantined with a longer
+    // backoff by `fetchBatch` -> `applyNormalizedRemote`.
+    final retryCutoff = config.now();
+    final quarantined = await pocket.db.rawQuery(
+        'SELECT record_id FROM lp_sync_row '
+        "WHERE store = ? AND sync_state = 'quarantine' AND record_id LIKE ? "
+        'AND next_retry_at <= ?',
+        [store, '$prefix%', retryCutoff]);
+    if (quarantined.isNotEmpty) {
+      final ids = [for (final r in quarantined) r['record_id'] as String];
+      await puller.fetchBatch(store, ids);
+      fetched += ids.length;
+    }
+
     return SweepReport(store, remoteSeen.length, hidden, fetched);
   }
 

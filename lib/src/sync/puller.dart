@@ -38,8 +38,13 @@ class PullReport {
   final int quarantined;
   final int conflicts;
   final int pages;
+
+  /// Whether the pull stopped because [maxPagesPerPass] was reached with a
+  /// full page (more changes likely remain) — the engine uses this to continue
+  /// immediately instead of waiting for the next sync interval.
+  final bool hitPageLimit;
   const PullReport(this.store, this.applied, this.pages,
-      {this.quarantined = 0, this.conflicts = 0});
+      {this.quarantined = 0, this.conflicts = 0, this.hitPageLimit = false});
 }
 
 /// Incremental pull + the conflict-aware applier.
@@ -72,6 +77,7 @@ class Puller {
     var applied = 0;
     var quarantined = 0;
     var conflicts = 0;
+    var hitPageLimit = false;
 
     while (true) {
       final page = await backend.listChanges(
@@ -150,10 +156,15 @@ class Puller {
       fromId = last.id;
       pages++;
       if (page.length < config.maxPage) break;
-      if (pages >= config.maxPagesPerPass) break;
+      if (pages >= config.maxPagesPerPass) {
+        hitPageLimit = true;
+        break;
+      }
     }
     return PullReport(store, applied, pages,
-        quarantined: quarantined, conflicts: conflicts);
+        quarantined: quarantined,
+        conflicts: conflicts,
+        hitPageLimit: hitPageLimit);
   }
 
   bool _tupleLte(RemoteRecord r, PullCursor c) {
@@ -436,7 +447,8 @@ class Puller {
     // 2. Clean locally -> fast-forward (no conflict possible).
     if (state == SyncState.clean) {
       if (sr?.remoteUpdated == remote.updated) {
-        await _touchSeen(tx, store, remote.id, remote.updated);
+        await _touchSeen(tx, store, remote.id, remote.updated,
+            advanceWatermark: false);
         return ApplyResult.skipped;
       }
       final dbRow = encodeDbRow(
@@ -475,14 +487,18 @@ class Puller {
         state == SyncState.conflict) {
       if (sr?.baseUpdated == remote.updated) {
         // Server unchanged; local edit stands.
-        await _touchSeen(tx, store, remote.id, remote.updated);
+        await _touchSeen(tx, store, remote.id, remote.updated,
+            advanceWatermark: false);
         return ApplyResult.skipped;
       }
       if (state == SyncState.conflict) {
         // A conflict is resolved only by explicit user action. Neither a
         // converged nor a newly-changed remote payload may silently clear it:
-        // keep the row open and only refresh visibility.
-        await _touchSeen(tx, store, remote.id, remote.updated);
+        // keep the row open and only refresh visibility. The remote watermark
+        // is NOT advanced: the domain still reflects the pre-conflict applied
+        // version (the conflicted remote is captured in lp_conflicts).
+        await _touchSeen(tx, store, remote.id, remote.updated,
+            advanceWatermark: false);
         return ApplyResult.skipped;
       }
       final localPayload = buildPayload(schema, localRow);
@@ -519,10 +535,13 @@ class Puller {
         policy: policy,
       );
       if (outcome.needsReview) {
-        // Escalate to lp_conflicts; outbox op is held.
+        // Escalate to lp_conflicts; outbox op is held. The watermark is not
+        // advanced: nothing was applied to the domain (the conflicted remote
+        // is captured in lp_conflicts for resolution).
         await _recordPullConflict(
             exec, store, remote, schema, sr, localPayload, outcome);
-        await _touchSeen(tx, store, remote.id, remote.updated);
+        await _touchSeen(tx, store, remote.id, remote.updated,
+            advanceWatermark: false);
         tx.addChange(ChangeSet(store, {remote.id}));
         tx.addChange(ChangeSet('lp_conflicts', {remote.id}));
         return ApplyResult.conflict;
@@ -596,7 +615,15 @@ class Puller {
     );
     await exec.update(
       'lp_sync_row',
-      {'sync_state': SyncState.conflict.name},
+      {
+        'sync_state': SyncState.conflict.name,
+        // The conflicted remote IS the base for resolution. It is recorded in
+        // the sync row's base_* (NOT remote_updated, which stays the last
+        // APPLIED version — the seen-vs-applied watermark separation).
+        'base_json': canonicalize(remotePayload),
+        'base_hash': payloadHash(schema, remotePayload),
+        'base_updated': remote.updated,
+      },
       where: 'store = ? AND record_id = ?',
       whereArgs: [store, remote.id],
     );
@@ -625,12 +652,21 @@ class Puller {
       'payload_json': payloadJson,
     });
     final sr = await pocket.outbox.readSyncRow(exec, store, remote.id);
+    // Backoff-gated retry: a quarantined record is re-fetched out-of-band by
+    // the sweeper once `next_retry_at` passes, so a malformed remote never
+    // advances the pull cursor past it forever. A now-valid record is
+    // re-applied; a still-malformed one is re-quarantined with a longer delay.
+    final attempt = (sr?.attemptCount ?? 0) + 1;
+    final retryAt = _nowMs() + config.delayFor(attempt).inMilliseconds;
     if (sr == null) {
       await exec.insert('lp_sync_row', {
         'store': store,
         'record_id': remote.id,
         'remote_updated': remote.updated,
         'sync_state': 'quarantine',
+        'attempt_count': attempt,
+        'next_retry_at': retryAt,
+        'last_error': message,
         'schema_ver': schema.version,
       });
     } else {
@@ -640,6 +676,8 @@ class Puller {
             'sync_state': 'quarantine',
             'last_error': message,
             'remote_updated': remote.updated,
+            'attempt_count': attempt,
+            'next_retry_at': retryAt,
           },
           where: 'store = ? AND record_id = ?',
           whereArgs: [store, remote.id]);
@@ -687,15 +725,19 @@ class Puller {
     }
   }
 
-  Future<void> _touchSeen(
-      Tx tx, String store, String id, String remoteUpdated) async {
+  Future<void> _touchSeen(Tx tx, String store, String id, String remoteUpdated,
+      {bool advanceWatermark = true}) async {
     final exec = tx.executor;
     await exec.update(
         'lp_sync_row',
         {
           'last_seen_at': _nowMs(),
           'access_state': 'visible',
-          'remote_updated': remoteUpdated,
+          // The remote watermark (`remote_updated`) must never advance past
+          // what is actually applied. No-op / conflict / escalated paths set
+          // advanceWatermark=false so the row keeps reflecting the last
+          // APPLIED remote version while the cursor tracks what was seen.
+          if (advanceWatermark) 'remote_updated': remoteUpdated,
         },
         where: 'store = ? AND record_id = ?',
         whereArgs: [store, id]);

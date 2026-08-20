@@ -23,7 +23,9 @@ CollectionSchema<Object?> widgetsSchema({
   String name = 'widgets',
   int version = 1,
   List<Field> extraFields = const [],
-  List<IndexSpec> indexes = const [IndexSpec(['name', 'qty'])],
+  List<IndexSpec> indexes = const [
+    IndexSpec(['name', 'qty'])
+  ],
   List<StoreMigration> migrations = const [],
   bool keepUnsyncedArchives = false,
   Map<int, DocumentMigration>? documentMigrations,
@@ -123,7 +125,7 @@ class TempDb {
   TempDb(this.path);
 
   Future<void> cleanup() async {
-      for (final suffix in ['', '-wal', '-shm']) {
+    for (final suffix in ['', '-wal', '-shm']) {
       final f = File('$path$suffix');
       if (await f.exists()) {
         try {
@@ -145,6 +147,7 @@ class StatementRecorder {
 
   void record(String sql) => statements.add(sql);
 
-  int countSelectsLike(String needle) =>
-      statements.where((s) => s.startsWith('SELECT') && s.contains(needle)).length;
+  int countSelectsLike(String needle) => statements
+      .where((s) => s.startsWith('SELECT') && s.contains(needle))
+      .length;
 }

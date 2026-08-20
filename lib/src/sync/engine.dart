@@ -72,6 +72,13 @@ class SyncEngine {
   /// [markAuthValid]/[invalidateVisibility] calls never double-sweep.
   bool _forceSweepPending = false;
 
+  /// Monotonic lifecycle generation: incremented on every start/stop so a
+  /// stale async chain (cycle, fast-path, status emission) from a previous
+  /// lifecycle can never affect the current one after a restart.
+  int _generation = 0;
+
+  bool _isCurrent(int generation) => _started && generation == _generation;
+
   /// In-flight realtime fast-path applies are chained so [stop] can wait for
   /// them and no DB work outlives the pocket (teardown race).
   Future<void> _fastPathTail = Future.value();
@@ -80,6 +87,11 @@ class SyncEngine {
   StreamSubscription<BackendHint>? _hintsSub;
   Timer? _syncTimer;
   Timer? _pushTimer;
+  // Page-limit auto-continuation. This MUST be a dedicated timer: the pull's
+  // own applied writes re-arm the (cancellable) debounce timer via
+  // handleLocalWrite, which would otherwise cancel a pending continuation
+  // before it fires.
+  Timer? _catchupTimer;
   Timer? _settleTimer;
 
   /// Debounced trigger bookkeeping: a pending full cycle, or the accumulated
@@ -141,6 +153,7 @@ class SyncEngine {
   /// re-opens fresh state/status streams.
   Future<void> start() async {
     if (_started) return;
+    final generation = ++_generation;
     // A restarted engine gets fresh streams: [stop] closed the previous ones.
     if (_stateController.isClosed || _statusController.isClosed) {
       _stateController = StreamController<SyncEngineState>.broadcast();
@@ -151,10 +164,10 @@ class SyncEngine {
     // Adapter warm-up (batch probe etc.) before any push decision.
     try {
       await backend.prepare();
-      if (!_started) return;
+      if (!_isCurrent(generation)) return;
       pusher.batchEnabled = backend.capabilities.batchEnabled;
     } catch (_) {
-      if (!_started) return;
+      if (!_isCurrent(generation)) return;
     }
     try {
       _changesSub = pocket.changes.listen(handleLocalWrite);
@@ -167,7 +180,7 @@ class SyncEngine {
     }
     _syncTimer = Timer.periodic(config.syncInterval, (_) => handleTimer());
     _transition(_effectiveIdle());
-    if (_started) {
+    if (_isCurrent(generation)) {
       await syncNow();
     }
   }
@@ -176,8 +189,10 @@ class SyncEngine {
   Future<void> stop() async {
     if (!_started) return;
     _started = false;
+    _generation++;
     _syncTimer?.cancel();
     _pushTimer?.cancel();
+    _catchupTimer?.cancel();
     _settleTimer?.cancel();
     // Drain any cycle already chained by a trigger that fired mid-shutdown so
     // no DB work outlives the pocket (teardown race).
@@ -226,15 +241,18 @@ class SyncEngine {
   }
 
   Future<void> _doEmitStatus() async {
-    if (!_started) return;
+    final generation = _generation;
+    if (!_isCurrent(generation)) return;
     int pending = 0;
     int conflicts = 0;
     int hidden = 0;
+    int blocked = 0;
     try {
       final counts = await syncStore.countAllStatus();
       pending = counts.pending;
       conflicts = counts.conflicts;
       hidden = counts.hidden;
+      blocked = counts.blocked;
     } catch (_) {
       // The status snapshot is best-effort: a failed count query must never
       // poison the status chain or crash the engine.
@@ -245,6 +263,7 @@ class SyncEngine {
         pending: pending,
         conflicts: conflicts,
         hidden: hidden,
+        blocked: blocked,
         lastError: _lastError,
         lastSyncAt: _lastSyncAt,
         lastSuccessfulSyncAt: _lastSuccessfulSyncAt,
@@ -280,6 +299,7 @@ class SyncEngine {
   }
 
   Future<void> _fastPath(RemoteRecord rec) async {
+    final generation = _generation;
     if (!_started || _paused || _authInvalid || _offline) {
       _scheduleCycle(config.pushDebounce, stores: [rec.store]);
       return;
@@ -290,6 +310,7 @@ class SyncEngine {
     } catch (_) {
       applied = false;
     }
+    if (!_isCurrent(generation)) return; // stale lifecycle
     if (!applied) {
       _scheduleCycle(config.pushDebounce, stores: [rec.store]);
     }
@@ -332,6 +353,19 @@ class SyncEngine {
     });
   }
 
+  /// Immediately continues a store whose pull stopped at the per-pass page
+  /// cap, so a large store drains without waiting for the next sync interval.
+  /// Uses its own timer (not [_pushTimer]) so the debounce re-armed by the
+  /// pull's own applied writes cannot cancel it.
+  void _scheduleCatchup(List<String> stores) {
+    _catchupTimer?.cancel();
+    _catchupTimer = Timer(Duration.zero, () {
+      _catchupTimer = null;
+      if (!_started) return;
+      _runExclusiveCycle(pullOnly: stores);
+    });
+  }
+
   // ------------------------------------------------------------------- state
 
   void _onAuthError() {
@@ -344,11 +378,13 @@ class SyncEngine {
   }
 
   /// The token became valid again: resume with a forced full
-  /// sweep — visibility may have changed while unauthorized.
+  /// sweep — visibility may have changed while unauthorized — and requeue any
+  /// blocked pushes so the next cycle retries them.
   Future<void> markAuthValid() async {
     if (!_authInvalid) return;
     _authInvalid = false;
     _forceSweepPending = true;
+    await pocket.outbox.requeueBlocked();
     _transition(_effectiveIdle());
     await syncNow();
   }
@@ -392,8 +428,10 @@ class SyncEngine {
     await syncNow();
   }
 
-  /// The app knows permissions changed (e.g. user joined a clinic).
+  /// The app knows permissions changed (e.g. user joined a clinic): requeue
+  /// any blocked pushes (they may now be permitted) and force a full sweep.
   Future<void> invalidateVisibility() async {
+    await pocket.outbox.requeueBlocked();
     _forceSweepPending = true;
     await syncNow();
   }
@@ -401,6 +439,9 @@ class SyncEngine {
   // ------------------------------------------------------------------- cycle
 
   Future<SyncReport> _runExclusiveCycle({List<String>? pullOnly}) {
+    // A full cycle pulls every store anyway, so a pending page-limit catchup
+    // would only re-pull the same store redundantly.
+    if (pullOnly == null) _catchupTimer?.cancel();
     final result = _cycleTail.then((_) => _doCycle(pullOnly: pullOnly));
     _cycleTail = result.then<SyncReport>((_) => const SyncReport(),
         onError: (Object _) => const SyncReport());
@@ -408,7 +449,8 @@ class SyncEngine {
   }
 
   Future<SyncReport> _doCycle({List<String>? pullOnly}) async {
-    if (!_started) return const SyncReport();
+    final generation = _generation;
+    if (!_isCurrent(generation)) return const SyncReport();
     if (_paused || _authInvalid || _offline) {
       _transition(_effectiveIdle());
       return const SyncReport();
@@ -421,6 +463,9 @@ class SyncEngine {
     // required pull fails, the push is deferred to the next fully-pulled
     // cycle (local edits stay dirty in the outbox).
     var pullFailed = false;
+    // Stores whose pull stopped at the per-pass page cap with a full page:
+    // they are continued immediately (page-limit auto-continuation).
+    final hitLimitStores = <String>[];
 
     _transition(SyncEngineState.pulling);
     final stores = pullOnly ?? pocket.storeNames.toList();
@@ -428,6 +473,7 @@ class SyncEngine {
       try {
         final pr = await puller.pullStore(store);
         pulled[store] = pr.applied;
+        if (pr.hitPageLimit && pr.applied > 0) hitLimitStores.add(store);
       } on AuthError {
         _onAuthError();
         break;
@@ -497,6 +543,15 @@ class SyncEngine {
       hadError = true;
       _lastError = '$e';
     }
+    // A stale cycle (from a previous lifecycle) must not mutate the new
+    // lifecycle's status or schedule work.
+    if (!_isCurrent(generation)) return const SyncReport();
+    // Page-limit exhaustion: keep catching up immediately instead of waiting
+    // for the next sync interval (only when the pull made progress, so a
+    // stuck store cannot busy-loop the engine).
+    if (hitLimitStores.isNotEmpty) {
+      _scheduleCatchup(hitLimitStores);
+    }
     // A completed cycle is a sync heartbeat; a transient failure parks the
     // engine in `backoff` until the next error-free cycle.
     final cycleHadError = hadError || pushReport.hadError;
@@ -515,6 +570,7 @@ class SyncEngine {
       swept: swept,
       pushed: pushReport.pushed,
       deadLettered: pushReport.deadLettered,
+      blocked: pushReport.blocked,
       hadError: cycleHadError,
     );
     return lastReport!;

@@ -74,7 +74,8 @@ void main() {
       expect(await h.pocket.collection('widgets').query().count(), 7);
     });
 
-    test('pass cap 100 pages resumes next pass', () async {
+    test('page-limit exhaustion auto-continues until the store drains',
+        () async {
       final h = await EngineHarness.create(
           config: testConfig(maxPage: 10, maxPagesPerPass: 3));
       addTearDown(h.close);
@@ -83,20 +84,23 @@ void main() {
       }
 
       final first = await h.engine.syncNow();
-      expect(first.pulled['widgets'], 30, reason: '3 pages of 10 per pass');
-      expect(await h.pocket.collection('widgets').query().count(), 30);
+      expect(first.pulled['widgets'], 30,
+          reason: 'a single pass stays bounded to 3 pages of 10');
 
-      // Resumes from the cursor across further passes (rewind re-deliveries
-      // are skipped but the cursor never regresses).
-      var count = 30;
-      var passes = 1;
-      while (count < 100 && passes < 20) {
-        await h.engine.syncNow();
+      // Auto-continuation drains the rest without further manual cycles.
+      var count = await h.pocket.collection('widgets').query().count();
+      var waits = 0;
+      while (count < 100 && waits < 50) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
         count = await h.pocket.collection('widgets').query().count();
-        passes++;
+        waits++;
       }
-      expect(count, 100, reason: 'resumed passes drain the store');
-      expect(passes, greaterThan(1), reason: 'it actually resumed');
+      expect(count, 100,
+          reason: 'the chained continuation cycles drain the store');
+
+      // Once drained, no further pages are pulled.
+      final settled = await h.engine.syncNow();
+      expect(settled.pulled['widgets'], 0, reason: 'nothing left to pull');
     });
 
     test('cursor advances only with page commit', () async {

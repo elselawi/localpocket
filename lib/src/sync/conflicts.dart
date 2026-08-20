@@ -213,15 +213,20 @@ class Conflicts {
         return;
       }
 
-      // Read remote_updated from sync row
+      // The resolution base is the conflicted remote version, recorded in the
+      // sync row's base_updated at conflict time (seen-vs-applied separation:
+      // remote_updated stays the last APPLIED version). Fall back to
+      // remote_updated for rows created by older code.
       final srRow = await exec.query(
         'lp_sync_row',
         where: 'store = ? AND record_id = ?',
         whereArgs: [store, id],
         limit: 1,
       );
-      final remoteUpdated =
-          srRow.isNotEmpty ? (srRow.first['remote_updated'] as String?) : null;
+      final remoteUpdated = srRow.isNotEmpty
+          ? ((srRow.first['base_updated'] as String?) ??
+              (srRow.first['remote_updated'] as String?))
+          : null;
 
       // 1. Delete conflict row
       await exec.delete(
