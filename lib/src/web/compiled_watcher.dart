@@ -1,7 +1,9 @@
 import 'dart:async';
 
-import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/src/core/codec.dart';
+import 'package:localpocket/src/core/change_bus.dart';
+import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/core/watch.dart';
 
 /// Compiled query plan watcher for web worker engine.
 /// Watches a compiled SQL query by subscribing to [ChangeBus] and re-running

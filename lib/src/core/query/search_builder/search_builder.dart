@@ -1,7 +1,13 @@
 import 'dart:convert';
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/canonical_json.dart';
+import 'package:localpocket/src/core/ddl_compiler.dart';
+import 'package:localpocket/src/core/errors.dart';
+import 'package:localpocket/src/core/hashing.dart';
+import 'package:localpocket/src/core/local_pocket.dart';
 import 'package:localpocket/src/core/query_plan.dart';
+import 'package:localpocket/src/core/query/search_builder/search_dsl.dart';
+import 'package:localpocket/src/core/schema.dart';
 import 'package:sqlite3/common.dart';
 
 /// A ranked search result from an FTS5 full-text search.
