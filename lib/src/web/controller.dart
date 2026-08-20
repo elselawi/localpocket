@@ -1137,6 +1137,8 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
         if (status.lastError != null) 'lastError': status.lastError,
         if (status.lastSyncAt != null)
           'lastSyncAt': encodeWireValue(status.lastSyncAt),
+        if (status.lastSuccessfulSyncAt != null)
+          'lastSuccessfulSyncAt': encodeWireValue(status.lastSuccessfulSyncAt),
       };
 
   static Map<String, Object?> _encodeSyncReport(SyncReport report) => {

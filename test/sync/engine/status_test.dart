@@ -80,6 +80,77 @@ void main() {
       expect((await sr(h.pocket, a))!.syncState, SyncState.clean);
     });
 
+    test('lastSuccessfulSyncAt only advances on error-free cycles', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id, name: 'x'));
+
+      final statuses = <SyncStatus>[];
+      final sub = h.engine.status.listen(statuses.add);
+
+      // Error cycle: lastSyncAt advances; lastSuccessfulSyncAt does not (it
+      // either stays null or keeps the previous success time).
+      h.mock.script('createRecord', [MockThrow(TransientNetworkError('boom'))]);
+      await h.engine.syncNow();
+      await Future<void>.delayed(Duration.zero);
+      final afterError = statuses.last;
+      expect(afterError.lastSyncAt, isNotNull);
+      expect(afterError.lastError, isNotNull,
+          reason: 'the cycle had an error');
+      expect(
+        afterError.lastSuccessfulSyncAt,
+        anyOf(isNull, isNot(equals(afterError.lastSyncAt))),
+        reason: 'an error cycle never advances lastSuccessfulSyncAt to the '
+            'attempt time',
+      );
+
+      // Healthy cycle: both timestamps are stamped at the same completion
+      // instant.
+      h.mock.script('createRecord', const []);
+      await h.engine.syncNow();
+      await Future<void>.delayed(Duration.zero);
+      final afterHealthy = statuses.last;
+      expect(afterHealthy.lastSuccessfulSyncAt, isNotNull,
+          reason: 'an error-free cycle stamps lastSuccessfulSyncAt');
+      expect(afterHealthy.lastSuccessfulSyncAt, afterHealthy.lastSyncAt,
+          reason: 'success and attempt share the same completion instant');
+      await sub.cancel();
+    });
+
+    test('lastSuccessfulSyncAt holds the last success across error cycles',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id, name: 'x'));
+
+      final statuses = <SyncStatus>[];
+      final sub = h.engine.status.listen(statuses.add);
+
+      // Healthy cycle -> a success timestamp is stamped.
+      await h.engine.syncNow();
+      await Future<void>.delayed(Duration.zero);
+      final success = statuses.last.lastSuccessfulSyncAt;
+      expect(success, isNotNull);
+
+      // Add fresh pending work, then make the next cycle fail on push.
+      final id2 = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id2, name: 'y'));
+      h.mock.script('createRecord', [MockThrow(TransientNetworkError('boom'))]);
+      await h.engine.syncNow();
+      await Future<void>.delayed(Duration.zero);
+
+      final afterError = statuses.last;
+      expect(afterError.lastError, isNotNull,
+          reason: 'the error cycle surfaced an error');
+      expect(afterError.lastSyncAt!.isAfter(success!), isTrue,
+          reason: 'the attempt advances past the last success');
+      expect(afterError.lastSuccessfulSyncAt, success,
+          reason: 'the success timestamp does not move on an error cycle');
+      await sub.cancel();
+    });
+
     test('stop emits a final closed state on the stream', () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);

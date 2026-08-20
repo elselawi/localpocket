@@ -64,6 +64,9 @@ class SyncEngine {
   /// When the most recent cycle completed (success or error).
   DateTime? _lastSyncAt;
 
+  /// Time of the most recent ERROR-FREE cycle, when available.
+  DateTime? _lastSuccessfulSyncAt;
+
   /// Set when the next full cycle must run a forced (full-scan) visibility
   /// sweep — consumed by exactly one cycle so concurrent
   /// [markAuthValid]/[invalidateVisibility] calls never double-sweep.
@@ -240,6 +243,7 @@ class SyncEngine {
         hidden: hidden,
         lastError: _lastError,
         lastSyncAt: _lastSyncAt,
+        lastSuccessfulSyncAt: _lastSuccessfulSyncAt,
       ));
     }
   }
@@ -409,6 +413,10 @@ class SyncEngine {
     final pulled = <String, int>{};
     final swept = <String, int>{};
     var hadError = false;
+    // A push is only safe against a freshly-pulled remote state. If any
+    // required pull fails, the push is deferred to the next fully-pulled
+    // cycle (local edits stay dirty in the outbox).
+    var pullFailed = false;
 
     _transition(SyncEngineState.pulling);
     final stores = pullOnly ?? pocket.storeNames.toList();
@@ -421,6 +429,7 @@ class SyncEngine {
         break;
       } on SyncError catch (e) {
         hadError = true;
+        pullFailed = true;
         _lastError = e.message;
       }
     }
@@ -446,26 +455,32 @@ class SyncEngine {
 
     _transition(SyncEngineState.pushing);
     var pushReport = const PushReport();
-    try {
-      pushReport = await pusher.pushPending();
-      if (pushReport.hadError && _lastError == null) {
-        // The pusher records the failure on the sync row; surface it so
-        // SyncStatus.lastError carries the real message.
-        final errRows =
-            await pocket.db.rawQuery('SELECT last_error FROM lp_sync_row '
-                'WHERE last_error IS NOT NULL '
-                'ORDER BY local_rev DESC, rowid DESC LIMIT 1');
-        if (errRows.isNotEmpty && errRows.first['last_error'] is String) {
-          _lastError = errRows.first['last_error'] as String;
-        } else {
-          _lastError = 'push failed';
+    if (pullFailed) {
+      // Do not push against stale remote state (see `pullFailed` above): the
+      // local outbox stays dirty and is pushed on the next fully-pulled cycle.
+      _lastError ??= 'pull failed; push deferred';
+    } else {
+      try {
+        pushReport = await pusher.pushPending();
+        if (pushReport.hadError && _lastError == null) {
+          // The pusher records the failure on the sync row; surface it so
+          // SyncStatus.lastError carries the real message.
+          final errRows =
+              await pocket.db.rawQuery('SELECT last_error FROM lp_sync_row '
+                  'WHERE last_error IS NOT NULL '
+                  'ORDER BY local_rev DESC, rowid DESC LIMIT 1');
+          if (errRows.isNotEmpty && errRows.first['last_error'] is String) {
+            _lastError = errRows.first['last_error'] as String;
+          } else {
+            _lastError = 'push failed';
+          }
         }
+      } on AuthError {
+        _onAuthError();
+      } on SyncError catch (e) {
+        hadError = true;
+        _lastError = e.message;
       }
-    } on AuthError {
-      _onAuthError();
-    } on SyncError catch (e) {
-      hadError = true;
-      _lastError = e.message;
     }
 
     try {
@@ -481,8 +496,12 @@ class SyncEngine {
     // A completed cycle is a sync heartbeat; a transient failure parks the
     // engine in `backoff` until the next error-free cycle.
     final cycleHadError = hadError || pushReport.hadError;
-    _lastSyncAt = DateTime.now();
-    if (!cycleHadError) _lastError = null;
+    final now = DateTime.now();
+    _lastSyncAt = now;
+    if (!cycleHadError) {
+      _lastSuccessfulSyncAt = now;
+      _lastError = null;
+    }
     final idle = _effectiveIdle();
     _transition(cycleHadError && idle == SyncEngineState.idle
         ? SyncEngineState.backoff

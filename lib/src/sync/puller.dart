@@ -17,11 +17,29 @@ import 'sync_config.dart';
 import 'sync_store.dart';
 import 'sync_tables.dart';
 
+/// Result of applying one normalized remote record during a pull.
+enum ApplyResult {
+  /// The remote state was written to the domain (insert/update/merge/converge).
+  applied,
+
+  /// The record was quarantined (malformed/foreign) and never reached the domain.
+  quarantined,
+
+  /// A real-time/pull conflict was escalated to `lp_conflicts`.
+  conflict,
+
+  /// The record was already observed (no-op); nothing changed.
+  skipped,
+}
+
 class PullReport {
   final String store;
   final int applied;
+  final int quarantined;
+  final int conflicts;
   final int pages;
-  const PullReport(this.store, this.applied, this.pages);
+  const PullReport(this.store, this.applied, this.pages,
+      {this.quarantined = 0, this.conflicts = 0});
 }
 
 /// Incremental pull + the conflict-aware applier.
@@ -52,6 +70,8 @@ class Puller {
     String? fromId;
     var pages = 0;
     var applied = 0;
+    var quarantined = 0;
+    var conflicts = 0;
 
     while (true) {
       final page = await backend.listChanges(
@@ -84,21 +104,37 @@ class Puller {
           final r = item.remote;
           // Idempotent re-delivery from the rewind window.
           if (c != null && _tupleLte(r, c)) continue;
+          final ApplyResult result;
           if (written.contains(r.id)) {
             // Duplicate id within this page: the first pass already wrote the
             // row in this transaction, so re-read (not prefetched) so the
             // second delivery sees it and takes the update path.
-            await applyNormalizedRemote(tx, store, item);
+            result = await applyNormalizedRemote(tx, store, item);
           } else {
-            await applyNormalizedRemote(tx, store, item,
+            result = await applyNormalizedRemote(tx, store, item,
                 prefetchedSyncRow: srById[r.id],
                 prefetchedLocalRow: localById[r.id],
                 prefetchedRowChecked: true,
                 prefetchedSyncRowChecked: true);
             written.add(r.id);
           }
-          applied++;
-          pocket.perf.pullAppliedRows++;
+          // Accounting: only records actually written to the domain count as
+          // `applied`; quarantined, conflict-escalated, and no-op deliveries
+          // are reported separately and never inflate the applied count.
+          switch (result) {
+            case ApplyResult.applied:
+              applied++;
+              pocket.perf.pullAppliedRows++;
+              break;
+            case ApplyResult.quarantined:
+              quarantined++;
+              break;
+            case ApplyResult.conflict:
+              conflicts++;
+              break;
+            case ApplyResult.skipped:
+              break;
+          }
         }
         // The cursor only advances forward: a page that is entirely within the
         // rewind window must never regress it.
@@ -116,7 +152,8 @@ class Puller {
       if (page.length < config.maxPage) break;
       if (pages >= config.maxPagesPerPass) break;
     }
-    return PullReport(store, applied, pages);
+    return PullReport(store, applied, pages,
+        quarantined: quarantined, conflicts: conflicts);
   }
 
   bool _tupleLte(RemoteRecord r, PullCursor c) {
@@ -273,7 +310,7 @@ class Puller {
 
   // --------------------------------------------------------------- applier --
 
-  Future<void> applyRemote(
+  Future<ApplyResult> applyRemote(
     Tx tx,
     String store,
     RemoteRecord remote, {
@@ -295,7 +332,7 @@ class Puller {
     );
   }
 
-  Future<void> applyNormalizedRemote(
+  Future<ApplyResult> applyNormalizedRemote(
       Tx tx, String store, NormalizedRemoteRecord item,
       {SyncRowState? prefetchedSyncRow,
       Map<String, Object?>? prefetchedLocalRow,
@@ -310,7 +347,7 @@ class Puller {
 
     if (item.error != null) {
       await _quarantineMapFailure(exec, schema, store, remote, item.error!);
-      return;
+      return ApplyResult.quarantined;
     }
 
     final logical = item.logical!;
@@ -325,12 +362,12 @@ class Puller {
     if (remote.store != store) {
       await _quarantineMapFailure(exec, schema, store, remote,
           'Remote store "${remote.store}" does not match requested store "$store".');
-      return;
+      return ApplyResult.quarantined;
     }
     if (!isValidRecordId(remote.id)) {
       await _quarantineMapFailure(exec, schema, store, remote,
           'Invalid remote record id "${remote.id}".');
-      return;
+      return ApplyResult.quarantined;
     }
 
     // `prefetchedSyncRowChecked` makes the probe authoritative even when the
@@ -391,7 +428,7 @@ class Puller {
         newRecord: logical,
         changedFields: changedFields,
       ));
-      return;
+      return ApplyResult.applied;
     }
 
     final state = sr?.syncState ?? SyncState.clean;
@@ -400,7 +437,7 @@ class Puller {
     if (state == SyncState.clean) {
       if (sr?.remoteUpdated == remote.updated) {
         await _touchSeen(tx, store, remote.id, remote.updated);
-        return;
+        return ApplyResult.skipped;
       }
       final dbRow = encodeDbRow(
         schema,
@@ -429,7 +466,7 @@ class Puller {
         newRecord: logical,
         changedFields: changedFields,
       ));
-      return;
+      return ApplyResult.applied;
     }
 
     // 3. Dirty locally: did the remote move since our base?
@@ -439,14 +476,14 @@ class Puller {
       if (sr?.baseUpdated == remote.updated) {
         // Server unchanged; local edit stands.
         await _touchSeen(tx, store, remote.id, remote.updated);
-        return;
+        return ApplyResult.skipped;
       }
       if (state == SyncState.conflict) {
         // A conflict is resolved only by explicit user action. Neither a
         // converged nor a newly-changed remote payload may silently clear it:
         // keep the row open and only refresh visibility.
         await _touchSeen(tx, store, remote.id, remote.updated);
-        return;
+        return ApplyResult.skipped;
       }
       final localPayload = buildPayload(schema, localRow);
       if (canonicalize(localPayload) == remotePayloadJson) {
@@ -461,7 +498,7 @@ class Puller {
             prefetchedSyncRow: sr,
             syncRowChecked: true);
         tx.addChange(ChangeSet(store, {remote.id}));
-        return;
+        return ApplyResult.applied;
       }
       // 3-way merge: remote is the trunk; local changes apply on top.
       final basePayload = parsePayloadJson(sr?.baseJson);
@@ -488,7 +525,7 @@ class Puller {
         await _touchSeen(tx, store, remote.id, remote.updated);
         tx.addChange(ChangeSet(store, {remote.id}));
         tx.addChange(ChangeSet('lp_conflicts', {remote.id}));
-        return;
+        return ApplyResult.conflict;
       }
       final merged = outcome.merged;
       final dbRow = encodeDbRow(
@@ -520,10 +557,11 @@ class Puller {
         newRecord: merged,
         changedFields: changedFields,
       ));
-      return;
+      return ApplyResult.applied;
     }
 
     // 4. error / quarantine: leave; human/ops action required.
+    return ApplyResult.skipped;
   }
 
   Future<void> _recordPullConflict(

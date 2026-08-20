@@ -64,8 +64,13 @@ class SyncStatus {
   /// Most recent error, when available.
   final String? lastError;
 
-  /// Time of the most recent completed sync, when available.
+  /// Time of the most recent completed sync cycle, whether or not it had
+  /// errors (i.e. an "attempt").
   final DateTime? lastSyncAt;
+
+  /// Time of the most recent ERROR-FREE completed sync cycle, when available.
+  /// Prefer this over [lastSyncAt] for "last successfully synced" indicators.
+  final DateTime? lastSuccessfulSyncAt;
 
   /// Creates a sync-status snapshot.
   const SyncStatus({
@@ -75,5 +80,6 @@ class SyncStatus {
     required this.hidden,
     this.lastError,
     this.lastSyncAt,
+    this.lastSuccessfulSyncAt,
   });
 }

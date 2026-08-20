@@ -13,6 +13,9 @@ void main() {
         'qty': qty,
       };
 
+  Future<SyncRowState?> sr(LocalPocket pocket, String id) =>
+      pocket.outbox.readSyncRow(pocket.db, 'widgets', id);
+
   group('pull & applyRemote', () {
     test('first pull bootstraps in pages', () async {
       final h = await EngineHarness.create(config: testConfig(maxPage: 200));
@@ -624,6 +627,34 @@ void main() {
   });
 
   group('pull failure transaction boundaries', () {
+    test('failed pull defers the push until the next clean pull', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      // A local edit awaiting push.
+      final id = generateRecordId();
+      await h.pocket.collection('widgets').put(doc(id, 'mine'));
+      // Remote data that will only be visible after the failed pull clears.
+      h.mock.seed(store: 'widgets', data: doc('', 'remote'));
+
+      // First cycle: the pull fails transiently -> the push must be deferred
+      // (the local edit is NOT pushed against stale remote state).
+      h.mock.script('listChanges', [MockThrow(TransientNetworkError())]);
+      final report = await h.engine.syncNow();
+      expect(report.hadError, isTrue);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.dirty,
+          reason: 'push deferred when the pull failed');
+      expect(h.mock.createCalls, 0,
+          reason: 'nothing pushed against stale remote state');
+
+      // Next cycle: pull succeeds; the local edit is pushed clean.
+      h.mock.script('listChanges', const []);
+      final report2 = await h.engine.syncNow();
+      expect(report2.hadError, isFalse);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.clean,
+          reason: 'the deferred push runs once the pull succeeds');
+      expect(h.mock.createCalls, 1);
+    });
+
     test('transient list failure applies nothing and retries cleanly',
         () async {
       final h = await EngineHarness.create();
@@ -683,12 +714,14 @@ void main() {
         ]),
       ]);
 
-      await h.engine.syncNow();
+      final report = await h.engine.syncNow();
 
       expect(await h.pocket.collection('widgets').get(ok), isNotNull,
           reason: 'valid sibling still applied');
       expect(await h.pocket.collection('widgets').get(poison), isNull,
           reason: 'poison record never reached the domain');
+      expect(report.pulled['widgets'], 1,
+          reason: 'the quarantined record is not counted as applied');
       final dl = await h.pocket.db.query('lp_dead_letter',
           where: 'kind = ?', whereArgs: ['map_failure']);
       expect(dl.any((r) => r['record_id'] == poison), isTrue,
@@ -726,6 +759,74 @@ void main() {
       // The remaining records are pulled on retry.
       await h.engine.syncNow();
       expect(await h.pocket.collection('widgets').query().count(), 6);
+    });
+  });
+
+  group('pull accounting', () {
+    test('PullReport counts quarantined records separately', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final ok = h.mock.seed(store: 'widgets', data: doc('', 'ok'));
+      // A record whose `store` does not match the requested store: quarantined.
+      final foreign = RemoteRecord(
+          id: generateRecordId(),
+          store: 'notes',
+          updated: '2026-01-01 00:00:00.001Z',
+          data: {'name': 'foreign'});
+      // A record with an invalid local id: quarantined.
+      final badId = RemoteRecord(
+          id: 'INVALID!!!',
+          store: 'widgets',
+          updated: '2026-01-01 00:00:00.002Z',
+          data: {'name': 'bad-id'});
+      h.mock.script('listChanges', [
+        MockReturn([
+          h.mock.records[ok]!.toRemote(),
+          foreign,
+          badId,
+        ]),
+      ]);
+
+      final report = await h.engine.puller.pullStore('widgets');
+      expect(report.applied, 1,
+          reason: 'only the valid record counts as applied');
+      expect(report.quarantined, 2,
+          reason: 'foreign-store and invalid-id records are quarantined');
+      expect(await h.pocket.collection('widgets').query().count(), 1);
+    });
+
+    test('conflict escalation is counted as conflicts, not applied',
+        () async {
+      final schema = CollectionSchema<Object?>(
+        name: 'widgets',
+        version: 1,
+        fields: [Field.text('name', required: true), Field.int('qty')],
+        conflictPolicy: ConflictPolicy(
+            collectionResolver: CustomResolver((ctx) => null)),
+      );
+      final h = await EngineHarness.create(stores: [schema]);
+      addTearDown(h.close);
+      final id = generateRecordId();
+      await h.pocket.collection('widgets').put(doc(id, 'local'));
+      // Remote delivers a changed payload for the same id -> merge escalates.
+      h.mock.script('listChanges', [
+        MockReturn([
+          RemoteRecord(
+              id: id,
+              store: 'widgets',
+              updated: h.mock.nextUpdated(),
+              data: {'name': 'remote'}),
+        ]),
+      ]);
+
+      final report = await h.engine.puller.pullStore('widgets');
+      expect(report.conflicts, 1,
+          reason: 'the escalated merge is counted as a conflict');
+      expect(report.applied, 0,
+          reason: 'a conflict is not an applied record');
+      final open = await h.pocket.conflicts.listOpen();
+      expect(open.map((c) => c.recordId), contains(id),
+          reason: 'the conflict row is open');
     });
   });
 }
