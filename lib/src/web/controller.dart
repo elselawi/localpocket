@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
+import 'package:localpocket/src/web/compiled_watcher.dart';
 import 'package:sqlite3/common.dart';
 // ignore: implementation_imports
 import 'package:sqlite3/src/wasm/sqlite3.dart';
@@ -9,7 +10,6 @@ import 'package:sqlite3_web/sqlite3_web.dart';
 
 import '../core/capabilities.dart';
 import '../core/change_bus.dart';
-import '../core/codec.dart';
 import '../core/compiled_query_runner.dart';
 import '../core/database_adapter.dart';
 import '../core/errors.dart';
@@ -691,7 +691,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
       ClientConnection connection, WebRequest req) async {
     final watchId = WireArgs(req.args).requireInt('watchId', op: 'watch_query');
     final plan = _parseCompiledPlan(req.args);
-    final watcher = _CompiledWatcher(
+    final watcher = CompiledWatcher(
       pocket,
       pocket.requireTable(plan.store).schema,
       plan.sql,
@@ -1242,117 +1242,5 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     final pageLimitRaw = args['pageLimit'];
     final pageLimit = pageLimitRaw is int ? pageLimitRaw : null;
     return executeCompiledQuery(pocket, run, plan, pageLimit: pageLimit);
-  }
-}
-
-/// Compiled-plan watch: re-executes a validated plan when the store's rows
-/// change, dedupes identical snapshots, and coalesces bursts on a 16 ms
-/// latest-wins window (mirrors [QueryWatcher] semantics).
-///
-/// Perf note: every refresh re-runs the plan and SHA-256 hashes ALL result
-/// rows — O(N) re-query + re-hash. This matches the native `QueryWatcher`,
-/// which also re-runs `fetch()` and hashes every row per refresh (it is not
-/// incremental either). `tool/watch_refresh_benchmark.dart` confirms both
-/// paths scale linearly with identical constants (compiled ≈ 0.44×–1.08× of
-/// native across 100–10k rows). If full-snapshot watches ever need to scale
-/// past that, the shared future work is incremental id-based invalidation,
-/// not a web-only change.
-class _CompiledWatcher {
-  final LocalPocket _pocket;
-  final CollectionSchema _schema;
-  final String _sql;
-  final List<Object?> _params;
-  final List<String>? _projection;
-  final List<String>? _decodeColumns;
-  final void Function(List<Map<String, Object?>> items) _emit;
-  final Duration coalesceWindow = const Duration(milliseconds: 16);
-
-  StreamSubscription<ChangeSet>? _sub;
-  Timer? _timer;
-  bool _running = false;
-  bool _dirty = false;
-  String? _digest;
-
-  _CompiledWatcher(this._pocket, this._schema, this._sql, this._params,
-      this._projection, this._decodeColumns, this._emit);
-
-  void start() {
-    _sub = _pocket.changes.listen(_onChange);
-  }
-
-  Future<List<Map<String, Object?>>> initial() async {
-    final items = await _run();
-    _digest = _digestOf(items);
-    return items;
-  }
-
-  void _onChange(ChangeSet cs) {
-    if (cs.store != _schema.name) return;
-    if (_running) {
-      _dirty = true;
-      return;
-    }
-    _timer?.cancel();
-    _timer = Timer(coalesceWindow, _refresh);
-  }
-
-  Future<void> _refresh() async {
-    _running = true;
-    _pocket.perf.watchRefreshes++;
-    try {
-      final items = await _run();
-      final digest = _digestOf(items);
-      if (digest != _digest) {
-        _digest = digest;
-        _pocket.perf.watchEmissions++;
-        _emit(items);
-      }
-    } catch (_) {
-      // A failed refresh must not kill the watcher; the next change retries.
-    } finally {
-      _running = false;
-      if (_dirty) {
-        _dirty = false;
-        _timer?.cancel();
-        _timer = Timer(coalesceWindow, _refresh);
-      }
-    }
-  }
-
-  Future<List<Map<String, Object?>>> _run() async {
-    final rows = await _pocket.traceQuery(_sql, _params);
-    final columns = _decodeColumns;
-    final decoded = columns != null
-        ? decodeDbRowsProjected(_schema, rows,
-            columns: columns,
-            cipher: _pocket.fieldCipher,
-            cryptoProvider: _pocket.cryptoProvider)
-        : decodeDbRows(_schema, rows,
-            cipher: _pocket.fieldCipher,
-            cryptoProvider: _pocket.cryptoProvider);
-    final projection = _projection;
-    if (projection == null) return decoded;
-    return [
-      for (final row in decoded)
-        {
-          for (final k in projection)
-            if (row.containsKey(k)) k: row[k]
-        }
-    ];
-  }
-
-  String _digestOf(List<Map<String, Object?>> items) {
-    final parts = <String>[];
-    for (final r in items) {
-      parts.add(canonicalize(r));
-    }
-    final joined = parts.join('|');
-    _pocket.perf.watchDigestBytes += joined.length;
-    return sha256Hex(joined);
-  }
-
-  void dispose() {
-    _timer?.cancel();
-    _sub?.cancel();
   }
 }
