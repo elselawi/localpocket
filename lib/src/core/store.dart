@@ -586,7 +586,7 @@ class Collection with ChangeBusAwareStore {
   Future<void> _putAllBatchCreate(DatabaseExecutor exec,
       List<(String, Map<String, Object?>)> records) async {
     final schema = _schema;
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = _pocket.now();
     final db = _pocket.db;
 
     // If using DirectSqliteDatabase, we can bind directly to prepared statements

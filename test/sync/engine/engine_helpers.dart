@@ -59,6 +59,7 @@ class EngineHarness {
     BlobStore? blobStore,
     FieldCipher? fieldCipher,
     CryptoProvider? cryptoProvider,
+    int Function()? now,
   }) async {
     final p = await openPocket(
       stores: stores ?? [widgetsSchema()],
@@ -67,12 +68,13 @@ class EngineHarness {
       blobStore: blobStore,
       fieldCipher: fieldCipher,
       cryptoProvider: cryptoProvider,
+      now: now,
     );
     final m = mock ?? MockSyncBackend();
     final e = SyncEngine(
       pocket: p,
       backend: m,
-      config: config ?? testConfig(),
+      config: config ?? testConfig(now: now),
     );
     if (start) await e.start();
     return EngineHarness(p, m, e);

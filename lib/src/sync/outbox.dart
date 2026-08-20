@@ -197,7 +197,7 @@ class Outbox {
       return const LocalWriteResult(vanished: true);
     }
 
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = pocket.now();
     final opId = outboxOp?.opId ?? generateOpId();
     // Earliest base wins across coalescing. The base JSON
     // snapshot lives on the sync row; base_updated/base_hash are mirrored on
@@ -273,7 +273,7 @@ class Outbox {
   /// whose `next_retry_at` is in the future are deferred (persisted backoff).
   Future<List<OutboxOp>> drain(
       {String? store, int limit = 25, int? now}) async {
-    final n = now ?? DateTime.now().millisecondsSinceEpoch;
+    final n = now ?? pocket.now();
     final where =
         StringBuffer("s.sync_state NOT IN ('error','quarantine','conflict') "
             'AND (s.next_retry_at IS NULL OR s.next_retry_at <= ?)');
@@ -334,7 +334,7 @@ class Outbox {
             'attempt_count': 0,
             'next_retry_at': 0,
             'last_error': null,
-            'last_seen_at': DateTime.now().millisecondsSinceEpoch,
+            'last_seen_at': pocket.now(),
           },
           where: 'store = ? AND record_id = ?',
           whereArgs: [store, id]);
@@ -402,7 +402,7 @@ class Outbox {
     final id = settlement.op.recordId;
     final table = pocket.requireTable(store);
     final schema = table.schema;
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final nowMs = pocket.now();
 
     if (settlement.mergedLogical != null) {
       // Guard: only write the stale merge result if the row was NOT edited
@@ -608,7 +608,7 @@ class Outbox {
     return pocket.transaction((tx) async {
       final exec = tx.executor;
       await exec.insert('lp_dead_letter', {
-        'at': DateTime.now().millisecondsSinceEpoch,
+        'at': pocket.now(),
         'kind': kind,
         'store': store,
         'record_id': id,
@@ -686,7 +686,7 @@ class Outbox {
   }) {
     return pocket.transaction((tx) async {
       final exec = tx.executor;
-      final now = DateTime.now().millisecondsSinceEpoch;
+      final now = pocket.now();
       await upsertBlobReference(exec, hash: hash, size: size, now: now);
       await exec.insert('lp_file_refs', {
         'ref_id': generateOpId(),

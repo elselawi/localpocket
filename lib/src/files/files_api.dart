@@ -139,7 +139,7 @@ class LocalPocketFiles {
 
     final ref = await _pocket.transaction<FileRef>((tx) async {
       final exec = tx.executor;
-      final now = DateTime.now().millisecondsSinceEpoch;
+      final now = _pocket.now();
 
       // Dedup: an identical (store, record_id, field, hash) attachment is the
       // SAME logical file — return the existing live ref without creating a
@@ -270,7 +270,7 @@ class LocalPocketFiles {
     // Update last_access
     await _pocket.db.execute(
       'UPDATE lp_blobs SET last_access = ? WHERE hash = ?',
-      [DateTime.now().millisecondsSinceEpoch, ref.hash],
+      [_pocket.now(), ref.hash],
     );
 
     return bs.open(ref.hash);
@@ -296,7 +296,7 @@ class LocalPocketFiles {
 
     await _pocket.transaction((tx) async {
       final exec = tx.executor;
-      final now = DateTime.now().millisecondsSinceEpoch;
+      final now = _pocket.now();
 
       if (ref.state == 'pending_upload' && ref.remoteName == null) {
         // Was never uploaded remotely -> vanish immediately: drop the ref,
@@ -360,8 +360,7 @@ class LocalPocketFiles {
     }
 
     // 2. Clean blobs with refcount = 0 and last_access older than grace
-    final cutoff =
-        DateTime.now().millisecondsSinceEpoch - blobGrace.inMilliseconds;
+    final cutoff = _pocket.now() - blobGrace.inMilliseconds;
     const pageSize = 250;
     while (true) {
       final deadBlobs = await _pocket.db.query(

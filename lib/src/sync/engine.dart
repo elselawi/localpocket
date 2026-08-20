@@ -98,12 +98,16 @@ class SyncEngine {
   final List<String> debugActions = [];
 
   /// Creates a synchronization engine for [pocket] and [backend].
+  ///
+  /// When [config] is omitted the engine inherits the pocket's injected clock
+  /// ([LocalPocket.now]) so persistence bookkeeping and engine scheduling stay
+  /// on one clock.
   SyncEngine({
     required this.pocket,
     required this.backend,
     SyncConfig? config,
     this.onAuthRequired,
-  }) : config = config ?? const SyncConfig() {
+  }) : config = config ?? SyncConfig(now: pocket.now) {
     syncStore = SyncStore(pocket, backend.scopeId);
     fileLane = FileSyncLane(
       pocket: pocket,
@@ -496,7 +500,7 @@ class SyncEngine {
     // A completed cycle is a sync heartbeat; a transient failure parks the
     // engine in `backoff` until the next error-free cycle.
     final cycleHadError = hadError || pushReport.hadError;
-    final now = DateTime.now();
+    final now = DateTime.fromMillisecondsSinceEpoch(config.now());
     _lastSyncAt = now;
     if (!cycleHadError) {
       _lastSuccessfulSyncAt = now;

@@ -66,6 +66,7 @@ Future<LocalPocket> openPocket({
   TestHooks? testHooks,
   int maxDocBytes = 1900000,
   BlobStore? blobStore,
+  int Function()? now,
 }) async {
   return LocalPocket.open(
     path: path ?? ':memory:',
@@ -79,6 +80,7 @@ Future<LocalPocket> openPocket({
     testHooks: testHooks,
     maxDocBytes: maxDocBytes,
     blobStore: blobStore,
+    now: now,
   );
 }
 

@@ -31,7 +31,7 @@ class OpQueue {
         'payload_json': jsonEncode(payload),
         'state': 'pending',
         'depends_on_op': dependsOnOp,
-        'created_at': DateTime.now().millisecondsSinceEpoch,
+        'created_at': pocket.now(),
       });
     });
   }
@@ -43,7 +43,7 @@ class OpQueue {
   /// lost — it is retried with backoff until it succeeds or the record it
   /// belongs to is purged.
   Future<List<OpQueueRow>> drain({String? store, int limit = 25}) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = pocket.now();
     final rows = await pocket.db.query('lp_op_queue',
         where: "state IN ('pending','failed') AND next_retry_at <= ?"
             '${store == null ? '' : ' AND store = ?'}',

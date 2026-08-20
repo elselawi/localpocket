@@ -272,7 +272,7 @@ class Conflicts {
       );
 
       if (existingOp.isEmpty) {
-        final now = DateTime.now().millisecondsSinceEpoch;
+        final now = _pocket.now();
         await exec.insert('lp_outbox', {
           'op_id': _pocket.outbox.generateOpId(),
           'store': store,

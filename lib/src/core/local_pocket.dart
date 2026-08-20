@@ -25,6 +25,9 @@ import '../sync/sync_tables.dart';
 import '../files/blob_store.dart';
 import '../files/files_api.dart';
 
+/// Default clock: wall-clock epoch milliseconds.
+int _defaultNow() => DateTime.now().millisecondsSinceEpoch;
+
 /// Durability class for a transaction.
 ///
 /// - [normal]: `synchronous=NORMAL` (default, app-crash-safe under WAL).
@@ -163,6 +166,13 @@ class LocalPocket with ChangeBusAwareLP {
   /// Per-field cipher provider, when configured.
   final CryptoProvider? cryptoProvider;
 
+  /// Injectable clock (epoch ms) for persistence bookkeeping: outbox/op-queue
+  /// timestamps, conflict timestamps, last-seen/settlement, compaction cutoffs
+  /// and file bookkeeping. Defaults to the wall clock; inject for deterministic
+  /// tests. The sync engine's [SyncConfig] clock is expected to match (or be
+  /// derived from) this one.
+  final int Function() now;
+
   /// Durable record-state synchronization queue.
   late final Outbox outbox;
 
@@ -193,6 +203,7 @@ class LocalPocket with ChangeBusAwareLP {
     required this.capabilities,
     required this.maxDocBytes,
     required this.destructiveBackup,
+    required this.now,
     this.testHooks,
     this.blobStore,
     this.fieldCipher,
@@ -242,6 +253,7 @@ class LocalPocket with ChangeBusAwareLP {
     BlobStore? blobStore,
     String? wasmAssetPath,
     String? workerAssetPath,
+    int Function()? now,
   }) async {
     if (encrypted && platform == PlatformProfile.web) {
       throw UnsupportedError('SQLCipher is unsupported on web platform.');
@@ -268,12 +280,13 @@ class LocalPocket with ChangeBusAwareLP {
         capabilities: caps,
         maxDocBytes: maxDocBytes,
         destructiveBackup: destructiveBackup,
+        now: now ?? _defaultNow,
         testHooks: testHooks,
         blobStore: blobStore,
         fieldCipher: fieldCipher,
         cryptoProvider: cryptoProvider,
       );
-      await _recordCoreMigration(db);
+      await _recordCoreMigration(db, pocket.now);
       for (final schema in stores) {
         await pocket.registerStore(schema);
       }
@@ -303,14 +316,15 @@ class LocalPocket with ChangeBusAwareLP {
     await db.execute('PRAGMA temp_store=MEMORY');
   }
 
-  static Future<void> _recordCoreMigration(Database db) async {
+  static Future<void> _recordCoreMigration(
+      Database db, int Function() now) async {
     final rows =
         await db.query('lp_migrations', where: 'version = ?', whereArgs: [1]);
     if (rows.isNotEmpty) return;
     await db.insert('lp_migrations', {
       'version': 1,
       'name': 'core:v1',
-      'applied_at': DateTime.now().millisecondsSinceEpoch,
+      'applied_at': now(),
       'duration_ms': 0,
     });
   }
@@ -332,7 +346,7 @@ class LocalPocket with ChangeBusAwareLP {
         'table_name': schema.name,
         'schema_ver': schema.version,
         'definition_json': jsonEncode(schema.toJson()),
-        'created_at': DateTime.now().millisecondsSinceEpoch,
+        'created_at': now(),
       });
       await Migrator.recordMigration(db,
           name: 'create:${schema.name}', from: 0, to: schema.version);
@@ -575,8 +589,8 @@ class LocalPocket with ChangeBusAwareLP {
   /// and drops their file refs and blob refcounts.
   Future<int> compact(String store,
       {required Duration olderThan, int? nowMs}) async {
-    final now = nowMs ?? DateTime.now().millisecondsSinceEpoch;
-    final cutoff = now - olderThan.inMilliseconds;
+    final current = nowMs ?? now();
+    final cutoff = current - olderThan.inMilliseconds;
     var count = 0;
     const chunkSize = 250;
     final schema = requireTable(store).schema;
