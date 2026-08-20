@@ -37,25 +37,89 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   final LocalPocket? _pocket;
   final CollectionSchema _schema;
 
-  final List<WhereClause> _where = [];
-  final List<WhereClause> _orGroups = [];
-  final List<OrderClause> _order = [];
-  int? _limit;
-  bool _all = false;
-  List<String>? _select;
-  bool _includeArchived = false;
-  bool _includeHidden = false;
-  String? _cursor;
+  final List<WhereClause> _where;
+  final List<WhereClause> _orGroups;
+  final List<OrderClause> _order;
+  final int? _limit;
+  final bool _all;
+  final List<String>? _select;
+  final bool _includeArchived;
+  final bool _includeHidden;
+  final String? _cursor;
+  final bool _suppressIdTiebreak;
 
   /// Internal: constructed by [Collection].
   /// Internal constructor used by [Collection.query].
   QueryBuilder.internal(this._pocket, StoreTable table)
-      : _schema = table.schema;
+      : _schema = table.schema,
+        _where = [],
+        _orGroups = [],
+        _order = [],
+        _limit = null,
+        _all = false,
+        _select = null,
+        _includeArchived = false,
+        _includeHidden = false,
+        _cursor = null,
+        _suppressIdTiebreak = false;
 
   /// Compile-only constructor used by the web query-plan spike.
   QueryBuilder.compileOnly(CollectionSchema schema)
       : _pocket = null,
-        _schema = schema;
+        _schema = schema,
+        _where = [],
+        _orGroups = [],
+        _order = [],
+        _limit = null,
+        _all = false,
+        _select = null,
+        _includeArchived = false,
+        _includeHidden = false,
+        _cursor = null,
+        _suppressIdTiebreak = false;
+
+  QueryBuilder._(
+    this._pocket,
+    this._schema,
+    this._where,
+    this._orGroups,
+    this._order,
+    this._limit,
+    this._all,
+    this._select,
+    this._includeArchived,
+    this._includeHidden,
+    this._cursor,
+    this._suppressIdTiebreak,
+  );
+
+  QueryBuilder _copyWith({
+    List<WhereClause>? where,
+    List<WhereClause>? orGroups,
+    List<OrderClause>? order,
+    int? limit,
+    bool? all,
+    List<String>? select,
+    bool? includeArchived,
+    bool? includeHidden,
+    String? cursor,
+    bool? suppressIdTiebreak,
+  }) {
+    return QueryBuilder._(
+      _pocket,
+      _schema,
+      where ?? List<WhereClause>.from(_where),
+      orGroups ?? List<WhereClause>.from(_orGroups),
+      order ?? List<OrderClause>.from(_order),
+      limit ?? _limit,
+      all ?? _all,
+      select ?? (_select == null ? null : List<String>.from(_select!)),
+      includeArchived ?? _includeArchived,
+      includeHidden ?? _includeHidden,
+      cursor ?? _cursor,
+      suppressIdTiebreak ?? _suppressIdTiebreak,
+    );
+  }
 
   /// Name of the collection being queried.
   String get store => _schema.name;
@@ -137,8 +201,9 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     if (isNotNull == true) {
       clauses.add(WhereClause('$col IS NOT NULL', const []));
     }
-    _where.addAll(clauses);
-    return this;
+    final copy = _copyWith();
+    copy._where.addAll(clauses);
+    return copy;
   }
 
   /// OR-group of equality predicates, e.g.
@@ -161,8 +226,9 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
       groupSqls.add('(${parts.join(' AND ')})');
     }
     if (groupSqls.isEmpty) return this;
-    _orGroups.add(WhereClause('(${groupSqls.join(' OR ')})', args));
-    return this;
+    final copy = _copyWith();
+    copy._orGroups.add(WhereClause('(${groupSqls.join(' OR ')})', args));
+    return copy;
   }
 
   static String _escapeLike(String s) =>
@@ -172,8 +238,9 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   @override
   QueryBuilder orderBy(String field, {bool desc = false}) {
     _checkQueryable(field);
-    _order.add(OrderClause(field, desc: desc));
-    return this;
+    final copy = _copyWith();
+    copy._order.add(OrderClause(field, desc: desc));
+    return copy;
   }
 
   /// Restricts the maximum number of records returned by [fetch].
@@ -185,8 +252,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     if (n < 0) {
       throw ValidationException('Limit must be non-negative, got $n.');
     }
-    _limit = n;
-    return this;
+    return _copyWith(limit: n);
   }
 
   /// Explicitly opt out of a limit.
@@ -196,8 +262,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// materialized in memory.
   @override
   QueryBuilder all() {
-    _all = true;
-    return this;
+    return _copyWith(all: true);
   }
 
   /// Selects only [fields] from each record.
@@ -213,27 +278,20 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// Projection of undeclared overflow keys falls back to full decoding.
   @override
   QueryBuilder select(List<String> fields) {
-    _select = fields;
-    return this;
+    return _copyWith(select: List<String>.from(fields));
   }
 
   /// Includes records marked as archived.
   @override
   QueryBuilder includeArchived() {
-    _includeArchived = true;
-    return this;
+    return _copyWith(includeArchived: true);
   }
 
   /// Includes records hidden by synchronization visibility state.
   @override
   QueryBuilder includeHidden() {
-    _includeHidden = true;
-    return this;
+    return _copyWith(includeHidden: true);
   }
-
-  /// Internal flag toggled by [distinct]: distinct result sets cannot carry
-  /// the automatic `id` tiebreaker (it would break DISTINCT semantics).
-  bool _suppressIdTiebreak = false;
 
   List<OrderClause> get _effectiveOrder {
     final o = [..._order];
@@ -601,8 +659,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// projection, and ordering. A cursor from another query shape throws
   /// [StaleCursorError].
   Future<Page> keysetAfter(String cursor) {
-    _cursor = cursor;
-    return fetch();
+    return _copyWith(cursor: cursor).fetch();
   }
 
   /// Counts records matching the current filters.
@@ -629,30 +686,19 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// unordered, so callers should not rely on a stable order.
   Future<List<Object?>> distinct(String field) async {
     _checkQueryable(field);
-    final savedSelect = _select;
-    final savedOrder = [..._order];
-    final savedSuppress = _suppressIdTiebreak;
-    _select = [field];
-    _order
-      ..clear()
-      ..addAll([
-        for (final o in savedOrder)
+    final copy = _copyWith(
+      select: [field],
+      order: [
+        for (final o in _order)
           if (o.field == field) o
-      ]);
-    _suppressIdTiebreak = true;
-    final limit = _all ? null : (_limit ?? 1000);
-    try {
-      final (sql, args) = _compile(limitOverride: limit);
-      final distinctSql = sql.replaceFirst('SELECT ', 'SELECT DISTINCT ');
-      final rows = await _requirePocket.traceQuery(distinctSql, args);
-      return [for (final r in rows) r[field]];
-    } finally {
-      _select = savedSelect;
-      _order
-        ..clear()
-        ..addAll(savedOrder);
-      _suppressIdTiebreak = savedSuppress;
-    }
+      ],
+      suppressIdTiebreak: true,
+    );
+    final limit = copy._all ? null : (copy._limit ?? 1000);
+    final (sql, args) = copy._compile(limitOverride: limit);
+    final distinctSql = sql.replaceFirst('SELECT ', 'SELECT DISTINCT ');
+    final rows = await copy._requirePocket.traceQuery(distinctSql, args);
+    return [for (final r in rows) r[field]];
   }
 
   /// Whether [field] can be aggregated numerically. Only declared numeric
@@ -698,15 +744,10 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
 
   /// Returns IDs matching the current query.
   Future<List<String>> ids() async {
-    final saved = _select;
-    _select = ['id'];
-    try {
-      final (sql, args) = _compile();
-      final rows = await _requirePocket.traceQuery(sql, args);
-      return [for (final r in rows) r['id'] as String];
-    } finally {
-      _select = saved;
-    }
+    final copy = _copyWith(select: ['id']);
+    final (sql, args) = copy._compile();
+    final rows = await copy._requirePocket.traceQuery(sql, args);
+    return [for (final r in rows) r['id'] as String];
   }
 
   /// Returns SQLite's `EXPLAIN QUERY PLAN` output for this query.
@@ -729,16 +770,12 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// The plan contains only compiler-owned SQL and bound arguments. It is not
   /// an arbitrary raw-SQL escape hatch.
   QueryPlan compilePlan({int? limitOverride, String? cursor}) {
-    final previousCursor = _cursor;
-    if (cursor != null) _cursor = cursor;
-    try {
-      final (sql, args) = _compile(limitOverride: limitOverride);
-      return _plan('query', sql, args,
-          limit: limitOverride ?? _resolveLimit(),
-          projection: _select == null ? null : List.unmodifiable(_select!));
-    } finally {
-      _cursor = previousCursor;
-    }
+    final query = cursor == null ? this : _copyWith(cursor: cursor);
+    final (sql, args) = query._compile(limitOverride: limitOverride);
+    return query._plan('query', sql, args,
+        limit: limitOverride ?? query._resolveLimit(),
+        projection:
+            query._select == null ? null : List.unmodifiable(query._select!));
   }
 
   /// Compiles a COUNT plan for the web transport.
@@ -764,14 +801,9 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
 
   /// Compiles an ID-list plan for the web transport.
   QueryPlan compileIdsPlan() {
-    final saved = _select;
-    _select = ['id'];
-    try {
-      final (sql, args) = _compile();
-      return _plan('ids', sql, args, projection: const ['id']);
-    } finally {
-      _select = saved;
-    }
+    final query = _copyWith(select: ['id']);
+    final (sql, args) = query._compile();
+    return query._plan('ids', sql, args, projection: const ['id']);
   }
 
   /// Compiles an EXPLAIN QUERY PLAN plan for the web transport. The worker

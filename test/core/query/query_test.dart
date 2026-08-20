@@ -160,6 +160,47 @@ void main() {
           throwsA(isA<StaleCursorError>()));
     });
 
+    test('mutating a query builder leaves the original query intact', () async {
+      await col.put(record(id: generateRecordId(), name: 'apple', qty: 1));
+      await col.put(record(id: generateRecordId(), name: 'banana', qty: 2));
+
+      final base = col.query().where('name', eq: 'apple').limit(10);
+      final page = await base.fetch();
+
+      expect(page.items, hasLength(1));
+      expect(page.items.single['name'], 'apple');
+
+      final mutated = base.where('qty', gt: 0);
+
+      final originalPage = await base.fetch();
+      expect(originalPage.items, hasLength(1));
+      expect(originalPage.items.single['name'], 'apple');
+
+      final mutatedPage = await mutated.fetch();
+      expect(mutatedPage.items, hasLength(1));
+      expect(mutatedPage.items.single['name'], 'apple');
+    });
+
+    test('cursor pagination stays tied to the original query snapshot',
+        () async {
+      for (var i = 0; i < 6; i++) {
+        await col.put(record(id: generateRecordId(), name: 'n$i', qty: i));
+      }
+
+      final base = col.query().orderBy('qty').limit(2);
+      final page1 = await base.fetch();
+      expect(page1.items, hasLength(2));
+      expect(page1.nextCursor, isNotNull);
+
+      final mutated = base.where('qty', gt: 99);
+      final mutatedPage = await mutated.fetch();
+      expect(mutatedPage.items, isEmpty);
+
+      final page2 = await base.keysetAfter(page1.nextCursor!);
+      expect(page2.items, hasLength(2));
+      expect(page2.items.first['qty'], isNot(page1.items.first['qty']));
+    });
+
     test('limit mandatory except all', () async {
       for (var i = 0; i < 5; i++) {
         await col.put(record(id: generateRecordId(), name: 'n$i', qty: i));
