@@ -25,7 +25,12 @@ Set<String> computeDirtyFields(
     final cVal = current[k];
     if (!deepEquals(bVal, cVal)) {
       dirty.add(k);
-      if (bVal is Map && cVal is Map) {
+      if (bVal is Map &&
+          cVal is Map &&
+          bVal.keys.every((k) => k is String) &&
+          cVal.keys.every((k) => k is String)) {
+        // Only recurse into String-keyed maps; a non-JSON map (e.g. int keys)
+        // is treated atomically instead of crashing `Map<String, Object?>.from`.
         final bMap = Map<String, Object?>.from(bVal);
         final cMap = Map<String, Object?>.from(cVal);
         final subDirty = computeDirtyFields(bMap, cMap);
@@ -36,6 +41,41 @@ Set<String> computeDirtyFields(
     }
   }
   return dirty;
+}
+
+/// Three-way conservative field-by-field merge used when a collection resolver
+/// declines resolution.
+///
+/// Unlike a naive `{...base, ...remote, ...local}` spread (which overwrites
+/// remote-only edits with stale base values), each field is taken from:
+/// - [local] when both sides agree, or when only local changed it, or
+/// - [remote] when only remote changed it, and
+/// - [remote] when both sides changed it differently (the record still
+///   escalates to review).
+///
+/// This never loses a remote-only or local-only change.
+Map<String, Object?> conservativeReviewMerge({
+  required Map<String, Object?> base,
+  required Map<String, Object?> local,
+  required Map<String, Object?> remote,
+}) {
+  final keys = <String>{...base.keys, ...local.keys, ...remote.keys};
+  final result = <String, Object?>{};
+  for (final key in keys) {
+    final b = base[key];
+    final l = local[key];
+    final r = remote[key];
+    if (deepEquals(l, r)) {
+      result[key] = l;
+    } else if (deepEquals(l, b)) {
+      result[key] = r;
+    } else if (deepEquals(r, b)) {
+      result[key] = l;
+    } else {
+      result[key] = r;
+    }
+  }
+  return result;
 }
 
 /// Context passed to a [ConflictResolver].
@@ -183,9 +223,21 @@ class SetUnionResolver extends ConflictResolver {
 }
 
 /// Counter resolver:
-/// `base + (local − base) + (remote − base)`
+/// `base + (local − base) + (remote − base)`.
+///
+/// The unconstrained formula can produce domain-invalid values (e.g. negative
+/// inventory when both sides decrement, or a quantity above a cap). Optional
+/// [min]/[max] bounds clamp the result into a valid range; without them the
+/// result is unconstrained (default behavior).
 class CounterResolver extends ConflictResolver {
-  const CounterResolver();
+  /// Lower bound for the resolved value, when provided.
+  final num? min;
+
+  /// Upper bound for the resolved value, when provided.
+  final num? max;
+
+  /// Creates a counter resolver with optional [min]/[max] clamps.
+  const CounterResolver({this.min, this.max});
 
   @override
   MergeResult resolve(MergeContext ctx) {
@@ -198,13 +250,13 @@ class CounterResolver extends ConflictResolver {
     final l = (localVal is num) ? localVal : 0;
     final r = (remoteVal is num) ? remoteVal : 0;
 
+    final isInt = b is int && l is int && r is int;
     final deltaL = l - b;
     final deltaR = r - b;
-    final result = b + deltaL + deltaR;
-    if (b is int && l is int && r is int) {
-      return result.toInt();
-    }
-    return result.toDouble();
+    var result = b + deltaL + deltaR;
+    if (min != null && result < min!) result = min!;
+    if (max != null && result > max!) result = max!;
+    return isInt ? result.toInt() : result.toDouble();
   }
 }
 
@@ -424,8 +476,14 @@ class MergeEngine {
     if (policy?.collectionResolver != null) {
       MergeResult handleCustomResult(MergeResult? customRes) {
         if (customRes == null) {
+          // The resolver declined: fall back to a conservative field-by-field
+          // merge that never loses a remote-only or local-only change (a naive
+          // `{...base, ...remote, ...local}` spread would overwrite remote-only
+          // edits with stale base values). The record still escalates for
+          // review.
           return MergeResult(
-            merged: {...base, ...remote, ...local},
+            merged: conservativeReviewMerge(
+                base: base, local: local, remote: remote),
             needsReview: true,
             dirtyLocal: dirtyLocal,
             dirtyRemote: dirtyRemote,
