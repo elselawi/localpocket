@@ -31,6 +31,7 @@ class QueryWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
   @override
   String computeDigest(List<Map<String, Object?>> data) =>
       computeSnapshotDigest(data,
+          ordered: _query.hasExplicitOrder,
           onDigestBytes: (b) => pocket.perf.watchDigestBytes += b);
 
   @override

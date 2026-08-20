@@ -55,6 +55,7 @@ class CompiledWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
   @override
   String computeDigest(List<Map<String, Object?>> data) =>
       computeSnapshotDigest(data,
+          ordered: false,
           onDigestBytes: (b) => pocket.perf.watchDigestBytes += b);
 
   @override

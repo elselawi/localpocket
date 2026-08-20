@@ -53,6 +53,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// Name of the collection being queried.
   String get store => _schema.name;
 
+  bool get hasExplicitOrder => _order.isNotEmpty;
+
+  bool get hasLimit => _limit != null;
+
+  /// Internal: validates that a field is queryable.
   void _checkQueryable(String field) {
     for (final f in _schema.fields) {
       if (f.name == field) {
