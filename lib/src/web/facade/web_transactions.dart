@@ -3,10 +3,10 @@ import 'package:localpocket/src/core/query/query_builder/query_forwarder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_forwarder.dart';
 import 'package:localpocket/src/core/schema.dart';
-import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade.dart';
 import 'package:localpocket/src/web/facade/query/web_query_forwarder.dart';
 import 'package:localpocket/src/web/facade/search/web_search_forwarder.dart';
+import 'package:localpocket/src/web/facade/web_collection_mixin.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
 class WebTx {
@@ -91,83 +91,23 @@ class WebTxSearchQueryBuilder
 }
 
 /// Main-thread collection bound to a transaction session.
-class WebTxCollection {
+class WebTxCollection with WireCollectionMixin {
   final LocalPocket _pocket;
   final CollectionSchema schema;
+  @override
   final int sessionId;
 
   WebTxCollection._(this._pocket, this.schema, this.sessionId);
 
+  @override
+  LocalPocket get pocket => _pocket;
+
+  @override
   String get name => schema.name;
 
-  Future<Map<String, Object?>?> get(String id) async {
-    final res = await _pocket
-        .send(WireOp.txGet, {'sessionId': sessionId, 'store': name, 'id': id});
-    if (res == null) return null;
-    final decoded = decodeWireValue(res);
-    if (decoded is Map) {
-      return decoded.map((k, v) => MapEntry(k.toString(), v));
-    }
-    return null;
-  }
+  @override
+  String get getOp => WireOp.txGet;
 
-  Future<void> put(Map<String, Object?> record) async {
-    await _pocket.send(WireOp.txMutateBatch, {
-      'sessionId': sessionId,
-      'store': name,
-      'mutations': [
-        {'action': 'put', 'record': encodeWireValue(record)}
-      ],
-    });
-  }
-
-  Future<void> putAll(List<Map<String, Object?>> records) async {
-    await _pocket.send(WireOp.txMutateBatch, {
-      'sessionId': sessionId,
-      'store': name,
-      'mutations': records
-          .map((record) => {'action': 'put', 'record': encodeWireValue(record)})
-          .toList(),
-    });
-  }
-
-  Future<void> patch(String id, Map<String, Object?> changes) async {
-    await _pocket.send(WireOp.txMutateBatch, {
-      'sessionId': sessionId,
-      'store': name,
-      'mutations': [
-        {'action': 'patch', 'id': id, 'record': encodeWireValue(changes)}
-      ],
-    });
-  }
-
-  Future<void> archive(String id) async {
-    await _pocket.send(WireOp.txMutateBatch, {
-      'sessionId': sessionId,
-      'store': name,
-      'mutations': [
-        {'action': 'archive', 'id': id}
-      ],
-    });
-  }
-
-  Future<void> restore(String id) async {
-    await _pocket.send(WireOp.txMutateBatch, {
-      'sessionId': sessionId,
-      'store': name,
-      'mutations': [
-        {'action': 'restore', 'id': id}
-      ],
-    });
-  }
-
-  Future<void> purge(String id) async {
-    await _pocket.send(WireOp.txMutateBatch, {
-      'sessionId': sessionId,
-      'store': name,
-      'mutations': [
-        {'action': 'purge', 'id': id}
-      ],
-    });
-  }
+  @override
+  String get mutateOp => WireOp.txMutateBatch;
 }
