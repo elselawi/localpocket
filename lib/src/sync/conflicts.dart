@@ -4,8 +4,8 @@ import 'dart:convert';
 import '../core/canonical_json.dart';
 import '../core/change_bus.dart';
 import '../core/codec.dart';
-import '../core/errors.dart';
 import '../core/local_pocket.dart';
+import '../core/row_models.dart';
 import 'merge.dart';
 import 'sync_tables.dart';
 
@@ -50,54 +50,28 @@ class ConflictRecord {
     this.resolved,
   });
 
-  static ConflictRecord fromRow(Map<String, Object?> row) {
-    // Corrupt JSON (or a JSON value of the wrong shape) surfaces as a typed
-    // StorageError — never a raw FormatException/TypeError — mirroring the
-    // other sync row-model factories.
-    Map<String, Object?> parseMap(Object? val, String column) {
-      if (val is String && val.isNotEmpty) {
-        try {
-          final d = jsonDecode(val);
-          if (d is Map) return Map<String, Object?>.from(d);
-        } catch (e) {
-          throw StorageError('Corrupt lp_conflicts row: $column: $e');
-        }
-      }
-      return const {};
-    }
-
-    Set<String> parseSet(Object? val, String column) {
-      if (val is String && val.isNotEmpty) {
-        try {
-          final d = jsonDecode(val);
-          if (d is List) {
-            try {
-              return d.cast<String>().toSet();
-            } catch (e) {
-              throw StorageError('Corrupt lp_conflicts row: $column: $e');
-            }
-          }
-        } catch (e) {
-          throw StorageError('Corrupt lp_conflicts row: $column: $e');
-        }
-      }
-      return const {};
-    }
-
-    return ConflictRecord(
-      store: row['store'] as String,
-      recordId: row['record_id'] as String,
-      base: parseMap(row['base_json'], 'base_json'),
-      local: parseMap(row['local_json'], 'local_json'),
-      remote: parseMap(row['remote_json'], 'remote_json'),
-      dirtyLocal: parseSet(row['dirty_local'], 'dirty_local'),
-      dirtyRemote: parseSet(row['dirty_remote'], 'dirty_remote'),
-      detectedAt: row['detected_at'] as int,
-      resolved: row['resolved_json'] != null
-          ? parseMap(row['resolved_json'], 'resolved_json')
-          : null,
-    );
-  }
+  static ConflictRecord fromRow(Map<String, Object?> row) => parseRowModel(
+        'lp_conflicts',
+        () => ConflictRecord(
+          store: row['store'] as String,
+          recordId: row['record_id'] as String,
+          base: decodeJsonMap(row['base_json'],
+              table: 'lp_conflicts', column: 'base_json'),
+          local: decodeJsonMap(row['local_json'],
+              table: 'lp_conflicts', column: 'local_json'),
+          remote: decodeJsonMap(row['remote_json'],
+              table: 'lp_conflicts', column: 'remote_json'),
+          dirtyLocal: decodeJsonStringSet(row['dirty_local'],
+              table: 'lp_conflicts', column: 'dirty_local'),
+          dirtyRemote: decodeJsonStringSet(row['dirty_remote'],
+              table: 'lp_conflicts', column: 'dirty_remote'),
+          detectedAt: row['detected_at'] as int,
+          resolved: row['resolved_json'] != null
+              ? decodeJsonMap(row['resolved_json'],
+                  table: 'lp_conflicts', column: 'resolved_json')
+              : null,
+        ),
+      );
 }
 
 /// Conflicts management and watch API.

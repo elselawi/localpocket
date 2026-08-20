@@ -5,6 +5,7 @@ import '../core/database_adapter.dart';
 import '../core/change_bus.dart';
 import '../core/ids.dart';
 import '../core/local_pocket.dart';
+import '../core/row_models.dart';
 import '../core/sql_utils.dart';
 import 'blob_store.dart';
 import '../sync/sync_tables.dart';
@@ -55,20 +56,21 @@ class FileRef {
     this.lastError,
   });
 
-  static FileRef fromRow(Map<String, Object?> row) {
-    return FileRef(
-      refId: row['ref_id'] as String,
-      store: row['store'] as String,
-      recordId: row['record_id'] as String,
-      field: row['field'] as String,
-      hash: row['hash'] as String,
-      remoteName: row['remote_name'] as String?,
-      state: row['state'] as String,
-      nextRetryAt: row['next_retry_at'] as int? ?? 0,
-      attemptCount: row['attempt_count'] as int? ?? 0,
-      lastError: row['last_error'] as String?,
-    );
-  }
+  static FileRef fromRow(Map<String, Object?> row) => parseRowModel(
+        'lp_file_refs',
+        () => FileRef(
+          refId: row['ref_id'] as String,
+          store: row['store'] as String,
+          recordId: row['record_id'] as String,
+          field: row['field'] as String,
+          hash: row['hash'] as String,
+          remoteName: row['remote_name'] as String?,
+          state: row['state'] as String,
+          nextRetryAt: row['next_retry_at'] as int? ?? 0,
+          attemptCount: row['attempt_count'] as int? ?? 0,
+          lastError: row['last_error'] as String?,
+        ),
+      );
 }
 
 /// App-facing Files API on LocalPocket.

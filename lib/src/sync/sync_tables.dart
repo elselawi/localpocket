@@ -1,9 +1,7 @@
 /// Sync-layer tables and their row models.
 library;
 
-import 'dart:convert';
-
-import '../core/errors.dart';
+import '../core/row_models.dart';
 
 enum SyncState { clean, dirty, inFlight, conflict, error, quarantine, blocked }
 
@@ -168,7 +166,7 @@ class SyncRowState {
     this.schemaVer = 1,
   });
 
-  factory SyncRowState.fromRow(Map<String, Object?> row) => _parseRow(
+  factory SyncRowState.fromRow(Map<String, Object?> row) => parseRowModel(
       'lp_sync_row',
       () => SyncRowState(
             store: row['store'] as String,
@@ -179,7 +177,7 @@ class SyncRowState {
             baseHash: row['base_hash'] as String?,
             baseJson: row['base_json'] as String?,
             syncState: SyncState.values.byName(row['sync_state'] as String),
-            dirtyFields: _decodeStringList(row['dirty_fields']),
+            dirtyFields: decodeJsonStringList(row['dirty_fields']),
             localRev: (row['local_rev'] as int?) ?? 0,
             accessState:
                 AccessState.values.byName(row['access_state'] as String),
@@ -218,7 +216,7 @@ class OutboxOp {
     this.dependsOnOp,
   });
 
-  factory OutboxOp.fromRow(Map<String, Object?> row) => _parseRow(
+  factory OutboxOp.fromRow(Map<String, Object?> row) => parseRowModel(
       'lp_outbox',
       () => OutboxOp(
             store: row['store'] as String,
@@ -227,7 +225,7 @@ class OutboxOp {
             payloadJson: row['payload_json'] as String,
             baseUpdated: row['base_updated'] as String?,
             baseHash: (row['base_hash'] as String?) ?? '',
-            dirtyFields: _decodeStringList(row['dirty_fields']),
+            dirtyFields: decodeJsonStringList(row['dirty_fields']),
             opId: row['op_id'] as String,
             createdAt: row['created_at'] as int,
             updatedAt: row['updated_at'] as int,
@@ -264,7 +262,7 @@ class OpQueueRow {
     required this.createdAt,
   });
 
-  factory OpQueueRow.fromRow(Map<String, Object?> row) => _parseRow(
+  factory OpQueueRow.fromRow(Map<String, Object?> row) => parseRowModel(
       'lp_op_queue',
       () => OpQueueRow(
             seq: row['seq'] as int,
@@ -280,24 +278,6 @@ class OpQueueRow {
             dependsOnOp: row['depends_on_op'] as String?,
             createdAt: row['created_at'] as int,
           ));
-}
-
-List<String> _decodeStringList(Object? v) {
-  if (v == null) return const [];
-  final s = v as String;
-  if (s.isEmpty) return const [];
-  final decoded = jsonDecode(s);
-  if (decoded is! List) {
-    throw FormatException('expected a JSON array, got ${decoded.runtimeType}');
-  }
-  return [
-    for (final item in decoded)
-      if (item is String)
-        item
-      else
-        throw FormatException(
-            'dirty-field member is ${item.runtimeType}, expected String')
-  ];
 }
 
 /// Resolves dependency `op_id`s that are still pending/failed in `lp_outbox` or `lp_op_queue`.
