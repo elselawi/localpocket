@@ -6,8 +6,9 @@
 /// capability contract.
 ///
 /// These tests spawn nested `dart` processes and are therefore `gate`-tagged;
-/// run them sequentially with `dart test --tags gate --run-skipped -j 1
-/// test/release/` or through `tool/release.dart --long`."}},{
+/// run them sequentially with `dart test --tags "gate || real" --run-skipped
+/// -j 1 test/release/ test/web/ test/e2e/real/` or through
+/// `tool/release.dart --long` and `tool/release.dart --real`."}},{
 @Tags(['gate'])
 library;
 

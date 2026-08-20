@@ -8,10 +8,10 @@
 # web checks). They cannot run inside the default parallel `dart test` run —
 # the nested process collides with the runner's native-asset (sqlite3.dll)
 # build-hook output. They are run sequentially by the canonical release runner
-# in long mode, and can be run explicitly here (single concurrency):
-#   dart test --tags gate --run-skipped -j 1 test/release/
+# in long mode. For a manual full pass over all skipped suites, use:
+#   dart test --tags "gate || real" --run-skipped -j 1 test/release/ test/web/ test/e2e/real/
 tags:
   real:
     skip: "Live PocketBase server tests — run with: dart test --tags real --run-skipped test/e2e/real/"
   gate:
-    skip: "Release/web gate child-process tests — run with: dart test --tags gate --run-skipped -j 1 test/release/"
+    skip: 'Release/web gate child-process tests — run with: dart test --tags "gate || real" --run-skipped -j 1 test/release/ test/web/ test/e2e/real/'

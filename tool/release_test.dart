@@ -59,6 +59,36 @@ void main() {
       expect(longSteps.any((s) => s.id == 'release_tests'), isTrue);
     });
 
+    test('release gate step includes all gate-tagged suites', () {
+      final releaseTests =
+          buildReleaseSteps().singleWhere((s) => s.id == 'release_tests');
+
+      expect(
+          releaseTests.argv,
+          containsAll([
+            'test',
+            '--tags',
+            'gate',
+            '--run-skipped',
+            '-j',
+            '1',
+            'test/release/',
+            'test/web/',
+          ]));
+
+      final liveSuite = buildReleaseSteps(withReal: true)
+          .singleWhere((s) => s.id == 'live_suite');
+      expect(
+          liveSuite.argv,
+          containsAll([
+            'test',
+            '--tags',
+            'real',
+            '--run-skipped',
+            'test/e2e/real/',
+          ]));
+    });
+
     test('--list output execution smoke', () {
       final root = findRepoRoot();
       final result = Process.runSync(

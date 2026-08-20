@@ -159,7 +159,8 @@ List<ReleaseStep> buildReleaseSteps({
         '--run-skipped',
         '-j',
         '1',
-        'test/release/'
+        'test/release/',
+        'test/web/'
       ],
     ),
     if (!noCoverage) ...[
