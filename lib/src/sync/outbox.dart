@@ -307,8 +307,15 @@ class Outbox {
     return result;
   }
 
-  /// ACKs a pushed op: removes it from the outbox and marks the sync row clean.
-  /// Dependents are released implicitly (drain re-checks).
+  /// Unconditional acknowledgment: removes the op from the outbox and marks
+  /// the sync row clean WITHOUT verifying the current payload still matches
+  /// what was pushed.
+  ///
+  /// UNSAFE for production settlement — a local edit made during the push
+  /// would be marked clean and lost. It has NO production callers and exists
+  /// only as a test helper; production settlement MUST go through
+  /// [settlePush] / [settlePushBatch], which detect newer edits and keep the
+  /// row dirty. Dependents are released implicitly (drain re-checks).
   Future<void> ack(String store, String id, {String? serverUpdated}) {
     return pocket.transaction((tx) async {
       final exec = tx.executor;

@@ -594,6 +594,19 @@ class LocalPocket with ChangeBusAwareLP {
         final exec = tx.executor;
         for (final r in rows) {
           final id = r['id'] as String;
+          // Revalidate eligibility INSIDE the transaction, immediately before
+          // the delete: a concurrent write between the candidate SELECT and
+          // here (unarchive, unhide, dirty/conflict transition) must prevent a
+          // stale deletion.
+          final stillEligible = await exec.rawQuery(
+            'SELECT b.id FROM ${DdlCompiler.quote(store)} b '
+            'JOIN lp_sync_row sr ON sr.store = ? AND sr.record_id = b.id '
+            'WHERE b.id = ? AND b.archived = 1 AND b.hidden = 0 '
+            'AND sr.sync_state = ? AND sr.last_seen_at IS NOT NULL '
+            'AND sr.last_seen_at < ? LIMIT 1',
+            [store, id, SyncState.clean.name, cutoff],
+          );
+          if (stillEligible.isEmpty) continue;
           final existingRows = await exec.rawQuery(
               'SELECT * FROM ${DdlCompiler.quote(store)} WHERE id = ? LIMIT 1',
               [id]);
