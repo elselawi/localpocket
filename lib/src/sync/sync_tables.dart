@@ -309,14 +309,17 @@ Future<Set<String>> queryBlockedDependencyOpIds(
   final ids = dependencyIds.toList();
   if (ids.isEmpty) return blocked;
 
-  final ph = List.filled(ids.length, '?').join(', ');
+  final placeholders = List.filled(ids.length, '?').join(', ');
+  final outboxSql =
+      'SELECT op_id FROM lp_outbox WHERE op_id IN ($placeholders)';
   final outboxRows =
-      await db.rawQuery('SELECT op_id FROM lp_outbox WHERE op_id IN ($ph)', ids)
-          as List<Map<String, Object?>>;
+      await db.rawQuery(outboxSql, ids) as List<Map<String, Object?>>;
   blocked.addAll(outboxRows.map((row) => row['op_id'] as String));
-  final queueRows = await db.rawQuery(
-      "SELECT op_id FROM lp_op_queue WHERE op_id IN ($ph) AND state IN ('pending','failed')",
-      ids) as List<Map<String, Object?>>;
+
+  final queueSql =
+      'SELECT op_id FROM lp_op_queue WHERE op_id IN ($placeholders) AND state IN (?, ?)';
+  final queueRows = await db.rawQuery(queueSql, [...ids, 'pending', 'failed'])
+      as List<Map<String, Object?>>;
   blocked.addAll(queueRows.map((row) => row['op_id'] as String));
   return blocked;
 }

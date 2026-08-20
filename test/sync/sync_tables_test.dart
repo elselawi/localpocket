@@ -1,4 +1,5 @@
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
 /// persisted sync-model decoding.
@@ -357,6 +358,87 @@ void main() {
           baseRow(createdAt: '300'),
         ]) {
           expect(() => OpQueueRow.fromRow(row), throwsA(isA<StorageError>()));
+        }
+      });
+    });
+
+    group('queryBlockedDependencyOpIds', () {
+      test('returns pending/failed op ids from outbox and queue', () async {
+        final pocket = await LocalPocket.open(
+          path: ':memory:',
+          stores: [
+            CollectionSchema<Object?>(
+              name: 'widgets',
+              version: 1,
+              fields: [Field.text('name')],
+            ),
+          ],
+        );
+        try {
+          await pocket.db.insert('lp_outbox', {
+            'store': 'widgets',
+            'record_id': 'rid1',
+            'kind': 'upsert',
+            'payload_json': '{"name":"a"}',
+            'base_updated': null,
+            'base_hash': '',
+            'dirty_fields': '[]',
+            'op_id': 'outbox-1',
+            'created_at': 1,
+            'updated_at': 1,
+            'depends_on_op': null,
+          });
+          await pocket.db.insert('lp_op_queue', {
+            'seq': 1,
+            'op_id': 'queue-1',
+            'store': 'widgets',
+            'record_id': 'rid2',
+            'kind': 'fileUpload',
+            'payload_json': '{"ref_id":"r"}',
+            'state': 'pending',
+            'attempt_count': 0,
+            'next_retry_at': 0,
+            'last_error': null,
+            'depends_on_op': null,
+            'created_at': 1,
+          });
+          await pocket.db.insert('lp_op_queue', {
+            'seq': 2,
+            'op_id': 'queue-2',
+            'store': 'widgets',
+            'record_id': 'rid3',
+            'kind': 'fileRemove',
+            'payload_json': '{"ref_id":"s"}',
+            'state': 'done',
+            'attempt_count': 0,
+            'next_retry_at': 0,
+            'last_error': null,
+            'depends_on_op': null,
+            'created_at': 2,
+          });
+          await pocket.db.insert('lp_op_queue', {
+            'seq': 3,
+            'op_id': 'queue-3',
+            'store': 'widgets',
+            'record_id': 'rid4',
+            'kind': 'fileUpload',
+            'payload_json': '{"ref_id":"t"}',
+            'state': 'failed',
+            'attempt_count': 1,
+            'next_retry_at': 0,
+            'last_error': 'nope',
+            'depends_on_op': null,
+            'created_at': 3,
+          });
+
+          final blocked = await queryBlockedDependencyOpIds(
+            pocket.db,
+            ['outbox-1', 'queue-1', 'queue-2', 'queue-3', 'missing'],
+          );
+
+          expect(blocked, {'outbox-1', 'queue-1', 'queue-3'});
+        } finally {
+          await pocket.close();
         }
       });
     });
