@@ -1,5 +1,5 @@
 /// Version of the engine compiler that produced a [QueryPlan].
-const int queryCompilerVersion = 1;
+const int queryCompilerVersion = 2;
 
 /// SQL plan produced by the engine query compiler for the web transport.
 /// This is a typed compiler artifact, not an arbitrary SQL API.

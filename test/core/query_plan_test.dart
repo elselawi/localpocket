@@ -1,4 +1,5 @@
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/query_plan.dart' show queryCompilerVersion;
 import 'package:test/test.dart';
 
 void main() {
@@ -19,7 +20,7 @@ void main() {
 
     final plan = query.compilePlan(limitOverride: 5);
     expect(plan.operation, 'query');
-    expect(plan.compilerVersion, 1);
+    expect(plan.compilerVersion, queryCompilerVersion);
     expect(plan.store, 'items');
     expect(plan.schemaFingerprint, isNotEmpty);
     expect(plan.argumentCount, 5);

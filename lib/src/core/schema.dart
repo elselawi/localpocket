@@ -390,6 +390,7 @@ class CollectionSchema<T> {
         'fields': [for (final f in fields) f.toJson()],
         'indexes': [for (final ix in indexes) ix.toJson()],
         'keepUnsyncedArchives': keepUnsyncedArchives,
+        'prefetchFiles': prefetchFiles,
         if (fts != null) 'fts': fts!.toJson(),
         'migrations': [for (final migration in migrations) migration.toJson()],
       };
@@ -407,6 +408,7 @@ class CollectionSchema<T> {
                 IndexSpec.fromJson(ix as Map<String, Object?>)
             ],
             keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
+            prefetchFiles: j['prefetchFiles'] == true,
             fts: j['fts'] is Map
                 ? FtsSpec.fromJson(j['fts'] as Map<String, Object?>)
                 : null,
