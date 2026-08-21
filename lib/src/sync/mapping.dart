@@ -119,45 +119,9 @@ Map<String, Object?> normalizeRemote(
       logical[f.name] = null;
       continue;
     }
-    switch (f.kind) {
-      case FieldKind.text:
-      case FieldKind.enumValue:
-      case FieldKind.ref:
-        if (v is! String) {
-          throw MapFailure(
-              'Field "${f.name}" must be a string, got ${v.runtimeType}.');
-        }
-        if (f.kind == FieldKind.enumValue && !f.enumValues!.contains(v)) {
-          throw MapFailure('Field "${f.name}" has unknown enum value "$v".');
-        }
-      case FieldKind.int:
-      case FieldKind.date:
-        if (v is! int) {
-          throw MapFailure(
-              'Field "${f.name}" must be an integer, got ${v.runtimeType}.');
-        }
-      case FieldKind.real:
-        if (v is! num) {
-          throw MapFailure(
-              'Field "${f.name}" must be a number, got ${v.runtimeType}.');
-        }
-      case FieldKind.bool:
-        if (v is! bool) {
-          throw MapFailure(
-              'Field "${f.name}" must be a boolean, got ${v.runtimeType}.');
-        }
-      case FieldKind.json:
-        if (v is! Map && v is! List) {
-          throw MapFailure(
-              'Field "${f.name}" must be JSON, got ${v.runtimeType}.');
-        }
-      case FieldKind.jsonList:
-        // Matches local validation: a jsonList field only accepts arrays.
-        // (A JSON object here is a wire-format violation, not a valid list.)
-        if (v is! List) {
-          throw MapFailure(
-              'Field "${f.name}" must be a JSON array, got ${v.runtimeType}.');
-        }
+    final violation = fieldKindViolation(f, v);
+    if (violation != null) {
+      throw MapFailure(_remoteKindViolationMessage(f, v, violation));
     }
     logical[f.name] = v;
   }
@@ -170,6 +134,26 @@ Map<String, Object?> normalizeRemote(
   }
   logical['archived'] = data['archived'] == true;
   return logical;
+}
+
+/// Renders a [KindViolation] with wire-visible type detail. The message shape
+/// is deliberately distinct from the local write message (it names the
+/// offending runtime type) so a quarantine reason records what arrived.
+String _remoteKindViolationMessage(
+    Field f, Object? value, KindViolation violation) {
+  final name = f.name;
+  final got = value.runtimeType;
+  return switch (violation) {
+    KindViolation.textExpected => 'Field "$name" must be a string, got $got.',
+    KindViolation.intExpected => 'Field "$name" must be an integer, got $got.',
+    KindViolation.numberExpected => 'Field "$name" must be a number, got $got.',
+    KindViolation.boolExpected => 'Field "$name" must be a boolean, got $got.',
+    KindViolation.jsonExpected => 'Field "$name" must be JSON, got $got.',
+    KindViolation.jsonListExpected =>
+      'Field "$name" must be a JSON array, got $got.',
+    KindViolation.enumValueRejected =>
+      'Field "$name" has unknown enum value "$value".',
+  };
 }
 
 /// Parses a payload JSON string into a Map, returning an empty map on null/empty/invalid payload.

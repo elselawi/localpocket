@@ -752,46 +752,10 @@ class Collection with ChangeBusAwareStore {
             field: f.name);
       }
       if (v == null) continue;
-      switch (f.kind) {
-        case FieldKind.text:
-        case FieldKind.enumValue:
-        case FieldKind.ref:
-          if (v is! String) {
-            throw ValidationException('Field "${f.name}" must be a string.',
-                field: f.name);
-          }
-          if (f.kind == FieldKind.enumValue && !f.enumValues!.contains(v)) {
-            throw ValidationException(
-                'Field "${f.name}" must be one of ${f.enumValues!.join(', ')}.',
-                field: f.name);
-          }
-        case FieldKind.int:
-        case FieldKind.date:
-          if (v is! int) {
-            throw ValidationException('Field "${f.name}" must be an integer.',
-                field: f.name);
-          }
-        case FieldKind.real:
-          if (v is! num) {
-            throw ValidationException('Field "${f.name}" must be a number.',
-                field: f.name);
-          }
-        case FieldKind.bool:
-          if (v is! bool) {
-            throw ValidationException('Field "${f.name}" must be a boolean.',
-                field: f.name);
-          }
-        case FieldKind.json:
-          if (v is! Map && v is! List) {
-            throw ValidationException(
-                'Field "${f.name}" must be a JSON object or array.',
-                field: f.name);
-          }
-        case FieldKind.jsonList:
-          if (v is! List) {
-            throw ValidationException('Field "${f.name}" must be a JSON array.',
-                field: f.name);
-          }
+      final violation = fieldKindViolation(f, v);
+      if (violation != null) {
+        throw ValidationException(_kindViolationMessage(f, violation),
+            field: f.name);
       }
     }
     final msgs = _schema.validator?.call(logical) ?? const <String>[];
@@ -806,6 +770,21 @@ class Collection with ChangeBusAwareStore {
           'Document exceeds max size ($bytes > ${_pocket.maxDocBytes} bytes).',
           field: null);
     }
+  }
+
+  static String _kindViolationMessage(Field f, KindViolation violation) {
+    final name = f.name;
+    return switch (violation) {
+      KindViolation.textExpected => 'Field "$name" must be a string.',
+      KindViolation.intExpected => 'Field "$name" must be an integer.',
+      KindViolation.numberExpected => 'Field "$name" must be a number.',
+      KindViolation.boolExpected => 'Field "$name" must be a boolean.',
+      KindViolation.jsonExpected =>
+        'Field "$name" must be a JSON object or array.',
+      KindViolation.jsonListExpected => 'Field "$name" must be a JSON array.',
+      KindViolation.enumValueRejected =>
+        'Field "$name" must be one of ${f.enumValues!.join(', ')}.',
+    };
   }
 
   // ------------------------------------------------------------- queries ----

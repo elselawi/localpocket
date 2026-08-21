@@ -13,6 +13,56 @@ import 'cipher.dart';
 import 'hashing.dart';
 import 'schema.dart';
 
+/// The single reason a [FieldKind] rejects a value.
+///
+/// Local writes wrap the reason in a [ValidationException] with local wording;
+/// remote mapping wraps the same reason in a [MapFailure] with wire wording.
+/// Sharing the *reason* (the rule) keeps the field-kind acceptance rules in one
+/// place so a new [FieldKind] cannot be added to one path and forgotten in the
+/// other.
+enum KindViolation {
+  textExpected,
+  intExpected,
+  numberExpected,
+  boolExpected,
+  jsonExpected,
+  jsonListExpected,
+  enumValueRejected,
+}
+
+/// Returns the rule violation ([KindViolation]) if [value] is not acceptable
+/// for [f], or `null` when it is well-typed. [value] must be non-null; callers
+/// short-circuit `null` (or the required check) before invoking this.
+///
+/// This is the single source of truth for which Dart type each [FieldKind]
+/// admits, shared by the local write validator and the remote payload
+/// normalizer so they cannot drift apart.
+KindViolation? fieldKindViolation(Field f, Object? value) {
+  switch (f.kind) {
+    case FieldKind.text:
+    case FieldKind.enumValue:
+    case FieldKind.ref:
+      if (value is! String) return KindViolation.textExpected;
+      if (f.kind == FieldKind.enumValue && !f.enumValues!.contains(value)) {
+        return KindViolation.enumValueRejected;
+      }
+      return null;
+    case FieldKind.int:
+    case FieldKind.date:
+      return value is! int ? KindViolation.intExpected : null;
+    case FieldKind.real:
+      return value is! num ? KindViolation.numberExpected : null;
+    case FieldKind.bool:
+      return value is! bool ? KindViolation.boolExpected : null;
+    case FieldKind.json:
+      return (value is! Map && value is! List)
+          ? KindViolation.jsonExpected
+          : null;
+    case FieldKind.jsonList:
+      return value is! List ? KindViolation.jsonListExpected : null;
+  }
+}
+
 /// Encodes a logical record into a DB row map (including system columns).
 Map<String, Object?> encodeDbRow(
   CollectionSchema schema, {
@@ -87,45 +137,8 @@ Map<String, Object?> decodeDbRow(
 }) {
   final logical = <String, Object?>{'id': dbRow['id']};
   for (final f in schema.fields) {
-    final v = dbRow[f.name];
-    if (v == null) {
-      logical[f.name] = null;
-      continue;
-    }
-    if (f.encrypted) {
-      final fc = cipher ?? cryptoProvider?.getFieldCipher(schema.name, f.name);
-      if (fc == null) {
-        throw StateError(
-            'Field "${f.name}" is encrypted but no FieldCipher was provided.');
-      }
-      final cipherBytes = base64Decode(v as String);
-      final plainBytes = fc.decrypt(cipherBytes);
-      final plainStr = utf8.decode(plainBytes);
-      switch (f.kind) {
-        case FieldKind.bool:
-          logical[f.name] = plainStr == '1' || plainStr == 'true';
-        case FieldKind.int:
-        case FieldKind.date:
-          logical[f.name] = int.parse(plainStr);
-        case FieldKind.real:
-          logical[f.name] = double.parse(plainStr);
-        case FieldKind.json:
-        case FieldKind.jsonList:
-          logical[f.name] = jsonDecode(plainStr);
-        default:
-          logical[f.name] = plainStr;
-      }
-      continue;
-    }
-    switch (f.kind) {
-      case FieldKind.bool:
-        logical[f.name] = v == 1;
-      case FieldKind.json:
-      case FieldKind.jsonList:
-        logical[f.name] = jsonDecode(v as String);
-      default:
-        logical[f.name] = v;
-    }
+    logical[f.name] = _decodeStoredValue(f, dbRow[f.name],
+        cipher: cipher, cryptoProvider: cryptoProvider, store: schema.name);
   }
   logical['archived'] = dbRow['archived'] == 1;
   final extra = dbRow['extra'];
@@ -184,43 +197,8 @@ Map<String, Object?> _decodeDbRowProjected(
     if (name == 'id' || name == 'archived') continue;
     final f = schema.fieldByName(name);
     if (f == null) continue;
-    final v = dbRow[name];
-    if (v == null) {
-      logical[name] = null;
-      continue;
-    }
-    if (f.encrypted) {
-      final fc = cipher ?? cryptoProvider?.getFieldCipher(schema.name, f.name);
-      if (fc == null) {
-        throw StateError(
-            'Field "${f.name}" is encrypted but no FieldCipher was provided.');
-      }
-      final plainStr = utf8.decode(fc.decrypt(base64Decode(v as String)));
-      switch (f.kind) {
-        case FieldKind.bool:
-          logical[name] = plainStr == '1' || plainStr == 'true';
-        case FieldKind.int:
-        case FieldKind.date:
-          logical[name] = int.parse(plainStr);
-        case FieldKind.real:
-          logical[name] = double.parse(plainStr);
-        case FieldKind.json:
-        case FieldKind.jsonList:
-          logical[name] = jsonDecode(plainStr);
-        default:
-          logical[name] = plainStr;
-      }
-      continue;
-    }
-    switch (f.kind) {
-      case FieldKind.bool:
-        logical[name] = v == 1;
-      case FieldKind.json:
-      case FieldKind.jsonList:
-        logical[name] = jsonDecode(v as String);
-      default:
-        logical[name] = v;
-    }
+    logical[name] = _decodeStoredValue(f, dbRow[name],
+        cipher: cipher, cryptoProvider: cryptoProvider, store: schema.name);
   }
   if (columns.contains('archived')) {
     logical['archived'] = dbRow['archived'] == 1;
@@ -241,6 +219,43 @@ Future<List<Map<String, Object?>>> decodeDbRowsAsync(
   // one-shot isolate transfer overhead for ordinary query pages.
   return decodeDbRows(schema, dbRows,
       cipher: cipher, cryptoProvider: cryptoProvider);
+}
+
+/// Decodes a single stored value (plaintext typed column or base64 ciphertext)
+/// into its logical form for [f]. [store] is the owning store name, used to
+/// resolve a per-field [CryptoProvider] cipher.
+///
+/// This is the single source of the "stored value → logical value" coercion
+/// rules, shared by the full [decodeDbRow] and projection-aware
+/// [_decodeDbRowProjected] paths so they cannot drift.
+Object? _decodeStoredValue(
+  Field f,
+  Object? stored, {
+  FieldCipher? cipher,
+  CryptoProvider? cryptoProvider,
+  required String store,
+}) {
+  if (stored == null) return null;
+  if (f.encrypted) {
+    final fc = cipher ?? cryptoProvider?.getFieldCipher(store, f.name);
+    if (fc == null) {
+      throw StateError(
+          'Field "${f.name}" is encrypted but no FieldCipher was provided.');
+    }
+    final plainStr = utf8.decode(fc.decrypt(base64Decode(stored as String)));
+    return switch (f.kind) {
+      FieldKind.bool => plainStr == '1' || plainStr == 'true',
+      FieldKind.int || FieldKind.date => int.parse(plainStr),
+      FieldKind.real => double.parse(plainStr),
+      FieldKind.json || FieldKind.jsonList => jsonDecode(plainStr),
+      _ => plainStr,
+    };
+  }
+  return switch (f.kind) {
+    FieldKind.bool => stored == 1,
+    FieldKind.json || FieldKind.jsonList => jsonDecode(stored as String),
+    _ => stored,
+  };
 }
 
 Object? _encodeValue(Field f, Object? v, {FieldCipher? cipher}) {
