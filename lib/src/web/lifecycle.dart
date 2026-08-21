@@ -1,14 +1,46 @@
 import 'dart:typed_data';
 import 'dart:async';
 
+import '../core/change_bus.dart';
 import '../core/errors.dart';
+import 'conversions.dart';
 import 'protocol.dart';
 
 /// Terminates worker-owned stream controllers upon worker termination or unexpected close.
 ///
-/// Adds [DatabaseWorkerClosedException] and closes every active stream controller
-/// ensuring deterministic "error then done" terminal semantics.
+/// Adds [DatabaseWorkerClosedException] (via [failWorkerStreams]) and closes
+/// every active stream controller ensuring deterministic "error then done"
+/// terminal semantics.
 void terminateWorkerStreams({
+  required Map<int, StreamController<dynamic>> workerStreams,
+  required Map<int, Object? Function(Object?)> workerEventDecoders,
+  required StreamController<Map<String, Object?>> syncStatusController,
+  required StreamController<void> authRequiredController,
+  Object? error,
+}) {
+  final streamsToClose = workerStreams.values.toList();
+  failWorkerStreams(
+    workerStreams: workerStreams,
+    workerEventDecoders: workerEventDecoders,
+    syncStatusController: syncStatusController,
+    authRequiredController: authRequiredController,
+    error: error,
+  );
+  for (final stream in streamsToClose) {
+    if (!stream.isClosed) stream.close();
+  }
+  if (!syncStatusController.isClosed) syncStatusController.close();
+  if (!authRequiredController.isClosed) authRequiredController.close();
+}
+
+/// Fails every worker-owned stream with a [DatabaseWorkerClosedException]
+/// WITHOUT closing the controllers.
+///
+/// This mirrors the facade's `_markWorkerClosed` teardown: the facade's own
+/// graceful `close()` closes the controllers itself, so an unexpected worker
+/// close must not double-close them (which would make a later `close()` throw
+/// on an already-closed controller).
+void failWorkerStreams({
   required Map<int, StreamController<dynamic>> workerStreams,
   required Map<int, Object? Function(Object?)> workerEventDecoders,
   required StreamController<Map<String, Object?>> syncStatusController,
@@ -17,27 +49,81 @@ void terminateWorkerStreams({
 }) {
   final terminalError = error ??
       DatabaseWorkerClosedException('The database worker closed unexpectedly.');
-
-  final streamsToClose = workerStreams.values.toList();
+  for (final stream in workerStreams.values) {
+    if (!stream.isClosed) stream.addError(terminalError);
+  }
   workerStreams.clear();
   workerEventDecoders.clear();
-
-  for (final stream in streamsToClose) {
-    if (!stream.isClosed) {
-      stream.addError(terminalError);
-      stream.close();
-    }
-  }
-
   if (!syncStatusController.isClosed) {
     syncStatusController.addError(terminalError);
-    syncStatusController.close();
   }
-
   if (!authRequiredController.isClosed) {
     authRequiredController.addError(terminalError);
-    authRequiredController.close();
   }
+}
+
+/// Dispatches one decoded worker→client event envelope to the matching watch
+/// stream / status controller / change bus.
+///
+/// Mirrors the facade's `_handleWorkerEvent` core: `worker_event` events are
+/// wire-decoded and added to the watch's [workerStreams] controller (through
+/// its optional [workerEventDecoders] transform); `sync_status`/`auth_required`
+/// events update the status controllers; `record_event` events are re-emitted
+/// on the [ChangeBus]. Unknown ops, version mismatches, and malformed shapes
+/// are ignored (a malformed unsolicited event must not tear down unrelated
+/// requests).
+void handleWorkerEventEnvelope(
+  Map<String, Object?> event, {
+  required Map<int, StreamController<dynamic>> workerStreams,
+  required Map<int, Object? Function(Object?)> workerEventDecoders,
+  required StreamController<void> authRequiredController,
+  required StreamController<Map<String, Object?>> syncStatusController,
+  required ChangeBus changeBus,
+}) {
+  if (event['v'] != webProtocolVersion) {
+    return;
+  }
+  if (event['op'] == WireOp.authRequired) {
+    if (!authRequiredController.isClosed) {
+      authRequiredController.add(null);
+    }
+    return;
+  }
+  if (event['op'] == WireOp.syncStatus) {
+    final status = event['status'];
+    if (status is Map && !syncStatusController.isClosed) {
+      syncStatusController.add(
+          status.map((k, v) => MapEntry(k.toString(), decodeWireValue(v))));
+    }
+    return;
+  }
+  if (event['op'] == WireOp.recordEvent) {
+    final rawEvent = event['event'];
+    if (rawEvent is Map) {
+      final decoded = (decodeWireValue(rawEvent) as Map)
+          .map((k, v) => MapEntry(k.toString(), v));
+      final recordEvent = RecordChangeEvent.fromJson(decoded);
+      changeBus.emitEvent(recordEvent);
+    }
+    return;
+  }
+  if (event['op'] != WireOp.workerEvent) {
+    return;
+  }
+  final watchId = event['watchId'];
+  if (watchId is! int) return;
+  final stream = workerStreams[watchId];
+  if (stream == null || stream.isClosed) return;
+  if (event['error'] != null) {
+    stream.addError(RemoteLocalPocketException(
+      code: 'watch',
+      message: event['error'].toString(),
+    ));
+    return;
+  }
+  final eventValue = decodeWireValue(event['value']);
+  final decoder = workerEventDecoders[watchId];
+  stream.add(decoder != null ? decoder(eventValue) : eventValue);
 }
 
 /// Validates web open configuration before asset loading and worker initialization.

@@ -1,7 +1,7 @@
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_forwarder.dart';
 import 'package:localpocket/src/core/schema.dart';
-import 'package:localpocket/src/web/facade.dart';
+import 'package:localpocket/src/web/facade/facade_host.dart';
 
 import 'web_search_forwarder.dart';
 
@@ -10,7 +10,7 @@ class WebSearchBuilder
     with
         SearchForwarder<WebSearchBuilder>,
         WebCompiledSearchForwarder<WebSearchBuilder> {
-  final LocalPocket _pocket;
+  final WebFacadeHost _pocket;
   final CollectionSchema schema;
   @override
   final String term;
@@ -20,7 +20,7 @@ class WebSearchBuilder
       : _core = SearchBuilder.compileOnly(schema, term);
 
   @override
-  LocalPocket get pocket => _pocket;
+  WebFacadeHost get pocket => _pocket;
 
   @override
   SearchBuilder get searchCore => _core;

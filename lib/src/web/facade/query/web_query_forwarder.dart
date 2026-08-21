@@ -1,15 +1,15 @@
 import 'package:localpocket/src/core/query/query_builder/query_forwarder.dart';
 import 'package:localpocket/src/core/store.dart';
 import 'package:localpocket/src/web/conversions.dart';
-import 'package:localpocket/src/web/facade.dart';
+import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/query/page_from_compiled.dart';
 import 'package:localpocket/src/web/facade/send_plan.dart';
 
 /// Mixin implementing terminal execution methods for web query builders
 /// by sending engine-compiled plans to the worker.
 mixin WebCompiledQueryForwarder<T extends Object> on QueryForwarder<T> {
-  /// LocalPocket instance connected to the web worker.
-  LocalPocket get pocket;
+  /// WebFacadeHost instance connected to the web worker.
+  WebFacadeHost get pocket;
 
   /// Optional transaction session identifier.
   int? get sessionId => null;

@@ -122,25 +122,30 @@ final class WorkerError extends WorkerReply {
 
 /// Parses a raw schema map into a typed [CollectionSchema].
 ///
-/// Shared by the worker open path (`controller.dart`) and the `open` wire
-/// handler so both use one VM-testable parser.
+/// Shared by the worker open path (`controller.dart`), the `open` wire
+/// handler, and the web option parser (`open_options.dart`) so all use one
+/// VM-testable parser.
 CollectionSchema<Object?> parseSchema(Object? raw) {
   if (raw is! Map) {
     throw FormatException('Schema must be a map: $raw');
   }
-  final rawMap = _deepStringMap(raw);
+  final rawMap = deepStringMap(raw);
   return CollectionSchema<Object?>.fromJson(rawMap);
 }
 
-Map<String, Object?> _deepStringMap(Map raw) {
+/// Recursively stringifies map keys (and nested map keys) so an arbitrary
+/// wire map can be indexed by String regardless of the JS-interop key type.
+///
+/// Shared by [parseSchema] and the web option parser (`open_options.dart`).
+Map<String, Object?> deepStringMap(Map raw) {
   final out = <String, Object?>{};
   raw.forEach((k, v) {
     final key = k.toString();
     if (v is Map) {
-      out[key] = _deepStringMap(v);
+      out[key] = deepStringMap(v);
     } else if (v is List) {
       out[key] =
-          v.map((item) => item is Map ? _deepStringMap(item) : item).toList();
+          v.map((item) => item is Map ? deepStringMap(item) : item).toList();
     } else {
       out[key] = v;
     }

@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:localpocket/localpocket.dart' show ConflictRecord;
 import 'package:localpocket/src/web/conflicts_bridge.dart';
 import 'package:localpocket/src/web/conversions.dart';
-import 'package:localpocket/src/web/facade.dart';
+import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
 /// Main-thread conflicts API over the worker-owned engine.
@@ -13,7 +13,7 @@ import 'package:localpocket/src/web/protocol.dart';
 /// dispatches a typed wire op that delegates to `pocket.conflicts` in the
 /// worker.
 class WebConflicts {
-  final LocalPocket _pocket;
+  final WebFacadeHost _pocket;
 
   WebConflicts.ins(this._pocket);
 

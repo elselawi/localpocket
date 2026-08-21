@@ -1,12 +1,12 @@
 import 'package:localpocket/src/core/query_plan.dart';
 import 'package:localpocket/src/web/conversions.dart';
-import 'package:localpocket/src/web/facade.dart';
+import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
 /// Sends an engine-compiled [QueryPlan] to the worker as the single read
 /// envelope and returns the decoded response map.
 Future<Map<String, Object?>> sendCompiledPlan(
-  LocalPocket pocket,
+  WebFacadeHost pocket,
   QueryPlan plan, {
   int? sessionId,
   int? pageLimit,

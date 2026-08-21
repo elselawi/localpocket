@@ -4,7 +4,7 @@ import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/core/query/query_builder/query_forwarder.dart';
 import 'package:localpocket/src/core/schema.dart';
 import 'package:localpocket/src/web/conversions.dart';
-import 'package:localpocket/src/web/facade.dart';
+import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/send_plan.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
@@ -18,20 +18,29 @@ class WebQueryBuilder
     with
         QueryForwarder<WebQueryBuilder>,
         WebCompiledQueryForwarder<WebQueryBuilder> {
-  final LocalPocket _pocket;
+  final WebFacadeHost _pocket;
   final CollectionSchema schema;
-  final QueryBuilder _core;
+  QueryBuilder _core;
 
   WebQueryBuilder(this._pocket, this.schema)
       : _core = QueryBuilder.compileOnly(schema);
 
   @override
-  LocalPocket get pocket => _pocket;
+  WebFacadeHost get pocket => _pocket;
 
   @override
   QueryBuilder get queryCore => _core;
 
+  @override
+  set queryCore(QueryBuilder value) => _core = value;
+
   String get store => schema.name;
+
+  /// Decodes one wire item into a string-keyed record map. [decodeWireValue]
+  /// already stringifies keys and decodes nested values; this narrows the
+  /// result to the record type the watch stream carries.
+  static Map<String, Object?> _decodeItem(Object? raw) =>
+      (decodeWireValue(raw) as Map).map((k, v) => MapEntry(k.toString(), v));
 
   /// Watches query results reactively.
   Stream<List<Map<String, Object?>>> watch() {
@@ -49,11 +58,17 @@ class WebQueryBuilder
         watchId: watchId,
         register: () async {
           _pocket.workerStreams[watchId] = controller;
+          // Later worker-originated snapshots arrive as a raw wire list; the
+          // decoder re-typed them so they match the stream's element type on
+          // every runtime (dart2js erases generic checks, but the VM and
+          // dart2wasm do not).
+          _pocket.workerEventDecoders[watchId] = (raw) {
+            return [for (final i in (raw as List)) _decodeItem(i)];
+          };
           try {
             final res = await sendCompiledPlan(_pocket, plan, watchId: watchId);
             final items = ((res['items'] as List?) ?? const [])
-                .map((i) => (decodeWireValue(i) as Map)
-                    .map((k, v) => MapEntry(k.toString(), v)))
+                .map(_decodeItem)
                 .toList();
             if (!controller.isClosed) {
               controller.add(items);
@@ -74,6 +89,7 @@ class WebQueryBuilder
 
   Future<void> _cancelWatch(int watchId) async {
     _pocket.workerStreams.remove(watchId);
+    _pocket.workerEventDecoders.remove(watchId);
     try {
       await _pocket.send(WireOp.watchCancel, {'watchId': watchId});
     } catch (_) {}

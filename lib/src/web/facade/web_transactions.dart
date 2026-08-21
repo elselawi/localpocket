@@ -3,14 +3,14 @@ import 'package:localpocket/src/core/query/query_builder/query_forwarder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_forwarder.dart';
 import 'package:localpocket/src/core/schema.dart';
-import 'package:localpocket/src/web/facade.dart';
+import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/query/web_query_forwarder.dart';
 import 'package:localpocket/src/web/facade/search/web_search_forwarder.dart';
 import 'package:localpocket/src/web/facade/web_collection_mixin.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
 class WebTx {
-  final LocalPocket _pocket;
+  final WebFacadeHost _pocket;
   final int sessionId;
 
   WebTx.ins(this._pocket, this.sessionId);
@@ -51,27 +51,30 @@ class WebTxQueryBuilder
     with
         QueryForwarder<WebTxQueryBuilder>,
         WebCompiledQueryForwarder<WebTxQueryBuilder> {
-  final LocalPocket _pocket;
+  final WebFacadeHost _pocket;
   final CollectionSchema schema;
   @override
   final int sessionId;
-  final QueryBuilder _core;
+  QueryBuilder _core;
 
   WebTxQueryBuilder._(this._pocket, this.schema, this.sessionId)
       : _core = QueryBuilder.compileOnly(schema);
 
   @override
-  LocalPocket get pocket => _pocket;
+  WebFacadeHost get pocket => _pocket;
 
   @override
   QueryBuilder get queryCore => _core;
+
+  @override
+  set queryCore(QueryBuilder value) => _core = value;
 }
 
 class WebTxSearchQueryBuilder
     with
         SearchForwarder<WebTxSearchQueryBuilder>,
         WebCompiledSearchForwarder<WebTxSearchQueryBuilder> {
-  final LocalPocket _pocket;
+  final WebFacadeHost _pocket;
   final CollectionSchema schema;
   @override
   final int sessionId;
@@ -84,7 +87,7 @@ class WebTxSearchQueryBuilder
       : _core = SearchBuilder.compileOnly(schema, term);
 
   @override
-  LocalPocket get pocket => _pocket;
+  WebFacadeHost get pocket => _pocket;
 
   @override
   SearchBuilder get searchCore => _core;
@@ -92,7 +95,7 @@ class WebTxSearchQueryBuilder
 
 /// Main-thread collection bound to a transaction session.
 class WebTxCollection with WireCollectionMixin {
-  final LocalPocket _pocket;
+  final WebFacadeHost _pocket;
   final CollectionSchema schema;
   @override
   final int sessionId;
@@ -100,7 +103,7 @@ class WebTxCollection with WireCollectionMixin {
   WebTxCollection._(this._pocket, this.schema, this.sessionId);
 
   @override
-  LocalPocket get pocket => _pocket;
+  WebFacadeHost get pocket => _pocket;
 
   @override
   String get name => schema.name;

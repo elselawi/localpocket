@@ -1,13 +1,13 @@
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_forwarder.dart';
-import 'package:localpocket/src/web/facade.dart';
+import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/send_plan.dart';
 
 /// Mixin implementing search execution for web search query builders
 /// by sending engine-compiled search plans to the worker.
 mixin WebCompiledSearchForwarder<T extends Object> on SearchForwarder<T> {
-  /// LocalPocket instance connected to the web worker.
-  LocalPocket get pocket;
+  /// WebFacadeHost instance connected to the web worker.
+  WebFacadeHost get pocket;
 
   /// Optional transaction session identifier.
   int? get sessionId => null;

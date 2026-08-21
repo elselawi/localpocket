@@ -13,6 +13,7 @@ import '../core/local_pocket.dart';
 import '../core/schema.dart';
 import '../files/web_blob_store.dart';
 import 'cipher_bridge.dart';
+import 'open_options.dart';
 import 'protocol.dart';
 import 'worker_engine.dart';
 
@@ -48,24 +49,22 @@ final class LocalPocketDatabaseController extends DatabaseController {
 
     final db = DirectSqliteDatabase(rawDb);
 
-    // Parse options from additionalData
-    final options = _parseOpenOptions(additionalData);
+    // Parse options from additionalData (pure-Dart parser in `open_options.dart`)
+    final options = parseOpenOptions(additionalData?.dartify());
     final stores = (options['stores'] as List<CollectionSchema>?) ?? [];
     final maxDocBytes = (options['maxDocBytes'] as int?) ?? 1900000;
     final destructiveBackup = (options['destructiveBackup'] as bool?) ?? true;
 
     // Field cipher bridge: reconstruct the engine cipher from the serialized
-    // envelope. Parsing is intentionally OUTSIDE `_parseOpenOptions`, which
+    // envelope. Parsing is intentionally OUTSIDE `parseOpenOptions`, which
     // swallows malformed options — a malformed cipher envelope must fail
     // loudly, never be silently dropped.
-    final fieldCipher =
-        parseFieldCipherEnvelope(_rawOpenOption(additionalData, 'fieldCipher'));
+    final fieldCipher = parseFieldCipherEnvelope(
+        rawOpenOption(additionalData?.dartify(), 'fieldCipher'));
 
     // Reject encrypted stores opened without a cipher at open time. A web open
     // must never silently produce stores that cannot be written.
-    final hasEncryptedFields =
-        stores.any((s) => s.fields.any((f) => f.encrypted));
-    if (hasEncryptedFields && fieldCipher == null) {
+    if (hasEncryptedFieldsWithoutCipher(stores, fieldCipher)) {
       throw ValidationException(
           'Store declares encrypted fields but no fieldCipher was provided.');
     }
@@ -93,59 +92,6 @@ final class LocalPocketDatabaseController extends DatabaseController {
       databaseAdapter: db,
       pocket: pocket,
     );
-  }
-
-  static Map<String, Object?> _parseOpenOptions(JSAny? data) {
-    if (data == null) return {};
-    try {
-      final dartVal = data.dartify();
-      if (dartVal is Map) {
-        final stringMap = _deepStringMap(dartVal);
-        final result = <String, Object?>{};
-        if (stringMap['stores'] is List) {
-          result['stores'] =
-              (stringMap['stores'] as List).map((s) => parseSchema(s)).toList();
-        }
-        if (stringMap['maxDocBytes'] is int) {
-          result['maxDocBytes'] = stringMap['maxDocBytes'];
-        }
-        if (stringMap['destructiveBackup'] is bool) {
-          result['destructiveBackup'] = stringMap['destructiveBackup'];
-        }
-        return result;
-      }
-    } catch (_) {}
-    return {};
-  }
-
-  /// Reads a single raw option from `additionalData` WITHOUT swallowing
-  /// errors. Used for options whose malformed values must fail loudly (e.g.
-  /// the field-cipher envelope) rather than silently degrading to defaults.
-  static Object? _rawOpenOption(JSAny? data, String key) {
-    if (data == null) return null;
-    try {
-      final dartVal = data.dartify();
-      if (dartVal is Map) {
-        return _deepStringMap(dartVal)[key];
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  static Map<String, Object?> _deepStringMap(Map raw) {
-    final out = <String, Object?>{};
-    raw.forEach((k, v) {
-      final key = k.toString();
-      if (v is Map) {
-        out[key] = _deepStringMap(v);
-      } else if (v is List) {
-        out[key] =
-            v.map((item) => item is Map ? _deepStringMap(item) : item).toList();
-      } else {
-        out[key] = v;
-      }
-    });
-    return out;
   }
 }
 

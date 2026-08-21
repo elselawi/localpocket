@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
+import 'package:localpocket/src/web/facade/facade_host.dart';
+import 'package:localpocket/src/web/facade/open_core.dart';
 import 'package:localpocket/src/web/facade/web_collections.dart';
 import 'package:localpocket/src/web/facade/web_conflicts.dart';
 import 'package:localpocket/src/web/facade/web_files.dart';
@@ -21,8 +23,9 @@ import 'connector.dart';
 import 'conversions.dart';
 import 'lifecycle.dart';
 import 'protocol.dart';
+import 'web_sender.dart';
 
-class LocalPocket with ChangeBusAwareLP {
+class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   final String path;
   final Database _remoteDb;
   final WebSqlite _webSqlite;
@@ -31,20 +34,24 @@ class LocalPocket with ChangeBusAwareLP {
   WebStorageCapabilities storageCapabilities;
   final Map<String, CollectionSchema> _storeMap = {};
   final PerfCounters perf = PerfCounters();
+  @override
   final Map<int, StreamController<dynamic>> workerStreams = {};
+  @override
   final WatchSubscriptionTracker watchTracker = WatchSubscriptionTracker();
 
   /// Optional per-watch transform applied to a worker event value before it is
   /// added to the matching [workerStreams] controller. Used by watch types
   /// whose wire payload needs structural decoding (e.g. conflicts -> typed
   /// [ConflictRecord] lists).
+  @override
   final Map<int, Object? Function(Object?)> workerEventDecoders = {};
   final StreamController<Map<String, Object?>> _syncStatusController =
       StreamController<Map<String, Object?>>.broadcast();
   final StreamController<void> _authRequiredController =
       StreamController<void>.broadcast();
 
-  bool _closed = false;
+  /// Pure-Dart request/response core over the worker transport.
+  late final WebSender _sender;
 
   LocalPocket._({
     required this.path,
@@ -60,6 +67,13 @@ class LocalPocket with ChangeBusAwareLP {
     for (final s in stores) {
       _storeMap[s.name] = s;
     }
+    _sender = WebSender(
+      transport: (req) async {
+        final raw = await _remoteDb.customRequest(req.toJson().jsify());
+        return raw?.dartify();
+      },
+      onWorkerClosed: _failWorkerStreams,
+    );
   }
 
   /// Opens or creates a database on web by spawning the dedicated engine worker.
@@ -87,27 +101,29 @@ class LocalPocket with ChangeBusAwareLP {
     String workerBlobUrl;
     String wasmBlobUrl;
 
-    try {
-      workerBlobUrl =
-          await loadAssetAsBlobUrl(workerPath, 'application/javascript');
-      blobUrls.add(workerBlobUrl);
-    } catch (_) {
-      // Fallback if running from root test / dev harness
-      workerBlobUrl = 'assets/localpocket_worker.js';
-    }
+    // Worker asset: primary path, falling back to the plain root asset when
+    // running from a dev/test harness where the package asset 404s.
+    final workerResolved = await resolveAssetAsBlobUrl(
+      load: loadAssetAsBlobUrl,
+      primary: workerPath,
+      mimeType: 'application/javascript',
+      fallbacks: const [],
+      lastResort: 'assets/localpocket_worker.js',
+    );
+    workerBlobUrl = workerResolved.url;
+    if (workerResolved.fetched) blobUrls.add(workerBlobUrl);
 
-    try {
-      wasmBlobUrl = await loadAssetAsBlobUrl(wasmPath, 'application/wasm');
-      blobUrls.add(wasmBlobUrl);
-    } catch (_) {
-      try {
-        wasmBlobUrl =
-            await loadAssetAsBlobUrl('assets/sqlite3.wasm', 'application/wasm');
-        blobUrls.add(wasmBlobUrl);
-      } catch (_) {
-        wasmBlobUrl = 'assets/packages/localpocket/assets/sqlite3.wasm';
-      }
-    }
+    // Wasm asset: primary path, then the root `assets/sqlite3.wasm`, then the
+    // packaged path as a final plain-path fallback.
+    final wasmResolved = await resolveAssetAsBlobUrl(
+      load: loadAssetAsBlobUrl,
+      primary: wasmPath,
+      mimeType: 'application/wasm',
+      fallbacks: const ['assets/sqlite3.wasm'],
+      lastResort: 'assets/packages/localpocket/assets/sqlite3.wasm',
+    );
+    wasmBlobUrl = wasmResolved.url;
+    if (wasmResolved.fetched) blobUrls.add(wasmBlobUrl);
 
     late LocalPocket pocket;
     final webSqlite = WebSqlite.open(
@@ -162,7 +178,6 @@ class LocalPocket with ChangeBusAwareLP {
       hasFts5: true,
       platform: PlatformProfile.web,
     );
-
     pocket = LocalPocket._(
       path: path,
       remoteDb: connectResult.database,
@@ -191,33 +206,16 @@ class LocalPocket with ChangeBusAwareLP {
     // facade matrix. Falls back to the facade's initial values on any failure
     // so open() does not fail just because capability discovery glitched.
     try {
-      final remote = await pocket.send(WireOp.capabilities) as Map;
-      final remoteMap = remote.map((k, v) => MapEntry(k.toString(), v));
-      final caps = SqliteCapabilities(
-        sqliteVersion: remoteMap['sqliteVersion'] as String? ??
-            pocket.capabilities.sqliteVersion,
-        hasStrict:
-            remoteMap['hasStrict'] as bool? ?? pocket.capabilities.hasStrict,
-        walSupported: remoteMap['walSupported'] as bool? ??
-            pocket.capabilities.walSupported,
-        hasFts5: remoteMap['hasFts5'] as bool? ?? pocket.capabilities.hasFts5,
-        platform: PlatformProfile.web,
+      final remote = await pocket.send(WireOp.capabilities);
+      final reconciled = reconcileOpenCapabilities(
+        capabilities: pocket.capabilities,
+        storage: pocket.storageCapabilities,
+        remote: remote is Map
+            ? remote.map((k, v) => MapEntry(k.toString(), v))
+            : null,
       );
-      pocket.capabilities = caps;
-      pocket.storageCapabilities = WebStorageCapabilities(
-        storage: remoteMap['storage'] as String? ??
-            pocket.storageCapabilities.storage,
-        durable:
-            remoteMap['durable'] as bool? ?? pocket.storageCapabilities.durable,
-        persistent: remoteMap['persistent'] as bool? ??
-            pocket.storageCapabilities.persistent,
-        multiTabStorage: remoteMap['multiTabStorage'] as bool? ??
-            pocket.storageCapabilities.multiTabStorage,
-        multiTabSync: remoteMap['multiTabSync'] as bool? ??
-            pocket.storageCapabilities.multiTabSync,
-        worker:
-            remoteMap['worker'] as bool? ?? pocket.storageCapabilities.worker,
-      );
+      pocket.capabilities = reconciled.capabilities;
+      pocket.storageCapabilities = reconciled.storage;
     } catch (_) {
       // Keep the facade's initial hard-coded fallback snapshot.
     }
@@ -225,85 +223,39 @@ class LocalPocket with ChangeBusAwareLP {
     return pocket;
   }
 
-  static Future<bool> _requestPersistence() async {
-    try {
-      // Firefox can hold this promise pending on a permission prompt that may
-      // never be answered (e.g. headless). Treat an unanswered prompt as
-      // not-persistent rather than hanging open() forever.
-      final result = await web.window.navigator.storage
-          .persist()
-          .toDart
-          .timeout(const Duration(seconds: 10), onTimeout: () => false.toJS);
-      return result.toDart;
-    } catch (_) {
-      return false;
-    }
-  }
+  static Future<bool> _requestPersistence() => requestPersistenceWithFallback(
+        () async =>
+            (await web.window.navigator.storage.persist().toDart).toDart,
+      );
 
   Iterable<String> get storeNames => _storeMap.keys;
 
-  int nextRequestId = 1;
+  @override
+  int get nextRequestId => _sender.nextRequestId;
+
+  @override
+  set nextRequestId(int value) => _sender.nextRequestId = value;
 
   /// Sends a typed WebRequest to the worker and decodes the response.
+  ///
+  /// Delegates to the pure-Dart [WebSender] core: closed detection, closed
+  /// marker classification, envelope validation, and error decoding all live
+  /// there and are unit-tested on the VM.
+  @override
   Future<Object?> send(String op,
       [Map<String, Object?> args = const {}]) async {
-    if (_closed) {
-      throw DatabaseWorkerClosedException('LocalPocket is closed.');
-    }
-    final req = WebRequest(
-      version: webProtocolVersion,
-      requestId: nextRequestId++,
-      op: op,
-      args: args,
-    );
-
-    final JSAny? rawResponse;
-    try {
-      rawResponse = await _remoteDb.customRequest(req.toJson().jsify());
-    } on Exception catch (e) {
-      final message = e.toString();
-      if (message.contains('Channel to database worker is closed') ||
-          message.contains('worker is closed') ||
-          message.contains('Worker closed')) {
-        _markWorkerClosed();
-        throw DatabaseWorkerClosedException(message);
-      }
-      rethrow;
-    }
-
-    if (rawResponse == null) {
-      throw ProtocolEnvelopeException('Null response from worker.');
-    }
-    final dartMap = (rawResponse.dartify() as Map?)
-        ?.map((k, v) => MapEntry(k.toString(), v));
-    if (dartMap == null) {
-      throw ProtocolEnvelopeException('Malformed response map from worker.');
-    }
-
-    final resp = WebResponse.fromJson(
-      dartMap,
-      expectedVersion: webProtocolVersion,
-    );
-    if (resp.isError) {
-      throw decodeError(resp.error!);
-    }
-    return resp.result;
+    return _sender.send(op, args);
   }
 
-  void _markWorkerClosed() {
-    if (_closed) return;
-    _closed = true;
-    final error = DatabaseWorkerClosedException(
-        'The database worker closed unexpectedly.');
-    for (final stream in workerStreams.values) {
-      if (!stream.isClosed) stream.addError(error);
-    }
-    workerStreams.clear();
-    workerEventDecoders.clear();
-    if (!_syncStatusController.isClosed) _syncStatusController.addError(error);
-    if (!_authRequiredController.isClosed) {
-      _authRequiredController.addError(error);
-    }
+  void _markWorkerClosed() => _sender.markWorkerClosed();
+
+  void _failWorkerStreams() {
+    failWorkerStreams(
+      workerStreams: workerStreams,
+      workerEventDecoders: workerEventDecoders,
+      syncStatusController: _syncStatusController,
+      authRequiredController: _authRequiredController,
+    );
   }
 
   void _handleWorkerEvent(JSAny raw) {
@@ -311,50 +263,14 @@ class LocalPocket with ChangeBusAwareLP {
       final value = raw.dartify();
       if (value is! Map) return;
       final event = value.map((k, v) => MapEntry(k.toString(), v));
-      if (event['v'] != webProtocolVersion) {
-        return;
-      }
-      if (event['op'] == WireOp.authRequired) {
-        if (!_authRequiredController.isClosed) {
-          _authRequiredController.add(null);
-        }
-        return;
-      }
-      if (event['op'] == WireOp.syncStatus) {
-        final status = event['status'];
-        if (status is Map && !_syncStatusController.isClosed) {
-          _syncStatusController.add(
-              status.map((k, v) => MapEntry(k.toString(), decodeWireValue(v))));
-        }
-        return;
-      }
-      if (event['op'] == WireOp.recordEvent) {
-        final rawEvent = event['event'];
-        if (rawEvent is Map) {
-          final decoded = (decodeWireValue(rawEvent) as Map)
-              .map((k, v) => MapEntry(k.toString(), v));
-          final recordEvent = RecordChangeEvent.fromJson(decoded);
-          changeBus.emitEvent(recordEvent);
-        }
-        return;
-      }
-      if (event['op'] != WireOp.workerEvent) {
-        return;
-      }
-      final watchId = event['watchId'];
-      if (watchId is! int) return;
-      final stream = workerStreams[watchId];
-      if (stream == null || stream.isClosed) return;
-      if (event['error'] != null) {
-        stream.addError(RemoteLocalPocketException(
-          code: 'watch',
-          message: event['error'].toString(),
-        ));
-        return;
-      }
-      final eventValue = decodeWireValue(event['value']);
-      final decoder = workerEventDecoders[watchId];
-      stream.add(decoder != null ? decoder(eventValue) : eventValue);
+      handleWorkerEventEnvelope(
+        event,
+        workerStreams: workerStreams,
+        workerEventDecoders: workerEventDecoders,
+        authRequiredController: _authRequiredController,
+        syncStatusController: _syncStatusController,
+        changeBus: changeBus,
+      );
     } catch (e, stack) {
       // A malformed unsolicited event must not tear down unrelated requests.
       for (final stream in workerStreams.values) {
@@ -363,6 +279,7 @@ class LocalPocket with ChangeBusAwareLP {
     }
   }
 
+  @override
   CollectionSchema schemaFor(String store) {
     final s = _storeMap[store];
     if (s == null) {
@@ -492,6 +409,7 @@ class LocalPocket with ChangeBusAwareLP {
   /// `FileRef` fields from the worker-owned store.
   static const int _fileChunkBytes = 262144;
 
+  @override
   Future<Map<String, Object?>> filesUpload({
     required String store,
     required String recordId,
@@ -538,6 +456,7 @@ class LocalPocket with ChangeBusAwareLP {
   }
 
   /// Lists file references attached to a record field (metadata RPC).
+  @override
   Future<List<Map<String, Object?>>> filesList({
     required String store,
     required String recordId,
@@ -554,6 +473,7 @@ class LocalPocket with ChangeBusAwareLP {
   }
 
   /// Opens a file's bytes for a record (metadata RPC; full read-back).
+  @override
   Future<Uint8List> filesOpen({
     required String store,
     required String recordId,
@@ -574,6 +494,7 @@ class LocalPocket with ChangeBusAwareLP {
   }
 
   /// Removes a file reference from a record (metadata RPC).
+  @override
   Future<void> filesRemove({
     required String store,
     required String recordId,
@@ -591,6 +512,7 @@ class LocalPocket with ChangeBusAwareLP {
   }
 
   /// Garbage-collects blobs in the worker-owned store.
+  @override
   Future<int> filesGc({
     Duration blobGrace = const Duration(days: 7),
     Duration tmpGrace = const Duration(hours: 24),
@@ -603,6 +525,7 @@ class LocalPocket with ChangeBusAwareLP {
   }
 
   /// Enforces the storage cap via LRU eviction of synced blobs.
+  @override
   Future<int> filesEnforceStorageCap({required int maxBytes}) async {
     final res = (await send(WireOp.fileEnforceStorageCap, {
       'maxBytes': maxBytes,
@@ -617,8 +540,8 @@ class LocalPocket with ChangeBusAwareLP {
   Stream<void> get authRequired => _authRequiredController.stream;
 
   Future<void> close() async {
-    if (_closed) return;
-    _closed = true;
+    if (_sender.isClosed) return;
+    _sender.markClosedLocal();
     changeBus.close();
     await _syncStatusController.close();
     await _authRequiredController.close();

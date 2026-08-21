@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:localpocket/src/web/facade.dart';
+import 'package:localpocket/src/web/facade/facade_host.dart';
 
 /// Page-facing file attachment and blob lifecycle API over the worker-owned
 /// store. Mirrors the native `LocalPocketFiles` public surface; every method
@@ -10,7 +10,7 @@ import 'package:localpocket/src/web/facade.dart';
 /// Object-URL materialization is intentionally NOT here: `URL.createObjectURL`
 /// is window-only work (see `web_blob_object_url.dart`).
 class WebLocalPocketFiles {
-  final LocalPocket _pocket;
+  final WebFacadeHost _pocket;
 
   WebLocalPocketFiles.ins(this._pocket);
 

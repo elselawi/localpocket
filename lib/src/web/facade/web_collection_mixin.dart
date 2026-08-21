@@ -1,5 +1,5 @@
 import 'package:localpocket/src/web/conversions.dart';
-import 'package:localpocket/src/web/facade.dart';
+import 'package:localpocket/src/web/facade/facade_host.dart';
 
 /// Shared wire-CRUD surface for the main-thread collection proxies.
 ///
@@ -8,8 +8,8 @@ import 'package:localpocket/src/web/facade.dart';
 /// [sessionId] differ. Keeping the CRUD bodies here means a new mutation is
 /// added once, never twice.
 mixin WireCollectionMixin {
-  /// The facade pocket used to send wire requests.
-  LocalPocket get pocket;
+  /// The facade host used to send wire requests.
+  WebFacadeHost get pocket;
 
   /// Collection name carried in every envelope.
   String get name;
