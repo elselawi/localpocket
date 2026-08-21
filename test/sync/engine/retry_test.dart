@@ -604,6 +604,60 @@ void main() {
         );
       }
     });
+
+    test('rewindUpdated subtracts the rewind window from a cursor', () {
+      expect(
+          rewindUpdated('2026-03-01 12:00:00.000Z', const Duration(seconds: 5)),
+          '2026-03-01 11:59:55.000Z');
+      expect(
+          rewindUpdated(
+              '2026-03-01 12:00:00.000Z', const Duration(milliseconds: 250)),
+          '2026-03-01 11:59:59.750Z');
+    });
+
+    test('rewindUpdated stays fixed-width across date boundaries', () {
+      // Sub-second / hour / day / month / year rollovers must all stay in the
+      // fixed-width format so lexicographic ordering still equals time order.
+      expect(
+          rewindUpdated(
+              '2026-03-01 00:00:00.000Z', const Duration(milliseconds: 1)),
+          '2026-02-28 23:59:59.999Z');
+      expect(
+          rewindUpdated('2026-01-01 00:00:00.000Z', const Duration(seconds: 1)),
+          '2025-12-31 23:59:59.000Z');
+      expect(
+          rewindUpdated('2026-03-01 12:00:00.000Z', const Duration(hours: 12)),
+          '2026-03-01 00:00:00.000Z');
+    });
+
+    test('the rewind start always sorts at or before the cursor', () {
+      const t = '2026-08-15 10:00:00.000Z';
+      for (final delta in [
+        const Duration(milliseconds: 1),
+        const Duration(seconds: 5),
+        const Duration(minutes: 90),
+        const Duration(days: 400),
+      ]) {
+        final rewound = rewindUpdated(t, delta);
+        expect(rewound.compareTo(t), lessThanOrEqualTo(0),
+            reason: '$delta keeps the window start <= cursor');
+      }
+    });
+
+    test('rewindUpdated round-trips through pbTimestampToDateTime', () {
+      const t = '2026-08-15 10:30:45.123Z';
+      final base = pbTimestampToDateTime(t);
+      final rewound =
+          pbTimestampToDateTime(rewindUpdated(t, const Duration(minutes: 90)));
+      expect(rewound, base.subtract(const Duration(minutes: 90)));
+    });
+
+    test('rewindUpdated rejects a malformed cursor', () {
+      expect(
+        () => rewindUpdated('not-a-timestamp', const Duration(seconds: 1)),
+        throwsA(isA<ProtocolError>()),
+      );
+    });
   });
 }
 

@@ -434,6 +434,33 @@ void main() {
       expect(w1.bucket, w1before,
           reason: 'failing store committed nothing on the failed pass');
     });
+
+    test('a non-Exception store Error is rethrown after the other stores sweep',
+        () async {
+      final h = await EngineHarness.create(
+          config: testConfig(sweepInterval: Duration.zero),
+          stores: [widgetsSchema(), widgetsSchema(name: 'widgets2')]);
+      addTearDown(h.close);
+      h.mock.seed(store: 'widgets', data: {'name': 'a'}, id: bucketAId());
+      h.mock.seed(store: 'widgets2', data: {'name': 'b'}, id: bucketAId());
+      await h.engine.syncNow();
+      final w1before = (await h.engine.syncStore.readSweep('widgets')).bucket;
+      final w2before = (await h.engine.syncStore.readSweep('widgets2')).bucket;
+
+      // A store fails with a raw Error (StateError is NOT an Exception, so it
+      // takes the `throw firstError as Error` rethrow branch).
+      final boom = StateError('listChanges blew up');
+      h.mock.script('listChanges', [MockThrow(boom)]);
+      await expectLater(h.engine.sweeper.sweepIfDue(), throwsA(same(boom)));
+
+      // The other store still swept and committed progress; the failing store
+      // committed nothing.
+      final w2 = await h.engine.syncStore.readSweep('widgets2');
+      expect(w2.bucket, greaterThan(w2before),
+          reason: 'the healthy store still sweeps despite the Error');
+      final w1 = await h.engine.syncStore.readSweep('widgets');
+      expect(w1.bucket, w1before);
+    });
   });
 
   group('hidden retention and purge safety', () {

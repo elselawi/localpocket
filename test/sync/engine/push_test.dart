@@ -86,6 +86,35 @@ void main() {
       expect(h.mock.records[id]!.data['name'], 'remote');
     });
 
+    test(
+        'duplicate id with a vanished remote dead-letters duplicate_id_missing',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id, name: 'x'));
+      // create -> duplicate -> GET finds nothing: the id is not recoverable.
+      h.mock.script('createRecord', [MockThrow(DuplicateIdError())]);
+      h.mock.script('getRecord', [MockReturn(null)]);
+      h.mock.script('listChanges', [MockReturn(const <RemoteRecord>[])]);
+
+      final report = await h.engine.syncNow();
+      expect(report.deadLettered, 1,
+          reason: 'an unrecoverable duplicate create dead-letters');
+      expect(report.pushed, 0);
+      expect(h.mock.records.containsKey(id), isFalse,
+          reason: 'no remote record is created for the dead letter');
+
+      final dl = await deadLetters(h.pocket);
+      expect(dl.single['kind'], 'duplicate_id_missing');
+      expect(dl.single['record_id'], id);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.error,
+          reason: 'the sync row parks in error (never retried in a loop)');
+      // The dead-letter contract preserves the op for audit.
+      expect(
+          await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull);
+    });
+
     test('update gets before patch', () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);

@@ -88,6 +88,45 @@ void main() {
           reason: 'min(config, capability) wins');
       expect(await h.engine.syncStore.countPending(), 0);
     });
+
+    test('a 403 on the batch endpoint disables batch and falls back per-record',
+        () async {
+      final mock = MockSyncBackend()..batchEnabled = true;
+      final h = await EngineHarness.create(mock: mock);
+      addTearDown(h.close);
+      final id1 = generateRecordId();
+      final id2 = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id1, name: 'a'));
+      await h.pocket.collection('widgets').put(record(id: id2, name: 'b'));
+
+      // The batch endpoint returns 403 (not the capability probe): the pusher
+      // must disable batch for the session and push each op per-record.
+      h.mock
+          .script('pushBatch', [MockThrow(ForbiddenError('batch forbidden'))]);
+      final report = await h.engine.syncNow();
+
+      expect(h.engine.pusher.batchEnabled, isFalse,
+          reason: 'a 403 on the batch endpoint disables batch for the session');
+      expect(report.pushed, 2,
+          reason: 'both ops still push via the per-record fallback');
+      expect(report.hadError, isFalse);
+      expect(h.mock.batchCalls, 1, reason: 'exactly one batch attempt');
+      expect(h.mock.createCalls, 2,
+          reason: 'each op falls back to a per-record create');
+      expect((await sr(h.pocket, id1))!.syncState, SyncState.clean);
+      expect((await sr(h.pocket, id2))!.syncState, SyncState.clean);
+      expect(h.mock.records.containsKey(id1), isTrue);
+      expect(h.mock.records.containsKey(id2), isTrue);
+
+      // The session stays in per-record mode: later cycles never re-batch.
+      final id3 = generateRecordId();
+      await h.pocket.collection('widgets').put(record(id: id3, name: 'c'));
+      final report2 = await h.engine.syncNow();
+      expect(report2.pushed, 1);
+      expect(h.mock.batchCalls, 1,
+          reason: 'batch stays disabled for the session');
+      expect(h.mock.createCalls, 3);
+    });
   });
 
   group('batch response contract matrix', () {

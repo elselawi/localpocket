@@ -157,5 +157,45 @@ void main() {
       expect((await h.pocket.collection('widgets').get(id))!['name'], 'v3');
       expect((await sr(h.pocket, id))!.remoteUpdated, v3);
     });
+
+    test('an event with EXACTLY the applied watermark is stale (not applied)',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: doc('', 'v1', 1));
+      await h.engine.syncNow();
+      final v1 = h.mock.records[id]!.updated;
+      expect((await sr(h.pocket, id))!.remoteUpdated, v1);
+
+      // `remote.updated == sr.remoteUpdated` (not strictly newer) is stale:
+      // the rewind-window re-delivery of the same version must never apply.
+      final equal = RemoteRecord(
+          id: id,
+          store: 'widgets',
+          updated: v1,
+          data: {'name': 'should-not-apply'});
+      expect(await h.engine.puller.fastPathApply(equal), isFalse);
+      expect((await h.pocket.collection('widgets').get(id))!['name'], 'v1',
+          reason: 'equal watermark never overwrites the row');
+      expect((await sr(h.pocket, id))!.remoteUpdated, v1,
+          reason: 'the applied watermark is unchanged');
+    });
+
+    test('a fast-path event for an unknown record applies regardless of age',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      // No local row: a create event is safe to insert even with a very old
+      // timestamp (there is no watermark to be stale against).
+      final id = generateRecordId();
+      final rec = RemoteRecord(
+          id: id,
+          store: 'widgets',
+          updated: '2020-01-01 00:00:00.000Z',
+          data: {'name': 'born-remote'});
+      expect(await h.engine.puller.fastPathApply(rec), isTrue);
+      expect((await h.pocket.collection('widgets').get(id))!['name'],
+          'born-remote');
+    });
   });
 }
