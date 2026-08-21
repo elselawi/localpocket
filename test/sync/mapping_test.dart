@@ -5,6 +5,13 @@ import 'package:test/test.dart';
 import '../support/helpers.dart';
 import 'engine/engine_helpers.dart';
 
+/// A value that passes field-kind validation but is not JSON-serializable, so
+/// canonical payload building throws a non-`MapFailure` error.
+class _Unserializable {
+  @override
+  String toString() => 'opaque-object';
+}
+
 /// remote normalization input matrix.
 ///
 /// Every declared field kind is checked for missing required values, nulls,
@@ -176,6 +183,55 @@ void main() {
           }));
       expect(n.isSuccess, isFalse);
       expect(n.error, isNotNull);
+    });
+
+    test('a non-MapFailure failure surfaces the raw error, not MapFailure', () {
+      // `_Unserializable` passes field-kind validation but canonicalization
+      // throws an ArgumentError DURING payload building — after normalization
+      // succeeded. The generic catch must capture the raw error text (a
+      // MapFailure would carry a "must be"/"missing" message instead).
+      final n = normalizeSingleRemote(
+          schema, rec({'name': 'x', 'extra': _Unserializable()}));
+      expect(n.isSuccess, isFalse);
+      expect(n.logical, isNull, reason: 'no logical doc on failure');
+      expect(n.remotePayloadJson, isNull);
+      expect(n.remoteHash, isNull);
+      expect(n.error, contains('Cannot canonicalize value of type'),
+          reason: 'the raw underlying exception text is preserved');
+      expect(n.error, isNot(contains('MapFailure')),
+          reason: 'this is the generic catch branch, not a MapFailure');
+    });
+
+    test('an unserializable value nested in a json field is quarantined', () {
+      // `meta` is a valid Map, so normalization passes; the unsupported value
+      // only explodes during canonical payload building.
+      final n = normalizeSingleRemote(
+          schema,
+          rec({
+            'name': 'x',
+            'meta': {'nested': _Unserializable()},
+          }));
+      expect(n.isSuccess, isFalse);
+      expect(n.error, contains('Cannot canonicalize value of type'));
+    });
+
+    test('an unserializable element inside a jsonList is quarantined', () {
+      final n = normalizeSingleRemote(
+          schema,
+          rec({
+            'name': 'x',
+            'tags': ['ok', _Unserializable()],
+          }));
+      expect(n.isSuccess, isFalse);
+      expect(n.error, contains('Cannot canonicalize value of type'));
+    });
+
+    test('the failed remote record is preserved on the result', () {
+      final id = generateRecordId();
+      final n = normalizeSingleRemote(
+          schema, rec({'name': 'x', 'extra': _Unserializable()}, id: id));
+      expect(n.remote.id, id);
+      expect(n.remote.store, 'widgets');
     });
 
     test('one bad record quarantines without stalling valid records', () async {

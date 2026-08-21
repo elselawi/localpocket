@@ -1,5 +1,6 @@
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/sync.dart';
+import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
@@ -81,7 +82,10 @@ void main() {
     });
 
     test('lastSuccessfulSyncAt only advances on error-free cycles', () async {
-      final h = await EngineHarness.create();
+      // A controllable clock keeps every cycle's completion instant distinct
+      // (wall-clock runs can land two cycles in the same millisecond).
+      var clock = 1000000;
+      final h = await EngineHarness.create(now: () => clock);
       addTearDown(h.close);
       final id = generateRecordId();
       await h.pocket.collection('widgets').put(record(id: id, name: 'x'));
@@ -91,6 +95,7 @@ void main() {
 
       // Error cycle: lastSyncAt advances; lastSuccessfulSyncAt does not (it
       // either stays null or keeps the previous success time).
+      clock += 1000;
       h.mock.script('createRecord', [MockThrow(TransientNetworkError('boom'))]);
       await h.engine.syncNow();
       await Future<void>.delayed(Duration.zero);
@@ -106,6 +111,7 @@ void main() {
 
       // Healthy cycle: both timestamps are stamped at the same completion
       // instant.
+      clock += 1000;
       h.mock.script('createRecord', const []);
       await h.engine.syncNow();
       await Future<void>.delayed(Duration.zero);
@@ -119,7 +125,10 @@ void main() {
 
     test('lastSuccessfulSyncAt holds the last success across error cycles',
         () async {
-      final h = await EngineHarness.create();
+      // A controllable clock keeps every cycle's completion instant distinct
+      // (wall-clock runs can land two cycles in the same millisecond).
+      var clock = 1000000;
+      final h = await EngineHarness.create(now: () => clock);
       addTearDown(h.close);
       final id = generateRecordId();
       await h.pocket.collection('widgets').put(record(id: id, name: 'x'));
@@ -128,12 +137,14 @@ void main() {
       final sub = h.engine.status.listen(statuses.add);
 
       // Healthy cycle -> a success timestamp is stamped.
+      clock += 1000;
       await h.engine.syncNow();
       await Future<void>.delayed(Duration.zero);
       final success = statuses.last.lastSuccessfulSyncAt;
       expect(success, isNotNull);
 
       // Add fresh pending work, then make the next cycle fail on push.
+      clock += 1000;
       final id2 = generateRecordId();
       await h.pocket.collection('widgets').put(record(id: id2, name: 'y'));
       h.mock.script('createRecord', [MockThrow(TransientNetworkError('boom'))]);
@@ -220,6 +231,64 @@ void main() {
       await h.engine.fullResync();
       expect(states, contains(SyncEngineState.fullResync));
       expect(h.engine.state, SyncEngineState.idle);
+      await sub.cancel();
+    });
+
+    test('a failing status count query still emits status with zero counts',
+        () async {
+      // Inject a database whose aggregate status query throws. Every other
+      // statement (migration, pull, push) still works.
+      final db = DirectSqliteDatabase(sqlite.sqlite3.openInMemory());
+      var failedQueries = 0;
+      db.onQuery = (sql, _) {
+        if (sql.contains('SUM(CASE WHEN')) {
+          failedQueries++;
+          throw StateError('count query down');
+        }
+      };
+      final pocket = await openPocket(database: db);
+      final mock = MockSyncBackend();
+      final engine = SyncEngine(
+        pocket: pocket,
+        backend: mock,
+        config: testConfig(),
+      );
+      addTearDown(() async {
+        await engine.stop();
+        await pocket.close();
+      });
+
+      // A pending local op: a healthy count query would report it as
+      // `pending` at the transitions fired during the cycle.
+      final id = generateRecordId();
+      await pocket.collection('widgets').put(record(id: id, name: 'x'));
+      // Keep it pending so the real count would be non-zero at emit time.
+      mock.script('createRecord', [MockThrow(TransientNetworkError('down'))]);
+
+      final statuses = <SyncStatus>[];
+      final sub = engine.status.listen(statuses.add);
+      await engine.start();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      expect(failedQueries, greaterThan(0),
+          reason: 'the injected count-query failure was actually exercised');
+      expect(statuses, isNotEmpty,
+          reason: 'status must still emit when the count query fails');
+      for (final s in statuses) {
+        expect(s.pending, 0,
+            reason: 'a failed count query falls back to zeros, not the real '
+                'pending count');
+        expect(s.conflicts, 0);
+        expect(s.hidden, 0);
+        expect(s.blocked, 0);
+      }
+      expect(engine.state, isNot(SyncEngineState.closed),
+          reason: 'the failed count query must not poison the engine');
+
+      // The engine stays usable once the count query recovers.
+      mock.script('createRecord', const []);
+      await engine.syncNow();
+      expect(engine.state, isNot(SyncEngineState.closed));
       await sub.cancel();
     });
   });

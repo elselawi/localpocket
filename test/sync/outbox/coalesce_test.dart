@@ -197,6 +197,57 @@ void main() {
       expect(op, isNotNull);
     });
 
+    test('editing an error row resets the full retry bookkeeping', () async {
+      final pocket = await open();
+      addTearDown(pocket.close);
+      final id = generateRecordId();
+      await pocket.collection('widgets').put(record(id: id, name: 'a'));
+      await pocket.outbox.ack('widgets', id, serverUpdated: t0);
+      // A real failure leaves attempt count, a backoff deadline, and an error.
+      await pocket.outbox.recordFailure('widgets', id,
+          error: 'boom',
+          attempts: 3,
+          nextRetryAt: 1 << 40,
+          state: SyncState.error);
+
+      await pocket.collection('widgets').patch(id, {'qty': 1});
+
+      final sr = await pocket.outbox.readSyncRow(pocket.db, 'widgets', id);
+      expect(sr!.syncState, SyncState.dirty, reason: 'edit replaces the error');
+      expect(sr.lastError, isNull, reason: 'last_error cleared by the edit');
+      expect(sr.attemptCount, 0, reason: 'attempt_count reset by the edit');
+      expect(sr.nextRetryAt, 0, reason: 'next_retry_at reset by the edit');
+      expect((await pocket.outbox.readOp(pocket.db, 'widgets', id)), isNotNull);
+    });
+
+    test('editing a quarantine row re-dirties it but keeps retry bookkeeping',
+        () async {
+      final pocket = await open();
+      addTearDown(pocket.close);
+      final id = generateRecordId();
+      await pocket.collection('widgets').put(record(id: id, name: 'a'));
+      await pocket.outbox.ack('widgets', id, serverUpdated: t0);
+      // Unlike `error`, the edit path only resets bookkeeping for the error
+      // state: a quarantine row keeps its attempt count, deadline and error.
+      await pocket.outbox.recordFailure('widgets', id,
+          error: 'malformed',
+          attempts: 2,
+          nextRetryAt: 42,
+          state: SyncState.quarantine);
+
+      await pocket.collection('widgets').patch(id, {'qty': 1});
+
+      final sr = await pocket.outbox.readSyncRow(pocket.db, 'widgets', id);
+      expect(sr!.syncState, SyncState.dirty,
+          reason: 'edit clears the quarantine state');
+      expect(sr.attemptCount, 2,
+          reason: 'attempt_count preserved for a quarantine row');
+      expect(sr.nextRetryAt, 42,
+          reason: 'next_retry_at preserved for a quarantine row');
+      expect(sr.lastError, 'malformed',
+          reason: 'last_error preserved for a quarantine row');
+    });
+
     test('conflict blocks edits until resolved', () async {
       final pocket = await open();
       addTearDown(pocket.close);
