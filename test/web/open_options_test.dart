@@ -17,8 +17,9 @@ void main() {
   group('parseOpenOptions', () {
     test('parses stores into a CollectionSchema list', () {
       final schema = encryptedStore();
-      final options =
-          parseOpenOptions({'stores': [schema.toJson()]});
+      final options = parseOpenOptions({
+        'stores': [schema.toJson()]
+      });
       final stores = (options['stores'] as List).cast<CollectionSchema>();
       expect(stores, hasLength(1));
       expect(stores.single.name, 'vault');
@@ -51,7 +52,9 @@ void main() {
       expect(wrongTypes, isEmpty);
 
       // A stores list containing non-map garbage is dropped entirely.
-      final badStore = parseOpenOptions({'stores': ['garbage']});
+      final badStore = parseOpenOptions({
+        'stores': ['garbage']
+      });
       expect(badStore, isEmpty);
 
       // A stores list whose schema JSON is malformed is dropped.
@@ -74,10 +77,16 @@ void main() {
   group('rawOpenOption', () {
     test('reads a raw key without swallowing malformed values', () {
       final data = {
-        'fieldCipher': {'type': 'aes-gcm', 'key': [1, 2, 3]},
+        'fieldCipher': {
+          'type': 'aes-gcm',
+          'key': [1, 2, 3]
+        },
       };
       final raw = rawOpenOption(data, 'fieldCipher');
-      expect(raw, {'type': 'aes-gcm', 'key': [1, 2, 3]});
+      expect(raw, {
+        'type': 'aes-gcm',
+        'key': [1, 2, 3]
+      });
     });
 
     test('returns null for a missing key or non-map data', () {
@@ -108,8 +117,7 @@ void main() {
 
     test('false when a cipher is provided', () {
       expect(
-        hasEncryptedFieldsWithoutCipher(
-            [encryptedStore()], 'cipher-object'),
+        hasEncryptedFieldsWithoutCipher([encryptedStore()], 'cipher-object'),
         isFalse,
       );
     });

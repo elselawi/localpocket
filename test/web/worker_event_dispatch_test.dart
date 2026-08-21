@@ -28,7 +28,8 @@ void main() {
         workerStreams: streams,
         workerEventDecoders: const {},
         authRequiredController: StreamController<void>.broadcast(),
-        syncStatusController: StreamController<Map<String, Object?>>.broadcast(),
+        syncStatusController:
+            StreamController<Map<String, Object?>>.broadcast(),
         changeBus: ChangeBus(),
       );
 
@@ -58,7 +59,8 @@ void main() {
         workerStreams: streams,
         workerEventDecoders: decoders,
         authRequiredController: StreamController<void>.broadcast(),
-        syncStatusController: StreamController<Map<String, Object?>>.broadcast(),
+        syncStatusController:
+            StreamController<Map<String, Object?>>.broadcast(),
         changeBus: ChangeBus(),
       );
 
@@ -83,7 +85,8 @@ void main() {
         workerStreams: streams,
         workerEventDecoders: const {},
         authRequiredController: StreamController<void>.broadcast(),
-        syncStatusController: StreamController<Map<String, Object?>>.broadcast(),
+        syncStatusController:
+            StreamController<Map<String, Object?>>.broadcast(),
         changeBus: ChangeBus(),
       );
 
@@ -133,7 +136,8 @@ void main() {
         workerStreams: const {},
         workerEventDecoders: const {},
         authRequiredController: authRequired,
-        syncStatusController: StreamController<Map<String, Object?>>.broadcast(),
+        syncStatusController:
+            StreamController<Map<String, Object?>>.broadcast(),
         changeBus: ChangeBus(),
       );
 
@@ -162,7 +166,8 @@ void main() {
         workerStreams: const {},
         workerEventDecoders: const {},
         authRequiredController: StreamController<void>.broadcast(),
-        syncStatusController: StreamController<Map<String, Object?>>.broadcast(),
+        syncStatusController:
+            StreamController<Map<String, Object?>>.broadcast(),
         changeBus: changeBus,
       );
 
@@ -239,7 +244,8 @@ void main() {
         workerStreams: streams,
         workerEventDecoders: const {},
         authRequiredController: StreamController<void>.broadcast(),
-        syncStatusController: StreamController<Map<String, Object?>>.broadcast(),
+        syncStatusController:
+            StreamController<Map<String, Object?>>.broadcast(),
         changeBus: ChangeBus(),
       );
       // Should not throw despite the closed controller.

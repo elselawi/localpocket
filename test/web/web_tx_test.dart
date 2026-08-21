@@ -52,7 +52,8 @@ void main() {
       expect(fake.sent[1].$2, {'sessionId': 42, 'savepoint': 'sp_2'});
     });
 
-    test('a failing rollback is swallowed and the original error still '
+    test(
+        'a failing rollback is swallowed and the original error still '
         'propagates', () async {
       fake.responses[WireOp.txSavepoint] = {'savepoint': 'sp_3'};
       fake.onSend = (op, args) async {
@@ -94,8 +95,7 @@ void main() {
 
     test('WebTxSearchQueryBuilder fetch carries the session id', () async {
       fake.responses[WireOp.compiledQuery] = {'results': <Object?>[]};
-      final results =
-          await tx.search('widgets', 'engines').limit(5).fetch();
+      final results = await tx.search('widgets', 'engines').limit(5).fetch();
       expect(results, isEmpty);
       final (op, args) = fake.sent.single;
       expect(op, WireOp.compiledQuery);

@@ -55,7 +55,8 @@ void main() {
     expect(call.expectedSha256, 'deadbeef');
   });
 
-  test('providing neither bytes nor byteArray throws ArgumentError and never '
+  test(
+      'providing neither bytes nor byteArray throws ArgumentError and never '
       'delegates', () async {
     await expectLater(
       files.attach(store: 'widgets', recordId: 'rec3'),

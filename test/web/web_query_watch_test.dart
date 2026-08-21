@@ -16,8 +16,7 @@ void main() {
   });
 
   Map<String, Object?> watchEnvelope() {
-    final (op, args) =
-        fake.sent.where((s) => s.$1 == WireOp.watchQuery).last;
+    final (op, args) = fake.sent.where((s) => s.$1 == WireOp.watchQuery).last;
     expect(op, WireOp.watchQuery);
     return args;
   }
@@ -81,7 +80,11 @@ void main() {
 
   test('the initial snapshot is wire-decoded and added to the stream',
       () async {
-    final r1 = {'id': 'a', 'name': 'apple', 'made_on': DateTime.utc(2026, 1, 1)};
+    final r1 = {
+      'id': 'a',
+      'name': 'apple',
+      'made_on': DateTime.utc(2026, 1, 1)
+    };
     final r2 = {'id': 'b', 'name': 'banana'};
     fake.responses[WireOp.watchQuery] = {
       'items': [encodeWireValue(r1), encodeWireValue(r2)],

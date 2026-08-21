@@ -46,7 +46,8 @@ void main() {
         reason: 'an omitted store filter must not be sent');
   });
 
-  test('listOpen sends the store filter when provided and tolerates an '
+  test(
+      'listOpen sends the store filter when provided and tolerates an '
       'empty/missing list', () async {
     fake.responses[WireOp.conflictsList] = {'conflicts': <Object?>[]};
     expect(await conflicts.listOpen(store: 'widgets'), isEmpty);
@@ -77,7 +78,10 @@ void main() {
     expect(op, WireOp.conflictsResolve);
     expect(args['store'], 'widgets');
     expect(args['id'], 'a');
-    expect(args['merged'], encodeWireValue({'name': 'merged', 'made_on': DateTime.utc(2026, 2, 2)}));
+    expect(
+        args['merged'],
+        encodeWireValue(
+            {'name': 'merged', 'made_on': DateTime.utc(2026, 2, 2)}));
   });
 
   test('acceptLocal and acceptRemote send the right ops', () async {

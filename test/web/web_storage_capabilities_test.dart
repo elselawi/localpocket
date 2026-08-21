@@ -31,14 +31,16 @@ void main() {
       worker: false,
     );
     final json = caps.toJson();
-    expect(json.keys, unorderedEquals({
-      'storage',
-      'durable',
-      'persistent',
-      'multiTabStorage',
-      'multiTabSync',
-      'worker',
-    }));
+    expect(
+        json.keys,
+        unorderedEquals({
+          'storage',
+          'durable',
+          'persistent',
+          'multiTabStorage',
+          'multiTabSync',
+          'worker',
+        }));
     expect(json['storage'], 'idb');
     expect(json['durable'], isFalse);
     expect(json['persistent'], isTrue);

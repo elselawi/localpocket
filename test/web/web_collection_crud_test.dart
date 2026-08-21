@@ -16,7 +16,8 @@ void main() {
   });
 
   group('WebCollection CRUD envelopes', () {
-    test('put sends a single put mutation with a wire-encoded record', () async {
+    test('put sends a single put mutation with a wire-encoded record',
+        () async {
       final record = {'id': 'abc', 'name': 'apple', 'qty': 3};
       await col.put(record);
 
@@ -68,14 +69,11 @@ void main() {
       final restoreArgs = fake.sent[1].$2;
       final purgeArgs = fake.sent[2].$2;
 
-      expect(
-          (archiveArgs['mutations'] as List).cast<Map>().single,
+      expect((archiveArgs['mutations'] as List).cast<Map>().single,
           {'action': 'archive', 'id': 'a1'});
-      expect(
-          (restoreArgs['mutations'] as List).cast<Map>().single,
+      expect((restoreArgs['mutations'] as List).cast<Map>().single,
           {'action': 'restore', 'id': 'a2'});
-      expect(
-          (purgeArgs['mutations'] as List).cast<Map>().single,
+      expect((purgeArgs['mutations'] as List).cast<Map>().single,
           {'action': 'purge', 'id': 'a3'});
     });
 
@@ -102,8 +100,7 @@ void main() {
   group('WebCollection.watchOne', () {
     test(
         'registers a watch id, sends watch_one, decodes the initial item, '
-        'delivers later worker events, and cancels via watch_cancel',
-        () async {
+        'delivers later worker events, and cancels via watch_cancel', () async {
       final record = {
         'id': 'abc',
         'name': 'apple',

@@ -7,7 +7,8 @@ import 'package:test/test.dart';
 
 void main() {
   group('resolveAssetAsBlobUrl', () {
-    test('primary fetch success returns the blob URL and marks fetched', () async {
+    test('primary fetch success returns the blob URL and marks fetched',
+        () async {
       final calls = <String>[];
       final resolved = await resolveAssetAsBlobUrl(
         load: (path, mime) async {
@@ -43,8 +44,10 @@ void main() {
       );
       expect(resolved.url, 'blob:fallback');
       expect(resolved.fetched, isTrue);
-      expect(calls, ['assets/packages/localpocket/assets/sqlite3.wasm',
-          'assets/sqlite3.wasm']);
+      expect(calls, [
+        'assets/packages/localpocket/assets/sqlite3.wasm',
+        'assets/sqlite3.wasm'
+      ]);
     });
 
     test('uses the packaged plain path when every fetch fails', () async {
@@ -91,7 +94,8 @@ void main() {
 
     test('resolves false when persist throws instead of propagating', () async {
       expect(
-        await requestPersistenceWithFallback(() async => throw StateError('no')),
+        await requestPersistenceWithFallback(
+            () async => throw StateError('no')),
         isFalse,
       );
     });
@@ -171,7 +175,8 @@ void main() {
       expect(reconciled.storage.worker, isTrue);
     });
 
-    test('a malformed (wrong-typed) response keeps the snapshot without '
+    test(
+        'a malformed (wrong-typed) response keeps the snapshot without '
         'throwing', () {
       final reconciled = reconcileOpenCapabilities(
         capabilities: initialCaps,

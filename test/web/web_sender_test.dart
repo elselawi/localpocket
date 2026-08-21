@@ -93,10 +93,12 @@ void main() {
         sender.send(WireOp.health),
         throwsA(isA<DatabaseWorkerClosedException>()),
       );
-      expect(closedCallback, 1, reason: 'closed callback must run exactly once');
+      expect(closedCallback, 1,
+          reason: 'closed callback must run exactly once');
     });
 
-    test('non-closed transport errors are rethrown as-is and do not mark closed',
+    test(
+        'non-closed transport errors are rethrown as-is and do not mark closed',
         () async {
       var closedCallback = 0;
       final boom = StateError('unrelated failure');
@@ -118,14 +120,14 @@ void main() {
       );
     });
 
-    test('a malformed (non-map) response is rejected as a protocol envelope '
+    test(
+        'a malformed (non-map) response is rejected as a protocol envelope '
         'error', () async {
       final sender = WebSender(transport: (_) async => 'not-a-map');
       await expectLater(
         sender.send(WireOp.health),
-        throwsA(isA<ProtocolEnvelopeException>()
-            .having(
-                (e) => e.message, 'message', contains('Malformed response'))),
+        throwsA(isA<ProtocolEnvelopeException>().having(
+            (e) => e.message, 'message', contains('Malformed response'))),
       );
     });
 
@@ -224,7 +226,9 @@ void main() {
       final authErrors = <Object?>[];
       authRequired.stream.listen((_) {}, onError: authErrors.add);
 
-      final workerStreams = <int, StreamController<dynamic>>{7: watchController};
+      final workerStreams = <int, StreamController<dynamic>>{
+        7: watchController
+      };
       final decoders = <int, Object? Function(Object?)>{7: (x) => x};
 
       failWorkerStreams(

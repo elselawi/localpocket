@@ -81,8 +81,7 @@ class WebSender {
     if (rawResponse is! Map) {
       throw ProtocolEnvelopeException('Malformed response map from worker.');
     }
-    final dartMap =
-        rawResponse.map((k, v) => MapEntry(k.toString(), v));
+    final dartMap = rawResponse.map((k, v) => MapEntry(k.toString(), v));
 
     final resp = WebResponse.fromJson(
       dartMap,

@@ -57,8 +57,7 @@ void main() {
     expect(args, isNot(contains('watchId')));
   });
 
-  test('sessionId/pageLimit/watchId are included only when provided',
-      () async {
+  test('sessionId/pageLimit/watchId are included only when provided', () async {
     fake.responses[WireOp.watchQuery] = {'items': <Object?>[]};
     await sendCompiledPlan(fake, buildPlan(),
         sessionId: 7, pageLimit: 10, watchId: 3);

@@ -67,9 +67,8 @@ class WebQueryBuilder
           };
           try {
             final res = await sendCompiledPlan(_pocket, plan, watchId: watchId);
-            final items = ((res['items'] as List?) ?? const [])
-                .map(_decodeItem)
-                .toList();
+            final items =
+                ((res['items'] as List?) ?? const []).map(_decodeItem).toList();
             if (!controller.isClosed) {
               controller.add(items);
             }

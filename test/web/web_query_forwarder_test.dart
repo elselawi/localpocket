@@ -21,17 +21,15 @@ void main() {
   }
 
   group('fetch', () {
-    test('compiles with limit+1, sends pageLimit, and builds a Page',
-        () async {
+    test('compiles with limit+1, sends pageLimit, and builds a Page', () async {
       final r1 = {'id': 'a', 'name': 'apple'};
       fake.responses[WireOp.compiledQuery] = {
         'items': [encodeWireValue(r1)],
         'hasMore': false,
       };
 
-      final page = await WebQueryBuilder(fake, widgetsSchema())
-          .limit(10)
-          .fetch();
+      final page =
+          await WebQueryBuilder(fake, widgetsSchema()).limit(10).fetch();
 
       final args = planArgs(WireOp.compiledQuery);
       expect(args['operation'], 'query');
@@ -50,16 +48,14 @@ void main() {
         'items': <Object?>[],
         'hasMore': false,
       };
-      final page = await WebQueryBuilder(fake, widgetsSchema())
-          .limit(5)
-          .fetch();
+      final page =
+          await WebQueryBuilder(fake, widgetsSchema()).limit(5).fetch();
       expect(page.items, isEmpty);
       expect(page.hasMore, isFalse);
       expect(page.nextCursor, isNull);
     });
 
-    test('hasMore with a wire-encoded lastRow produces a nextCursor',
-        () async {
+    test('hasMore with a wire-encoded lastRow produces a nextCursor', () async {
       final r1 = {'id': 'a', 'name': 'apple'};
       fake.responses[WireOp.compiledQuery] = {
         'items': [encodeWireValue(r1)],
@@ -77,9 +73,8 @@ void main() {
     test('keysetAfter passes the cursor through to the compiled plan',
         () async {
       // Build a cursor with the same query shape as the facade builder.
-      final core = QueryBuilder.compileOnly(widgetsSchema())
-          .orderBy('name')
-          .limit(10);
+      final core =
+          QueryBuilder.compileOnly(widgetsSchema()).orderBy('name').limit(10);
       final cursor = core.cursorForCompiledRow({'name': 'apple', 'id': 'a'});
 
       fake.responses[WireOp.compiledQuery] = {
@@ -113,7 +108,8 @@ void main() {
 
     test('countDistinct reads the value key', () async {
       fake.responses[WireOp.compiledQuery] = {'value': 3};
-      final n = await WebQueryBuilder(fake, widgetsSchema()).countDistinct('qty');
+      final n =
+          await WebQueryBuilder(fake, widgetsSchema()).countDistinct('qty');
       expect(n, 3);
       expect(planArgs(WireOp.compiledQuery)['operation'], 'countDistinct');
     });

@@ -93,7 +93,10 @@ class FakeFacadeHost implements WebFacadeHost {
         'v': webProtocolVersion,
         'op': WireOp.workerEvent,
         'watchId': watchId,
-        if (error != null) 'error': error else 'value': encodeWireValue(rawValue),
+        if (error != null)
+          'error': error
+        else
+          'value': encodeWireValue(rawValue),
       },
       workerStreams: workerStreams,
       workerEventDecoders: workerEventDecoders,

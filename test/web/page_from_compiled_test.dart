@@ -15,8 +15,7 @@ Map<String, Object?> decodeCursor(String cursor) =>
 void main() {
   final schema = widgetsSchema();
 
-  test('items are wire-decoded, including nested maps and typed values',
-      () {
+  test('items are wire-decoded, including nested maps and typed values', () {
     final core = QueryBuilder.compileOnly(schema).limit(5);
     final page = pageFromCompiled(core, {
       'items': [
@@ -24,7 +23,10 @@ void main() {
           'id': 'a',
           'name': 'apple',
           'made_on': DateTime.utc(2026, 1, 2, 3, 4, 5),
-          'meta': {'nested': 1, 'deep': {'x': true}},
+          'meta': {
+            'nested': 1,
+            'deep': {'x': true}
+          },
         }),
       ],
       'hasMore': false,
@@ -33,7 +35,10 @@ void main() {
     final item = page.items.single;
     expect(item['id'], 'a');
     expect(item['made_on'], DateTime.utc(2026, 1, 2, 3, 4, 5));
-    expect(item['meta'], {'nested': 1, 'deep': {'x': true}});
+    expect(item['meta'], {
+      'nested': 1,
+      'deep': {'x': true}
+    });
   });
 
   test('hasMore is read from the response', () {
