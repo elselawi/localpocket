@@ -339,6 +339,7 @@ class MockSyncBackend implements SyncBackend {
   Future<RemoteRecord> updateRecord({
     required String id,
     required String dataJson,
+    String? baseUpdated,
   }) async {
     updateCalls++;
     final b = await _next('updateRecord');
@@ -348,11 +349,20 @@ class MockSyncBackend implements SyncBackend {
     _checkAuth();
     final barrier = updateRecordBarrier;
     if (barrier != null) {
-      updateRecordEntered?.complete();
+      // Re-entry safe: a version-conflict retry calls updateRecord again while
+      // the test barrier may still be armed.
+      final entered = updateRecordEntered;
+      if (entered != null && !entered.isCompleted) entered.complete();
       await barrier.future;
     }
     final rec = records[id];
     if (rec == null) throw NotFoundError();
+    // Optimistic concurrency: reject the write when the base version moved
+    // since the client's GET — the pusher re-fetches, re-merges and retries
+    // instead of blindly overwriting the concurrent edit.
+    if (baseUpdated != null && rec.updated != baseUpdated) {
+      throw RemoteVersionConflict(current: rec.toRemote());
+    }
     rec.data = jsonDecode(dataJson) as Map<String, Object?>;
     rec.updated = nextUpdated();
     if (lostUpdateResponse) throw TransientNetworkError();
@@ -374,6 +384,17 @@ class MockSyncBackend implements SyncBackend {
     _checkAuth();
     if (poisonEnabled && ops.any((o) => o.dataJson.contains('"poison"'))) {
       throw BatchFailedError('poison in batch');
+    }
+    // Optimistic concurrency: every op whose base version moved since the
+    // client's preflight GET is rejected as a version conflict (all-or-
+    // nothing). The pusher re-runs each op through the per-record OCC path.
+    for (final op in ops) {
+      if (op.baseUpdated == null) continue; // create path
+      final existing = records[op.id];
+      if (existing != null && existing.updated != op.baseUpdated) {
+        throw RemoteVersionConflict(
+            message: 'record ${op.id} changed since the preflight GET');
+      }
     }
     // Transactional: all or nothing.
     final results = <PushResult>[];

@@ -210,8 +210,11 @@ class _RateLimitingMockSyncBackend extends MockSyncBackend {
 
   @override
   Future<RemoteRecord> updateRecord(
-      {required String id, required String dataJson}) {
+      {required String id,
+      required String dataJson,
+      String? baseUpdated}) {
     onAction();
-    return super.updateRecord(id: id, dataJson: dataJson);
+    return super.updateRecord(
+        id: id, dataJson: dataJson, baseUpdated: baseUpdated);
   }
 }

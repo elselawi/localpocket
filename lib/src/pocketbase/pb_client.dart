@@ -105,7 +105,11 @@ class PbClient {
   Future<RemoteRecord> updateRecord({
     required String id,
     required String dataJson,
+    String? baseUpdated,
   }) async {
+    // [baseUpdated] is accepted for contract parity with version-aware
+    // backends; PocketBase has no conditional writes, so it is intentionally
+    // ignored here (the server stays authoritative).
     final uri = _record(id);
     final res = await _sendAuth('PATCH', uri,
         body: jsonEncode({'data': jsonDecode(dataJson)}));

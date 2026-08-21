@@ -329,8 +329,10 @@ class PocketBaseBackend implements SyncBackend {
   Future<RemoteRecord> updateRecord({
     required String id,
     required String dataJson,
+    String? baseUpdated,
   }) {
-    return _client.updateRecord(id: id, dataJson: dataJson);
+    return _client.updateRecord(
+        id: id, dataJson: dataJson, baseUpdated: baseUpdated);
   }
 
   /// Sends a transactional PocketBase batch of record upserts.

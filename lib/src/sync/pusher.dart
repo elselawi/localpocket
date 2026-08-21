@@ -175,13 +175,32 @@ class Pusher {
         await _deadLetter(op, 'missing_target');
         return const PushReport(deadLettered: 1);
       }
+      _assertFetchedMatches(op, fetched);
       if (fetched.updated == op.baseUpdated) {
-        // No concurrent change: plain PATCH.
+        // No concurrent change: a version-checked PATCH. The base version is
+        // sent so a backend that enforces optimistic concurrency can reject
+        // the write if the remote moved between the GET and the PATCH — the
+        // pusher then re-merges against the fresh version instead of losing
+        // the concurrent edit.
         return _handlePushExceptions(op, sr, () async {
-          final rec = await backend.updateRecord(
-              id: op.recordId, dataJson: op.payloadJson);
-          await _settle(op, rec);
-          return const PushReport(pushed: 1);
+          try {
+            final rec = await backend.updateRecord(
+                id: op.recordId,
+                dataJson: op.payloadJson,
+                baseUpdated: fetched.updated);
+            await _settle(op, rec);
+            return const PushReport(pushed: 1);
+          } on RemoteVersionConflict {
+            // The remote moved while the PATCH was in flight: re-fetch and
+            // re-merge against the CURRENT version, then retry — never
+            // overwrite blindly.
+            final fresh = await backend.getRecord(op.recordId);
+            if (fresh == null) {
+              await _deadLetter(op, 'missing_target');
+              return const PushReport(deadLettered: 1);
+            }
+            return _pushUpdateWithBase(op, sr, fresh);
+          }
         }, catchPayloadError: true);
       }
       // Concurrent change: verify / merge.
@@ -191,6 +210,7 @@ class Pusher {
 
   Future<PushReport> _pushUpdateWithBase(
       OutboxOp op, SyncRowState sr, RemoteRecord fetched) async {
+    _assertFetchedMatches(op, fetched);
     final schema = pocket.requireTable(op.store).schema;
     final fetchedLogical = normalizeRemote(schema, fetched);
     final fetchedHash = payloadHash(schema, fetchedLogical);
@@ -208,8 +228,13 @@ class Pusher {
     }
     final mergedJson = canonicalize(outcome.merged);
     return _handlePushExceptions(op, sr, () async {
-      final rec =
-          await backend.updateRecord(id: op.recordId, dataJson: mergedJson);
+      // Version-check the write against the version the merge was based on: a
+      // backend enforcing OCC rejects it (and the next cycle re-merges) if the
+      // remote moved again between the re-fetch and the PATCH.
+      final rec = await backend.updateRecord(
+          id: op.recordId,
+          dataJson: mergedJson,
+          baseUpdated: fetched.updated);
       await _settle(op, rec,
           mergedLogical: outcome.merged, serverDataJson: mergedJson);
       return const PushReport(pushed: 1);
@@ -429,6 +454,32 @@ class Pusher {
       // Binary split isolates the poison op; report its real effects so
       // SyncReport counts match what actually happened.
       return _binarySplit(toSend, mergedByOpId, outboxPayloadByOpId);
+    } on RemoteVersionConflict {
+      // One or more ops were based on a version that moved after the preflight
+      // GETs but before the batch landed. Re-run each op through the
+      // per-record optimistic-concurrency path (re-fetch, re-merge,
+      // version-checked write) so no concurrent remote edit is lost.
+      var pushed = 0;
+      var dead = 0;
+      var conflicted = 0;
+      var blocked = 0;
+      var hadError = false;
+      for (final op in toSend) {
+        final sr = await pocket.outbox.readSyncRow(pocket.db, op.store, op.id);
+        if (sr == null) continue;
+        final r = await _pushOp(_makeOutboxOp(op));
+        pushed += r.pushed;
+        dead += r.deadLettered;
+        conflicted += r.conflicted;
+        blocked += r.blocked;
+        hadError = hadError || r.hadError;
+      }
+      return PushReport(
+          pushed: pushed,
+          deadLettered: dead,
+          conflicted: conflicted,
+          blocked: blocked,
+          hadError: hadError);
     } on ForbiddenError {
       // Server disabled batch: fall back to per-record for this session.
       batchEnabled = false;
@@ -563,6 +614,17 @@ class Pusher {
         mergedLogical: mergedLogical,
       ),
     ]);
+  }
+
+  /// A targeted GET that answers a DIFFERENT record than requested is a
+  /// backend contract violation: surface it loudly (the op is retained, never
+  /// acked or dead-lettered) instead of writing against the wrong record.
+  void _assertFetchedMatches(OutboxOp op, RemoteRecord fetched) {
+    if (fetched.id != op.recordId) {
+      throw MapFailure(
+          'record id "${fetched.id}" does not match requested '
+          '"${op.recordId}"');
+    }
   }
 
   Future<PushReport> _retry(OutboxOp op, SyncRowState sr, SyncError e) async {

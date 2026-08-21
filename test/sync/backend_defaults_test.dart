@@ -47,6 +47,7 @@ class _MinimalBackend extends SyncBackend {
   Future<RemoteRecord> updateRecord({
     required String id,
     required String dataJson,
+    String? baseUpdated,
   }) async =>
       RemoteRecord(
           id: id,

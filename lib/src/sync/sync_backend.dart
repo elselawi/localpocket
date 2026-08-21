@@ -70,6 +70,19 @@ class BatchFailedError extends SyncError {
   BatchFailedError([super.message = 'batch failed']);
 }
 
+/// A write was rejected because the record's remote version moved since the
+/// client's optimistic-concurrency read (the GET before a PATCH, or the batch
+/// preflight GET). The pusher re-fetches, re-merges against [current] and
+/// retries instead of blindly overwriting the concurrent edit.
+class RemoteVersionConflict extends SyncError {
+  /// The remote record at the version that caused the rejection, when the
+  /// backend can provide it.
+  final RemoteRecord? current;
+
+  RemoteVersionConflict({String message = 'version conflict', this.current})
+      : super(message);
+}
+
 // ---------------------------------------------------------------------------
 // Capabilities & wire types
 // ---------------------------------------------------------------------------
@@ -314,9 +327,16 @@ abstract class SyncBackend {
   });
 
   /// Updates a remote record after the pusher's concurrency check.
+  ///
+  /// [baseUpdated] is the remote version the write is based on (captured by
+  /// the pusher's GET). A backend that enforces optimistic concurrency may
+  /// reject the write with [RemoteVersionConflict] when the remote moved past
+  /// that version; backends without conditional writes (e.g. PocketBase) may
+  /// ignore it.
   Future<RemoteRecord> updateRecord({
     required String id,
     required String dataJson,
+    String? baseUpdated,
   });
 
   /// Updates record files using the modifier matrix.
