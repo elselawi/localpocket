@@ -410,7 +410,8 @@ void main() {
         pocket.read((tx) async {
           await tx.transaction((tx2) async {});
         }),
-        throwsA(isA<StateError>()),
+        throwsA(isA<StateError>().having((e) => e.message, 'message',
+            contains('Cannot open a nested transaction in a read-only Tx'))),
       );
     });
 

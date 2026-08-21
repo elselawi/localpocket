@@ -285,6 +285,85 @@ void main() {
       expect(restored, equals(event));
     });
 
+    test('fromJson tolerates missing record maps and changedFields', () {
+      final restored = RecordChangeEvent.fromJson({
+        'store': 'tasks',
+        'id': 't1',
+        'origin': 'local',
+        'action': 'create',
+      });
+
+      expect(restored.oldRecord, isNull);
+      expect(restored.newRecord, isNull);
+      expect(restored.changedFields, isEmpty);
+      expect(restored.store, 'tasks');
+      expect(restored.id, 't1');
+      expect(restored.origin, ChangeOrigin.local);
+      expect(restored.action, ChangeAction.create);
+    });
+
+    test('fromJson coerces record map keys to strings', () {
+      final restored = RecordChangeEvent.fromJson({
+        'store': 'tasks',
+        'id': 't1',
+        'origin': 'remote',
+        'action': 'update',
+        'oldRecord': {1: 'int-key', 'name': 'old'},
+        'newRecord': {'name': 'new'},
+        'changedFields': ['name'],
+      });
+
+      expect(restored.oldRecord, {'1': 'int-key', 'name': 'old'});
+      expect(restored.newRecord, {'name': 'new'});
+      expect(restored.changedFields, {'name'});
+    });
+
+    test('create and purge events round-trip without record maps', () {
+      final created = RecordChangeEvent(
+        store: 'tasks',
+        id: 't1',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.create,
+        newRecord: {'title': 'A'},
+        changedFields: {'title'},
+      );
+      final createJson = created.toJson();
+      expect(createJson, isNot(contains('oldRecord')));
+      final restoredCreate = RecordChangeEvent.fromJson(createJson);
+      expect(restoredCreate, equals(created));
+      expect(restoredCreate.oldRecord, isNull);
+      expect(restoredCreate.newRecord, {'title': 'A'});
+
+      final purged = RecordChangeEvent(
+        store: 'tasks',
+        id: 't1',
+        origin: ChangeOrigin.remote,
+        action: ChangeAction.purge,
+        oldRecord: {'title': 'A'},
+        changedFields: const {},
+      );
+      final purgeJson = purged.toJson();
+      expect(purgeJson, isNot(contains('newRecord')));
+      final restoredPurge = RecordChangeEvent.fromJson(purgeJson);
+      expect(restoredPurge, equals(purged));
+      expect(restoredPurge.newRecord, isNull);
+      expect(restoredPurge.oldRecord, {'title': 'A'});
+    });
+
+    test('changedFields round-trip as a sorted string set', () {
+      final event = RecordChangeEvent(
+        store: 'tasks',
+        id: 't1',
+        origin: ChangeOrigin.resolution,
+        action: ChangeAction.update,
+        changedFields: {'zeta', 'alpha'},
+      );
+      expect(event.toJson()['changedFields'], ['alpha', 'zeta']);
+      final restored = RecordChangeEvent.fromJson(event.toJson());
+      expect(restored.changedFields, {'alpha', 'zeta'});
+      expect(restored, equals(event));
+    });
+
     test('Stream extension methods filter correctly', () async {
       final controller = StreamController<RecordChangeEvent>.broadcast();
       final stream = controller.stream;

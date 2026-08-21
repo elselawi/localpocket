@@ -791,7 +791,39 @@ void main() {
         throwsA(isA<StateError>()),
       );
     });
+
+    test('a provider returning null for an encrypted field throws StateError',
+        () {
+      // A provider is configured, but it declines to supply a cipher for this
+      // field — the row is still undecodable and must fail with the same
+      // typed error as having no provider at all.
+      final id = generateRecordId();
+      final row = encodeDbRow(
+        encSchema,
+        id: id,
+        logical: {'name': 'n', 'secret': 's', 'code': 1, 'blob': {}},
+        archived: false,
+        cryptoProvider: SingleKeyCryptoProvider(cipher),
+      );
+      expect(
+        () =>
+            decodeDbRow(encSchema, row, cryptoProvider: _NullCryptoProvider()),
+        throwsA(isA<StateError>().having((e) => e.message, 'message',
+            contains('no FieldCipher was provided'))),
+      );
+      expect(
+        () => decodeDbRowsProjected(encSchema, [row],
+            columns: ['secret'], cryptoProvider: _NullCryptoProvider()),
+        throwsA(isA<StateError>()),
+      );
+    });
   });
+}
+
+/// A [CryptoProvider] that never supplies a cipher.
+class _NullCryptoProvider implements CryptoProvider {
+  @override
+  FieldCipher? getFieldCipher(String storeName, String fieldName) => null;
 }
 
 /// A [CryptoProvider] that returns a different cipher per (store, field).

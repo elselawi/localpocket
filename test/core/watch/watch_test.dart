@@ -23,6 +23,34 @@ void main() {
       expect(events, [1], reason: 'initial emission reflects current data');
     });
 
+    test('a watch with no limit and no all() defaults to 50 rows', () async {
+      final pocket = await openPocket();
+      addTearDown(pocket.close);
+      final col = pocket.collection('widgets');
+      await col.putAll([
+        for (var i = 0; i < 60; i++)
+          record(id: generateRecordId(), name: 'n$i'),
+      ]);
+
+      final events = <int>[];
+      final sub = col.query().watch().listen((items) {
+        events.add(items.length);
+      });
+      addTearDown(sub.cancel);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(events, [50],
+          reason: 'fetchSnapshot applies the implicit default limit of 50');
+
+      // .all() lifts the implicit limit.
+      final allEvents = <int>[];
+      final subAll = col.query().all().watch().listen((items) {
+        allEvents.add(items.length);
+      });
+      addTearDown(subAll.cancel);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(allEvents, [60], reason: '.all() overrides the default limit');
+    });
+
     test('500 writes in 16ms yield one requery one emit', () async {
       final recorder = StatementRecorder();
       final hooks = TestHooks(onQuery: recorder.record);

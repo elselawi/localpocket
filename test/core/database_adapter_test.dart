@@ -116,6 +116,95 @@ void main() {
     });
   });
 
+  group('query SQL building', () {
+    DirectSqliteDatabase aggDb() {
+      final db = openDb(
+          'CREATE TABLE sales (id TEXT PRIMARY KEY, region TEXT, amount INTEGER)');
+      db.executeSync("INSERT INTO sales VALUES ('a','east',5)");
+      db.executeSync("INSERT INTO sales VALUES ('b','east',10)");
+      db.executeSync("INSERT INTO sales VALUES ('c','west',30)");
+      return db;
+    }
+
+    test('groupBy builds a GROUP BY clause and returns grouped rows', () async {
+      final db = aggDb();
+      final recorder = <String>[];
+      db.onQuery = (sql, _) => recorder.add(sql);
+      final rows = await db.query('sales',
+          columns: ['region', 'SUM(amount) AS total'], groupBy: 'region');
+      expect(recorder.single, contains(' GROUP BY region'));
+      expect({for (final r in rows) r['region']: r['total']},
+          {'east': 15, 'west': 30});
+      db.close();
+    });
+
+    test('having filters grouped results after aggregation', () async {
+      final db = aggDb();
+      final recorder = <String>[];
+      db.onQuery = (sql, _) => recorder.add(sql);
+      final rows = await db.query('sales',
+          columns: ['region', 'SUM(amount) AS total'],
+          groupBy: 'region',
+          having: 'SUM(amount) > 25');
+      final sql = recorder.single;
+      expect(sql, contains(' GROUP BY region'));
+      expect(sql, contains(' HAVING SUM(amount) > 25'));
+      expect(rows, hasLength(1));
+      expect(rows.single['region'], 'west');
+      expect(rows.single['total'], 30);
+      db.close();
+    });
+
+    test('distinct: true emits SELECT DISTINCT and deduplicates rows',
+        () async {
+      final db = aggDb();
+      final recorder = <String>[];
+      db.onQuery = (sql, _) => recorder.add(sql);
+      final rows = await db.query('sales', columns: ['region'], distinct: true);
+      expect(recorder.single, startsWith('SELECT DISTINCT '));
+      expect(rows.map((r) => r['region']).toList(), hasLength(2));
+      db.close();
+    });
+
+    test('empty groupBy and having strings are omitted', () async {
+      final db = aggDb();
+      final recorder = <String>[];
+      db.onQuery = (sql, _) => recorder.add(sql);
+      await db.query('sales', groupBy: '', having: '');
+      expect(recorder.single, isNot(contains('GROUP BY')));
+      expect(recorder.single, isNot(contains('HAVING')));
+      db.close();
+    });
+
+    test(
+        'distinct, groupBy, having, orderBy, limit and offset compose in '
+        'stable clause order', () async {
+      final db = aggDb();
+      final recorder = <String>[];
+      db.onQuery = (sql, _) => recorder.add(sql);
+      await db.query('sales',
+          columns: ['region'],
+          distinct: true,
+          groupBy: 'region',
+          having: 'SUM(amount) > 0',
+          orderBy: 'region',
+          limit: 1,
+          offset: 1);
+      final sql = recorder.single;
+      expect(sql, startsWith('SELECT DISTINCT '));
+      expect(sql, contains(' GROUP BY region'));
+      expect(sql, contains(' HAVING SUM(amount) > 0'));
+      expect(sql, contains(' ORDER BY region'));
+      expect(sql, contains(' LIMIT 1'));
+      expect(sql, contains(' OFFSET 1'));
+      expect(sql.indexOf(' GROUP BY'), lessThan(sql.indexOf(' HAVING')));
+      expect(sql.indexOf(' HAVING'), lessThan(sql.indexOf(' ORDER BY')));
+      expect(sql.indexOf(' ORDER BY'), lessThan(sql.indexOf(' LIMIT')));
+      expect(sql.indexOf(' LIMIT'), lessThan(sql.indexOf(' OFFSET')));
+      db.close();
+    });
+  });
+
   group('ConflictAlgorithm', () {
     const createTable = 'CREATE TABLE t (id TEXT PRIMARY KEY, v TEXT)';
 
@@ -255,6 +344,83 @@ void main() {
           '2');
       expect(db.selectSync('SELECT COUNT(*) c FROM t').single['c'], 1,
           reason: 'OR REPLACE removes the row that held the conflicting value');
+    });
+
+    test('insert with ConflictAlgorithm.fail throws and keeps the prior row',
+        () async {
+      final db = openDb(createTable);
+      await db.insert('t', {'id': 'a', 'v': '1'});
+      await expectLater(
+        db.insert('t', {'id': 'a', 'v': '2'},
+            conflictAlgorithm: ConflictAlgorithm.fail),
+        throwsA(isA<sqlite.SqliteException>()),
+      );
+      expect(db.selectSync('SELECT v FROM t WHERE id = ?', ['a']).single['v'],
+          '1');
+      // Connection remains usable after the failed insert.
+      await db.insert('t', {'id': 'b', 'v': 'b'});
+      expect(db.selectSync('SELECT COUNT(*) c FROM t').single['c'], 2);
+    });
+
+    test('update with ConflictAlgorithm.abort throws and keeps the row',
+        () async {
+      final db = openDb(createTable);
+      await db.insert('t', {'id': 'a', 'v': '1'});
+      await db.insert('t', {'id': 'b', 'v': '2'});
+      await db.execute('CREATE UNIQUE INDEX ux_v ON t(v)');
+      await expectLater(
+        db.update('t', {'v': '2'},
+            where: 'id = ?',
+            whereArgs: ['a'],
+            conflictAlgorithm: ConflictAlgorithm.abort),
+        throwsA(isA<sqlite.SqliteException>()),
+      );
+      expect(db.selectSync('SELECT v FROM t WHERE id = ?', ['a']).single['v'],
+          '1');
+      expect(db.selectSync('SELECT COUNT(*) c FROM t').single['c'], 2);
+    });
+
+    test('update with ConflictAlgorithm.fail throws and keeps the row',
+        () async {
+      final db = openDb(createTable);
+      await db.insert('t', {'id': 'a', 'v': '1'});
+      await db.insert('t', {'id': 'b', 'v': '2'});
+      await db.execute('CREATE UNIQUE INDEX ux_v ON t(v)');
+      await expectLater(
+        db.update('t', {'v': '2'},
+            where: 'id = ?',
+            whereArgs: ['a'],
+            conflictAlgorithm: ConflictAlgorithm.fail),
+        throwsA(isA<sqlite.SqliteException>()),
+      );
+      expect(db.selectSync('SELECT v FROM t WHERE id = ?', ['a']).single['v'],
+          '1');
+      expect(db.selectSync('SELECT COUNT(*) c FROM t').single['c'], 2);
+    });
+
+    test('update with ConflictAlgorithm.rollback aborts the whole transaction',
+        () async {
+      final db = openDb(createTable);
+      await db.insert('t', {'id': 'a', 'v': '1'});
+      await db.insert('t', {'id': 'b', 'v': '2'});
+      await db.execute('CREATE UNIQUE INDEX ux_v ON t(v)');
+      await expectLater(
+        db.transaction((txn) async {
+          // An innocuous prior write inside the transaction.
+          await txn.update('t', {'v': '5'}, where: 'id = ?', whereArgs: ['a']);
+          // Conflicts with b's unique v = '2'.
+          await txn.update('t', {'v': '2'},
+              where: 'id = ?',
+              whereArgs: ['a'],
+              conflictAlgorithm: ConflictAlgorithm.rollback);
+        }),
+        throwsA(isA<sqlite.SqliteException>()),
+      );
+      // OR ROLLBACK reverts the earlier update in the same transaction too.
+      expect(db.selectSync('SELECT v FROM t WHERE id = ?', ['a']).single['v'],
+          '1');
+      expect(db.selectSync('SELECT v FROM t WHERE id = ?', ['b']).single['v'],
+          '2');
     });
   });
 

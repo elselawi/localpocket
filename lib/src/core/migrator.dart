@@ -1,3 +1,4 @@
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 import 'database_adapter.dart';
 
@@ -175,7 +176,7 @@ class Migrator {
     final newTable = '${schema.name}__new_${m.toVersion}';
 
     // 1. backup (VACUUM INTO — pure SQL, no dart:io)
-    final backupFile = _backupPath(pocket.path, schema.name, m.toVersion);
+    final backupFile = backupPath(pocket.path, schema.name, m.toVersion);
     try {
       await db.execute("VACUUM INTO '${backupFile.replaceAll("'", "''")}'");
     } catch (e) {
@@ -254,7 +255,13 @@ class Migrator {
     }
   }
 
-  static String _backupPath(String dbPath, String store, int toVersion) {
+  /// Computes the `VACUUM INTO` backup path for a destructive migration.
+  ///
+  /// With a bare relative DB path (`dirname == '.'`) the backup lands in the
+  /// current directory next to the database; otherwise it is joined into the
+  /// database's directory.
+  @visibleForTesting
+  static String backupPath(String dbPath, String store, int toVersion) {
     final dir = p.dirname(dbPath);
     final base = p.basename(dbPath);
     final name = '$base.v$toVersion.$store.bak';

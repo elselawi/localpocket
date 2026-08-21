@@ -280,6 +280,56 @@ void main() {
       expect(caps.walSupported, isFalse);
     });
 
+    test('empty compile options with a working FTS5 DDL probe reports FTS5',
+        () async {
+      // Some wasm builds omit PRAGMA compile_options entirely; when the DDL
+      // fallback probe succeeds, FTS5 must be reported as supported.
+      final caps = await SqliteCapabilities.probe(
+        _FakeProbeDatabase(
+          version: '3.44.2',
+          compileOptions: const [],
+          journalMode: 'wal',
+          fts5ProbeSucceeds: true,
+        ),
+        PlatformProfile.native,
+      );
+      expect(caps.hasFts5, isTrue,
+          reason: 'the throwaway FTS5 table probe succeeded');
+      expect(caps.walSupported, isTrue);
+    });
+
+    test('empty journal_mode result set degrades WAL support', () async {
+      // The native query returns no rows: journalMode stays null and WAL is
+      // reported as unsupported (the not-empty guard branch).
+      final caps = await SqliteCapabilities.probe(
+        _FakeProbeDatabase(
+          version: '3.44.2',
+          compileOptions: ['ENABLE_FTS5'],
+          journalMode: 'wal',
+          journalModeEmptyRows: true,
+        ),
+        PlatformProfile.native,
+      );
+      expect(caps.walSupported, isFalse);
+      expect(caps.hasMmap, isFalse);
+    });
+
+    test('a non-string journal_mode value degrades WAL support', () async {
+      // A non-string cell makes `as String?` throw inside the probe; the
+      // catch degrades to null and WAL is reported unsupported.
+      final caps = await SqliteCapabilities.probe(
+        _FakeProbeDatabase(
+          version: '3.44.2',
+          compileOptions: ['ENABLE_FTS5'],
+          journalMode: 'wal',
+          journalModeRaw: 123,
+        ),
+        PlatformProfile.native,
+      );
+      expect(caps.walSupported, isFalse);
+      expect(caps.hasMmap, isFalse);
+    });
+
     test('web probe never queries journal_mode and never enables WAL',
         () async {
       final db = _FakeProbeDatabase(
@@ -304,12 +354,27 @@ class _FakeProbeDatabase implements Database {
   final String version;
   final List<String> compileOptions;
   final String? journalMode;
+
+  /// When true, `execute` accepts the throwaway FTS5 probe DDL, so the DDL
+  /// fallback reports FTS5 support even with empty compile options.
+  final bool fts5ProbeSucceeds;
+
+  /// When true, `PRAGMA journal_mode` returns an empty result set.
+  final bool journalModeEmptyRows;
+
+  /// A non-string cell to return from `PRAGMA journal_mode` (defaults to
+  /// [journalMode]).
+  final Object? journalModeRaw;
+
   bool journalModeQueried = false;
 
   _FakeProbeDatabase({
     required this.version,
     required this.compileOptions,
     required this.journalMode,
+    this.fts5ProbeSucceeds = false,
+    this.journalModeEmptyRows = false,
+    this.journalModeRaw,
   });
 
   @override
@@ -327,9 +392,10 @@ class _FakeProbeDatabase implements Database {
     }
     if (sql.startsWith('PRAGMA journal_mode')) {
       journalModeQueried = true;
+      if (journalModeEmptyRows) return [];
       if (journalMode == null) throw Exception('journal_mode unavailable');
       return [
-        {'journal_mode': journalMode}
+        {'journal_mode': journalModeRaw ?? journalMode}
       ];
     }
     throw UnimplementedError('unexpected probe SQL: $sql');
@@ -346,8 +412,11 @@ class _FakeProbeDatabase implements Database {
       throw UnimplementedError();
 
   @override
-  Future<void> execute(String sql, [List<Object?> parameters = const []]) =>
-      throw UnimplementedError();
+  Future<void> execute(String sql,
+      [List<Object?> parameters = const []]) async {
+    if (fts5ProbeSucceeds && sql.contains('lp__fts5_probe')) return;
+    throw UnimplementedError('unexpected probe execute: $sql');
+  }
 
   @override
   void executeSync(String sql, [List<Object?> parameters = const []]) =>

@@ -1,4 +1,8 @@
+import 'dart:io';
+
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/migrator.dart';
+import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
@@ -121,9 +125,7 @@ void main() {
 
       final v1 = await openPocket(path: t.path);
       final id = generateRecordId();
-      await v1
-          .collection('widgets')
-          .put(record(id: id, name: 'x', qty: 1));
+      await v1.collection('widgets').put(record(id: id, name: 'x', qty: 1));
       await v1.close();
 
       // Simulate a crash between the ALTER and the ledger bump: the column
@@ -268,6 +270,50 @@ void main() {
             ])
           ]),
           throwsA(isA<DestructiveMigrationRefusedError>()));
+    });
+
+    test(
+        'destructive migration refused when the backup target already '
+        'exists', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+
+      final v1 = await openPocket(path: t.path);
+      await v1
+          .collection('widgets')
+          .put(record(id: generateRecordId(), name: 'x'));
+      await v1.close();
+
+      // VACUUM INTO refuses to overwrite an existing file, so a stale backup
+      // from a previous (interrupted) attempt must fail the migration loudly.
+      final backup = Migrator.backupPath(t.path, 'widgets', 2);
+      File(backup).writeAsStringSync('stale backup');
+      addTearDown(() {
+        final f = File(backup);
+        if (f.existsSync()) f.deleteSync();
+      });
+
+      await expectLater(
+          openPocket(path: t.path, stores: [
+            v2Schema(migrations: [
+              StoreMigration(toVersion: 2, destructive: true),
+            ])
+          ]),
+          throwsA(isA<DestructiveMigrationRefusedError>()
+              .having((e) => e.message, 'message', contains('Backup failed'))));
+    });
+
+    test(
+        'backupPath with a bare relative db path stays in the current '
+        'directory', () {
+      expect(Migrator.backupPath('test.db', 'widgets', 2),
+          'test.db.v2.widgets.bak',
+          reason: 'dirname of a bare filename is "." so no directory is '
+              'prefixed');
+      expect(Migrator.backupPath('data/db.sqlite', 'notes', 3),
+          p.join('data', 'db.sqlite.v3.notes.bak'));
+      expect(Migrator.backupPath('/tmp/x/test.db', 'widgets', 2),
+          p.join('/tmp/x', 'test.db.v2.widgets.bak'));
     });
 
     test('migration ledger rows recorded', () async {
