@@ -232,9 +232,7 @@ class Pusher {
       // backend enforcing OCC rejects it (and the next cycle re-merges) if the
       // remote moved again between the re-fetch and the PATCH.
       final rec = await backend.updateRecord(
-          id: op.recordId,
-          dataJson: mergedJson,
-          baseUpdated: fetched.updated);
+          id: op.recordId, dataJson: mergedJson, baseUpdated: fetched.updated);
       await _settle(op, rec,
           mergedLogical: outcome.merged, serverDataJson: mergedJson);
       return const PushReport(pushed: 1);
@@ -621,8 +619,7 @@ class Pusher {
   /// acked or dead-lettered) instead of writing against the wrong record.
   void _assertFetchedMatches(OutboxOp op, RemoteRecord fetched) {
     if (fetched.id != op.recordId) {
-      throw MapFailure(
-          'record id "${fetched.id}" does not match requested '
+      throw MapFailure('record id "${fetched.id}" does not match requested '
           '"${op.recordId}"');
     }
   }

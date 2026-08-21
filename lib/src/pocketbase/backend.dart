@@ -90,7 +90,8 @@ class PocketBaseBackend implements SyncBackend {
     HttpTransport? transport,
   }) : transport = transport ?? PackageHttpTransport() {
     _auth = AuthManager(tokenProvider);
-    _client = PbClient(transport: this.transport, baseUrl: baseUrl, auth: _auth);
+    _client =
+        PbClient(transport: this.transport, baseUrl: baseUrl, auth: _auth);
   }
 
   // ---------------------------------------------------------------- probe --
@@ -202,8 +203,8 @@ class PocketBaseBackend implements SyncBackend {
       return;
     }
     // Still visible: re-deliver as a changed event (fast-path or pull).
-    _debounce(ev.store,
-        BackendHint(ev.store, BackendHintKind.changed, current));
+    _debounce(
+        ev.store, BackendHint(ev.store, BackendHintKind.changed, current));
   }
 
   void _debounce(String store, BackendHint hint) {
@@ -258,6 +259,7 @@ class PocketBaseBackend implements SyncBackend {
   }) {
     return _client.createRecord(id: id, store: store, dataJson: dataJson);
   }
+
   @override
   Future<RemoteRecord> updateRecordFiles({
     required String id,
@@ -266,7 +268,10 @@ class PocketBaseBackend implements SyncBackend {
     List<String>? keepNames,
     List<String>? removeNames,
   }) {
-    if (uploads == null && keepNames == null && removeNames == null && dataJson != null) {
+    if (uploads == null &&
+        keepNames == null &&
+        removeNames == null &&
+        dataJson != null) {
       return updateRecord(id: id, dataJson: dataJson);
     }
     return updateRecordFilesStream(
