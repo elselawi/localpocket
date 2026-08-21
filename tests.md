@@ -1,14 +1,14 @@
 ### E. Web (`web`) — the structural gap
 
-**E1. The big one: no web *execution* tests.** Everything in `test/web/*` stops at the wire envelope. None of the facade classes, none of the worker `_handle*` handlers, and none of the compiled-plan execution paths run against a real engine. All real behavior lives in browser smokes under `web_smoke`, which are **not** part of `dart test`. A unit-level worker harness (feed `WebRequest`s to `LocalPocketDatabaseController` with a real in-memory engine) would unlock dozens of tests:
+**E1. The big one: no web *execution* tests.** ✅ **DONE (2026-08-21).** Everything in `test/web/*` used to stop at the wire envelope; the worker `_handle*` handlers and compiled-plan execution paths never ran against a real engine under `dart test`. The fix extracted the pure-Dart request-execution core into `lib/src/web/worker_engine.dart` (`WorkerEngine`, no `dart:js_interop`); `controller.dart`'s `LocalPocketWorkerDatabase` is now a thin JS-boundary adapter over it. `test/web/support/worker_harness.dart` opens a real `WorkerEngine` over a native in-memory engine, and `test/web/worker_engine_test.dart` (44 tests) feeds `WebRequest`s through the exact parse → dispatch → handler → reply path the worker runs — covering E3, E4 (worker-side), E15, E17, plus CRUD, compiled-query execution/validation, chunked upload, conflicts, maintenance, and close. Remaining facade-only items (E5/E9/E18) still need the page-side classes; the worker-side execution surface is now VM-tested.
 
 **E2. `LocalPocket.open()`** — asset fetch/fallback, `_requestPersistence` timeout, capability reconciliation. **E3. `filesUpload()`** — chunking loop + `expectedSize` mismatch `StateError`. **E4. `_handleWorkerEvent`** — `recordEvent`→ChangeBus emission, `syncStatus` decode, `authRequired` dispatch, malformed events. **E5. `send()` worker-closed detection.** **E6. `WebCollection`** full CRUD + `watchOne`. **E7. `WebQueryBuilder.watch()`** default-50 plan. **E8. `WebQueryForwarder`** all ops (`fetch/keysetAfter/count/countDistinct/distinct/ids/explain/sum/avg/min/max`). **E9. `pageFromCompiled`** cursor construction. **E10. `WebSearchBuilder`/`WebSearchForwarder.fetch()`**. **E11. `WebTx`** savepoint/release/rollback. **E12. `WebLocalPocketFiles.attach`** with the `bytes`-stream path (vs `byteArray`). **E13. `WebConflicts`** `watch/listOpen/get/resolve/acceptLocal/acceptRemote`. **E14. `web_storage_capabilities.toJson`**.
 
-**E15. Controller handlers** (each untested): `_handleMutateBatch` unknown-action `ValidationException`; `_handleCompiledQuery`/`_parseCompiledPlan` validation (op vocabulary, compiler version, schema version + fingerprint, argument count, `SELECT ` prefix, stale-plan rejection); `_handleTxSavepoint/RollbackTo/Release/Commit/Rollback` savepoint bookkeeping; `_handleSyncStart` (baseUrl validation, engine construction, realtime start) and `_handleSyncUpdateAuth`; `_handleFileUploadBegin/Chunk/Finish/Abort` chunk reassembly; `_handleConflicts*`; `_requireSession` `StateError`.
+**E15. Controller handlers** — ✅ **covered in `worker_engine_test.dart`**: `_handleMutateBatch` unknown-action `ValidationException`; `_handleCompiledQuery`/`_parseCompiledPlan` validation (op vocabulary, compiler version, schema version + fingerprint, argument count, `SELECT ` prefix, stale-plan rejection); `_handleTxSavepoint/RollbackTo/Release/Commit/Rollback` savepoint bookkeeping; `_handleSyncStart` baseUrl validation + not-started `StateError`s; `_handleFileUploadBegin/Chunk/Finish/Abort` chunk reassembly; `_handleConflicts*`; `_requireSession` `StateError`.
 
 **E16. Controller `openDatabase`** — journal-mode `TRUNCATE` assertion, `_parseOpenOptions`/`_rawOpenOption`, cipher-envelope parse, and encrypted-store-without-cipher rejection.
 
-**E17. `CompiledWatcher` normal emission path** — only error-forwarding is tested; initial snapshot, digest dedupe, projection + `decodeColumns` are not.
+**E17. `CompiledWatcher` normal emission path** — ✅ initial snapshot, digest dedupe, projection, `watch_cancel`, and `watch_one` emissions covered in `worker_engine_test.dart` (error-forwarding remains in `compiled_watcher_test.dart`).
 
 **E18. `sendCompiledPlan`** (`send_plan.dart`) and **`loadAssetAsBlobUrl`** (`assets.dart`) — no unit tests.
 
@@ -73,7 +73,7 @@ These are the scenarios that would **verify (or break) the still-open audit item
 
 - **B1** → `generation_test.dart` · **B8** → `watermark_test.dart` (strictly-less only) · **G13** → `generation_test.dart` · **G14** → `blocked_test.dart`
 - **G5 (single-op)** → `push_test.dart` 'merged push settlement race' · **G8 (mid-page)** → `pull_test.dart` 'cursor advances only with page commit' · **G9 (close/reopen)** → `crash_restart_matrix_test.dart`
-- The **E1 web worker harness** remains the single highest-value addition in this file.
+- **E1** → ✅ `worker_engine_test.dart` + `test/web/support/worker_harness.dart` (2026-08-21) · **E15/E17** → same file
 
 ---
 
