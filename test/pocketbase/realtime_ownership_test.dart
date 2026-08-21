@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:localpocket/pocketbase.dart';
 import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
+import 'fake_transport.dart';
 import 'mock_pb_server.dart';
 import 'pb_helpers.dart';
 
@@ -119,6 +124,52 @@ void main() {
       expect(await h.pocket.collection('widgets').get(id), isNull,
           reason: 'closed backend delivers no realtime hints');
       await h.pocket.close();
+    });
+
+    test('stopRealtime cancels pending debounce timers and clears hints',
+        () async {
+      final fake = FakeTransport();
+      final backend = PocketBaseBackend(
+        baseUrl: Uri.parse('https://pb.test'),
+        tokenProvider: TestTokenProvider(),
+        stores: const ['widgets'],
+        realtimeDebounce: const Duration(milliseconds: 200),
+        transport: fake,
+      );
+      addTearDown(backend.close);
+
+      final hints = <BackendHint>[];
+      final sub = backend.hints().listen(hints.add);
+
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      await backend.startRealtime();
+      // Handshake + one realtime event: both arm a 200ms debounce timer.
+      controller.add(utf8.encode('id:h1\n'
+          'event:PB_CONNECT\n'
+          'data:{"clientId":"c1"}\n\n'
+          'event:data\n'
+          'data:${jsonEncode({
+            'action': 'update',
+            'record': {
+              'id': 'r1',
+              'store': 'widgets',
+              'updated': '2026-08-15 10:00:00.000Z',
+              'data': {'id': 'r1', 'name': 'n'}
+            }
+          })}\n\n'));
+      // Let the frames process and the timers arm — but stop before they fire.
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await backend.stopRealtime();
+      await controller.close();
+
+      // Well past the 200ms debounce: no hint may arrive after stop.
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(hints, isEmpty,
+          reason: 'stopRealtime cancelled the debounce timers and cleared '
+              'the pending hints');
+      await sub.cancel();
     });
   });
 }

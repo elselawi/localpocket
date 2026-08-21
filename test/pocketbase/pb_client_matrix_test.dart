@@ -342,6 +342,26 @@ void main() {
           reason: 'still five path segments');
     });
 
+    test('downloadFile maps non-200 statuses to typed errors', () async {
+      final fake = FakeTransport();
+      fake.streamStatus(404);
+      final b = backendWith(fake);
+      await expectLater(
+        b.downloadFile(recordId: 'r', filename: 'f.png'),
+        throwsA(isA<NotFoundError>()),
+      );
+    });
+
+    test('downloadFile propagates an openStream failure', () async {
+      final fake = FakeTransport();
+      fake.streamError(StateError('socket down'));
+      final b = backendWith(fake);
+      await expectLater(
+        b.downloadFile(recordId: 'r', filename: 'f.png'),
+        throwsA(isA<StateError>()),
+      );
+    });
+
     test('multipart fields for data/keep/remove and the auth header', () async {
       final fake = FakeTransport();
       fake.multipartStatus(
@@ -381,6 +401,49 @@ void main() {
       expect(req.headers['Content-Type'], 'application/json');
       expect(req.body, '{"data":{"name":"x"}}');
       expect(req.url.path, '/api/collections/data/records/r1');
+    });
+
+    test('updateRecordFiles with only dataJson routes to a plain update',
+        () async {
+      final fake = FakeTransport();
+      fake.sendStatus(200, FakeTransport.recordBody('r1'));
+      final b = backendWith(fake);
+      final rec = await b.updateRecordFiles(id: 'r1', dataJson: '{"name":"x"}');
+
+      expect(fake.multiparts, isEmpty,
+          reason: 'data-only never takes the multipart path');
+      final req = fake.sends.single;
+      expect(req.method, 'PATCH');
+      expect(req.url.path, '/api/collections/data/records/r1');
+      expect(req.body, '{"data":{"name":"x"}}');
+      expect(rec.id, 'r1');
+    });
+
+    test('updateRecordFiles with keep/remove/upload uses multipart', () async {
+      final keep = FakeTransport();
+      keep.multipartStatus(
+          200, FakeTransport.recordBody('r1', imgs: ['a.png']));
+      await backendWith(keep).updateRecordFiles(id: 'r1', keepNames: ['a.png']);
+      expect(keep.multiparts, hasLength(1),
+          reason: 'keepNames forces the multipart path');
+      expect(keep.sends, isEmpty);
+
+      final remove = FakeTransport();
+      remove.multipartStatus(200, FakeTransport.recordBody('r1'));
+      await backendWith(remove)
+          .updateRecordFiles(id: 'r1', removeNames: ['old.png']);
+      expect(remove.multiparts, hasLength(1),
+          reason: 'removeNames forces the multipart path');
+
+      final upload = FakeTransport();
+      upload.multipartStatus(
+          200, FakeTransport.recordBody('r1', imgs: ['f.bin']));
+      await backendWith(upload).updateRecordFiles(id: 'r1', uploads: {
+        'f.bin': [1, 2, 3]
+      });
+      expect(upload.multiparts, hasLength(1),
+          reason: 'uploads force the multipart path');
+      expect(upload.sends, isEmpty);
     });
   });
 
@@ -591,6 +654,28 @@ void main() {
           }));
       final b = backendWith(fake);
       await expectLater(b.pushBatch(twoOps()), throwsA(isA<ProtocolError>()));
+    });
+
+    test('legacy envelopes with malformed inner shapes are ProtocolErrors',
+        () async {
+      for (final body in <Map<String, Object?>>[
+        {
+          'data': {'results': 'not-a-list'}
+        },
+        {
+          'data': [1, 2]
+        }, // data present but not a map; no top-level results
+        {'data': {}}, // data map with no results
+      ]) {
+        final fake = FakeTransport();
+        fake.sendStatus(200, jsonEncode(body));
+        final b = backendWith(fake);
+        await expectLater(
+          b.pushBatch(twoOps()),
+          throwsA(isA<ProtocolError>()),
+          reason: '$body',
+        );
+      }
     });
 
     test('empty batch returns an empty result list', () async {

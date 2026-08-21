@@ -338,4 +338,34 @@ void main() {
     expect(events.map((e) => e.record.id), ['e1', 'e2', 'e3']);
     expect(events.map((e) => e.action), ['update', 'delete', 'update']);
   });
+
+  test('non-String action or non-Map record frames are silently ignored',
+      () async {
+    final fake = FakeTransport();
+    final events = <PbRealtimeEvent>[];
+    final rt = realtime(fake, onEvent: events.add);
+    final controller = StreamController<List<int>>();
+    fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
+    await rt.start();
+
+    final text = 'event:data\n'
+        'data:{"action":5,"record":{"id":"bad-action","store":"widgets","updated":"2026-08-15 10:00:00.000Z","data":{"id":"bad-action"}}}\n\n'
+        'event:data\n'
+        'data:{"action":"update","record":"not-a-map"}\n\n'
+        'event:data\n'
+        'data:{"action":"update","record":["array"]}\n\n'
+        'event:data\n'
+        'data:{"record":{"id":"no-action","store":"widgets","updated":"2026-08-15 10:00:00.000Z","data":{"id":"no-action"}}}\n\n'
+        '${eventFrame('ok', 'ok')}';
+    controller.add(utf8.encode(text));
+    await controller.close();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await rt.stop();
+
+    expect(events, hasLength(1),
+        reason: 'malformed action/record frames are silently ignored');
+    expect(events.single.record.id, 'ok',
+        reason: 'a well-formed frame after the malformed ones still emits');
+    expect(events.single.action, 'update');
+  });
 }
