@@ -1367,6 +1367,21 @@ void runQueryEdgesCorpus(
       expect(capped, hasLength(1000));
     });
 
+    test('distinct with all() bypasses the default 1000-value cap', () async {
+      for (var i = 0; i < 1005; i++) {
+        await h.col.put(record(id: generateRecordId(), name: 'v$i', qty: i));
+      }
+      final capped = await h.query().distinct('name');
+      expect(capped, hasLength(1000), reason: 'no limit caps at 1000');
+
+      final all = await h.query().all().distinct('name');
+      expect(all, hasLength(1005), reason: 'all() removes the implicit cap');
+
+      // all() wins even when a limit is also present.
+      final allLimited = await h.query().limit(5).all().distinct('name');
+      expect(allLimited, hasLength(1005));
+    });
+
     test('aggregates respect filters and scope', () async {
       final normal = generateRecordId();
       final archived = generateRecordId();

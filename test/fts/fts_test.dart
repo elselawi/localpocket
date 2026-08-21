@@ -304,6 +304,58 @@ void main() {
       expect(await col.search('flutter').limit(5).fetch(), hasLength(1));
     });
 
+    test('search on a store without FTS raises FtsUnavailableError', () async {
+      final pocket = await openPocket(); // widgets has no FtsSpec
+      addTearDown(pocket.close);
+
+      expect(
+        () => pocket.collection('widgets').search('anything'),
+        throwsA(isA<FtsUnavailableError>().having(
+          (e) => e.message,
+          'message',
+          contains('does not have FTS enabled'),
+        )),
+      );
+
+      // The compile-only web path reports the same error.
+      expect(
+        () => SearchBuilder.compileOnly(widgetsSchema(), 'anything'),
+        throwsA(isA<FtsUnavailableError>().having(
+          (e) => e.message,
+          'message',
+          contains('does not have FTS enabled'),
+        )),
+      );
+    });
+
+    test('runtime fts errors the validator misses become ValidationException',
+        () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+      final pocket = await openPocket(path: t.path, stores: [ftsSchema()]);
+      addTearDown(pocket.close);
+      final col = pocket.collection('articles');
+      await col.put({
+        'id': generateRecordId(),
+        'title': 'Flutter localpocket guide',
+        'body': 'sqlite storage',
+      });
+
+      // Unbalanced grouping slips past the term validator but FTS5 rejects it
+      // at query time; fetch() converts the raw error to a ValidationException.
+      await expectLater(
+        col.search('a (').limit(5).fetch(),
+        throwsA(isA<ValidationException>().having(
+          (e) => e.message,
+          'message',
+          contains('Invalid search term'),
+        )),
+      );
+
+      // The store remains usable after the wrapped failure.
+      expect(await col.search('flutter').limit(5).fetch(), hasLength(1));
+    });
+
     test('prefix search and double score', () async {
       final t = await tempDbPath();
       addTearDown(t.cleanup);

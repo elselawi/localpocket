@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/compiled_query_runner.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
@@ -141,6 +142,79 @@ void main() {
       ], reason: 'keyset order matches full fetch');
     });
 
+    test('all-null DESC keyset cursor compiles to the exhausted false predicate',
+        () async {
+      for (var i = 0; i < 5; i++) {
+        await col.put(record(id: generateRecordId(), name: 'n$i', qty: i));
+      }
+      final q = col.query().orderBy('id', desc: true).limit(2);
+      final page1 = await q.fetch();
+      expect(page1.hasMore, isTrue);
+
+      // Re-encode the page-1 cursor with a NULL sort value at every position:
+      // NULLs sort last in DESC, so no row can follow any alternative of the
+      // OR-chain and the predicate collapses to the literal false `0`.
+      final decoded = jsonDecode(utf8.decode(base64Url.decode(page1.nextCursor!)))
+          as Map<String, Object?>;
+      decoded['values'] = [null];
+      final degenerate = base64UrlEncode(utf8.encode(jsonEncode(decoded)));
+
+      final compiled = QueryBuilder.compileOnly(widgetsSchema())
+          .orderBy('id', desc: true)
+          .limit(2);
+      final plan = compiled.compilePlan(cursor: degenerate);
+      expect(plan.sql, contains('AND 0'));
+      expect(plan.args, isEmpty, reason: 'the false predicate binds nothing');
+
+      final exhausted = await q.keysetAfter(degenerate);
+      expect(exhausted.items, isEmpty);
+      expect(exhausted.hasMore, isFalse);
+      expect(exhausted.nextCursor, isNull);
+    });
+
+    test('compilePlan(cursor:) binds the keyset predicate for the web path',
+        () async {
+      for (var i = 0; i < 8; i++) {
+        await col.put(record(id: generateRecordId(), name: 'n$i', qty: i % 3));
+      }
+      final q = col.query().orderBy('qty').limit(3);
+      final page1 = await q.fetch();
+      expect(page1.nextCursor, isNotNull);
+
+      final compiled =
+          QueryBuilder.compileOnly(widgetsSchema()).orderBy('qty').limit(3);
+      final plan = compiled.compilePlan(cursor: page1.nextCursor!);
+
+      expect(plan.operation, 'query');
+      expect(plan.sql, startsWith('SELECT '));
+      expect(plan.sql, contains('ORDER BY "qty" ASC, "id" ASC'));
+      // The keyset predicate values are bound into the plan.
+      expect(plan.args, isNotEmpty);
+      expect(plan.args.first, page1.items.last['qty']);
+      expect(plan.argumentCount, plan.args.length);
+
+      // A cursor from a different sort shape is rejected at compile time.
+      final otherCursor =
+          (await col.query().orderBy('name').limit(3).fetch()).nextCursor!;
+      expect(
+        () => compiled.compilePlan(cursor: otherCursor),
+        throwsA(isA<StaleCursorError>()),
+      );
+
+      // Executing the cursor plan matches the native keyset page.
+      final res = await executeCompiledQuery(
+        pocket,
+        (sql, args) => pocket.traceQuery(sql, args),
+        plan,
+        pageLimit: 3,
+      );
+      final page2 = await q.keysetAfter(page1.nextCursor!);
+      expect(
+        (res['items'] as List).map((r) => (r as Map)['id']).toList(),
+        page2.items.map((r) => r['id']).toList(),
+      );
+    });
+
     test('cursor rejected across sort shapes', () async {
       for (var i = 0; i < 10; i++) {
         await col.put(record(id: generateRecordId(), name: 'n$i', qty: i));
@@ -237,6 +311,53 @@ void main() {
       expect(await q.min('qty'), 1);
       expect(await q.max('qty'), 10);
       expect(await q.avg('qty'), 5.5);
+    });
+
+    test('compileAggregatePlan rejects an unknown aggregate function',
+        () async {
+      final compiled = QueryBuilder.compileOnly(widgetsSchema());
+      expect(
+        () => compiled.compileAggregatePlan('BOGUS', 'qty'),
+        throwsA(isA<ArgumentError>()
+            .having((e) => e.name, 'name', 'fn')
+            .having((e) => e.invalidValue, 'invalidValue', 'BOGUS')),
+      );
+      // The numeric-field check runs before the function-name switch.
+      expect(
+        () => compiled.compileAggregatePlan('BOGUS', 'name'),
+        throwsA(isA<ValidationException>()),
+      );
+      // Valid names still compile after a rejected one.
+      expect(compiled.compileAggregatePlan('SUM', 'qty').operation, 'sum');
+      expect(compiled.compileAggregatePlan('AVG', 'qty').operation, 'avg');
+      expect(compiled.compileAggregatePlan('MIN', 'qty').operation, 'min');
+      expect(compiled.compileAggregatePlan('MAX', 'qty').operation, 'max');
+    });
+
+    test('where with no operators is a silent no-op copy', () async {
+      await col.put(record(id: generateRecordId(), name: 'apple', qty: 1));
+      await col.put(record(id: generateRecordId(), name: 'banana', qty: 2));
+
+      final base = col.query().limit(10);
+      final (sqlBefore, _) = base.debugCompile();
+      final noop = base.where('name');
+      final (sqlAfter, argsAfter) = noop.debugCompile();
+
+      // No predicate or argument was added for the field.
+      expect(sqlAfter, sqlBefore);
+      expect(argsAfter, isEmpty);
+
+      final page = await noop.fetch();
+      expect(page.items, hasLength(2), reason: 'no-op where filters nothing');
+
+      // The field is still validated even with every operator null.
+      expect(() => base.where('nope'), throwsA(isA<ValidationException>()));
+
+      // The no-op does not poison later chained predicates.
+      final filtered = noop.where('name', eq: 'apple').limit(10);
+      final filteredPage = await filtered.fetch();
+      expect(filteredPage.items, hasLength(1));
+      expect(filteredPage.items.single['name'], 'apple');
     });
 
     test('empty and single row results', () async {
