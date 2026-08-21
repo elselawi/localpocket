@@ -43,15 +43,29 @@ void _writeCanonical(StringBuffer out, Object? value) {
     }
     out.write(']');
   } else if (value is Map) {
-    final keys = value.keys.map((k) => k.toString()).toList()..sort();
+    // Keys are stringified and sorted lexicographically. Lookups must use the
+    // ORIGINAL key (a non-String key never matches its `toString()` form), and
+    // two distinct keys that stringify identically (e.g. `1` vs `'1'`) cannot
+    // be represented losslessly in JSON — fail loudly rather than silently
+    // dropping a value or emitting a duplicate key.
+    final entries = <(String, Object)>[];
+    for (final original in value.keys) {
+      final s = original.toString();
+      if (entries.any((e) => e.$1 == s)) {
+        throw ArgumentError(
+            'Cannot canonicalize map: keys collide after toString() ("$s").');
+      }
+      entries.add((s, original));
+    }
+    entries.sort((a, b) => a.$1.compareTo(b.$1));
     out.write('{');
     var first = true;
-    for (final key in keys) {
+    for (final (key, original) in entries) {
       if (!first) out.write(',');
       first = false;
       out.write(jsonEncode(key));
       out.write(':');
-      _writeCanonical(out, value[key]);
+      _writeCanonical(out, value[original]);
     }
     out.write('}');
   } else {

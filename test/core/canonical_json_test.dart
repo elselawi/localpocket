@@ -81,6 +81,43 @@ void main() {
           '{"a":{"e":2,"f":1},"b":{"c":2,"d":1}}');
     });
 
+    test('non-string map keys are stringified, sorted, and keep their values',
+        () {
+      // Value lookup must use the ORIGINAL key; the stringified form never
+      // matches a non-string key.
+      expect(canonicalize({1: 'a'}), '{"1":"a"}');
+      expect(canonicalize({2: 'b', 1: 'a'}), '{"1":"a","2":"b"}');
+      expect(canonicalize({true: 'x', false: 'y'}), '{"false":"y","true":"x"}');
+      expect(
+          canonicalize({
+            1: {'nested': 2}
+          }),
+          '{"1":{"nested":2}}');
+    });
+
+    test('non-string keys round-trip stably through the canonical form', () {
+      // canonicalize -> jsonDecode -> canonicalize is fixed-point.
+      final first = canonicalize({2: 'b', 1: 'a'});
+      final decoded = jsonDecode(first) as Map<String, Object?>;
+      expect(canonicalize(decoded), first,
+          reason: 'the canonical form is a stable fixed point');
+      expect(canonicalize({1: 'a'}), canonicalize(jsonDecode('{"1":"a"}')),
+          reason: 'int key 1 and string key "1" agree when alone');
+    });
+
+    test('distinct keys that stringify identically are rejected', () {
+      // `1` (int) and `'1'` (String) both stringify to "1" and cannot be
+      // represented losslessly in JSON; silently merging would corrupt the
+      // load-bearing hash, so the canonicalizer must fail loudly.
+      expect(
+        () => canonicalize({1: 'a', '1': 'b'}),
+        throwsA(isA<ArgumentError>().having((e) => e.message.toString(),
+            'message', contains('collide after toString'))),
+      );
+      expect(() => canonicalize({true: 'a', 'true': 'b'}),
+          throwsA(isA<ArgumentError>()));
+    });
+
     test('output is compact with no insignificant whitespace', () {
       expect(
           canonicalize({
@@ -167,31 +204,6 @@ void main() {
       expect(canonicalize([1, 'x', null, true, 2.0]), '[1,"x",null,true,2]');
       expect(canonicalize([]), '[]');
       expect(canonicalize([<String, Object?>{}]), '[{}]');
-    });
-
-    test('non-string map keys are stringified and values read by string key',
-        () {
-      // Documented current behavior: keys are converted via toString(), and
-      // values are then looked up by the STRING key. An int-keyed value whose
-      // string form does not exist as a real key reads back as null.
-      expect(canonicalize({1: 'a', 2: 'b'}), '{"1":null,"2":null}');
-      expect(
-          canonicalize({true: 't', false: 'f'}), '{"false":null,"true":null}');
-      // When the string form of the key also exists, its value is used.
-      expect(canonicalize({'1': 'string', 1: 'int'}),
-          '{"1":"string","1":"string"}');
-    });
-
-    test('two keys whose toString values collide are not rejected', () {
-      // {1: 'int', '1': 'string'} has two keys that both stringify to "1".
-      // The implementation does NOT reject the collision; it emits duplicate
-      // keys, each reading the value found under the string key "1". This is
-      // a documented limitation of the current canonicalizer (callers must
-      // use string keys), not a round-trip loss.
-      final out = canonicalize({1: 'int', '1': 'string'});
-      expect(out, '{"1":"string","1":"string"}');
-      // The value under the int key is silently shadowed by the string key.
-      expect(out, isNot(contains('int')));
     });
 
     test('map with null values keeps explicit nulls', () {
