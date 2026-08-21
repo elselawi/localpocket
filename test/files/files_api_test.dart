@@ -341,4 +341,112 @@ void main() {
           0);
     });
   });
+
+  group('FileRef row-model corruption', () {
+    test('fromRow wraps malformed rows in a typed StorageError', () {
+      // Parity with SyncRowState/OutboxOp/OpQueueRow/ConflictRecord: a corrupt
+      // lp_file_refs row raises a typed StorageError, never a raw TypeError.
+      expect(
+          () => FileRef.fromRow({'ref_id': 123}),
+          throwsA(isA<StorageError>().having(
+              (e) => e.message, 'message', contains('Corrupt lp_file_refs'))));
+      for (final row in [
+        // Missing required columns.
+        {'ref_id': 'ok', 'store': 'widgets'},
+        // Wrong-typed required columns.
+        {
+          'ref_id': 'ok',
+          'store': 5,
+          'record_id': 'r',
+          'field': 'imgs',
+          'hash': 'h',
+          'state': 'x'
+        },
+        {
+          'ref_id': 'ok',
+          'store': 'widgets',
+          'record_id': 'r',
+          'field': 'imgs',
+          'hash': 'h',
+          'state': 9
+        },
+        {
+          'ref_id': 'ok',
+          'store': 'widgets',
+          'record_id': 'r',
+          'field': 3,
+          'hash': 'h',
+          'state': 'x'
+        },
+      ]) {
+        expect(() => FileRef.fromRow(row), throwsA(isA<StorageError>()));
+      }
+
+      // A well-formed row still parses (optional columns default safely).
+      final ok = FileRef.fromRow({
+        'ref_id': 'ok',
+        'store': 'widgets',
+        'record_id': 'r',
+        'field': 'imgs',
+        'hash': 'a' * 64,
+        'remote_name': 'f.png',
+        'state': 'synced',
+        'next_retry_at': 5,
+        'attempt_count': 2,
+        'last_error': null,
+      });
+      expect(ok.remoteName, 'f.png');
+      expect(ok.attemptCount, 2);
+      expect(ok.nextRetryAt, 5);
+    });
+  });
+
+  group('blob last-access touch', () {
+    test('open() advances lp_blobs.last_access on the read', () async {
+      var clock = 1000000;
+      final dbPath = await tempDbPath();
+      final pocket = await openPocket(
+        path: dbPath.path,
+        blobStore: MemoryBlobStore(),
+        stores: [
+          CollectionSchema(
+            name: 'widgets',
+            version: 1,
+            fields: [Field.text('name', required: true)],
+          ),
+        ],
+        now: () => clock,
+      );
+      addTearDown(() async {
+        await pocket.close();
+        await dbPath.cleanup();
+      });
+      final rec = generateRecordId();
+      await pocket.collection('widgets').put({'id': rec, 'name': 'w'});
+      final ref = await pocket.files.attach(
+          store: 'widgets',
+          recordId: rec,
+          bytes: Stream.value(utf8.encode('file')));
+      expect(
+          (await pocket.db
+                  .query('lp_blobs', where: 'hash = ?', whereArgs: [ref.hash]))
+              .single['last_access'],
+          1000000,
+          reason: 'attach stamps last_access with the current clock');
+
+      // Rewind the stored last_access, then read: open() must re-touch it.
+      clock += 5000;
+      await pocket.db.execute(
+          'UPDATE lp_blobs SET last_access = 0 WHERE hash = ?', [ref.hash]);
+      final stream = await pocket.files.open(store: 'widgets', recordId: rec);
+      await stream.drain<void>();
+
+      expect(
+          (await pocket.db
+                  .query('lp_blobs', where: 'hash = ?', whereArgs: [ref.hash]))
+              .single['last_access'],
+          1005000,
+          reason: 'open() re-touches last_access with the current clock');
+    });
+  });
 }

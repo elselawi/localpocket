@@ -872,6 +872,37 @@ void main() {
       expect(mock.records[recId]!.imgs, isNotEmpty);
     });
 
+    test('adoption GET throwing a non-SyncError still falls back to upload',
+        () async {
+      final mock = MockSyncBackend();
+      final h = await EngineHarness.create(
+        mock: mock,
+        config: convConfig(),
+        blobStore: MemoryBlobStore(),
+      );
+      addTearDown(h.close);
+      final recId = mock.seed(store: 'widgets', data: {'name': 'w'});
+      await h.engine.syncNow();
+      await h.pocket.files.attach(
+          store: 'widgets',
+          recordId: recId,
+          bytes: Stream.value(utf8.encode('data')),
+          name: 'img.png');
+      // The adoption GET throws a raw Error (not a SyncError): the catch-all
+      // in _processUploadOp swallows every exception, not just 404/SyncError.
+      mock.script('getRecord', [MockThrow(StateError('backend wedged'))]);
+
+      final report = await h.engine.fileLane.syncFiles();
+      expect(report.hadError, isFalse);
+      expect(report.uploaded, 1);
+      expect(
+          (await h.pocket.files.list(store: 'widgets', recordId: recId))
+              .single
+              .state,
+          'synced');
+      expect(mock.records[recId]!.imgs, isNotEmpty);
+    });
+
     test('upload response with no imgs falls back to the requested name',
         () async {
       final mock = MockSyncBackend();
@@ -1022,6 +1053,53 @@ void main() {
           (await h.pocket.files.list(store: 'widgets', recordId: recId)).single;
       expect(ref.state, 'remote_only',
           reason: 'the ref stays remote-only after a failed download');
+    });
+
+    test('prefetch skips remote_only refs with no remote name', () async {
+      final mock = MockSyncBackend();
+      final h = await EngineHarness.create(
+        mock: mock,
+        config: convConfig(),
+        blobStore: MemoryBlobStore(),
+        stores: [
+          CollectionSchema(
+            name: 'widgets',
+            version: 1,
+            fields: [Field.text('name')],
+            prefetchFiles: true,
+          ),
+        ],
+      );
+      addTearDown(h.close);
+      final recId =
+          mock.seed(store: 'widgets', data: {'name': 'w'}, imgs: ['f.bin']);
+      await h.engine.syncNow(); // pull observes + prefetches the named file
+      final downloadsBefore = mock.downloadFileCalls;
+
+      // A remote_only ref WITHOUT a remote name can never be downloaded: the
+      // prefetch loop must skip it silently (no download, no error).
+      await h.pocket.db.insert('lp_file_refs', {
+        'ref_id': generateRecordId(),
+        'store': 'widgets',
+        'record_id': recId,
+        'field': 'imgs',
+        'hash': 'unknown_ghost.bin',
+        'remote_name': null,
+        'state': 'remote_only',
+      });
+
+      final report = await h.engine.fileLane.syncFiles();
+      expect(report.hadError, isFalse,
+          reason: 'a null remote name is skipped, not an error');
+      expect(report.downloaded, 0);
+      expect(mock.downloadFileCalls, downloadsBefore,
+          reason: 'no download attempt for a ref with no remote name');
+      final ghost = (await h.pocket.db.query('lp_file_refs',
+              where: "record_id = ? AND hash = 'unknown_ghost.bin'",
+              whereArgs: [recId]))
+          .single;
+      expect(ghost['state'], 'remote_only',
+          reason: 'the nameless ref stays untouched');
     });
 
     test('zero-row ref update completes the op without crashing', () async {

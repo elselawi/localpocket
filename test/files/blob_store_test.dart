@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:localpocket/localpocket.dart';
+// `processAndValidateBlobStream` is internal (not on the public export list).
+import 'package:localpocket/src/files/blob_store.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -614,6 +616,66 @@ void main() {
       expect(await store.open(hash), isA<Stream<List<int>>>());
       // The bad key was never used as a storage identity.
       expect(await inner.listHashes(), isNot(contains('bad/key')));
+    });
+  });
+
+  group('MemoryBlobStore', () {
+    test('cleanTmp is inert: _tmpFiles is never populated', () async {
+      final store = MemoryBlobStore();
+      final data = utf8.encode('data');
+      await store.put(Stream.value(data));
+      final hash = sha256.convert(data).toString();
+
+      expect(await store.cleanTmp(), 0,
+          reason: 'the in-memory store never registers tmp files');
+      expect(await store.cleanTmp(olderThan: Duration.zero), 0,
+          reason: 'the age threshold is irrelevant when nothing is tracked');
+      expect(await store.listHashes(), [hash],
+          reason: 'cleanTmp never removes blobs');
+      expect(await store.exists(hash), isTrue);
+    });
+  });
+
+  group('processAndValidateBlobStream error paths', () {
+    test('a source stream error mid-way propagates', () async {
+      Stream<List<int>> boom() async* {
+        yield [1, 2];
+        throw StateError('source down');
+      }
+
+      await expectLater(
+          processAndValidateBlobStream(boom()), throwsA(isA<StateError>()));
+    });
+
+    test('an onChunk error propagates and stops consumption', () async {
+      var chunks = 0;
+      await expectLater(
+        processAndValidateBlobStream(Stream.value([1, 2, 3]), onChunk: (_) {
+          chunks++;
+          throw StateError('sink failed');
+        }),
+        throwsA(isA<StateError>()),
+      );
+      expect(chunks, 1, reason: 'the first chunk aborts the pass');
+    });
+
+    test('size and hash mismatches are validated after a clean stream',
+        () async {
+      final data = [1, 2, 3];
+      final hash = sha256.convert(data).toString();
+      await expectLater(
+        processAndValidateBlobStream(Stream.value(data), expectedSize: 4),
+        throwsA(isA<StateError>()),
+      );
+      await expectLater(
+        processAndValidateBlobStream(Stream.value(data),
+            expectedSha256: 'f' * 64),
+        throwsA(isA<StateError>()),
+      );
+      final ok = await processAndValidateBlobStream(Stream.value(data),
+          expectedSize: 3, expectedSha256: hash);
+      expect(ok.hash, hash);
+      expect(ok.totalBytes, 3);
     });
   });
 }
