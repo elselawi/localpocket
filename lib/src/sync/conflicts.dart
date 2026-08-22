@@ -9,6 +9,12 @@ import '../core/row_models.dart';
 import 'merge.dart';
 import 'sync_tables.dart';
 
+/// Marker key inside a conflict's `remote_json` when the remote side of the
+/// conflict is a deletion: the record no longer exists remotely, so there is
+/// no remote document to store. The local row and its outbox op are retained
+/// until the app resolves the conflict.
+const String remoteDeletedKey = '__lp_deleted__';
+
 /// Representation of a conflict row in `lp_conflicts`.
 class ConflictRecord {
   /// Collection containing the conflicted record.
@@ -37,6 +43,12 @@ class ConflictRecord {
 
   /// Application-selected resolution, when stored.
   final Map<String, Object?>? resolved;
+
+  /// Whether the remote side of this conflict is a deletion (the record no
+  /// longer exists remotely). `remote` is then a tombstone map whose only
+  /// entry is [remoteDeletedKey].
+  bool get remoteDeleted =>
+      remote.length == 1 && remote[remoteDeletedKey] == true;
 
   ConflictRecord({
     required this.store,
@@ -167,8 +179,13 @@ class Conflicts {
         throw StateError('No conflict found for $store/$id');
       }
       final record = ConflictRecord.fromRow(conflictRow.first);
-      final remoteJson = canonicalize(record.remote);
-      final remoteHash = payloadHash(schema, record.remote);
+      // A delete-conflict's remote side is a tombstone: resolving it writes
+      // the record back, so the resolution base is "never remote" (the next
+      // push is a create, never an update against a vanished target).
+      final remoteDeleted = record.remoteDeleted;
+      final remoteJson = remoteDeleted ? null : canonicalize(record.remote);
+      final remoteHash =
+          remoteDeleted ? '' : payloadHash(schema, record.remote);
 
       // The domain row may be gone (e.g. the record was purged). There is
       // nothing to resolve then: drop the stale conflict (and any dangling
@@ -197,10 +214,12 @@ class Conflicts {
         whereArgs: [store, id],
         limit: 1,
       );
-      final remoteUpdated = srRow.isNotEmpty
-          ? ((srRow.first['base_updated'] as String?) ??
-              (srRow.first['remote_updated'] as String?))
-          : null;
+      final remoteUpdated = remoteDeleted
+          ? null
+          : (srRow.isNotEmpty
+              ? ((srRow.first['base_updated'] as String?) ??
+                  (srRow.first['remote_updated'] as String?))
+              : null);
 
       // 1. Delete conflict row
       await exec.delete(
@@ -223,9 +242,13 @@ class Conflicts {
         whereArgs: [id],
       );
 
-      // 3. Compute dirty fields between remote and merged
-      final dirtyFields =
-          computeDirtyFields(record.remote, mergedWithId).toList()..sort();
+      // 3. Compute dirty fields between the resolution base and merged (an
+      // empty base for a delete-conflict: everything is "added").
+      final dirtyFields = computeDirtyFields(
+              remoteDeleted ? const <String, Object?>{} : record.remote,
+              mergedWithId)
+          .toList()
+        ..sort();
       final mergedPayload = canonicalize(buildPayload(schema, mergedWithId));
 
       // 4. Update sync row to dirty with remote as base
@@ -311,6 +334,12 @@ class Conflicts {
     final conflict = await get(store, id);
     if (conflict == null) {
       throw StateError('No conflict found for $store/$id');
+    }
+    if (conflict.remoteDeleted) {
+      // The remote side deleted the record: accept it by hard-deleting the
+      // local copy (and its sync metadata) so the local DB mirrors remote.
+      await _pocket.collection(store).purge(id);
+      return;
     }
     await resolve(store: store, id: id, merged: conflict.remote);
   }

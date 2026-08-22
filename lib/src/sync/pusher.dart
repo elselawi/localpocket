@@ -8,6 +8,7 @@ import '../core/codec.dart';
 import '../core/hashing.dart';
 import '../core/local_pocket.dart';
 import '../core/schema.dart';
+import 'conflicts.dart';
 import 'mapping.dart';
 import 'merge.dart';
 import 'outbox.dart';
@@ -24,12 +25,18 @@ class PushReport {
   /// Operations parked in the recoverable `blocked` state (a 403 that may be
   /// temporary). They are requeued when permissions are restored.
   final int blocked;
+
+  /// Local edits discarded in favor of the remote deletion
+  /// (`MissingRemotePolicy.discardLocal`).
+  final int discarded;
+
   final bool hadError;
   const PushReport({
     this.pushed = 0,
     this.deadLettered = 0,
     this.conflicted = 0,
     this.blocked = 0,
+    this.discarded = 0,
     this.hadError = false,
   });
 }
@@ -77,6 +84,7 @@ class Pusher {
         deadLettered: report.deadLettered + r.deadLettered,
         conflicted: report.conflicted + r.conflicted,
         blocked: report.blocked + r.blocked,
+        discarded: report.discarded + r.discarded,
         hadError: report.hadError || r.hadError,
       );
     }
@@ -105,6 +113,7 @@ class Pusher {
     SyncRowState sr,
     Future<PushReport> Function() action, {
     bool catchPayloadError = false,
+    bool recreateInProgress = false,
   }) async {
     try {
       return await action();
@@ -125,14 +134,17 @@ class Pusher {
       }
       return _retry(op, sr, e);
     } on NotFoundError {
-      await _deadLetter(op, 'missing_target');
-      return const PushReport(deadLettered: 1);
+      // The update's target vanished remotely: apply the collection's
+      // missing-remote policy (recreate is single-shot per flow so an
+      // oscillating backend can never loop).
+      return _handleMissingRemote(op, sr, allowRecreate: !recreateInProgress);
     } on SyncError catch (e) {
       return _retry(op, sr, e);
     }
   }
 
-  Future<PushReport> _pushCreate(OutboxOp op, SyncRowState sr) async {
+  Future<PushReport> _pushCreate(OutboxOp op, SyncRowState sr,
+      {bool recreateInProgress = false}) async {
     return _handlePushExceptions(op, sr, () async {
       try {
         final rec = await backend.createRecord(
@@ -141,13 +153,14 @@ class Pusher {
         return const PushReport(pushed: 1);
       } on DuplicateIdError {
         // Retry of a lost create: verify, else convert to an update.
-        return _recoverDuplicateCreate(op, sr);
+        return _recoverDuplicateCreate(op, sr,
+            recreateInProgress: recreateInProgress);
       }
-    }, catchPayloadError: true);
+    }, catchPayloadError: true, recreateInProgress: recreateInProgress);
   }
 
-  Future<PushReport> _recoverDuplicateCreate(
-      OutboxOp op, SyncRowState sr) async {
+  Future<PushReport> _recoverDuplicateCreate(OutboxOp op, SyncRowState sr,
+      {bool recreateInProgress = false}) async {
     final schema = pocket.requireTable(op.store).schema;
     return _handlePushExceptions(op, sr, () async {
       final fetched = await backend.getRecord(op.recordId);
@@ -163,17 +176,18 @@ class Pusher {
         return const PushReport(pushed: 1);
       }
       // Same id, different content: fall through to the update path.
-      return await _pushUpdateWithBase(op, sr, fetched);
-    });
+      return await _pushUpdateWithBase(op, sr, fetched,
+          recreateInProgress: recreateInProgress);
+    }, recreateInProgress: recreateInProgress);
   }
 
   Future<PushReport> _pushUpdate(OutboxOp op, SyncRowState sr) async {
     return _handlePushExceptions(op, sr, () async {
       final fetched = await backend.getRecord(op.recordId);
       if (fetched == null) {
-        // The record no longer exists remotely (a vanished target).
-        await _deadLetter(op, 'missing_target');
-        return const PushReport(deadLettered: 1);
+        // The record no longer exists remotely (a vanished target): apply the
+        // collection's missing-remote policy.
+        return _handleMissingRemote(op, sr);
       }
       _assertFetchedMatches(op, fetched);
       if (fetched.updated == op.baseUpdated) {
@@ -196,8 +210,7 @@ class Pusher {
             // overwrite blindly.
             final fresh = await backend.getRecord(op.recordId);
             if (fresh == null) {
-              await _deadLetter(op, 'missing_target');
-              return const PushReport(deadLettered: 1);
+              return _handleMissingRemote(op, sr);
             }
             return _pushUpdateWithBase(op, sr, fresh);
           }
@@ -209,7 +222,8 @@ class Pusher {
   }
 
   Future<PushReport> _pushUpdateWithBase(
-      OutboxOp op, SyncRowState sr, RemoteRecord fetched) async {
+      OutboxOp op, SyncRowState sr, RemoteRecord fetched,
+      {bool recreateInProgress = false}) async {
     _assertFetchedMatches(op, fetched);
     final schema = pocket.requireTable(op.store).schema;
     final fetchedLogical = normalizeRemote(schema, fetched);
@@ -236,7 +250,7 @@ class Pusher {
       await _settle(op, rec,
           mergedLogical: outcome.merged, serverDataJson: mergedJson);
       return const PushReport(pushed: 1);
-    }, catchPayloadError: true);
+    }, catchPayloadError: true, recreateInProgress: recreateInProgress);
   }
 
   // ---------------------------------------------------------------- batch --
@@ -248,6 +262,7 @@ class Pusher {
     var dead = 0;
     var conflicted = 0;
     var blocked = 0;
+    var discarded = 0;
 
     // Pre-flight GETs gate every write.
     final outboxPayloadByOpId = <String, String>{};
@@ -266,11 +281,16 @@ class Pusher {
         pocket.perf.pushPreflightRequests++;
         fetched = await backend.getRecord(op.recordId);
       } on NotFoundError {
-        // Not on the server yet. For an update that is a vanished row; for a
-        // create it is the expected state — fall through to send it.
+        // Not on the server yet. For an update this is a vanished target:
+        // apply the collection's missing-remote policy. For a create it is
+        // the expected state — fall through to send it.
         if (op.baseUpdated != null) {
-          await _deadLetter(op, 'missing_target');
-          dead++;
+          final r = await _handleMissingRemote(op, sr);
+          pushed += r.pushed;
+          dead += r.deadLettered;
+          conflicted += r.conflicted;
+          blocked += r.blocked;
+          discarded += r.discarded;
           continue;
         }
         fetched = null;
@@ -341,12 +361,14 @@ class Pusher {
         pushed += report.pushed;
         dead += report.deadLettered;
         conflicted += report.conflicted;
+        discarded += report.discarded;
         if (report.hadError) {
           return PushReport(
               pushed: pushed,
               deadLettered: dead,
               conflicted: conflicted,
               blocked: blocked,
+              discarded: discarded,
               hadError: true);
         }
       }
@@ -355,7 +377,8 @@ class Pusher {
         pushed: pushed,
         deadLettered: dead,
         conflicted: conflicted,
-        blocked: blocked);
+        blocked: blocked,
+        discarded: discarded);
   }
 
   /// Maximum operations per remote batch request: min of the configured limit
@@ -461,6 +484,7 @@ class Pusher {
       var dead = 0;
       var conflicted = 0;
       var blocked = 0;
+      var discarded = 0;
       var hadError = false;
       for (final op in toSend) {
         final sr = await pocket.outbox.readSyncRow(pocket.db, op.store, op.id);
@@ -470,6 +494,7 @@ class Pusher {
         dead += r.deadLettered;
         conflicted += r.conflicted;
         blocked += r.blocked;
+        discarded += r.discarded;
         hadError = hadError || r.hadError;
       }
       return PushReport(
@@ -477,6 +502,7 @@ class Pusher {
           deadLettered: dead,
           conflicted: conflicted,
           blocked: blocked,
+          discarded: discarded,
           hadError: hadError);
     } on ForbiddenError {
       // Server disabled batch: fall back to per-record for this session.
@@ -657,6 +683,79 @@ class Pusher {
       error: error ?? kind,
       payloadJson: op.payloadJson,
     );
+  }
+
+  /// Applies the collection's [MissingRemotePolicy] when an update's target no
+  /// longer exists remotely (a remote deletion raced a local offline edit).
+  ///
+  /// [allowRecreate] is false on the re-entrant path (a recreated create hit
+  /// the delete/update race again), so an oscillating backend can never loop:
+  /// the second miss dead-letters instead.
+  Future<PushReport> _handleMissingRemote(
+    OutboxOp op,
+    SyncRowState sr, {
+    bool allowRecreate = true,
+  }) async {
+    final policy =
+        pocket.requireTable(op.store).schema.conflictPolicy.missingRemote;
+    switch (policy) {
+      case MissingRemotePolicy.conflict:
+        await _escalateDeleteConflict(op, sr);
+        return const PushReport(conflicted: 1);
+      case MissingRemotePolicy.recreate:
+        if (!allowRecreate) {
+          await _deadLetter(op, 'missing_target');
+          return const PushReport(deadLettered: 1);
+        }
+        return _pushCreate(op, sr, recreateInProgress: true);
+      case MissingRemotePolicy.discardLocal:
+        // Mirror the remote deletion: the collection purge hard-deletes the
+        // row and releases refs/queue entries/metadata.
+        await pocket.collection(op.store).purge(op.recordId);
+        return const PushReport(discarded: 1);
+    }
+  }
+
+  /// Escalates a push whose target vanished remotely into a delete-vs-edit
+  /// conflict: the remote side is recorded as a tombstone so the conflicts UI
+  /// offers acceptLocal (recreate) / acceptRemote (discard).
+  Future<void> _escalateDeleteConflict(OutboxOp op, SyncRowState sr) async {
+    final basePayload = parsePayloadJson(sr.baseJson);
+    final localPayload = parsePayloadJson(op.payloadJson);
+    final dirtyLocal = computeDirtyFields(basePayload, localPayload).toList()
+      ..sort();
+    final baseJson = sr.baseJson ?? canonicalize(basePayload);
+
+    await pocket.transaction((tx) async {
+      final exec = tx.executor;
+      await exec.insert(
+          'lp_conflicts',
+          {
+            'store': op.store,
+            'record_id': op.recordId,
+            'base_json': baseJson,
+            'local_json': canonicalize(localPayload),
+            'remote_json': canonicalize({remoteDeletedKey: true}),
+            'dirty_local': jsonEncode(dirtyLocal),
+            'dirty_remote': jsonEncode(const <String>[]),
+            'detected_at': _nowMs(),
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace);
+      await exec.update(
+          'lp_sync_row',
+          {
+            'sync_state': SyncState.conflict.name,
+            // The resolution base stays the last known remote version; the
+            // tombstone lives in the conflict row's remote_json.
+            'base_json': baseJson,
+            'base_hash': op.baseHash,
+            'base_updated': op.baseUpdated,
+          },
+          where: 'store = ? AND record_id = ?',
+          whereArgs: [op.store, op.recordId]);
+      tx.addChange(ChangeSet(op.store, {op.recordId}));
+      tx.addChange(ChangeSet('lp_conflicts', {op.recordId}));
+    });
   }
 
   Future<void> _recordConflict(OutboxOp op, SyncRowState sr,
