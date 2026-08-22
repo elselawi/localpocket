@@ -54,6 +54,7 @@ class EngineHarness {
     SyncConfig? config,
     MockSyncBackend? mock,
     TestHooks? testHooks,
+    Database? database,
     bool start = true,
     String? path,
     BlobStore? blobStore,
@@ -62,6 +63,7 @@ class EngineHarness {
     int Function()? now,
   }) async {
     final p = await openPocket(
+      database: database,
       stores: stores ?? [widgetsSchema()],
       testHooks: testHooks,
       path: path,

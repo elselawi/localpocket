@@ -83,6 +83,10 @@ class MockSyncBackend implements SyncBackend {
   int getCalls = 0;
   int createCalls = 0;
   int updateCalls = 0;
+
+  /// Every `baseUpdated` value sent to [updateRecord], in call order — lets
+  /// contract tests pin that a retried update carries the same base version.
+  final List<String?> updateRecordBaseVersions = [];
   int updateFilesCalls = 0;
   int downloadFileCalls = 0;
   int batchCalls = 0;
@@ -342,6 +346,7 @@ class MockSyncBackend implements SyncBackend {
     String? baseUpdated,
   }) async {
     updateCalls++;
+    updateRecordBaseVersions.add(baseUpdated);
     final b = await _next('updateRecord');
     if (b is MockThrow) throw b.error;
     if (b is MockReturn) return b.value as RemoteRecord;
