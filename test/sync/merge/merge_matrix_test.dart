@@ -11,6 +11,28 @@ import 'package:test/test.dart';
 void main() {
   group('exhaustive small domain triples', () {
     test('exhaustive small domain triples', () {
+      // The expected outcome under the current spec: the classic three-way
+      // rules per path, with nested String-keyed maps merging per-key.
+      Object? expectedMerge(Object? b, Object? l, Object? r) {
+        if (deepEquals(l, r)) return l;
+        if (deepEquals(l, b)) return r;
+        if (deepEquals(r, b)) return l;
+        if (l is Map &&
+            r is Map &&
+            l.keys.every((k) => k is String) &&
+            r.keys.every((k) => k is String) &&
+            (b == null || (b is Map && b.keys.every((k) => k is String)))) {
+          final bMap = b == null ? null : Map<String, Object?>.from(b as Map);
+          final lMap = Map<String, Object?>.from(l);
+          final rMap = Map<String, Object?>.from(r);
+          return <String, Object?>{
+            for (final key in {...?bMap?.keys, ...lMap.keys, ...rMap.keys})
+              key: expectedMerge(bMap?[key], lMap[key], rMap[key]),
+          };
+        }
+        return r;
+      }
+
       final domain = <Object?>[
         null,
         0,
@@ -49,9 +71,10 @@ void main() {
               expect(deepEquals(mergedVal, l), isTrue,
                   reason: 'r == b -> l ($b, $l, $r)');
             } else {
-              // Both changed: default resolver is RemoteWins
-              expect(deepEquals(mergedVal, r), isTrue,
-                  reason: 'both changed -> remote wins ($b, $l, $r)');
+              // Both changed: per-key recursive merge (nested maps) or
+              // remote wins (everything else).
+              expect(deepEquals(mergedVal, expectedMerge(b, l, r)), isTrue,
+                  reason: 'both changed -> per-key/remote ($b, $l, $r)');
             }
           }
         }
@@ -77,7 +100,8 @@ void main() {
         } else if (deepEquals(r, b)) {
           expect(deepEquals(outcome.merged['val'], l), isTrue);
         } else {
-          expect(deepEquals(outcome.merged['val'], r), isTrue);
+          expect(deepEquals(outcome.merged['val'], expectedMerge(b, l, r)),
+              isTrue);
         }
 
         // Disjoint keys survive
@@ -243,7 +267,7 @@ void main() {
       expect(identical(res.merged['m'], l), isTrue);
     });
 
-    test('nested maps are atomic: a nested difference is both-changed', () {
+    test('nested maps merge per-key: additions from both sides survive', () {
       final base = {
         'cfg': {'a': 1, 'b': 2}
       };
@@ -253,10 +277,12 @@ void main() {
       final remote = {
         'cfg': {'a': 1, 'b': 2, 'r': true}
       };
-      // No per-key recursion: the nested map is one value -> remote wins whole.
+      // Per-key recursion: unchanged keys follow their sides, and each
+      // side's own additions survive as nested keys.
       final res = merge3Way(base: base, local: local, remote: remote);
-      expect(deepEquals(res.merged['cfg'], remote['cfg']), isTrue,
-          reason: 'nested maps merge atomically (remote wins)');
+      expect(res.merged['cfg'], {'a': 1, 'b': 2, 'l': true, 'r': true},
+          reason: 'nested maps merge per-key (each side\'s nested additions '
+              'survive)');
     });
 
     test('maps with non-string keys deep-compare correctly', () {
@@ -415,8 +441,8 @@ void main() {
           remote: {
             'tags': ['b', 'd']
           },
-          policy:
-              const MergePolicy(fieldOverrides: {'tags': SetUnionResolver()}),
+          policy: const MergePolicy(
+              fieldOverrides: {'tags': SetUnionWithDeletionWinsResolver()}),
         ),
         (
           base: {'score': 10},

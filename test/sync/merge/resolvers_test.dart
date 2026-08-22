@@ -47,7 +47,7 @@ void main() {
       };
 
       final policy = MergePolicy(
-        fieldOverrides: {'tags': const SetUnionResolver()},
+        fieldOverrides: {'tags': const SetUnionWithDeletionWinsResolver()},
       );
 
       final res = merge3Way(
@@ -110,8 +110,8 @@ void main() {
 
       final policy = MergePolicy(
         fieldOverrides: {
-          'notes': const AppendOnlyResolver(),
-          'log': const AppendOnlyResolver(),
+          'notes': const AppendOnlyLinesResolver(),
+          'log': const AppendOnlyListResolver(),
         },
       );
 
@@ -243,15 +243,15 @@ void main() {
     });
   });
 
-  group('SetUnionResolver edge cases', () {
+  group('SetUnionWithDeletionWinsResolver edge cases', () {
     List<Object?> mergeTags(
             List<Object?>? b, List<Object?>? l, List<Object?>? r) =>
         (merge3Way(
           base: {'tags': b},
           local: {'tags': l},
           remote: {'tags': r},
-          policy:
-              const MergePolicy(fieldOverrides: {'tags': SetUnionResolver()}),
+          policy: const MergePolicy(
+              fieldOverrides: {'tags': SetUnionWithDeletionWinsResolver()}),
         ).merged['tags'] as List)
             .cast<Object?>();
 
@@ -323,19 +323,20 @@ void main() {
           'tags': ['x']
         },
         remote: {'tags': <Object?>[]},
-        policy: const MergePolicy(fieldOverrides: {'tags': SetUnionResolver()}),
+        policy: const MergePolicy(
+            fieldOverrides: {'tags': SetUnionWithDeletionWinsResolver()}),
       );
       expect((m.merged['tags'] as List).cast<Object?>(), ['x']);
     });
   });
 
-  group('AppendOnlyResolver edge cases', () {
+  group('append-only resolvers edge cases', () {
     String mergeNotes(String? b, String? l, String? r) => (merge3Way(
           base: {'notes': b},
           local: {'notes': l},
           remote: {'notes': r},
           policy: const MergePolicy(
-              fieldOverrides: {'notes': AppendOnlyResolver()}),
+              fieldOverrides: {'notes': AppendOnlyLinesResolver()}),
         ).merged['notes'] as String);
 
     test('empty and whitespace-only lines are skipped', () {
@@ -378,8 +379,8 @@ void main() {
             'evt'
           ]
         },
-        policy:
-            const MergePolicy(fieldOverrides: {'log': AppendOnlyResolver()}),
+        policy: const MergePolicy(
+            fieldOverrides: {'log': AppendOnlyListResolver()}),
       ).merged['log'] as List)
           .cast<Object?>();
       // List mode uses deep equality: all three {'x':1} instances collapse.
@@ -397,8 +398,8 @@ void main() {
         remote: {
           'log': [3]
         },
-        policy:
-            const MergePolicy(fieldOverrides: {'log': AppendOnlyResolver()}),
+        policy: const MergePolicy(
+            fieldOverrides: {'log': AppendOnlyListResolver()}),
       ).merged['log'] as List)
           .cast<Object?>();
       // List mode dedups by DEEP equality: 2 and 2.0 are deep-equal, so 2.0
@@ -424,8 +425,8 @@ void main() {
             {'c': 3}
           ]
         },
-        policy:
-            const MergePolicy(fieldOverrides: {'log': AppendOnlyResolver()}),
+        policy: const MergePolicy(
+            fieldOverrides: {'log': AppendOnlyListResolver()}),
       ).merged['log'] as List)
           .cast<Object?>();
       expect(m, [
