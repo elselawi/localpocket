@@ -5,7 +5,7 @@ import 'package:localpocket/pocketbase.dart';
 import 'package:test/test.dart';
 
 import 'fake_transport.dart';
-import 'pb_helpers.dart';
+import '../support/pb_helpers.dart';
 
 /// SSE parser byte/frame matrix: frame splitting at every byte
 /// boundary, multibyte UTF-8 split across chunks, CRLF/LF, comments, blank /

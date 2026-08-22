@@ -8,7 +8,7 @@ import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
 import '../pocketbase/fake_transport.dart';
-import '../pocketbase/pb_helpers.dart';
+import '../support/pb_helpers.dart';
 import '../support/helpers.dart';
 import '../sync/engine/engine_helpers.dart';
 import '../sync/engine/mock_backend.dart';

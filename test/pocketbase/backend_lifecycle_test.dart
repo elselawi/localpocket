@@ -5,8 +5,8 @@ import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
 import 'fake_transport.dart';
-import 'mock_pb_server.dart';
-import 'pb_helpers.dart';
+import '../support/mock_pb_server.dart';
+import '../support/pb_helpers.dart';
 
 /// PocketBase backend prepare/close lifecycle: probing, capability
 /// negotiation, page-size behavior, and realtime lifecycle / close hygiene.

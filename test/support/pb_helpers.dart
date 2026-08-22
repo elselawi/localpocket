@@ -5,7 +5,7 @@ import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/pocketbase.dart';
 import 'package:localpocket/sync.dart';
 
-import '../support/helpers.dart';
+import 'helpers.dart';
 import 'mock_pb_server.dart';
 
 /// A controllable token provider for auth tests.
@@ -68,6 +68,8 @@ class PbEngineHarness {
     SyncConfig? config,
     String? path,
     int maxDocBytes = 1900000,
+    BlobStore? blobStore,
+    FieldCipher? fieldCipher,
   }) async {
     final t = tokens ?? TestTokenProvider();
     final backend = PocketBaseBackend(
@@ -79,7 +81,9 @@ class PbEngineHarness {
     final pocket = await openPocket(
         stores: stores ?? [widgetsSchema()],
         path: path,
-        maxDocBytes: maxDocBytes);
+        maxDocBytes: maxDocBytes,
+        blobStore: blobStore,
+        fieldCipher: fieldCipher);
     final engine = SyncEngine(
       pocket: pocket,
       backend: backend,

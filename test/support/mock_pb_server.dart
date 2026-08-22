@@ -43,9 +43,22 @@ class PbRecord {
       };
 }
 
+/// A single multipart part: form field [name] (+ optional [filename] for
+/// file parts) and its raw [bytes].
+class _MultipartPart {
+  final String name;
+  final String? filename;
+  final List<int> bytes;
+  _MultipartPart(this.name, this.filename, this.bytes);
+}
+
 class MockPbServer {
   final Map<String, PbRecord> records = {};
   final Map<String, List<String>> receivedTokens = {};
+
+  /// Uploaded file bytes keyed by `'<recordId>/<serverFilename>'` (the
+  /// download route mirrors real PB: `GET /api/files/data/{id}/{filename}`).
+  final Map<String, List<int>> fileBytes = {};
 
   bool authRequired = false;
   String validToken = 'valid-token';
@@ -68,6 +81,11 @@ class MockPbServer {
   /// `(status, body)` WITHOUT applying the requests. Enables response-contract
   /// tests (empty/short/long/duplicate/unknown-op/malformed-record bodies).
   final List<(int, Object?)> batchResponseScript = [];
+
+  /// Artificial latency before every batch response (default zero). Used to
+  /// hold a batch request in-flight so a test can stop the server MID-drain
+  /// and observe the client's recovery.
+  Duration batchLatency = Duration.zero;
 
   int listCalls = 0;
   int viewCalls = 0;
@@ -96,8 +114,9 @@ class MockPbServer {
       _clockBase + _tick++ * 1000,
       isUtc: true));
 
-  Future<MockPbServer> start() async {
-    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  Future<MockPbServer> start({int? port}) async {
+    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port ?? 0,
+        shared: true);
     _server!.listen(_handle);
     return this;
   }
@@ -232,6 +251,14 @@ class MockPbServer {
           req.response.statusCode = 405;
           await req.response.close();
         }
+        return;
+      }
+      final fileMatch =
+          RegExp(r'^/api/files/data/([^/]+)/(.+)$').firstMatch(path);
+      if (fileMatch != null && method == 'GET') {
+        await _handleFileDownload(req,
+            Uri.decodeComponent(fileMatch.group(1)!),
+            Uri.decodeComponent(fileMatch.group(2)!));
         return;
       }
       req.response.statusCode = 404;
@@ -486,6 +513,45 @@ class MockPbServer {
       return _sendJson(
           req, 404, {'message': 'The requested resource wasn\'t found.'});
     }
+    // Multipart uploads (real PB file modifier contract): `imgs+` FILE parts
+    // APPEND server-renamed files, `imgs-` removes by name, `data` merges.
+    final ct = req.headers.contentType;
+    if (ct?.mimeType == 'multipart/form-data') {
+      final raw =
+          await req.fold<List<int>>(<int>[], (acc, chunk) => acc..addAll(chunk));
+      // Derive the boundary from the BODY's first line (`--<boundary>\r\n`):
+      // dart:io's Content-Type parameter parsing can mangle the boundary
+      // value, so the actual delimiter used in the body is authoritative.
+      final firstCrlf = _indexOf(raw, utf8.encode('\r\n'), 0);
+      final firstLine = firstCrlf < 0
+          ? ''
+          : utf8.decode(raw.sublist(0, firstCrlf), allowMalformed: true);
+      final boundary =
+          firstLine.startsWith('--') ? firstLine.substring(2) : '';
+      final parts = _parseMultipart(raw, boundary);
+      for (final part in parts) {
+        if (part.name == 'imgs-' && part.filename == null) {
+          final names =
+              (jsonDecode(utf8.decode(part.bytes)) as List).cast<String>();
+          r.imgs = r.imgs.where((n) => !names.contains(n)).toList();
+        } else if (part.name == 'imgs+' && part.filename != null) {
+          final renamed = 'file_${_tick}_${part.filename}';
+          fileBytes['${r.id}/$renamed'] = part.bytes;
+          r.imgs = [...r.imgs, renamed];
+        } else if (part.name == 'data' && part.filename == null) {
+          final data = jsonDecode(utf8.decode(part.bytes));
+          if (data is Map) {
+            r.data = {
+              ...r.data,
+              ...Map<String, Object?>.from(data),
+            };
+          }
+        }
+      }
+      r.updated = nextUpdated(); // file changes re-deliver on the next pull
+      await _sendJson(req, 200, r.toJson());
+      return;
+    }
     final body =
         jsonDecode(await utf8.decoder.bind(req).join()) as Map<String, Object?>;
     lastBody = jsonEncode(body);
@@ -509,6 +575,9 @@ class MockPbServer {
 
   Future<void> _handleBatch(HttpRequest req) async {
     batchCalls++;
+    if (batchLatency > Duration.zero) {
+      await Future<void>.delayed(batchLatency);
+    }
     _recordToken(req);
     if (!_authed(req)) return _sendJson(req, 401, {'message': 'Unauthorized'});
     final body =
@@ -637,7 +706,88 @@ class MockPbServer {
     } catch (_) {}
   }
 
+  // ------------------------------------------------------------- files --
+
+  Future<void> _handleFileDownload(
+      HttpRequest req, String recordId, String filename) async {
+    if (!_authed(req)) return _sendJson(req, 401, {'message': 'Unauthorized'});
+    final bytes = fileBytes['$recordId/$filename'];
+    if (bytes == null) {
+      return _sendJson(
+          req, 404, {'message': 'The requested resource wasn\'t found.'});
+    }
+    req.response.statusCode = 200;
+    req.response.headers.contentType = ContentType.binary;
+    req.response.add(bytes);
+    await req.response.close();
+  }
+
   // --------------------------------------------------------------- utils --
+
+  /// Minimal `multipart/form-data` parser sufficient for the adapter's file
+  /// uploads: split on `--boundary`, read `Content-Disposition` headers, keep
+  /// the raw content bytes (binary-safe).
+  List<_MultipartPart> _parseMultipart(List<int> body, String boundary) {
+    final parts = <_MultipartPart>[];
+    final delim = utf8.encode('--$boundary');
+    final crlfDelim = [...utf8.encode('\r\n'), ...delim];
+    final headerSep = utf8.encode('\r\n\r\n');
+    var pos = _indexOf(body, delim, 0);
+    if (pos < 0) return parts;
+    pos += delim.length;
+    while (true) {
+      if (pos + 1 < body.length &&
+          body[pos] == 0x2d &&
+          body[pos + 1] == 0x2d) {
+        break; // final `--boundary--`
+      }
+      if (pos + 1 < body.length &&
+          body[pos] == 0x0d &&
+          body[pos + 1] == 0x0a) {
+        pos += 2;
+      } else if (pos < body.length && body[pos] == 0x0a) {
+        pos += 1;
+      }
+      final headerEnd = _indexOf(body, headerSep, pos);
+      if (headerEnd < 0) break;
+      final headerText =
+          utf8.decode(body.sublist(pos, headerEnd), allowMalformed: true);
+      String? name;
+      String? filename;
+      // Case-insensitive: the adapter's multipart writes `content-type` BEFORE
+      // `content-disposition` and uses lowercase header names.
+      final cd = RegExp(
+              r'content-disposition: form-data; name="([^"]*)"(?:; filename="([^"]*)")?',
+              caseSensitive: false)
+          .firstMatch(headerText);
+      if (cd != null) {
+        name = cd.group(1);
+        filename = cd.group(2);
+      }
+      pos = headerEnd + headerSep.length;
+      final next = _indexOf(body, crlfDelim, pos);
+      if (next < 0) break;
+      if (name != null) {
+        parts.add(_MultipartPart(name, filename, body.sublist(pos, next)));
+      }
+      pos = next + crlfDelim.length;
+    }
+    return parts;
+  }
+
+  int _indexOf(List<int> haystack, List<int> needle, int start) {
+    for (var i = start; i <= haystack.length - needle.length; i++) {
+      var match = true;
+      for (var j = 0; j < needle.length; j++) {
+        if (haystack[i + j] != needle[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return i;
+    }
+    return -1;
+  }
 
   int _jsonSize(Map<String, Object?> data) =>
       utf8.encode(jsonEncode(data)).length;

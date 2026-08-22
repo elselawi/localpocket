@@ -7,7 +7,7 @@ import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
 import '../pocketbase/fake_transport.dart';
-import '../pocketbase/pb_helpers.dart';
+import '../support/pb_helpers.dart';
 import '../support/helpers.dart';
 
 /// Public API / documentation contract tests.

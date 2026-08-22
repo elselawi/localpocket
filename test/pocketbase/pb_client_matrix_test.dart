@@ -6,7 +6,7 @@ import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
 import 'fake_transport.dart';
-import 'pb_helpers.dart';
+import '../support/pb_helpers.dart';
 
 /// PbClient-level request/response matrix: typed status mapping,
 /// malformed response handling, URL/request encoding, and batch response

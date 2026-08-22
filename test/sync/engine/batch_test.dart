@@ -5,8 +5,8 @@ import 'package:localpocket/pocketbase.dart';
 import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
-import '../../pocketbase/mock_pb_server.dart';
-import '../../pocketbase/pb_helpers.dart';
+import '../../support/mock_pb_server.dart';
+import '../../support/pb_helpers.dart';
 import '../../support/helpers.dart';
 import 'engine_helpers.dart';
 import 'mock_backend.dart';

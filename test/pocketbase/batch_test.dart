@@ -3,8 +3,8 @@ import 'package:localpocket/pocketbase.dart';
 import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
-import 'mock_pb_server.dart';
-import 'pb_helpers.dart';
+import '../support/mock_pb_server.dart';
+import '../support/pb_helpers.dart';
 
 /// Batch probe and upsert tests.
 void main() {

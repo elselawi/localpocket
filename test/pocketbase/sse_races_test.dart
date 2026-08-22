@@ -5,7 +5,7 @@ import 'package:localpocket/pocketbase.dart';
 import 'package:test/test.dart';
 
 import 'fake_transport.dart';
-import 'pb_helpers.dart';
+import '../support/pb_helpers.dart';
 
 /// Realtime SSE handshake / auth / stop races and event validation /
 /// ordering, driven through [PbRealtime] over a fake transport.

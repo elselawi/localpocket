@@ -6,8 +6,8 @@ import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
 import 'fake_transport.dart';
-import 'mock_pb_server.dart';
-import 'pb_helpers.dart';
+import '../support/mock_pb_server.dart';
+import '../support/pb_helpers.dart';
 
 /// Realtime startup ownership: `SyncEngine.start()` does NOT open
 /// the SSE connection — realtime is application-managed via
