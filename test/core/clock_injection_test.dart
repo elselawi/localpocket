@@ -6,7 +6,7 @@ import '../support/helpers.dart';
 import '../sync/engine/engine_helpers.dart';
 import '../sync/engine/mock_backend.dart';
 
-/// Clock injection (audit #40): every persistence/engine timestamp should come
+/// Clock injection: every persistence/engine timestamp should come
 /// from the single injectable clock (`LocalPocket.now`, adopted by
 /// `SyncConfig.now`), never from a raw `DateTime.now()`, so tests are fully
 /// deterministic. A fake mutable clock pins every value; if any path leaked a
