@@ -3,7 +3,7 @@ import 'package:test/test.dart';
 
 import 'engine_helpers.dart';
 
-/// Audit #17: "Quarantine can permanently advance the cursor".
+/// "Quarantine can permanently advance the cursor".
 ///
 /// A malformed remote record is quarantined (the store never stalls), but the
 /// pull cursor advances past it — so a dedicated, backoff-gated retry must

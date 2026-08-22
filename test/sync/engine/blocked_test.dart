@@ -6,7 +6,7 @@ import '../../support/helpers.dart';
 import 'engine_helpers.dart';
 import 'mock_backend.dart';
 
-/// Audit #34: "Forbidden operations can become permanently stranded".
+/// "Forbidden operations can become permanently stranded".
 ///
 /// A 403 (permission failure) is RECOVERABLE: the op is parked in the
 /// `blocked` state (kept in the outbox, never dead-lettered) so a later

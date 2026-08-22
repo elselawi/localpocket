@@ -4,7 +4,7 @@ import 'package:test/test.dart';
 
 import 'engine_helpers.dart';
 
-/// Audit #11: "Sync lifecycle generation token".
+/// "Sync lifecycle generation token".
 ///
 /// A monotonic generation is bumped on every start/stop so stale async work
 /// from a previous lifecycle (a cycle, a realtime fast-path apply, a status
@@ -62,6 +62,28 @@ void main() {
       final id2 = h.mock.seed(store: 'widgets', data: doc('', 'v2'));
       await h.engine.syncNow();
       expect(await h.pocket.collection('widgets').get(id2), isNotNull);
+    });
+
+    test('the periodic sync timer never fires after stop', () async {
+      final h = await EngineHarness.create(
+          config: const SyncConfig(
+        syncInterval: Duration(milliseconds: 10),
+        sweepInterval: Duration(days: 365),
+        pushDebounce: Duration(days: 365),
+      ));
+      addTearDown(h.close);
+      final id = h.mock.seed(store: 'widgets', data: doc('', 'v1'));
+      await h.engine.syncNow();
+      await h.engine.stop();
+
+      // Seed AFTER stop: a stray periodic timer firing would pull it.
+      final pullsBefore = h.mock.listChangesCalls;
+      h.mock.seed(store: 'widgets', data: doc('', 'v2'));
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(h.mock.listChangesCalls, pullsBefore,
+          reason: 'the periodic timer was cancelled at stop and never fired');
+      expect(await h.pocket.collection('widgets').get(id), isNotNull);
     });
 
     test('fast-path hint while stopped never applies or schedules work',

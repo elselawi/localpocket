@@ -325,6 +325,52 @@ void main() {
       expect(await h.pocket.collection('widgets').query().all().count(), 2);
     });
 
+    test(
+        'a push cycle held open across stop and restart pushes once and the '
+        'restart pushes cleanly', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+
+      final id = h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
+      await h.engine.syncNow();
+      await h.pocket.collection('widgets').patch(id, {'name': 'edited'});
+
+      // Hold the PATCH in flight; the cycle hangs across the stop.
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      h.mock.updateRecordEntered = entered;
+      h.mock.updateRecordBarrier = release;
+      final cycle = h.engine.syncNow();
+      await entered.future;
+
+      var stoppedDone = false;
+      final stopped = h.engine.stop().then((_) => stoppedDone = true);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(stoppedDone, isFalse, reason: 'stop waits for the in-flight push');
+      release.complete();
+      await stopped;
+      await cycle;
+      h.mock.updateRecordBarrier = null;
+      h.mock.updateRecordEntered = null;
+
+      expect(h.engine.state, SyncEngineState.closed);
+      expect(h.mock.updateCalls, 1,
+          reason: 'the held cycle pushed exactly once before completing');
+      expect(h.mock.records[id]!.data['name'], 'edited');
+
+      // A fresh lifecycle pushes the next edit cleanly — the drained old
+      // cycle can never run again in the new lifecycle.
+      await h.pocket.collection('widgets').patch(id, {'name': 'again'});
+      await h.engine.start();
+      await h.engine.syncNow();
+      expect(h.mock.updateCalls, 2, reason: 'exactly one more push');
+      expect(h.mock.records[id]!.data['name'], 'again');
+      expect(
+          (await h.pocket.outbox.readSyncRow(h.pocket.db, 'widgets', id))!
+              .syncState,
+          SyncState.clean);
+    });
+
     test('stop cancels a pending debounce so no cycle touches a closed pocket',
         () async {
       final h = await EngineHarness.create(
@@ -383,6 +429,40 @@ void main() {
       expect(h.engine.state, SyncEngineState.closed);
       expect(mock.maxConcurrentListChanges, 1,
           reason: 'never overlapped, even across stop');
+    });
+
+    test('a pull cycle held open across stop and restart applies exactly once',
+        () async {
+      final mock = _GatedListBackend();
+      final h = await EngineHarness.create(mock: mock, start: false);
+      addTearDown(h.close);
+      await h.engine.start(); // startup completes (gate null)
+      final id = mock.seed(store: 'widgets', data: {'name': 'v1'});
+      mock.gate = Completer<void>();
+
+      final cycle = h.engine.syncNow(); // blocked on the gate
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      var stoppedDone = false;
+      final stopped = h.engine.stop().then((_) => stoppedDone = true);
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      expect(stoppedDone, isFalse, reason: 'stop drains the held pull');
+      mock.gate!.complete();
+      await stopped;
+      await cycle;
+
+      expect(h.engine.state, SyncEngineState.closed);
+      expect((await h.pocket.collection('widgets').get(id))!['name'], 'v1',
+          reason: 'the old cycle applied exactly once');
+      expect(mock.maxConcurrentListChanges, 1,
+          reason: 'never overlapped, even across stop');
+
+      // The new lifecycle is independent: it pulls fresh work and never
+      // re-runs the drained old cycle.
+      final id2 = mock.seed(store: 'widgets', data: {'name': 'v2'});
+      await h.engine.start(); // fresh lifecycle pulls v2
+      expect(await h.pocket.collection('widgets').get(id2), isNotNull);
+      expect((await h.pocket.collection('widgets').get(id))!['name'], 'v1',
+          reason: 'the drained cycle never re-applied in the new lifecycle');
     });
 
     test('stop during start() prepare does not leave zombie timers or workers',

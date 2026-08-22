@@ -4,7 +4,7 @@ import 'package:test/test.dart';
 
 import 'engine_helpers.dart';
 
-/// Audit #31: "Seen-vs-applied watermarks".
+/// "Seen-vs-applied watermarks".
 ///
 /// A conflict is recorded while the pull cursor keeps advancing (the record
 /// WAS seen), but the sync row's `remote_updated` must never advance past the
