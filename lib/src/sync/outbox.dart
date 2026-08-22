@@ -225,10 +225,10 @@ class Outbox {
     // Single-statement upsert on the (store, record_id) primary key — one
     // round-trip replaces the old insert-or-update branch pair.
     final outboxCols = outboxColumns;
-    final outboxUpsert = StringBuffer(
-        'INSERT INTO lp_outbox (${quotedColumnList(outboxCols)}) '
-        'VALUES (${placeholders(outboxCols.length)}) '
-        'ON CONFLICT(store, record_id) DO UPDATE SET ');
+    final outboxUpsert =
+        StringBuffer('INSERT INTO lp_outbox (${quotedColumnList(outboxCols)}) '
+            'VALUES (${placeholders(outboxCols.length)}) '
+            'ON CONFLICT(store, record_id) DO UPDATE SET ');
     for (var i = 0; i < outboxCols.length; i++) {
       if (i > 0) outboxUpsert.write(', ');
       outboxUpsert.write('"${outboxCols[i]}" = excluded."${outboxCols[i]}"');
@@ -256,10 +256,10 @@ class Outbox {
       schemaVer: schema.version,
     );
     final syncCols = syncRowColumns;
-    final syncUpsert = StringBuffer(
-        'INSERT INTO lp_sync_row (${quotedColumnList(syncCols)}) '
-        'VALUES (${placeholders(syncCols.length)}) '
-        'ON CONFLICT(store, record_id) DO UPDATE SET ');
+    final syncUpsert =
+        StringBuffer('INSERT INTO lp_sync_row (${quotedColumnList(syncCols)}) '
+            'VALUES (${placeholders(syncCols.length)}) '
+            'ON CONFLICT(store, record_id) DO UPDATE SET ');
     for (var i = 0; i < syncCols.length; i++) {
       if (i > 0) syncUpsert.write(', ');
       syncUpsert.write('"${syncCols[i]}" = excluded."${syncCols[i]}"');

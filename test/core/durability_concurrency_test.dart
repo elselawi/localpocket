@@ -62,10 +62,9 @@ void main() {
 
       // The cached state is not stuck: a later write raises FULL again.
       recorder.statements.clear();
-      await pocket
-          .collection('widgets')
-          .put(record(id: generateRecordId(), name: 'y'),
-            durability: DurabilityClass.full);
+      await pocket.collection('widgets').put(
+          record(id: generateRecordId(), name: 'y'),
+          durability: DurabilityClass.full);
       expect(pragmaToggles(recorder), contains('PRAGMA synchronous=FULL'),
           reason: 'the synchronous cache is not stuck after the failure');
     });
