@@ -283,6 +283,28 @@ class StoreMigration {
 typedef DocumentMigration = Map<String, Object?> Function(
     Map<String, Object?> doc);
 
+/// Policy applied when a pushed update's target record no longer exists
+/// remotely (a remote deletion raced a local offline edit).
+///
+/// Purely a client-side decision: none of the options require backend support
+/// beyond the existing `NotFoundError`/404 contract.
+enum MissingRemotePolicy {
+  /// Escalate to a delete-vs-edit conflict: the local edit is kept and the
+  /// app resolves it (`acceptLocal` recreates, `acceptRemote` discards).
+  /// This is the default — it never loses data and never resurrects an
+  /// intentional deletion.
+  conflict,
+
+  /// Recreate the record remotely with the local content (same id).
+  /// Converges automatically but resurrects a record whose deletion was
+  /// intentional.
+  recreate,
+
+  /// Accept the remote deletion: discard the local edit and remove the row
+  /// (the local DB mirrors the remote state).
+  discardLocal,
+}
+
 /// Conflict resolution policy. Resolver implementations are provided by the
 /// sync layer; this type exists now so `CollectionSchema` can carry it.
 class ConflictPolicy {
@@ -295,11 +317,15 @@ class ConflictPolicy {
   /// Whether local content edits should unarchive a record.
   final bool editsUnarchive;
 
+  /// How a pushed update reacts when its target no longer exists remotely.
+  final MissingRemotePolicy missingRemote;
+
   /// Creates a conflict policy.
   const ConflictPolicy({
     this.collectionResolver,
     this.fieldOverrides = const {},
     this.editsUnarchive = false,
+    this.missingRemote = MissingRemotePolicy.conflict,
   });
 
   /// Creates the default policy with optional resolver overrides.
@@ -307,11 +333,13 @@ class ConflictPolicy {
     Object? collectionResolver,
     Map<String, Object> fieldOverrides = const {},
     bool editsUnarchive = false,
+    MissingRemotePolicy missingRemote = MissingRemotePolicy.conflict,
   }) =>
       ConflictPolicy(
         collectionResolver: collectionResolver,
         fieldOverrides: fieldOverrides,
         editsUnarchive: editsUnarchive,
+        missingRemote: missingRemote,
       );
 }
 

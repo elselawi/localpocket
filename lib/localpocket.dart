@@ -38,6 +38,7 @@ export 'src/core/schema.dart'
         FtsSpec,
         StoreMigration,
         ConflictPolicy,
+        MissingRemotePolicy,
         DocumentMigration,
         applyDocumentMigrations;
 export 'src/core/ddl_compiler.dart' show DdlCompiler, CompiledSchema;
