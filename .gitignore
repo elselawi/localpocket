@@ -5,6 +5,7 @@ build/
 *.iml
 .idea/
 .vscode/
+*.log
 
 # playwright
 node_modules
