@@ -58,7 +58,7 @@ class PlaygroundSchemas {
       fieldOverrides: {
         'views': const CounterResolver(),
         'likes': const CounterResolver(),
-        'tags': const SetUnionResolver(),
+        'tags': const SetUnionWithDeletionWinsResolver(),
       },
       editsUnarchive: true,
     ),

@@ -32,7 +32,8 @@ export 'src/sync/merge.dart'
         deepEquals,
         merge3Way,
         merge3WayAsync;
-export 'src/sync/conflicts.dart' show Conflicts, ConflictRecord;
+export 'src/sync/conflicts.dart'
+    show Conflicts, ConflictRecord, remoteDeletedKey;
 export 'src/sync/sync_config.dart' show SyncConfig;
 export 'src/sync/status.dart' show SyncEngineState, SyncReport, SyncStatus;
 export 'src/sync/sync_store.dart' show PullCursor, SweepState, SyncStore;

@@ -294,7 +294,7 @@ Future<void> main() async {
 
     final policy = MergePolicy(
       fieldOverrides: {
-        'tags': const SetUnionResolver(),
+        'tags': const SetUnionWithDeletionWinsResolver(),
         'qty': const CounterResolver(),
       },
     );

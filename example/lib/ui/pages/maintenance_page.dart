@@ -203,7 +203,7 @@ final postSchema = CollectionSchema(
   conflictPolicy: ConflictPolicy(
     fieldOverrides: {
       'views': const CounterResolver(),   // base + localΔ + remoteΔ
-      'tags':  const SetUnionResolver(),  // merge tag sets
+      'tags':  const SetUnionWithDeletionWinsResolver(),  // merge tag sets
     },
     editsUnarchive: true,
   ),

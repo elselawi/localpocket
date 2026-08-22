@@ -180,11 +180,19 @@ class LocalWinsResolver extends ConflictResolver {
   }
 }
 
-/// OR-set union resolver:
+/// Set union with deletion wins:
 /// `base ∪ (local − base) ∪ (remote − base)` minus deletions from either side.
 /// For list/set fields.
-class SetUnionResolver extends ConflictResolver {
-  const SetUnionResolver();
+///
+/// NOT a true OR-set: elements are compared with ordinary Dart [Set]
+/// equality — numbers by VALUE (2 and 2.0 are the same element), non-primitive
+/// elements (maps/lists) by IDENTITY. A base element missing from either side
+/// is removed even if the other side re-adds an equal value, and two
+/// structurally equal nested objects stay distinct elements. (The merge
+/// engine itself compares with deep equality; this resolver deliberately
+/// does not — see the pinned tests.)
+class SetUnionWithDeletionWinsResolver extends ConflictResolver {
+  const SetUnionWithDeletionWinsResolver();
 
   @override
   MergeResult resolve(MergeContext ctx) {
@@ -221,6 +229,12 @@ class SetUnionResolver extends ConflictResolver {
     return resultList;
   }
 }
+
+/// Previous name of [SetUnionWithDeletionWinsResolver].
+@Deprecated(
+    'Renamed to SetUnionWithDeletionWinsResolver: it is a deletion-wins set '
+    'union, not a true OR-set.')
+typedef SetUnionResolver = SetUnionWithDeletionWinsResolver;
 
 /// Counter resolver:
 /// `base + (local − base) + (remote − base)`.
@@ -260,10 +274,19 @@ class CounterResolver extends ConflictResolver {
   }
 }
 
-/// Append-only resolver:
-/// Concatenation with deduplication by content.
-class AppendOnlyResolver extends ConflictResolver {
-  const AppendOnlyResolver();
+/// Append-only LIST resolver: `base + local + remote` with deduplication.
+///
+/// By default items are deduplicated by deep content equality. Pass an
+/// [identity] function to key items instead (e.g. an event id) when two
+/// identical-looking entries are distinct events and must both survive, or
+/// when equal content with different keys must stay distinct.
+class AppendOnlyListResolver extends ConflictResolver {
+  /// Optional per-item identity key: two items sharing a key are duplicates
+  /// even when their content differs, and equal content with different keys
+  /// stays distinct.
+  final String Function(Object? value)? identity;
+
+  const AppendOnlyListResolver({this.identity});
 
   @override
   MergeResult resolve(MergeContext ctx) {
@@ -272,44 +295,77 @@ class AppendOnlyResolver extends ConflictResolver {
 
   /// Field-level append-only resolution.
   Object? resolveField(Object? baseVal, Object? localVal, Object? remoteVal) {
-    if (localVal is String || remoteVal is String || baseVal is String) {
-      final b = (baseVal is String) ? baseVal : '';
-      final l = (localVal is String) ? localVal : '';
-      final r = (remoteVal is String) ? remoteVal : '';
-
-      final parts = <String>[];
-      void addPart(String s) {
-        final trimmed = s.trim();
-        if (trimmed.isNotEmpty && !parts.contains(trimmed)) {
-          parts.add(trimmed);
-        }
-      }
-
-      for (final line in b.split('\n')) {
-        addPart(line);
-      }
-      for (final line in l.split('\n')) {
-        addPart(line);
-      }
-      for (final line in r.split('\n')) {
-        addPart(line);
-      }
-      return parts.join('\n');
-    }
-
     final bList = baseVal is List ? baseVal : const <Object?>[];
     final lList = localVal is List ? localVal : const <Object?>[];
     final rList = remoteVal is List ? remoteVal : const <Object?>[];
 
     final result = <Object?>[];
-    for (final item in [...bList, ...lList, ...rList]) {
-      if (!result.any((existing) => deepEquals(existing, item))) {
-        result.add(item);
+    if (identity != null) {
+      final seen = <String>{};
+      for (final item in [...bList, ...lList, ...rList]) {
+        if (seen.add(identity!(item))) result.add(item);
+      }
+    } else {
+      for (final item in [...bList, ...lList, ...rList]) {
+        if (!result.any((existing) => deepEquals(existing, item))) {
+          result.add(item);
+        }
       }
     }
     return result;
   }
 }
+
+/// Append-only LINES resolver for string fields.
+///
+/// Concatenates the base, local, and remote strings line by line: each line
+/// is trimmed, empty/whitespace-only lines are skipped, and identical lines
+/// are deduplicated; the result joins with `\n`. This is NOT a generic text
+/// append — it normalizes whitespace and drops duplicate lines by design.
+class AppendOnlyLinesResolver extends ConflictResolver {
+  const AppendOnlyLinesResolver();
+
+  @override
+  MergeResult resolve(MergeContext ctx) {
+    return const RemoteWinsResolver().resolve(ctx);
+  }
+
+  /// Field-level line-append resolution.
+  Object? resolveField(Object? baseVal, Object? localVal, Object? remoteVal) {
+    final b = (baseVal is String) ? baseVal : '';
+    final l = (localVal is String) ? localVal : '';
+    final r = (remoteVal is String) ? remoteVal : '';
+
+    final parts = <String>[];
+    void addPart(String s) {
+      final trimmed = s.trim();
+      if (trimmed.isNotEmpty && !parts.contains(trimmed)) {
+        parts.add(trimmed);
+      }
+    }
+
+    for (final line in b.split('\n')) {
+      addPart(line);
+    }
+    for (final line in l.split('\n')) {
+      addPart(line);
+    }
+    for (final line in r.split('\n')) {
+      addPart(line);
+    }
+    return parts.join('\n');
+  }
+}
+
+/// Previous name of [AppendOnlyListResolver].
+///
+/// The former `AppendOnlyResolver` handled BOTH string values (line-based
+/// append) and list values; the two behaviours are now separate — use
+/// [AppendOnlyListResolver] for lists and [AppendOnlyLinesResolver] for text
+/// fields.
+@Deprecated('Split into AppendOnlyListResolver (list values) and '
+    'AppendOnlyLinesResolver (string values).')
+typedef AppendOnlyResolver = AppendOnlyListResolver;
 
 /// Custom resolver wrapping a user-supplied function.
 class CustomResolver extends ConflictResolver {
@@ -330,6 +386,11 @@ class MergePolicy {
   final ConflictResolver? collectionResolver;
 
   /// Per-field resolver overrides.
+  ///
+  /// Keys may be top-level (`'meta'`) or dotted paths (`'meta.name'`). The
+  /// most specific key wins, and a top-level key also governs its nested
+  /// children — so a policy on `meta` follows into `meta.name` unless a
+  /// dotted override says otherwise.
   final Map<String, Object> fieldOverrides;
 
   /// Whether local content edits should unarchive records.
@@ -351,13 +412,16 @@ Object? resolveFieldValue(
   Object? remoteVal,
   Object? resolverOrPolicy,
 ) {
-  if (resolverOrPolicy is SetUnionResolver) {
+  if (resolverOrPolicy is SetUnionWithDeletionWinsResolver) {
     return resolverOrPolicy.resolveField(baseVal, localVal, remoteVal);
   }
   if (resolverOrPolicy is CounterResolver) {
     return resolverOrPolicy.resolveField(baseVal, localVal, remoteVal);
   }
-  if (resolverOrPolicy is AppendOnlyResolver) {
+  if (resolverOrPolicy is AppendOnlyListResolver) {
+    return resolverOrPolicy.resolveField(baseVal, localVal, remoteVal);
+  }
+  if (resolverOrPolicy is AppendOnlyLinesResolver) {
     return resolverOrPolicy.resolveField(baseVal, localVal, remoteVal);
   }
   if (resolverOrPolicy is LocalWinsResolver) {
@@ -372,6 +436,27 @@ Object? resolveFieldValue(
   }
   // Package default: remote wins
   return remoteVal;
+}
+
+/// Mutable review-escalation flag threaded through the recursive merge.
+class _ReviewFlag {
+  bool value = false;
+}
+
+/// The most specific `fieldOverrides` entry governing [path], walking up from
+/// the exact dotted path to the top-level key. A top-level entry therefore
+/// governs all its nested children (audit #24).
+Object? _overrideForPath(MergePolicy? policy, String path) {
+  final overrides = policy?.fieldOverrides;
+  if (overrides == null || overrides.isEmpty) return null;
+  var p = path;
+  while (true) {
+    final override = overrides[p];
+    if (override != null) return override;
+    final dot = p.lastIndexOf('.');
+    if (dot <= 0) return null;
+    p = p.substring(0, dot);
+  }
 }
 
 abstract class _ResolverAdapter {
@@ -473,7 +558,13 @@ class MergeEngine {
       dirtyRemote: dirtyRemote,
     );
 
-    if (policy?.collectionResolver != null) {
+    // A collection resolver arbitrates CONFLICTS. When only one side diverged
+    // from base there is nothing to arbitrate: the ordinary three-way rules
+    // decide deterministically (r == b -> local; l == b -> remote). Running a
+    // declining resolver on a one-sided change would escalate routine
+    // convergence (e.g. an acceptLocal resolution push) into a conflict loop.
+    final bothChanged = dirtyLocal.isNotEmpty && dirtyRemote.isNotEmpty;
+    if (policy?.collectionResolver != null && bothChanged) {
       MergeResult handleCustomResult(MergeResult? customRes) {
         if (customRes == null) {
           // The resolver declined: fall back to a conservative field-by-field
@@ -515,13 +606,13 @@ class MergeEngine {
       local: local,
       remote: remote,
       out: <String, Object?>{},
-      needsReview: false,
       policy: policy,
       store: store,
       recordId: recordId,
       adapter: adapter,
       dirtyLocal: dirtyLocal,
       dirtyRemote: dirtyRemote,
+      review: _ReviewFlag(),
     );
   }
 
@@ -532,13 +623,13 @@ class MergeEngine {
     required Map<String, Object?> local,
     required Map<String, Object?> remote,
     required Map<String, Object?> out,
-    required bool needsReview,
     required MergePolicy? policy,
     required String store,
     required String recordId,
     required _ResolverAdapter adapter,
     required Set<String> dirtyLocal,
     required Set<String> dirtyRemote,
+    required _ReviewFlag review,
   }) {
     if (index >= keys.length) {
       if (policy?.editsUnarchive == true) {
@@ -550,7 +641,7 @@ class MergeEngine {
       }
       return MergeResult(
         merged: out,
-        needsReview: needsReview,
+        needsReview: review.value,
         dirtyLocal: dirtyLocal,
         dirtyRemote: dirtyRemote,
       );
@@ -586,121 +677,30 @@ class MergeEngine {
         local: local,
         remote: remote,
         out: out,
-        needsReview: needsReview,
         policy: policy,
         store: store,
         recordId: recordId,
         adapter: adapter,
         dirtyLocal: dirtyLocal,
         dirtyRemote: dirtyRemote,
+        review: review,
       );
     }
 
-    if (deepEquals(l, r)) {
-      out[k] = l;
-      return _mergeKeyRange(
-        keys: keys,
-        index: index + 1,
-        base: base,
-        local: local,
-        remote: remote,
-        out: out,
-        needsReview: needsReview,
-        policy: policy,
-        store: store,
-        recordId: recordId,
-        adapter: adapter,
-        dirtyLocal: dirtyLocal,
-        dirtyRemote: dirtyRemote,
-      );
-    }
-
-    if (deepEquals(l, b)) {
-      out[k] = r;
-      return _mergeKeyRange(
-        keys: keys,
-        index: index + 1,
-        base: base,
-        local: local,
-        remote: remote,
-        out: out,
-        needsReview: needsReview,
-        policy: policy,
-        store: store,
-        recordId: recordId,
-        adapter: adapter,
-        dirtyLocal: dirtyLocal,
-        dirtyRemote: dirtyRemote,
-      );
-    }
-
-    if (deepEquals(r, b)) {
-      out[k] = l;
-      return _mergeKeyRange(
-        keys: keys,
-        index: index + 1,
-        base: base,
-        local: local,
-        remote: remote,
-        out: out,
-        needsReview: needsReview,
-        policy: policy,
-        store: store,
-        recordId: recordId,
-        adapter: adapter,
-        dirtyLocal: dirtyLocal,
-        dirtyRemote: dirtyRemote,
-      );
-    }
-
-    final fieldOverride = policy?.fieldOverrides[k];
-    if (fieldOverride != null) {
-      if (fieldOverride is CustomResolver) {
-        final fieldCtx = MergeContext(
-          store: store,
-          recordId: recordId,
-          base: {k: b},
-          local: {k: l},
-          remote: {k: r},
-          dirtyLocal: {k},
-          dirtyRemote: {k},
-        );
-        final fieldResOrFuture = adapter.invoke(fieldOverride, fieldCtx);
-        if (fieldResOrFuture is Future<MergeResult?>) {
-          return fieldResOrFuture.then((fieldRes) {
-            var nextNeedsReview = needsReview;
-            if (fieldRes == null || fieldRes.needsReview) {
-              nextNeedsReview = true;
-              out[k] = r;
-            } else {
-              out[k] = fieldRes.merged[k];
-            }
-            return _mergeKeyRange(
-              keys: keys,
-              index: index + 1,
-              base: base,
-              local: local,
-              remote: remote,
-              out: out,
-              needsReview: nextNeedsReview,
-              policy: policy,
-              store: store,
-              recordId: recordId,
-              adapter: adapter,
-              dirtyLocal: dirtyLocal,
-              dirtyRemote: dirtyRemote,
-            );
-          });
-        }
-
-        final fieldRes = fieldResOrFuture;
-        var nextNeedsReview = needsReview;
-        if (fieldRes == null || fieldRes.needsReview) {
-          nextNeedsReview = true;
-          out[k] = r;
-        } else {
-          out[k] = fieldRes.merged[k];
-        }
+    final valueOrFuture = _mergeFieldValue(
+      path: k,
+      b: b,
+      l: l,
+      r: r,
+      policy: policy,
+      store: store,
+      recordId: recordId,
+      adapter: adapter,
+      review: review,
+    );
+    if (valueOrFuture is Future<Object?>) {
+      return valueOrFuture.then((v) {
+        out[k] = v;
         return _mergeKeyRange(
           keys: keys,
           index: index + 1,
@@ -708,35 +708,17 @@ class MergeEngine {
           local: local,
           remote: remote,
           out: out,
-          needsReview: nextNeedsReview,
           policy: policy,
           store: store,
           recordId: recordId,
           adapter: adapter,
           dirtyLocal: dirtyLocal,
           dirtyRemote: dirtyRemote,
+          review: review,
         );
-      }
-
-      out[k] = resolveFieldValue(k, b, l, r, fieldOverride);
-      return _mergeKeyRange(
-        keys: keys,
-        index: index + 1,
-        base: base,
-        local: local,
-        remote: remote,
-        out: out,
-        needsReview: needsReview,
-        policy: policy,
-        store: store,
-        recordId: recordId,
-        adapter: adapter,
-        dirtyLocal: dirtyLocal,
-        dirtyRemote: dirtyRemote,
-      );
+      });
     }
-
-    out[k] = r;
+    out[k] = valueOrFuture;
     return _mergeKeyRange(
       keys: keys,
       index: index + 1,
@@ -744,14 +726,126 @@ class MergeEngine {
       local: local,
       remote: remote,
       out: out,
-      needsReview: needsReview,
       policy: policy,
       store: store,
       recordId: recordId,
       adapter: adapter,
       dirtyLocal: dirtyLocal,
       dirtyRemote: dirtyRemote,
+      review: review,
     );
+  }
+
+  /// Three-way merge of one field at [path] (a top-level key or a dotted
+  /// nested path).
+  ///
+  /// The classic rules apply per path:
+  ///   l == r -> l
+  ///   l == b -> r          # only remote changed
+  ///   r == b -> l          # only local changed
+  ///   else   -> recursion into nested String-keyed maps (a nested field
+  ///             follows the most specific `fieldOverrides` entry walking up
+  ///             from its dotted path — a top-level policy follows into its
+  ///             children, a dotted override wins at its exact path), or the
+  ///             most specific override on a non-recursable value, or remote
+  ///             wins.
+  static FutureOr<Object?> _mergeFieldValue({
+    required String path,
+    required Object? b,
+    required Object? l,
+    required Object? r,
+    required MergePolicy? policy,
+    required String store,
+    required String recordId,
+    required _ResolverAdapter adapter,
+    required _ReviewFlag review,
+  }) {
+    if (deepEquals(l, r)) return l;
+    if (deepEquals(l, b)) return r;
+    if (deepEquals(r, b)) return l;
+
+    // Both changed. Recurse into nested String-keyed maps FIRST so nested
+    // fields follow the same three-way rules and the most specific override
+    // governs each nested conflict (audit #24). A type change on either side
+    // (or a non-String-keyed map) keeps the value atomic.
+    if (l is Map &&
+        r is Map &&
+        l.keys.every((k) => k is String) &&
+        r.keys.every((k) => k is String) &&
+        (b == null || (b is Map && b.keys.every((k) => k is String)))) {
+      final lMap = Map<String, Object?>.from(l);
+      final rMap = Map<String, Object?>.from(r);
+      final bMap = b == null ? null : Map<String, Object?>.from(b as Map);
+      final keys = <String>{...?bMap?.keys, ...lMap.keys, ...rMap.keys};
+      final out = <String, Object?>{};
+      var pendingFuture = false;
+      final resolved = <Object?>[];
+      for (final key in keys) {
+        final child = _mergeFieldValue(
+          path: '$path.$key',
+          b: bMap?[key],
+          l: lMap[key],
+          r: rMap[key],
+          policy: policy,
+          store: store,
+          recordId: recordId,
+          adapter: adapter,
+          review: review,
+        );
+        if (child is Future) pendingFuture = true;
+        resolved.add(child);
+      }
+      if (!pendingFuture) {
+        var i = 0;
+        for (final key in keys) {
+          out[key] = resolved[i++];
+        }
+        return out;
+      }
+      return Future.wait(
+              resolved.map((v) => v is Future ? v : Future<Object?>.value(v)))
+          .then((values) {
+        var i = 0;
+        for (final key in keys) {
+          out[key] = values[i++];
+        }
+        return out;
+      });
+    }
+
+    final override = _overrideForPath(policy, path);
+    if (override != null) {
+      if (override is CustomResolver) {
+        final key = path.substring(path.lastIndexOf('.') + 1);
+        final fieldCtx = MergeContext(
+          store: store,
+          recordId: recordId,
+          base: {key: b},
+          local: {key: l},
+          remote: {key: r},
+          dirtyLocal: {key},
+          dirtyRemote: {key},
+        );
+        final resOrFuture = adapter.invoke(override, fieldCtx);
+        if (resOrFuture is Future<MergeResult?>) {
+          return resOrFuture.then((res) {
+            if (res == null || res.needsReview) {
+              review.value = true;
+              return r;
+            }
+            return res.merged[key];
+          });
+        }
+        final res = resOrFuture;
+        if (res == null || res.needsReview) {
+          review.value = true;
+          return r;
+        }
+        return res.merged[key];
+      }
+      return resolveFieldValue(path, b, l, r, override);
+    }
+    return r;
   }
 }
 
