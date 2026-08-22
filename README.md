@@ -559,18 +559,40 @@ await db.transaction(
 
 ## Running Tests & Benchmarks
 
-```bash
-# Run static analysis
-dart analyze
+Run **all** tests with these three commands — the first runs the fast hermetic
+suite, the other two runs everything else (the live-server and web-gate
+suites):
 
-# Run unit & integration tests
+```bash
+# 1. Fast suite — unit, integration, and hermetic wire E2E. The `real` (live
+#    PocketBase, test/secret.dart) and `gate` (release) suites are tagged and
+#    skipped by default, so this stays offline and quick.
 dart test
 
-# Run skipped tests
-dart test --tags "gate || real" --run-skipped -j 1
+# 2. The rest — every skipped suite: the live PocketBase E2E plus the
+#    release/web gates.
+dart test --tags real --run-skipped -j 1
+dart test --tags web --run-skipped -j 1
+```
 
-# Run performance benchmark suite
+> **Why `-j 1`:** the gate suites spawn `dart run` subprocesses that re-stage
+> the native `sqlite3.dll` via the native-assets build hook. On Windows a
+> loaded DLL cannot be deleted, so running those subprocesses while the same
+> test VM still has `sqlite3.dll` loaded fails with `Access is denied` — which
+> is exactly why the gates are run on their own (this second command).
+
+Optional extras:
+
+```bash
+# Static analysis
+dart analyze
+
+# Performance benchmark suite
 dart run benchmark/benchmark.dart
+
+# Live PocketBase E2E alone (without the release gates) — the same
+# backend-swapped scenarios run against pb.apexo.app
+dart test --tags real --run-skipped test/e2e/
 ```
 
 ## Update & test coverage

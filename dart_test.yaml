@@ -1,5 +1,11 @@
 # Test configuration.
 #
+# The toolchain keeps `test` at 1.26.x (see README): `isar_generator`/
+# `build_runner` codegen dev-deps are deliberately absent because they pin
+# `analyzer <6` and force `test` to 1.25.x, whose old `test_core` needs the
+# `native-assets` experiment for the staged sqlite3.dll. On 1.26.x a plain
+# `dart test` just works — no `--enable-experiment` flag anywhere.
+#
 # `real`-tagged tests hit the LIVE PocketBase server configured in
 # test/secret.dart (gitignored) and need network + valid credentials. They are
 # SKIPPED in the default run so the hermetic gate stays green offline.
@@ -12,6 +18,6 @@
 #   dart test --tags "gate || real" --run-skipped -j 1 test/release/ test/web/ test/e2e/real/
 tags:
   real:
-    skip: "Live PocketBase server tests — run with: dart test --tags real --run-skipped test/e2e/real/"
+    skip: "Live PocketBase server tests — run with: dart test --tags real --run-skipped test/e2e/"
   gate:
     skip: 'Release/web gate child-process tests — run with: dart test --tags "gate || real" --run-skipped -j 1 test/release/ test/web/ test/e2e/real/'
