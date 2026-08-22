@@ -843,6 +843,7 @@ class SembastPeer extends BenchmarkPeer {
   List<String> get rowNotes => const [
         'file-backed (was in-memory before 2026-08-22)',
         'rewrites the store file per committed transaction',
+        'scale-capped: maxRows = 10000 (skipped above)',
       ];
 
   late sembast.Database _db;
