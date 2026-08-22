@@ -10,6 +10,7 @@ import '../core/local_pocket.dart';
 import '../core/schema.dart';
 import '../core/transaction.dart';
 import '../files/file_sync_lane.dart';
+import 'apply_lane.dart';
 import 'mapping.dart';
 import 'merge.dart';
 import 'sync_backend.dart';
@@ -58,8 +59,16 @@ class Puller {
   final SyncStore syncStore;
   final FileSyncLane? fileLane;
 
+  /// Shared serialization lane for every remote-application transaction in
+  /// this puller (pull pages, sweep fetch batches, hidden marks, and realtime
+  /// fast-path applies). The engine passes its own lane so all remote applies
+  /// across all sync flows form one logical stream; a standalone puller
+  /// defaults to a private lane.
+  final ApplyLane applyLane;
+
   Puller(this.pocket, this.backend, this.config, this.syncStore,
-      {this.fileLane});
+      {this.fileLane, ApplyLane? applyLane})
+      : applyLane = applyLane ?? ApplyLane();
 
   static const String epoch = '1970-01-01 00:00:00.000Z';
 
@@ -98,59 +107,61 @@ class Puller {
         page,
       );
 
-      await pocket.transaction((tx) async {
-        final c = cursor;
-        final exec = tx.executor;
-        final schema = pocket.requireTable(store).schema;
-        final pageIds = [for (final item in normalizedBatch) item.remote.id];
-        final (srById, localById) =
-            await _probeBatchRows(exec, store, schema, pageIds);
-        final written = <String>{};
-        for (final item in normalizedBatch) {
-          final r = item.remote;
-          // Idempotent re-delivery from the rewind window.
-          if (c != null && _tupleLte(r, c)) continue;
-          final ApplyResult result;
-          if (written.contains(r.id)) {
-            // Duplicate id within this page: the first pass already wrote the
-            // row in this transaction, so re-read (not prefetched) so the
-            // second delivery sees it and takes the update path.
-            result = await applyNormalizedRemote(tx, store, item);
-          } else {
-            result = await applyNormalizedRemote(tx, store, item,
-                prefetchedSyncRow: srById[r.id],
-                prefetchedLocalRow: localById[r.id],
-                prefetchedRowChecked: true,
-                prefetchedSyncRowChecked: true);
-            written.add(r.id);
-          }
-          // Accounting: only records actually written to the domain count as
-          // `applied`; quarantined, conflict-escalated, and no-op deliveries
-          // are reported separately and never inflate the applied count.
-          switch (result) {
-            case ApplyResult.applied:
-              applied++;
-              pocket.perf.pullAppliedRows++;
-              break;
-            case ApplyResult.quarantined:
-              quarantined++;
-              break;
-            case ApplyResult.conflict:
-              conflicts++;
-              break;
-            case ApplyResult.skipped:
-              break;
-          }
-        }
-        // The cursor only advances forward: a page that is entirely within the
-        // rewind window must never regress it.
-        final advanced = c == null || !_tupleLte(last, c);
-        final nextUpdated = advanced ? last.updated : c.updated;
-        final nextId = advanced ? last.id : c.id;
-        await syncStore.writeCursor(tx.executor, store,
-            updated: nextUpdated, id: nextId);
-        cursor = PullCursor(nextUpdated, nextId);
-      });
+      await applyLane.run(() => pocket.transaction((tx) async {
+            final c = cursor;
+            final exec = tx.executor;
+            final schema = pocket.requireTable(store).schema;
+            final pageIds = [
+              for (final item in normalizedBatch) item.remote.id
+            ];
+            final (srById, localById) =
+                await _probeBatchRows(exec, store, schema, pageIds);
+            final written = <String>{};
+            for (final item in normalizedBatch) {
+              final r = item.remote;
+              // Idempotent re-delivery from the rewind window.
+              if (c != null && _tupleLte(r, c)) continue;
+              final ApplyResult result;
+              if (written.contains(r.id)) {
+                // Duplicate id within this page: the first pass already wrote the
+                // row in this transaction, so re-read (not prefetched) so the
+                // second delivery sees it and takes the update path.
+                result = await applyNormalizedRemote(tx, store, item);
+              } else {
+                result = await applyNormalizedRemote(tx, store, item,
+                    prefetchedSyncRow: srById[r.id],
+                    prefetchedLocalRow: localById[r.id],
+                    prefetchedRowChecked: true,
+                    prefetchedSyncRowChecked: true);
+                written.add(r.id);
+              }
+              // Accounting: only records actually written to the domain count as
+              // `applied`; quarantined, conflict-escalated, and no-op deliveries
+              // are reported separately and never inflate the applied count.
+              switch (result) {
+                case ApplyResult.applied:
+                  applied++;
+                  pocket.perf.pullAppliedRows++;
+                  break;
+                case ApplyResult.quarantined:
+                  quarantined++;
+                  break;
+                case ApplyResult.conflict:
+                  conflicts++;
+                  break;
+                case ApplyResult.skipped:
+                  break;
+              }
+            }
+            // The cursor only advances forward: a page that is entirely within the
+            // rewind window must never regress it.
+            final advanced = c == null || !_tupleLte(last, c);
+            final nextUpdated = advanced ? last.updated : c.updated;
+            final nextId = advanced ? last.id : c.id;
+            await syncStore.writeCursor(tx.executor, store,
+                updated: nextUpdated, id: nextId);
+            cursor = PullCursor(nextUpdated, nextId);
+          }));
 
       from = last.updated;
       fromId = last.id;
@@ -195,29 +206,32 @@ class Puller {
   /// delta pull re-delivers it idempotently. Returns whether it applied.
   Future<bool> fastPathApply(RemoteRecord remote) async {
     var applied = false;
-    await pocket.transaction((tx) async {
-      final exec = tx.executor;
-      final sr = await pocket.outbox.readSyncRow(exec, remote.store, remote.id);
-      if (sr == null) {
-        // Unknown record (create event): safe to insert.
-        await applyRemote(tx, remote.store, remote);
-        applied = true;
-        return;
-      }
-      if (sr.syncState != SyncState.clean) return; // dirty: let the pull merge
-      if (sr.remoteUpdated != null &&
-          remote.updated.compareTo(sr.remoteUpdated!) <= 0) {
-        return; // stale event
-      }
-      await applyRemote(
-        tx,
-        remote.store,
-        remote,
-        prefetchedSyncRow: sr,
-        prefetchedSyncRowChecked: true,
-      );
-      applied = true;
-    });
+    await applyLane.run(() => pocket.transaction((tx) async {
+          final exec = tx.executor;
+          final sr =
+              await pocket.outbox.readSyncRow(exec, remote.store, remote.id);
+          if (sr == null) {
+            // Unknown record (create event): safe to insert.
+            await applyRemote(tx, remote.store, remote);
+            applied = true;
+            return;
+          }
+          if (sr.syncState != SyncState.clean) {
+            return; // dirty: let the pull merge
+          }
+          if (sr.remoteUpdated != null &&
+              remote.updated.compareTo(sr.remoteUpdated!) <= 0) {
+            return; // stale event
+          }
+          await applyRemote(
+            tx,
+            remote.store,
+            remote,
+            prefetchedSyncRow: sr,
+            prefetchedSyncRowChecked: true,
+          );
+          applied = true;
+        }));
     return applied;
   }
 
@@ -261,26 +275,26 @@ class Puller {
       final normalized = [
         for (final remote in fetched) normalizeSingleRemote(schema, remote)
       ];
-      await pocket.transaction((tx) async {
-        final exec = tx.executor;
-        final pageIds = [for (final item in normalized) item.remote.id];
-        final (srById, localById) =
-            await _probeBatchRows(exec, store, schema, pageIds);
-        final written = <String>{};
-        for (final item in normalized) {
-          final r = item.remote;
-          if (written.contains(r.id)) {
-            await applyNormalizedRemote(tx, store, item);
-          } else {
-            await applyNormalizedRemote(tx, store, item,
-                prefetchedSyncRow: srById[r.id],
-                prefetchedLocalRow: localById[r.id],
-                prefetchedRowChecked: true,
-                prefetchedSyncRowChecked: true);
-            written.add(r.id);
-          }
-        }
-      });
+      await applyLane.run(() => pocket.transaction((tx) async {
+            final exec = tx.executor;
+            final pageIds = [for (final item in normalized) item.remote.id];
+            final (srById, localById) =
+                await _probeBatchRows(exec, store, schema, pageIds);
+            final written = <String>{};
+            for (final item in normalized) {
+              final r = item.remote;
+              if (written.contains(r.id)) {
+                await applyNormalizedRemote(tx, store, item);
+              } else {
+                await applyNormalizedRemote(tx, store, item,
+                    prefetchedSyncRow: srById[r.id],
+                    prefetchedLocalRow: localById[r.id],
+                    prefetchedRowChecked: true,
+                    prefetchedSyncRowChecked: true);
+                written.add(r.id);
+              }
+            }
+          }));
     }
   }
 
@@ -763,54 +777,54 @@ class Puller {
       final chunk = queue.take(batchSize).toList();
       queue.removeRange(0, chunk.length);
 
-      await pocket.transaction((tx) async {
-        final exec = tx.executor;
-        final schema = pocket.requireTable(store).schema;
-        final table = pocket.requireTable(store).tableName;
+      await applyLane.run(() => pocket.transaction((tx) async {
+            final exec = tx.executor;
+            final schema = pocket.requireTable(store).schema;
+            final table = pocket.requireTable(store).tableName;
 
-        final ph = List.filled(chunk.length, '?').join(', ');
-        final existingRows = await exec.query(
-          table,
-          where: 'id IN ($ph)',
-          whereArgs: chunk,
-        );
-        final oldRowsById = <String, Map<String, Object?>>{};
-        for (final r in existingRows) {
-          final id = r['id'] as String;
-          oldRowsById[id] = decodeDbRow(schema, r,
-              cipher: pocket.fieldCipher,
-              cryptoProvider: pocket.cryptoProvider);
-        }
+            final ph = List.filled(chunk.length, '?').join(', ');
+            final existingRows = await exec.query(
+              table,
+              where: 'id IN ($ph)',
+              whereArgs: chunk,
+            );
+            final oldRowsById = <String, Map<String, Object?>>{};
+            for (final r in existingRows) {
+              final id = r['id'] as String;
+              oldRowsById[id] = decodeDbRow(schema, r,
+                  cipher: pocket.fieldCipher,
+                  cryptoProvider: pocket.cryptoProvider);
+            }
 
-        await exec.update(
-          'lp_sync_row',
-          {'access_state': 'hidden'},
-          where: 'store = ? AND record_id IN ($ph)',
-          whereArgs: [store, ...chunk],
-        );
-        await exec.update(
-          table,
-          {'hidden': 1},
-          where: 'id IN ($ph)',
-          whereArgs: chunk,
-        );
+            await exec.update(
+              'lp_sync_row',
+              {'access_state': 'hidden'},
+              where: 'store = ? AND record_id IN ($ph)',
+              whereArgs: [store, ...chunk],
+            );
+            await exec.update(
+              table,
+              {'hidden': 1},
+              where: 'id IN ($ph)',
+              whereArgs: chunk,
+            );
 
-        tx.addChange(ChangeSet(store, chunk.toSet()));
-        for (final id in chunk) {
-          final oldRow = oldRowsById[id];
-          if (oldRow != null) {
-            tx.addRecordEvent(RecordChangeEvent(
-              store: store,
-              id: id,
-              origin: ChangeOrigin.remote,
-              action: ChangeAction.hide,
-              oldRecord: oldRow,
-              newRecord: {...oldRow, 'hidden': true},
-              changedFields: const {'hidden'},
-            ));
-          }
-        }
-      });
+            tx.addChange(ChangeSet(store, chunk.toSet()));
+            for (final id in chunk) {
+              final oldRow = oldRowsById[id];
+              if (oldRow != null) {
+                tx.addRecordEvent(RecordChangeEvent(
+                  store: store,
+                  id: id,
+                  origin: ChangeOrigin.remote,
+                  action: ChangeAction.hide,
+                  oldRecord: oldRow,
+                  newRecord: {...oldRow, 'hidden': true},
+                  changedFields: const {'hidden'},
+                ));
+              }
+            }
+          }));
     }
   }
 
