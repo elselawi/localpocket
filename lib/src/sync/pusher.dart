@@ -240,7 +240,10 @@ class Pusher {
     if (outcome == null) {
       return const PushReport(conflicted: 1);
     }
-    final mergedJson = canonicalize(outcome.merged);
+    // The schema-aware payload builder strips a literal `archived: false`
+    // (the wire convention omits the key for live records — same as the
+    // create path), while the raw merged map keeps it for the LOCAL write.
+    final mergedJson = canonicalPayload(schema, outcome.merged);
     return _handlePushExceptions(op, sr, () async {
       // Version-check the write against the version the merge was based on: a
       // backend enforcing OCC rejects it (and the next cycle re-merges) if the
@@ -319,7 +322,10 @@ class Pusher {
           pushed++;
           continue;
         }
-        // Concurrent create-vs-update or update: merge.
+        // Concurrent create-vs-update or update: merge. The schema-aware
+        // payload builder strips a literal `archived: false` (live records
+        // omit the key on the wire) while keeping it in the merged logical
+        // for the local write.
         final outcome = await _mergeForBatch(op, sr, fetched, schema);
         if (outcome == null) {
           conflicted++;
@@ -329,7 +335,7 @@ class Pusher {
             opId: op.opId,
             store: op.store,
             id: op.recordId,
-            dataJson: canonicalize(outcome.merged),
+            dataJson: canonicalPayload(schema, outcome.merged),
             baseUpdated: op.baseUpdated == null ? null : fetched.updated,
             upsert: true));
         mergedByOpId[op.opId] = outcome.merged;

@@ -415,8 +415,13 @@ class Puller {
               cryptoProvider: pocket.cryptoProvider);
     }
 
-    // Observe remote file attachments.
-    if (remote.imgs.isNotEmpty && fileLane != null) {
+    // Observe remote file attachments. The reconciliation MUST also run when
+    // the remote `imgs` list is EMPTY but the record exists locally: a peer
+    // that removed the LAST file leaves `imgs` empty, and without this call
+    // the remote-shrink would never fire and stale local refs (and their blob
+    // refcounts) would persist forever. A brand-new record (no local row) with
+    // no files cannot have refs, so it skips the probe.
+    if (fileLane != null && (remote.imgs.isNotEmpty || localRow != null)) {
       await fileLane!.observeRemoteFiles(
         exec: exec,
         store: store,
