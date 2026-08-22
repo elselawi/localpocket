@@ -364,8 +364,9 @@ Precedence hierarchy:
 | `RemoteWinsResolver` *(Default)* | Takes the remote value on overlapping fields | Standard editable text / status fields |
 | `LocalWinsResolver` | Preserves the local value on overlapping fields | Client-local preferences, drafts |
 | `CounterResolver` | Computes $\text{Base} + (\text{Local} - \text{Base}) + (\text{Remote} - \text{Base})$ | View counts, numeric tallies, likes |
-| `SetUnionResolver` | Preserves 2-way additions; drops removals | Tag lists, categorizations, multi-select IDs |
-| `AppendOnlyResolver` | Concatenates text or list items with deduplication | Audit logs, conversation threads, history |
+| `SetUnionWithDeletionWinsResolver` | Preserves 2-way additions; drops removals from either side | Tag lists, categorizations, multi-select IDs |
+| `AppendOnlyListResolver` | Concatenates list items with deduplication (deep-equality, or per-item `identity`) | Event logs, audit trails, history |
+| `AppendOnlyLinesResolver` | Concatenates text line-by-line (trims, skips blanks, dedups lines) | Multi-line notes, thread messages |
 | `CustomResolver` | Custom Dart callback `(MergeContext ctx) => ...` | Complex business logic, manual review escalation |
 
 ### Configuring Conflict Policies
@@ -382,7 +383,7 @@ final postSchema = CollectionSchema(
   conflictPolicy: ConflictPolicy(
     fieldOverrides: {
       'views': const CounterResolver(),
-      'tags': const SetUnionResolver(),
+      'tags': const SetUnionWithDeletionWinsResolver(),
     },
     editsUnarchive: true, // Auto-restores archived records on local edits
   ),
@@ -529,16 +530,31 @@ await db.transaction((tx) async {
   ]);
 });
 
-// Explicit durability tuning:
-// - DurabilityClass.full (default): PRAGMA synchronous=FULL for crash resilience
-// - DurabilityClass.normal: PRAGMA synchronous=NORMAL for high throughput
+// Durability tuning (per mutation or per transaction):
+//
+// - DurabilityClass.normal (DEFAULT): PRAGMA synchronous=NORMAL. Under WAL
+//   this is app-crash-safe — a process crash never corrupts the database and
+//   all commits up to the last checkpoint are durable — while avoiding a disk
+//   flush on every commit (~5x faster writes). Only an OS-level power loss /
+//   kernel panic can lose the most recent commits.
+// - DurabilityClass.full: PRAGMA synchronous=FULL. Every commit is flushed to
+//   disk before the call returns; survives power loss. Use it for writes whose
+//   loss would be unacceptable (payments, irreplaceable user edits).
 await tasks.patch(
   'tsk1234567890ab',
   {'completed': true},
-  durability: DurabilityClass.normal,
+  durability: DurabilityClass.full,
+);
+
+// The same knob governs whole transactions:
+await db.transaction(
+  (tx) async {
+    await tx.collection('orders').put(order);
+    await tx.collection('audit').put(entry);
+  },
+  durability: DurabilityClass.full,
 );
 ```
-
 ---
 
 ## Running Tests & Benchmarks
@@ -550,8 +566,21 @@ dart analyze
 # Run unit & integration tests
 dart test
 
+# Run skipped tests
+dart test --tags "gate || real" --run-skipped -j 1
+
 # Run performance benchmark suite
 dart run benchmark/benchmark.dart
+```
+
+## Update & test coverage
+
+```bash
+# Update coverage baseline
+dart test --coverage=coverage
+
+# then
+dart run tool/coverage_gate.dart
 ```
 
 ---

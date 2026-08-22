@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<!-- HTML Landing page for the project -->
+<!-- Loads up the readme.md file itself -->
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LocalPocket — Local-First SQLite for Dart &amp; Flutter</title>
+    <meta name="description"
+        content="LocalPocket is a fast, local-first SQLite database for Dart and Flutter with automatic synchronization to PocketBase." />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+    <!-- Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <!-- Syntax highlighting -->
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/dart.min.js"></script>
+
+    <style>
+        :root {
+            --bg: #101112;
+            --bg-soft: #141517;
+            --bg-card: #191a1c;
+            --bg-card-hover: #1e2023;
+            --border: #27292d;
+            --border-strong: #34373c;
+            --text: #e4e5e7;
+            --text-muted: #97999e;
+            --accent: #a7c0ae;
+            --accent-strong: #bcd3c1;
+            --accent-dim: rgba(167, 192, 174, 0.12);
+            --code-bg: #131315;
+            --radius: 14px;
+            --max-w: 1080px;
+            --shadow-card: 0 24px 60px -30px rgba(0, 0, 0, 0.5);
+            --font: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+            --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        ::selection {
+            background: rgba(167, 192, 174, 0.28);
+        }
+
+        ::-webkit-scrollbar {
+            width: 11px;
+            height: 11px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #2c2f33;
+            border-radius: 8px;
+            border: 3px solid var(--bg);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3a3d42;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        html {
+            scroll-behavior: smooth;
+            scroll-padding-top: 76px;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.65;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        @keyframes rise {
+            from {
+                opacity: 0;
+                transform: translateY(18px);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        /* ---------- Nav ---------- */
+        nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.9rem clamp(1rem, 4vw, 2.5rem);
+            background: rgba(16, 17, 18, 0.82);
+            backdrop-filter: blur(14px) saturate(1.2);
+            border-bottom: 1px solid var(--border);
+            transition: box-shadow 0.25s ease, background 0.25s ease;
+        }
+
+        nav.scrolled {
+            background: rgba(16, 17, 18, 0.94);
+            box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.85);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-weight: 700;
+            font-size: 1.05rem;
+            letter-spacing: -0.01em;
+            text-decoration: none;
+            color: var(--text);
+        }
+
+        .brand .logo {
+            width: 30px;
+            height: 30px;
+            border-radius: 9px;
+            background: linear-gradient(135deg, var(--accent-strong), var(--accent));
+            display: grid;
+            place-items: center;
+            font-size: 0.85rem;
+            color: #101112;
+            font-weight: 800;
+            font-family: var(--mono);
+            box-shadow: 0 4px 14px -6px rgba(167, 192, 174, 0.4);
+        }
+
+        nav .links {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        nav .links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.15s ease;
+        }
+
+        nav .links a:hover {
+            color: var(--accent-strong);
+        }
+
+        .nav-cta {
+            background: var(--accent);
+            color: #101112 !important;
+            font-weight: 600;
+            padding: 0.45rem 1.05rem;
+            border-radius: 8px;
+            transition: filter 0.15s ease, transform 0.15s ease !important;
+        }
+
+        .nav-cta:hover {
+            filter: brightness(1.07);
+            transform: translateY(-1px);
+            color: #101112 !important;
+        }
+
+        @media (max-width: 640px) {
+            nav .links a:not(.nav-cta) {
+                display: none;
+            }
+        }
+
+        /* ---------- Hero ---------- */
+        .hero {
+            position: relative;
+            text-align: center;
+            padding: clamp(4.5rem, 11vw, 8rem) 1.5rem 5rem;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: "";
+            position: absolute;
+            inset: -40% 0 auto;
+            height: 130%;
+            background:
+                radial-gradient(640px 320px at 32% 18%, rgba(167, 192, 174, 0.09), transparent 70%),
+                radial-gradient(560px 300px at 68% 22%, rgba(255, 255, 255, 0.035), transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(228, 229, 231, 0.035) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(228, 229, 231, 0.035) 1px, transparent 1px);
+            background-size: 44px 44px;
+            -webkit-mask-image: radial-gradient(ellipse 75% 62% at 50% 38%, #000 30%, transparent 72%);
+            mask-image: radial-gradient(ellipse 75% 62% at 50% 38%, #000 30%, transparent 72%);
+            pointer-events: none;
+        }
+
+        .hero>* {
+            position: relative;
+        }
+
+        .hero .badge {
+            animation: rise 0.6s ease both;
+        }
+
+        .hero h1 {
+            animation: rise 0.6s ease 0.08s both;
+        }
+
+        .hero p.sub {
+            animation: rise 0.6s ease 0.16s both;
+        }
+
+        .hero-actions {
+            animation: rise 0.6s ease 0.24s both;
+        }
+
+        .hero .install {
+            animation: rise 0.6s ease 0.32s both;
+        }
+
+        .badge {
+            display: inline-block;
+            font-size: 0.74rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            font-weight: 600;
+            color: var(--accent-strong);
+            border: 1px solid rgba(167, 192, 174, 0.28);
+            background: var(--accent-dim);
+            border-radius: 999px;
+            padding: 0.35rem 1rem;
+            margin-bottom: 1.4rem;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.2rem, 6vw, 3.6rem);
+            font-weight: 800;
+            line-height: 1.12;
+            letter-spacing: -0.03em;
+            max-width: 820px;
+            margin: 0 auto 1.3rem;
+        }
+
+        .hero h1 .grad {
+            background: linear-gradient(100deg, var(--text) 10%, var(--accent-strong) 55%, var(--accent) 90%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .hero p.sub {
+            max-width: 640px;
+            margin: 0 auto 2.2rem;
+            color: var(--text-muted);
+            font-size: clamp(1rem, 2.2vw, 1.15rem);
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 0.9rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 2.6rem;
+        }
+
+        .btn {
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            padding: 0.78rem 1.7rem;
+            border-radius: 10px;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease,
+                background 0.15s ease, border-color 0.15s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #101112;
+            box-shadow: 0 8px 24px -10px rgba(167, 192, 174, 0.45);
+        }
+
+        .btn-primary:hover {
+            filter: brightness(1.06);
+            box-shadow: 0 12px 30px -10px rgba(167, 192, 174, 0.55);
+        }
+
+        .btn-ghost {
+            border: 1px solid var(--border);
+            color: var(--text);
+            background: var(--bg-card);
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--border-strong);
+            color: var(--text);
+            background: var(--bg-card-hover);
+        }
+
+        /* install snippet */
+        .install {
+            display: inline-flex;
+            align-items: center;
+            gap: 1rem;
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.8rem 1.2rem;
+            font-family: var(--mono);
+            font-size: 0.9rem;
+            cursor: pointer;
+            user-select: all;
+            transition: border-color 0.15s ease, transform 0.15s ease;
+        }
+
+        .install:hover {
+            border-color: var(--border-strong);
+            transform: translateY(-1px);
+        }
+
+        .install .ps1 {
+            color: var(--accent-strong);
+        }
+
+        .install .copied {
+            color: var(--accent-strong);
+            font-family: var(--font);
+            font-size: 0.78rem;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .install .copied.show {
+            opacity: 1;
+        }
+
+        /* ---------- Feature cards ---------- */
+        .features {
+            max-width: var(--max-w);
+            margin: 0 auto;
+            padding: 2rem 1.5rem 4.5rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.2rem;
+        }
+
+        .feature {
+            position: relative;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            overflow: hidden;
+            transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .feature::before {
+            content: "";
+            position: absolute;
+            inset: 0 0 auto;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(167, 192, 174, 0.4), transparent);
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+
+        .feature:hover {
+            border-color: var(--border-strong);
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-card);
+        }
+
+        .feature:hover::before {
+            opacity: 1;
+        }
+
+        .feature:nth-child(1) {
+            animation: rise 0.55s ease 0.05s both;
+        }
+
+        .feature:nth-child(2) {
+            animation: rise 0.55s ease 0.11s both;
+        }
+
+        .feature:nth-child(3) {
+            animation: rise 0.55s ease 0.17s both;
+        }
+
+        .feature:nth-child(4) {
+            animation: rise 0.55s ease 0.23s both;
+        }
+
+        .feature:nth-child(5) {
+            animation: rise 0.55s ease 0.29s both;
+        }
+
+        .feature:nth-child(6) {
+            animation: rise 0.55s ease 0.35s both;
+        }
+
+        .feature .icon {
+            width: 40px;
+            height: 40px;
+            display: grid;
+            place-items: center;
+            font-size: 1.15rem;
+            border-radius: 10px;
+            margin-bottom: 0.9rem;
+            background: linear-gradient(145deg, rgba(167, 192, 174, 0.16), rgba(167, 192, 174, 0.04));
+            border: 1px solid rgba(167, 192, 174, 0.18);
+            transition: transform 0.2s ease;
+        }
+
+        .feature:hover .icon {
+            transform: scale(1.08);
+        }
+
+        .feature h3 {
+            font-size: 0.98rem;
+            margin-bottom: 0.45rem;
+            letter-spacing: -0.01em;
+        }
+
+        .feature p {
+            font-size: 0.87rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        /* ---------- Docs ---------- */
+        .docs-section {
+            position: relative;
+            border-top: 1px solid var(--border);
+            background: var(--bg-soft);
+        }
+
+        .docs-head {
+            max-width: var(--max-w);
+            margin: 0 auto;
+            padding: 3.5rem 1.5rem 1.8rem;
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .eyebrow {
+            display: block;
+            font-size: 0.72rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            font-weight: 600;
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+
+        .docs-head h2 {
+            font-size: 1.7rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .docs-head span {
+            color: var(--text-muted);
+            font-size: 0.88rem;
+        }
+
+        .docs-wrap {
+            max-width: var(--max-w);
+            margin: 0 auto;
+            padding: 0 1.5rem 5rem;
+            display: grid;
+            grid-template-columns: 240px 1fr;
+            gap: 2.5rem;
+            align-items: start;
+        }
+
+        @media (max-width: 900px) {
+            .docs-wrap {
+                grid-template-columns: 1fr;
+            }
+
+            #toc {
+                display: none;
+            }
+        }
+
+        #toc {
+            position: sticky;
+            top: 84px;
+            max-height: calc(100vh - 110px);
+            overflow-y: auto;
+            font-size: 0.83rem;
+            border-left: 1px solid var(--border);
+            padding-left: 1rem;
+        }
+
+        #toc a {
+            display: block;
+            color: var(--text-muted);
+            text-decoration: none;
+            padding: 0.22rem 0;
+            border-left: 2px solid transparent;
+            margin-left: -1rem;
+            padding-left: calc(1rem - 2px);
+            transition: color 0.12s ease, border-color 0.12s ease;
+        }
+
+        #toc a:hover,
+        #toc a.active {
+            color: var(--accent);
+            border-left-color: var(--accent);
+        }
+
+        #toc a.lv3 {
+            padding-left: calc(1.8rem - 2px);
+        }
+
+        #loading {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            color: var(--text-muted);
+            padding: 3rem 0;
+        }
+
+        .spinner {
+            width: 22px;
+            height: 22px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent-strong);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ---------- Rendered markdown ---------- */
+        .markdown {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: clamp(1.4rem, 4vw, 2.8rem);
+            min-width: 0;
+        }
+
+        .markdown> :first-child {
+            margin-top: 0;
+        }
+
+        .markdown h1,
+        .markdown h2,
+        .markdown h3,
+        .markdown h4 {
+            line-height: 1.3;
+            margin: 2rem 0 0.8rem;
+            scroll-margin-top: 90px;
+        }
+
+        .markdown h1 {
+            font-size: 1.9rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+            letter-spacing: -0.02em;
+        }
+
+        .markdown h2 {
+            font-size: 1.45rem;
+            padding-bottom: 0.4rem;
+            border-bottom: 1px solid var(--border);
+            letter-spacing: -0.02em;
+        }
+
+        .markdown h3 {
+            font-size: 1.15rem;
+            letter-spacing: -0.01em;
+        }
+
+        .markdown h4 {
+            font-size: 1rem;
+        }
+
+        .markdown p,
+        .markdown ul,
+        .markdown ol,
+        .markdown blockquote,
+        .markdown table,
+        .markdown pre {
+            margin: 0.9rem 0;
+        }
+
+        .markdown a {
+            color: var(--accent-strong);
+            text-decoration: none;
+        }
+
+        .markdown a:hover {
+            text-decoration: underline;
+        }
+
+        .markdown ul,
+        .markdown ol {
+            padding-left: 1.5rem;
+        }
+
+        .markdown li {
+            margin: 0.3rem 0;
+        }
+
+        .markdown li::marker {
+            color: var(--accent);
+        }
+
+        .markdown blockquote {
+            border-left: 3px solid var(--accent);
+            background: var(--accent-dim);
+            padding: 0.7rem 1.1rem;
+            border-radius: 0 8px 8px 0;
+            color: var(--text-muted);
+        }
+
+        .markdown code {
+            font-family: var(--mono);
+            font-size: 0.85em;
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 0.15em 0.4em;
+        }
+
+        /* ---- code block chrome ---- */
+        .codeblock {
+            position: relative;
+            margin: 1.1rem 0;
+        }
+
+        .codeblock .code-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #17181a;
+            border: 1px solid var(--border);
+            border-bottom: none;
+            border-radius: 12px 12px 0 0;
+            padding: 0.45rem 1rem;
+        }
+
+        .codeblock .lang {
+            font-family: var(--mono);
+            font-size: 0.7rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .codeblock .copy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-family: var(--font);
+            font-size: 0.74rem;
+            cursor: pointer;
+            padding: 0.2rem 0.4rem;
+            border-radius: 6px;
+            transition: color 0.15s ease, background 0.15s ease;
+        }
+
+        .codeblock .copy-btn:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .codeblock .copy-btn.done {
+            color: var(--accent-strong);
+        }
+
+        .codeblock pre {
+            margin: 0;
+            border-radius: 0 0 12px 12px;
+        }
+
+        .markdown pre {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.1rem 1.3rem;
+            overflow-x: auto;
+            line-height: 1.6;
+        }
+
+        .markdown pre code {
+            background: none;
+            border: none;
+            padding: 0;
+            font-size: 0.85rem;
+        }
+
+        .markdown table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+            display: block;
+            overflow-x: auto;
+        }
+
+        .markdown th,
+        .markdown td {
+            border: 1px solid var(--border);
+            padding: 0.55rem 0.85rem;
+            text-align: left;
+        }
+
+        .markdown th {
+            background: var(--bg-soft);
+            font-weight: 600;
+            white-space: nowrap;
+            font-size: 0.82rem;
+            letter-spacing: 0.02em;
+        }
+
+        .markdown tr:nth-child(even) td {
+            background: rgba(255, 255, 255, 0.015);
+        }
+
+        .markdown hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 2.2rem 0;
+        }
+
+        /* ---- syntax highlighting (soft neutral theme) ---- */
+        .markdown .hljs {
+            color: #d6d7da;
+        }
+
+        .markdown .hljs-comment,
+        .markdown .hljs-quote {
+            color: #6f7278;
+            font-style: italic;
+        }
+
+        .markdown .hljs-keyword,
+        .markdown .hljs-selector-tag,
+        .markdown .hljs-literal,
+        .markdown .hljs-doctag {
+            color: #b0a48e;
+        }
+
+        .markdown .hljs-string,
+        .markdown .hljs-regexp,
+        .markdown .hljs-addition,
+        .markdown .hljs-meta .hljs-string {
+            color: #a9c1ab;
+        }
+
+        .markdown .hljs-number,
+        .markdown .hljs-symbol,
+        .markdown .hljs-bullet,
+        .markdown .hljs-link {
+            color: #c9a98f;
+        }
+
+        .markdown .hljs-title,
+        .markdown .hljs-title.class_,
+        .markdown .hljs-title.function_,
+        .markdown .hljs-section,
+        .markdown .hljs-name {
+            color: #d8cbb3;
+            font-weight: 600;
+        }
+
+        .markdown .hljs-attr,
+        .markdown .hljs-attribute,
+        .markdown .hljs-variable,
+        .markdown .hljs-template-variable,
+        .markdown .hljs-type,
+        .markdown .hljs-class .hljs-title,
+        .markdown .hljs-built_in,
+        .markdown .hljs-selector-class {
+            color: #c4cdd6;
+        }
+
+        .markdown .hljs-meta,
+        .markdown .hljs-deletion {
+            color: #97999e;
+        }
+
+        .markdown .hljs-emphasis {
+            font-style: italic;
+        }
+
+        .markdown .hljs-strong {
+            font-weight: bold;
+        }
+
+        .markdown img {
+            max-width: 100%;
+            border-radius: 8px;
+        }
+
+        .markdown .anchor-link {
+            opacity: 0;
+            margin-left: 0.4rem;
+            font-size: 0.85em;
+            text-decoration: none;
+        }
+
+        .markdown h1:hover .anchor-link,
+        .markdown h2:hover .anchor-link,
+        .markdown h3:hover .anchor-link {
+            opacity: 1;
+        }
+
+        #error {
+            display: none;
+            background: rgba(255, 99, 99, 0.08);
+            border: 1px solid rgba(255, 99, 99, 0.4);
+            color: #ffb4b4;
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            font-size: 0.92rem;
+        }
+
+        #error code {
+            color: #ffd7d7;
+        }
+
+        /* ---------- Footer ---------- */
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 2.4rem 1.5rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        footer a {
+            color: var(--accent-strong);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav id="topnav">
+        <a class="brand" href="#top">
+            <span class="logo">LP</span>
+            LocalPocket
+        </a>
+        <div class="links">
+            <a href="#highlights">Highlights</a>
+            <a href="#docs">Documentation</a>
+            <a href="https://pub.dev/packages/localpocket" class="nav-cta">pub.dev</a>
+        </div>
+    </nav>
+
+    <header class="hero" id="top">
+        <span class="badge">Local-First · Dart &amp; Flutter</span>
+        <h1>Your data, <span class="grad">instantly local.</span><br />Synced when it matters.</h1>
+        <p class="sub">
+            A SQLite-powered embedded database for Dart and Flutter that keeps your app
+            blazing fast offline, and quietly reconciles with your PocketBase backend
+            in the background.
+        </p>
+        <div class="hero-actions">
+            <a class="btn btn-primary" href="#docs">Read the Docs ↓</a>
+            <a class="btn btn-ghost" href="https://pub.dev/packages/localpocket">View on pub.dev</a>
+        </div>
+        <div class="install" id="install" title="Click to copy">
+            <span><span class="ps1">$</span> dart pub add localpocket</span>
+            <span class="copied" id="copied">copied ✓</span>
+        </div>
+    </header>
+
+    <section class="features" id="highlights">
+        <div class="feature">
+            <div class="icon">⚡</div>
+            <h3>Instant Reads</h3>
+            <p>Point reads land in well under a blink, served from a warm in-memory layer.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">🔁</div>
+            <h3>Effortless Sync</h3>
+            <p>Background reconciliation with your backend — push, pull, and realtime hints handled for you.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">🤝</div>
+            <h3>Smart Merges</h3>
+            <p>Concurrent edits from different devices are combined intelligently, not clobbered.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">🔎</div>
+            <h3>Built-In Search</h3>
+            <p>Ranked full-text search over your collections with zero extra infrastructure.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">📎</div>
+            <h3>Files &amp; Blobs</h3>
+            <p>Attach binary files to records with deduplication and streaming, locally first.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">🔒</div>
+            <h3>Private by Design</h3>
+            <p>Opt-in field-level encryption keeps sensitive values safe at rest.</p>
+        </div>
+    </section>
+
+    <section class="docs-section" id="docs">
+        <div class="docs-head">
+            <div>
+                <span class="eyebrow">Reference</span>
+                <h2>Documentation</h2>
+            </div>
+            <span>Loaded live from <code>README.md</code></span>
+        </div>
+        <div class="docs-wrap">
+            <aside id="toc" aria-label="Table of contents"></aside>
+            <div>
+                <div id="error">
+                    <strong>Couldn’t load the documentation.</strong><br />
+                    This page fetches <code>README.md</code> at runtime, so it needs to be served
+                    over HTTP (not opened via <code>file://</code>). Try:
+                    <pre><code>dart run tool/web_smoke_server.dart</code></pre>
+                    or any static file server from the repository root.
+                </div>
+                <div id="loading">
+                    <div class="spinner"></div> Loading documentation…
+                </div>
+                <article class="markdown" id="docs-content" style="display:none"></article>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <p><strong>LocalPocket</strong> — released under the <a href="https://opensource.org/licenses/MIT">MIT
+                License</a>.</p>
+        <p>Built for the Dart &amp; Flutter community.</p>
+    </footer>
+
+    <script>
+        (function () {
+            "use strict";
+
+            /* ---- copy install command ---- */
+            const install = document.getElementById("install");
+            const copied = document.getElementById("copied");
+            install.addEventListener("click", () => {
+                navigator.clipboard.writeText("dart pub add localpocket").then(() => {
+                    copied.classList.add("show");
+                    setTimeout(() => copied.classList.remove("show"), 1400);
+                });
+            });
+
+            /* ---- nav shadow on scroll ---- */
+            const nav = document.getElementById("topnav");
+            function onScrollNav() { nav.classList.toggle("scrolled", window.scrollY > 8); }
+            window.addEventListener("scroll", onScrollNav, { passive: true });
+            onScrollNav();
+
+            /* ---- markdown setup ---- */
+            marked.setOptions({ gfm: true, breaks: false });
+
+            const slugCounts = Object.create(null);
+            function slugify(text) {
+                let s = text.toLowerCase().trim()
+                    .replace(/[^\w\- ]+/g, "")
+                    .replace(/\s+/g, "-");
+                if (slugCounts[s] != null) slugCounts[s] += 1; else slugCounts[s] = 0;
+                return slugCounts[s] ? s + "-" + slugCounts[s] : s;
+            }
+
+            function render(md) {
+                // Strip the leading H1: the hero already presents it.
+                md = md.replace(/^#\s+.+\n+/, "");
+                return marked.parse(md);
+            }
+
+            /* ---- wrap <pre> in chrome with lang label + copy button ---- */
+            function enhanceCodeBlocks(container) {
+                container.querySelectorAll("pre").forEach((pre) => {
+                    const code = pre.querySelector("code");
+                    if (!code) return;
+                    const lang =
+                        (Array.from(code.classList).find((c) => c.startsWith("language-")) || "")
+                            .replace("language-", "") || "";
+                    const wrapper = document.createElement("div");
+                    wrapper.className = "codeblock";
+                    const head = document.createElement("div");
+                    head.className = "code-head";
+                    const label = document.createElement("span");
+                    label.className = "lang";
+                    label.textContent = lang || "text";
+                    const btn = document.createElement("button");
+                    btn.className = "copy-btn";
+                    btn.type = "button";
+                    btn.innerHTML = "⧉ Copy";
+                    btn.addEventListener("click", () => {
+                        navigator.clipboard.writeText(code.textContent).then(() => {
+                            btn.classList.add("done");
+                            btn.innerHTML = "✓ Copied";
+                            setTimeout(() => {
+                                btn.classList.remove("done");
+                                btn.innerHTML = "⧉ Copy";
+                            }, 1500);
+                        });
+                    });
+                    head.appendChild(label);
+                    head.appendChild(btn);
+                    pre.parentNode.insertBefore(wrapper, pre);
+                    wrapper.appendChild(head);
+                    wrapper.appendChild(pre);
+                });
+            }
+
+            function anchorHeadings(container) {
+                container.querySelectorAll("h1, h2, h3").forEach((h) => {
+                    const id = slugify(h.textContent);
+                    h.id = id;
+                    const a = document.createElement("a");
+                    a.href = "#" + id;
+                    a.className = "anchor-link";
+                    a.textContent = "#";
+                    h.appendChild(a);
+                });
+            }
+
+            function buildToc(container) {
+                const toc = document.getElementById("toc");
+                toc.innerHTML = "";
+                container.querySelectorAll("h2, h3").forEach((h) => {
+                    const a = document.createElement("a");
+                    a.href = "#" + h.id;
+                    a.textContent = h.textContent.trim();
+                    if (h.tagName === "H3") a.classList.add("lv3");
+                    toc.appendChild(a);
+                });
+            }
+
+            /* ---- scroll-spy for TOC ---- */
+            function spy() {
+                const links = Array.from(document.querySelectorAll("#toc a"));
+                const heads = links
+                    .map((a) => document.getElementById(decodeURIComponent(a.hash.slice(1))))
+                    .filter(Boolean);
+                const y = window.scrollY + 100;
+                let current = heads[0];
+                for (const h of heads) if (h.offsetTop <= y) current = h;
+                links.forEach((a) =>
+                    a.classList.toggle("active", current && a.hash === "#" + current.id)
+                );
+            }
+            window.addEventListener("scroll", spy, { passive: true });
+
+            /* ---- load README ---- */
+            fetch("README.md", { cache: "no-cache" })
+                .then((r) => {
+                    if (!r.ok) throw new Error("HTTP " + r.status);
+                    return r.text();
+                })
+                .then((md) => {
+                    document.getElementById("loading").style.display = "none";
+                    const content = document.getElementById("docs-content");
+                    content.innerHTML = render(md);
+                    enhanceCodeBlocks(content);
+                    content.querySelectorAll("pre code").forEach((block) => {
+                        if (window.hljs) hljs.highlightElement(block);
+                    });
+                    anchorHeadings(content);
+                    buildToc(content);
+                    content.style.display = "";
+                    content.animate(
+                        [{ opacity: 0, transform: "translateY(14px)" }, { opacity: 1, transform: "none" }],
+                        { duration: 500, easing: "ease-out" }
+                    );
+                    spy();
+                })
+                .catch(() => {
+                    document.getElementById("loading").style.display = "none";
+                    document.getElementById("error").style.display = "block";
+                });
+        })();
+    </script>
+
+</body>
+
+</html>
