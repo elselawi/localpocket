@@ -193,7 +193,8 @@ void main() {
       expect(await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNull);
     });
 
-    test('push 404 errors dead letter keeps payload', () async {
+    test('push 404 escalates to a delete-vs-edit conflict (default policy)',
+        () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);
 
@@ -202,10 +203,18 @@ void main() {
       await h.pocket.collection('widgets').patch(id, {'name': 'edited'});
 
       h.mock.delete(id); // hard-deleted server-side before the push
-      await h.engine.syncNow();
+      final report = await h.engine.syncNow();
 
-      final dl = await deadLetters(h.pocket);
-      expect(dl.any((r) => r['kind'] == 'missing_target'), isTrue);
+      expect(report.deadLettered, 0);
+      expect(await deadLetters(h.pocket), isEmpty,
+          reason: 'the default policy escalates, never dead-letters');
+      final conflict = await h.pocket.conflicts.get('widgets', id);
+      expect(conflict, isNotNull);
+      expect(conflict!.remoteDeleted, isTrue,
+          reason: 'the remote side is recorded as a deletion tombstone');
+      expect(conflict.local['name'], 'edited',
+          reason: 'the local payload is preserved for resolution');
+      expect((await sr(h.pocket, id))!.syncState, SyncState.conflict);
       // Payload is preserved for inspection / recovery.
       final local = await h.pocket.collection('widgets').get(id);
       expect(local!['name'], 'edited');
@@ -429,7 +438,7 @@ void main() {
       );
 
   group('pusher targeted-fetch result matrix', () {
-    test('getRecord returns null: vanished update dead-letters, no crash',
+    test('getRecord returns null: vanished update escalates, no crash',
         () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);
@@ -439,14 +448,15 @@ void main() {
       h.mock.script('getRecord', [MockReturn(null)]);
 
       final report = await h.engine.syncNow();
-      expect(report.deadLettered, 1,
-          reason: 'vanished target dead-lettered, never a null crash');
+      expect(report.deadLettered, 0,
+          reason: 'vanished target escalates a conflict, never a null crash');
       expect(report.hadError, isFalse);
-      final dl = await deadLetters(h.pocket);
-      expect(dl.any((r) => r['kind'] == 'missing_target'), isTrue);
+      expect(await deadLetters(h.pocket), isEmpty);
+      final conflict = await h.pocket.conflicts.get('widgets', id);
+      expect(conflict!.remoteDeleted, isTrue);
       final local = await h.pocket.collection('widgets').get(id);
       expect(local!['name'], 'edited', reason: 'local copy preserved');
-      expect((await sr(h.pocket, id))!.syncState, SyncState.error);
+      expect((await sr(h.pocket, id))!.syncState, SyncState.conflict);
     });
 
     test('getRecord auth error parks the engine and keeps the op', () async {
@@ -466,7 +476,7 @@ void main() {
           await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull);
     });
 
-    test('getRecord not-found dead-letters missing target', () async {
+    test('getRecord not-found escalates a delete conflict', () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);
       final id = h.mock.seed(store: 'widgets', data: {'name': 'v1', 'qty': 1});
@@ -475,9 +485,10 @@ void main() {
       h.mock.script('getRecord', [MockThrow(NotFoundError())]);
 
       final report = await h.engine.syncNow();
-      expect(report.deadLettered, 1);
-      final dl = await deadLetters(h.pocket);
-      expect(dl.any((r) => r['kind'] == 'missing_target'), isTrue);
+      expect(report.deadLettered, 0);
+      expect(await deadLetters(h.pocket), isEmpty);
+      final conflict = await h.pocket.conflicts.get('widgets', id);
+      expect(conflict!.remoteDeleted, isTrue);
       final local = await h.pocket.collection('widgets').get(id);
       expect(local!['name'], 'edited');
     });
