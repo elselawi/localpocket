@@ -165,7 +165,8 @@ class RemoteRecord {
 /// An outbox op encoded for a single push (create vs update by [baseUpdated]).
 /// One desired record state prepared for a backend push.
 class PushOp {
-  /// Stable local operation ID.
+  /// Stable local operation ID — the server-side idempotency key for batch
+  /// pushes (see [SyncBackend.pushBatch]).
   final String opId;
 
   /// Collection name.
@@ -294,6 +295,12 @@ String rewindUpdated(String updated, Duration delta) =>
 // ---------------------------------------------------------------------------
 
 /// Backend contract used by [SyncEngine] for pull, push, realtime, and files.
+///
+/// Idempotency: every push retry is safe to repeat, and backends MUST honor
+/// the keys that make that true — batch ops key on their stable [PushOp.opId],
+/// creates key on the client-supplied record id, and updates re-send the full
+/// desired state guarded by [updateRecord]'s [baseUpdated] check. See the
+/// per-method contracts below.
 abstract class SyncBackend {
   /// Negotiated backend capabilities.
   BackendCapabilities get capabilities;
@@ -320,6 +327,11 @@ abstract class SyncBackend {
   Future<RemoteRecord?> getRecord(String id);
 
   /// Creates a remote record with the client-supplied ID.
+  ///
+  /// The client may retry this call after a lost response. Implementations
+  /// MUST treat the client-supplied [id] as an idempotency key: a retry with
+  /// the same [id] either creates the record once or fails with
+  /// [DuplicateIdError] when it already exists — never a second copy.
   Future<RemoteRecord> createRecord({
     required String id,
     required String store,
@@ -333,6 +345,13 @@ abstract class SyncBackend {
   /// reject the write with [RemoteVersionConflict] when the remote moved past
   /// that version; backends without conditional writes (e.g. PocketBase) may
   /// ignore it.
+  ///
+  /// Retry contract: the client may retry this call after a lost response.
+  /// [dataJson] is the FULL desired record state (never a diff), so
+  /// re-applying it while the remote record still matches [baseUpdated] is
+  /// idempotent. Implementations SHOULD reject the write with
+  /// [RemoteVersionConflict] when the remote moved past [baseUpdated] so the
+  /// pusher re-merges instead of overwriting a concurrent edit.
   Future<RemoteRecord> updateRecord({
     required String id,
     required String dataJson,
@@ -398,6 +417,13 @@ abstract class SyncBackend {
 
   /// Transactional batch. Throws [BatchFailedError] when the whole batch
   /// fails as a unit.
+  ///
+  /// Idempotency contract (REQUIRED — the binary-split retry depends on it):
+  /// implementations MUST treat ([scopeId], [PushOp.opId]) as an idempotency
+  /// key. A network failure after the server committed a batch but before the
+  /// client received the response must be safe: retrying the same [opId]
+  /// returns the original result (or an equivalent no-op success) and never
+  /// applies the mutation twice or fabricates a conflict.
   ///
   /// Response contract:
   /// - Every returned [PushResult.opId] MUST reference an op in [ops] and be
