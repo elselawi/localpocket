@@ -54,8 +54,18 @@ class Tx {
 
   /// Buffers a detailed post-commit record change event (emitted after commit only).
   void addRecordEvent(RecordChangeEvent event) {
+    // Nobody is listening: drop before it ever reaches a list. Broadcast
+    // streams never replay history, so a listener attaching later could not
+    // have received this event anyway.
+    if (!_pocket.changeBus.hasEventListeners) return;
     _recordEvents.add(event);
   }
+
+  /// Whether any record-event listener is currently attached. Mutation paths
+  /// consult this BEFORE building [RecordChangeEvent] objects (old/new maps,
+  /// changed-field sets) so an unwatched bulk write allocates nothing for
+  /// notifications.
+  bool get wantsRecordEvents => _pocket.changeBus.hasEventListeners;
 
   /// Scoped collection access bound to this transaction.
   Collection collection(String name) =>

@@ -269,6 +269,9 @@ void main() {
     test('mutations broadcast recordEvent to the sink (E4)', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'apple'), id: id);
+      // Group commit emits post-commit notifications after the commit
+      // boundary; give the broadcast a turn to land.
+      await Future<void>.delayed(Duration.zero);
 
       final events = h.sink.byOp(WireOp.recordEvent);
       expect(events, isNotEmpty);

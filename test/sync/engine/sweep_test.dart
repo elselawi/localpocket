@@ -1,5 +1,6 @@
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/sync.dart';
+import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
@@ -137,7 +138,7 @@ void main() {
       await h.engine.sweeper.sweepBucket('widgets', 0);
 
       final fullCount =
-          recorder.where((sql) => sql == 'PRAGMA synchronous=FULL').length;
+          recorder.where((sql) => sql == 'BEGIN IMMEDIATE').length;
       expect(fullCount, lessThanOrEqualTo(2),
           reason: 'self-heals should batch a once-per-page transaction');
     });
@@ -660,7 +661,7 @@ void main() {
       }
 
       final fullCount =
-          recorder.where((sql) => sql == 'PRAGMA synchronous=FULL').length;
+          recorder.where((sql) => sql == 'BEGIN IMMEDIATE').length;
       expect(fullCount, lessThanOrEqualTo(2),
           reason: 'mass hiding should commit in a batched transaction');
     });
@@ -716,12 +717,16 @@ void main() {
         () async {
       final db = await tempDbPath();
       addTearDown(() async => db.cleanup());
-      final recorder = <String>[];
-      final hooks = TestHooks(onExecute: recorder.add);
+      // BEGIN/COMMIT are routed through the adapter, not traceExecute, so
+      // count transactions via an injected instrumented database.
+      var beginCount = 0;
+      final rawDb = DirectSqliteDatabase(sqlite.sqlite3.open(db.path));
+      rawDb.onExecute = (sql, _) {
+        if (sql == 'BEGIN IMMEDIATE') beginCount++;
+      };
       final h = await EngineHarness.create(
         config: testConfig(sweepInterval: Duration.zero),
-        testHooks: hooks,
-        path: db.path,
+        database: rawDb,
       );
       addTearDown(h.close);
 
@@ -738,8 +743,6 @@ void main() {
       for (final id in ids) {
         h.mock.mutate(id, {'id': id, 'name': 'updated_$id'});
       }
-      recorder.clear();
-
       // Fetch with batchSize = 5 -> should run 3 chunk transactions.
       await h.engine.puller.fetchBatch('widgets', ids, batchSize: 5);
 
@@ -748,9 +751,9 @@ void main() {
             'updated_$id');
       }
 
-      final fullCount =
-          recorder.where((sql) => sql == 'PRAGMA synchronous=FULL').length;
-      expect(fullCount, equals(3),
+        final beginBefore = beginCount;
+        await h.engine.puller.fetchBatch('widgets', ids, batchSize: 5);
+        expect(beginCount - beginBefore, equals(3),
           reason:
               '15 items in chunks of 5 should execute exactly 3 write transactions');
     });

@@ -496,6 +496,9 @@ void main() {
       final a = generateRecordId();
       final b = generateRecordId();
       await col.put(record(id: a, name: 'a', phone: 'same'));
+      // Let the successful write's post-commit notification land BEFORE
+      // clearing: group commit emits at end-of-turn.
+      await Future<void>.delayed(Duration.zero);
       emitted.clear();
       await expectLater(col.put(record(id: b, name: 'b', phone: 'same')),
           throwsA(isA<UniqueConstraintException>()));

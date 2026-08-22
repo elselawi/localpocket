@@ -57,6 +57,13 @@ mixin WireCollectionMixin {
         {'action': 'patch', 'id': id, 'record': encodeWireValue(changes)}
       ]);
 
+  /// Applies partial updates to many records in one batched request.
+  Future<void> patchAll(Map<String, Map<String, Object?>> patches) =>
+      _sendMutations([
+        for (final e in patches.entries)
+          {'action': 'patch', 'id': e.key, 'record': encodeWireValue(e.value)}
+      ]);
+
   /// Archives the record with [id].
   Future<void> archive(String id) => _sendMutations([
         {'action': 'archive', 'id': id}

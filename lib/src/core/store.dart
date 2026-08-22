@@ -5,6 +5,7 @@ import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
 import 'database_adapter.dart';
 
+import 'canonical_json.dart';
 import 'change_bus.dart';
 import 'codec.dart';
 import 'errors.dart';
@@ -86,7 +87,7 @@ class Collection with ChangeBusAwareStore {
   /// });
   /// ```
   Future<void> put(Map<String, Object?> record,
-      {DurabilityClass durability = DurabilityClass.full}) {
+      {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) {
       return _mutate(MutationAction.createOrUpdate, record: record);
     }
@@ -103,7 +104,7 @@ class Collection with ChangeBusAwareStore {
   /// duplicate ids are applied sequentially (last write wins) with the same
   /// semantics as repeated `put` calls.
   Future<void> putAll(List<Map<String, Object?>> records,
-      {DurabilityClass durability = DurabilityClass.full}) {
+      {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return _putAll(records);
     return _pocket.transaction((tx) => tx.collection(name).putAll(records),
         durability: durability);
@@ -120,10 +121,42 @@ class Collection with ChangeBusAwareStore {
   ///
   /// Throws [RecordNotFoundException] when [id] is not present locally.
   Future<void> patch(String id, Map<String, Object?> changes,
-      {DurabilityClass durability = DurabilityClass.full}) {
+      {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return _patch(id, changes);
     return _pocket.transaction((tx) => tx.collection(name).patch(id, changes),
         durability: durability);
+  }
+
+  /// Applies partial updates to many records in ONE transaction.
+  ///
+  /// ```dart
+  /// await tasks.patchAll({
+  ///   taskIdA: {'completed': true},
+  ///   taskIdB: {'archived': true},
+  /// });
+  /// ```
+  ///
+  /// Semantically equivalent to awaiting [patch] for every entry, but the
+  /// whole batch commits as one durability boundary: one fsync (FULL), one
+  /// post-commit [ChangeSet], and one coalesced record-event stream. Each
+  /// entry follows the exact same path as an individual [patch] — including
+  /// the dirty-row fast path and outbox bookkeeping. Throws on the first
+  /// failure ([RecordNotFoundException] or validation); earlier entries in
+  /// the batch are rolled back with it.
+  Future<void> patchAll(Map<String, Map<String, Object?>> patches,
+      {DurabilityClass durability = DurabilityClass.normal}) {
+    if (_tx != null) return _patchAll(patches);
+    return _pocket.transaction((tx) => tx.collection(name).patchAll(patches),
+        durability: durability);
+  }
+
+  Future<void> _patchAll(Map<String, Map<String, Object?>> patches) async {
+    _ensureWritable();
+    if (patches.isEmpty) return;
+    for (final e in patches.entries) {
+      await _patch(e.key, e.value, coalesceChanges: true);
+    }
+    _tx!.addChange(ChangeSet(name, {for (final id in patches.keys) id}));
   }
 
   /// Soft-deletes a record by setting `archived` to `true`.
@@ -131,7 +164,7 @@ class Collection with ChangeBusAwareStore {
   /// Archived records are excluded from default queries but remain available
   /// with `query().includeArchived()`.
   Future<void> archive(String id,
-      {DurabilityClass durability = DurabilityClass.full}) {
+      {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return _mutate(MutationAction.archive, id: id);
     return _pocket.transaction((tx) => tx.collection(name).archive(id),
         durability: durability);
@@ -139,7 +172,7 @@ class Collection with ChangeBusAwareStore {
 
   /// Removes the archive flag from the record with [id].
   Future<void> restore(String id,
-      {DurabilityClass durability = DurabilityClass.full}) {
+      {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return _mutate(MutationAction.restore, id: id);
     return _pocket.transaction((tx) => tx.collection(name).restore(id),
         durability: durability);
@@ -150,7 +183,7 @@ class Collection with ChangeBusAwareStore {
   /// Unlike [archive], this is a hard local deletion. Use it only when the
   /// application intentionally wants to remove local state.
   Future<void> purge(String id,
-      {DurabilityClass durability = DurabilityClass.full}) {
+      {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return _purge(id);
     return _pocket.transaction((tx) => tx.collection(name).purge(id),
         durability: durability);
@@ -178,7 +211,8 @@ class Collection with ChangeBusAwareStore {
     }
   }
 
-  Future<void> _patch(String id, Map<String, Object?> changes) async {
+  Future<void> _patch(String id, Map<String, Object?> changes,
+      {bool coalesceChanges = false}) async {
     _ensureWritable();
     final exec = _ex;
 
@@ -221,15 +255,17 @@ class Collection with ChangeBusAwareStore {
       }
     }
     if (sr != null && sr.syncState == SyncState.dirty && op != null) {
-      await _patchDirtyFast(id, changes, sr, op);
+      await _patchDirtyFast(id, changes, sr, op,
+          coalesceChanges: coalesceChanges);
       return;
     }
 
-    await _fallbackPatch(id, changes, sr: sr, op: op);
+    await _fallbackPatch(id, changes,
+        sr: sr, op: op, coalesceChanges: coalesceChanges);
   }
 
   Future<void> _fallbackPatch(String id, Map<String, Object?> changes,
-      {SyncRowState? sr, OutboxOp? op}) async {
+      {SyncRowState? sr, OutboxOp? op, bool coalesceChanges = false}) async {
     final existing = await _readLogical(id);
     if (existing == null) {
       throw RecordNotFoundException('No record $name/$id to patch.');
@@ -240,15 +276,17 @@ class Collection with ChangeBusAwareStore {
         id: id,
         existing: existing,
         prefetchedSyncRow: sr,
-        prefetchedOp: op);
+        prefetchedOp: op,
+        coalesceChanges: coalesceChanges);
   }
 
   /// Dirty-row patch fast path: reuses the outbox payload
   /// as the existing desired state, issues a targeted domain UPDATE, and lets
   /// the tested `applyLocalMutation` handle outbox/sync-row bookkeeping
   /// (earliest-base preservation, dirty-field union, op-kind transitions).
-  Future<void> _patchDirtyFast(String id, Map<String, Object?> changes,
-      SyncRowState sr, OutboxOp op) async {
+  Future<void> _patchDirtyFast(
+      String id, Map<String, Object?> changes, SyncRowState sr, OutboxOp op,
+      {bool coalesceChanges = false}) async {
     final hooks = _pocket.testHooks;
     Object? currentPayload;
     try {
@@ -258,22 +296,28 @@ class Collection with ChangeBusAwareStore {
     }
     if (currentPayload is! Map<String, Object?>) {
       // Defensive: corrupt payload — fall back to the full read path.
-      return _fallbackPatch(id, changes, sr: sr, op: op);
+      return _fallbackPatch(id, changes,
+          sr: sr, op: op, coalesceChanges: coalesceChanges);
     }
     // A payload that names a different record is corruption: treating it as
     // the desired state would drop the real record's fields. Fall back to the
     // authoritative domain row.
     final payloadId = currentPayload['id'];
     if (payloadId != null && payloadId != id) {
-      return _fallbackPatch(id, changes, sr: sr, op: op);
+      return _fallbackPatch(id, changes,
+          sr: sr, op: op, coalesceChanges: coalesceChanges);
     }
 
     final merged = <String, Object?>{...currentPayload, ...changes};
     merged['id'] = id;
-    final payloadJson = canonicalPayload(_schema, merged);
+    final payloadBuffer = StringBuffer();
+    final payloadBytes =
+        canonicalizeInto(payloadBuffer, buildPayload(_schema, merged));
+    final payloadJson = payloadBuffer.toString();
     // Validators see the logical form without the synthetic `id` key (same as
     // the normal `_mutate` path); the payload is already validated by size.
-    _validate(id, {...merged}..remove('id'), precomputedPayload: payloadJson);
+    _validate(id, {...merged}..remove('id'),
+        precomputedPayload: payloadJson, precomputedPayloadBytes: payloadBytes);
 
     final row = encodeDbRow(
       _schema,
@@ -308,16 +352,20 @@ class Collection with ChangeBusAwareStore {
     );
     hooks?.mutationCrashPoint?.call('after-outbox');
 
-    _tx?.addChange(ChangeSet(name, {id}));
-    _tx?.addRecordEvent(RecordChangeEvent(
-      store: name,
-      id: id,
-      origin: ChangeOrigin.local,
-      action: ChangeAction.update,
-      oldRecord: currentPayload,
-      newRecord: merged,
-      changedFields: dirtyFields.toSet(),
-    ));
+    if (!coalesceChanges) {
+      _tx?.addChange(ChangeSet(name, {id}));
+    }
+    if (_tx?.wantsRecordEvents ?? false) {
+      _tx?.addRecordEvent(RecordChangeEvent(
+        store: name,
+        id: id,
+        origin: ChangeOrigin.local,
+        action: ChangeAction.update,
+        oldRecord: currentPayload,
+        newRecord: merged,
+        changedFields: dirtyFields.toSet(),
+      ));
+    }
   }
 
   Future<void> _mutate(MutationAction action,
@@ -364,13 +412,18 @@ class Collection with ChangeBusAwareStore {
       logical = {...existingRow, 'archived': action == MutationAction.archive};
     }
 
-    // Single canonical serialization per put: reused by validation (maxDocBytes),
-    // the outbox payload, and — on first dirt — the base snapshot hash
-    // (one serialization pass).
-    final payloadJson = canonicalPayload(
-        _schema, {...logical, if (recordId.isNotEmpty) 'id': recordId});
+    // Single canonical serialization per put: reused by validation
+    // (maxDocBytes — measured from the same buffer, no UTF-8 re-encode), the
+    // outbox payload, and — on first dirt — the base snapshot hash.
+    final payloadBuffer = StringBuffer();
+    final payloadBytes = canonicalizeInto(
+        payloadBuffer,
+        buildPayload(
+            _schema, {...logical, if (recordId.isNotEmpty) 'id': recordId}));
+    final payloadJson = payloadBuffer.toString();
 
-    _validate(recordId, logical, precomputedPayload: payloadJson);
+    _validate(recordId, logical,
+        precomputedPayload: payloadJson, precomputedPayloadBytes: payloadBytes);
 
     // A fresh create cannot have existing sync/outbox rows (id is the PK), so
     // skip the reads on the hot create path. putAll supplies prefetched state
@@ -464,15 +517,17 @@ class Collection with ChangeBusAwareStore {
       changedFieldsSet = dirtyFields.toSet();
     }
 
-    _tx?.addRecordEvent(RecordChangeEvent(
-      store: name,
-      id: recordId,
-      origin: ChangeOrigin.local,
-      action: changeAction,
-      oldRecord: existingRow,
-      newRecord: logical,
-      changedFields: changedFieldsSet,
-    ));
+    if (_tx?.wantsRecordEvents ?? false) {
+      _tx?.addRecordEvent(RecordChangeEvent(
+        store: name,
+        id: recordId,
+        origin: ChangeOrigin.local,
+        action: changeAction,
+        oldRecord: existingRow,
+        newRecord: logical,
+        changedFields: changedFieldsSet,
+      ));
+    }
 
     if (!coalesceChanges) {
       _tx?.addChange(ChangeSet(name, {recordId}));
@@ -602,8 +657,13 @@ class Collection with ChangeBusAwareStore {
 
     for (final (rid, record) in records) {
       final logical = _logicalFromRecord(record, rid);
-      final payloadJson = canonicalPayload(schema, {...logical, 'id': rid});
-      _validate(rid, logical, precomputedPayload: payloadJson);
+      final payloadBuffer = StringBuffer();
+      final payloadBytes = canonicalizeInto(
+          payloadBuffer, buildPayload(schema, {...logical, 'id': rid}));
+      final payloadJson = payloadBuffer.toString();
+      _validate(rid, logical,
+          precomputedPayload: payloadJson,
+          precomputedPayloadBytes: payloadBytes);
       final row = encodeDbRow(
         schema,
         id: rid,
@@ -651,15 +711,17 @@ class Collection with ChangeBusAwareStore {
           await exec.insert('lp_outbox', outboxRow);
           await exec.insert('lp_sync_row', syncRow);
         }
-        _tx?.addRecordEvent(RecordChangeEvent(
-          store: name,
-          id: rid,
-          origin: ChangeOrigin.local,
-          action: ChangeAction.create,
-          oldRecord: null,
-          newRecord: logical,
-          changedFields: logical.keys.where((k) => k != 'id').toSet(),
-        ));
+        if (_tx?.wantsRecordEvents ?? false) {
+          _tx!.addRecordEvent(RecordChangeEvent(
+            store: name,
+            id: rid,
+            origin: ChangeOrigin.local,
+            action: ChangeAction.create,
+            oldRecord: null,
+            newRecord: logical,
+            changedFields: logical.keys.where((k) => k != 'id').toSet(),
+          ));
+        }
       } catch (e) {
         throw translateConstraintError(e);
       }
@@ -744,7 +806,7 @@ class Collection with ChangeBusAwareStore {
   // ------------------------------------------------------------- validation --
 
   void _validate(String id, Map<String, Object?> logical,
-      {String? precomputedPayload}) {
+      {String? precomputedPayload, int? precomputedPayloadBytes}) {
     for (final f in _schema.fields) {
       final v = logical[f.name];
       if (f.required && v == null) {
@@ -762,9 +824,12 @@ class Collection with ChangeBusAwareStore {
     if (msgs.isNotEmpty) {
       throw ValidationException(msgs.join('; '));
     }
-    final bytes = utf8
-        .encode(precomputedPayload ?? canonicalPayload(_schema, logical))
-        .length;
+    // The UTF-8 measurement is an upper bound (each non-ASCII code unit
+    // counted as 4 bytes) computed without a second serialization pass.
+    final bytes = precomputedPayloadBytes ??
+        utf8
+            .encode(precomputedPayload ?? canonicalPayload(_schema, logical))
+            .length;
     if (bytes > _pocket.maxDocBytes) {
       throw ValidationException(
           'Document exceeds max size ($bytes > ${_pocket.maxDocBytes} bytes).',

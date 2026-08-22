@@ -7,6 +7,13 @@ class PerfCounters {
   /// Number of completed write transactions.
   int writeTransactions = 0;
 
+  /// Number of group-commit transactions that coalesced 2+ queued mutations
+  /// into one SQLite transaction (one fsync for the whole group).
+  int groupCommits = 0;
+
+  /// Total number of mutations that ever joined a group-commit transaction.
+  int groupCommitMembers = 0;
+
   /// Sum of write transaction durations in microseconds.
   int totalWriteTransactionUs = 0;
 
@@ -78,6 +85,8 @@ class PerfCounters {
   /// Resets all counters to zero.
   void reset() {
     writeTransactions = 0;
+    groupCommits = 0;
+    groupCommitMembers = 0;
     totalWriteTransactionUs = 0;
     statements = 0;
     queries = 0;
@@ -97,6 +106,8 @@ class PerfCounters {
   /// Returns the counters as a JSON-friendly map.
   Map<String, Object?> snapshot() => {
         'writeTransactions': writeTransactions,
+        'groupCommits': groupCommits,
+        'groupCommitMembers': groupCommitMembers,
         'totalWriteTransactionUs': totalWriteTransactionUs,
         'avgWriteTransactionUs': avgWriteTransactionUs,
         'statements': statements,

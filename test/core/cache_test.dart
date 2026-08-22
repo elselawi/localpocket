@@ -181,9 +181,8 @@ void main() {
           throwsA(anything));
     });
 
-    test(
-        'returned records share nested maps with the cache (documented '
-        'top-level-only defensive copy)', () async {
+    test('returned records are deeply isolated from the cache and each other',
+        () async {
       final pocket = await openCachedPocket();
       addTearDown(pocket.close);
       final col = pocket.collection('widgets');
@@ -196,11 +195,12 @@ void main() {
       final r1 = await col.get(id);
       (r1!['meta'] as Map<String, Object?>)['nested'] = {'x': 999};
 
-      // The mutation is visible on the next read because only the top level of
-      // the cached record is copied (documented current behavior).
+      // The mutation must NOT be visible on the next read: nested values are
+      // copied on both set() and get() so callers can never corrupt or alias
+      // cached state.
       final r2 = await col.get(id);
-      expect(((r2!['meta'] as Map)['nested'] as Map)['x'], 999,
-          reason: 'nested maps are shared with the cache');
+      expect(((r2!['meta'] as Map)['nested'] as Map)['x'], 1,
+          reason: 'nested maps are isolated from caller mutations');
 
       // A fresh record read from the DB is independent across reads.
       final fresh = generateRecordId();

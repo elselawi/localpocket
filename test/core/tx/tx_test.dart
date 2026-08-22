@@ -97,7 +97,7 @@ void main() {
       }
     });
 
-    test('dirty txns use synchronous full', () async {
+    test('dirty txns with full durability toggle synchronous', () async {
       // File-backed: durability classes are meaningful (fsync) only on disk.
       final t = await tempDbPath();
       addTearDown(t.cleanup);
@@ -109,7 +109,8 @@ void main() {
 
       await pocket
           .collection('widgets')
-          .put(record(id: generateRecordId(), name: 'x'));
+          .put(record(id: generateRecordId(), name: 'x'),
+              durability: DurabilityClass.full);
 
       expect(recorder.statements, contains('PRAGMA synchronous=FULL'));
       expect(recorder.statements, contains('PRAGMA synchronous=NORMAL'));

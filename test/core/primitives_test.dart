@@ -99,16 +99,20 @@ void main() {
       }
     });
 
-    test('is deterministic with an injected Random', () {
+    test('random suffix is deterministic with an injected Random', () {
       final rng1 = Random(42);
       final rng2 = Random(42);
       final id1 = generateRecordId(random: rng1);
       final id2 = generateRecordId(random: rng2);
-      expect(id1, id2);
+      // The 8-char counter prefix is wall-clock derived, so equality is
+      // pinned on the random suffix.
+      expect(id1.substring(8), id2.substring(8));
       // Same seed => same sequence of ids.
       final seq1 = List.generate(5, (_) => generateRecordId(random: Random(7)));
       final seq2 = List.generate(5, (_) => generateRecordId(random: Random(7)));
-      expect(seq1, seq2);
+      expect(
+          [for (final id in seq1) id.substring(8)],
+          [for (final id in seq2) id.substring(8)]);
     });
 
     test('uses the full alphabet across positions', () {
@@ -126,10 +130,12 @@ void main() {
       expect(seen, hasLength(36));
     });
 
-    test('each position independently draws from the alphabet', () {
+    test('each random-suffix position draws from the alphabet', () {
       final rng = Random(99);
       final ids = List.generate(500, (_) => generateRecordId(random: rng));
-      for (var pos = 0; pos < 15; pos++) {
+      // Positions 0..7 are the monotonic counter prefix (near-constant in a
+      // tight loop); the 7-char suffix must vary at every position.
+      for (var pos = 8; pos < 15; pos++) {
         final chars = {for (final id in ids) id[pos]};
         expect(chars.length, greaterThan(1),
             reason: 'position $pos is not varying');
@@ -139,6 +145,16 @@ void main() {
     test('generates distinct ids without an injected Random', () {
       final ids = {for (var i = 0; i < 1000; i++) generateRecordId()};
       expect(ids, hasLength(1000), reason: 'collision in generated ids');
+    });
+
+    test('generated ids sort by creation order (monotonic prefix)', () {
+      final seq = List.generate(5000, (_) => generateRecordId());
+      for (var i = 1; i < seq.length; i++) {
+        expect(seq[i].compareTo(seq[i - 1]), isNonNegative,
+            reason:
+                'id $i (${seq[i]}) must sort at or after id ${i - 1} '
+                '(${seq[i - 1]}) so B-tree inserts append in order');
+      }
     });
 
     test('generated ids are accepted by isValidRecordId', () {

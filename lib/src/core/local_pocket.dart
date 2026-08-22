@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
 import 'database_adapter.dart';
@@ -98,7 +99,10 @@ class PointReadCache {
     if (_cache.length >= _maxSize) {
       _cache.remove(_cache.keys.first);
     }
-    _cache[id] = value == null ? null : Map<String, Object?>.from(value);
+    // Deep copy on the way in as well: a shallow store let a caller's
+    // mutation of a nested map/list leak INTO the cache (the returned doc
+    // aliased the stored nested values).
+    _cache[id] = value == null ? null : _deepClone(value);
   }
 
   void invalidate(Iterable<String> ids) {
@@ -114,8 +118,31 @@ class PointReadCache {
   void clear() => _cache.clear();
 
   Map<String, Object?> _deepClone(Map<String, Object?> map) {
-    return jsonDecode(jsonEncode(map)) as Map<String, Object?>;
+    return _copyValue(map) as Map<String, Object?>;
   }
+}
+
+/// Deep structural copy for cache isolation: plain maps and Lists are
+/// rebuilt recursively; every other JSON-representable value is immutable in
+/// Dart (String/num/bool/null) and shared by reference. Uint8List values
+/// (blob bytes surfaced through the files API) are copied defensively since
+/// they are mutable.
+Object? _copyValue(Object? v) {
+  if (v is Map<String, Object?>) {
+    return {
+      for (final e in v.entries) e.key: _copyValue(e.value),
+    };
+  }
+  if (v is Map) {
+    return {
+      for (final e in v.entries) e.key: _copyValue(e.value),
+    };
+  }
+  if (v is List) {
+    return [for (final e in v) _copyValue(e)];
+  }
+  if (v is Uint8List) return Uint8List.fromList(v);
+  return v;
 }
 
 /// The main LocalPocket database handle.
@@ -397,8 +424,7 @@ class LocalPocket with ChangeBusAwareLP {
   ///
   /// All domain, outbox, and sync-state changes performed through the [Tx]
   /// handle commit atomically. Change notifications are emitted only after a
-  /// successful commit. The default [DurabilityClass.full] preserves the
-  /// local-first guarantee for file-backed databases.
+  /// successful commit.
   ///
   /// ```dart
   /// await db.transaction((tx) async {
@@ -407,14 +433,59 @@ class LocalPocket with ChangeBusAwareLP {
   /// });
   /// ```
   ///
-  /// Use [DurabilityClass.normal] only when the application accepts its
-  /// weaker power-loss durability behavior.
+  /// [DurabilityClass.normal] is the default: under WAL it is app-crash-safe
+  /// (no torn files, no lost committed transactions on process death) while
+  /// avoiding a disk flush per commit. Pass [DurabilityClass.full] for
+  /// writes that must survive an OS/power failure (the tail commit of a
+  /// payment, an irreplaceable edit). See the README "Transactions &
+  /// Durability Modes" section for the trade-off table.
+  ///
+  /// Group commit: mutations submitted from the SAME event-loop turn (e.g. a
+  /// `Future.wait` burst or fire-and-forget writes) are coalesced into ONE
+  /// SQLite transaction — one fsync for the whole group — without changing
+  /// observable semantics. Each member's body runs inside a savepoint, so a
+  /// failing member rolls back only itself; its error propagates to that
+  /// caller alone while the rest of the group commits. A mutation submitted
+  /// alone still commits at the end of the current event-loop turn with no
+  /// added wait. Members with different durability classes never share a
+  /// group.
   Future<T> transaction<T>(
     Future<T> Function(Tx tx) action, {
-    DurabilityClass durability = DurabilityClass.full,
+    DurabilityClass durability = DurabilityClass.normal,
   }) {
     _guardOutsideTx();
-    return writeQueue.run(() => _runTransaction(action, durability));
+    // BISECT: no coalescing — each transaction flushes immediately.
+    if (const bool.fromEnvironment('LP_BISECT', defaultValue: false)) {
+      final group = _CommitGroup(this, durability);
+      final member = _CommitMember(action);
+      group.members.add(member);
+      final done = group.flush();
+      unawaited(done.catchError((Object _) {}));
+      return member.completer.future.then((value) => value as T);
+    }
+    final group = _pendingGroup;
+    if (group != null && group.durability == durability && !group.sealed) {
+      final member = _CommitMember(action);
+      group.members.add(member);
+      return member.completer.future.then((value) => value as T);
+    }
+    return _startGroup(action, durability);
+  }
+
+  /// The currently open (not yet flushed) commit group, if any.
+  _CommitGroup? _pendingGroup;
+
+  /// Starts a new commit group and schedules its flush at the end of the
+  /// current event-loop turn, giving concurrently-submitted mutations the
+  /// chance to join before the transaction opens.
+  Future<T> _startGroup<T>(
+      Future<dynamic> Function(Tx tx) action, DurabilityClass durability) {
+    final group = _CommitGroup(this, durability);
+    _pendingGroup = group;
+    group.reserve();
+    final member = _CommitMember(action);
+    group.members.add(member);
+    return member.completer.future.then((value) => value as T);
   }
 
   /// Runs [action] in a read-only transaction.
@@ -439,45 +510,6 @@ class LocalPocket with ChangeBusAwareLP {
           final tx = Tx.internal(this, txn, changes, readOnly: true);
           return tx.runInZone(() => action(tx));
         }));
-  }
-
-  Future<T> _runTransaction<T>(
-    Future<T> Function(Tx tx) action,
-    DurabilityClass durability,
-  ) async {
-    final sw = Stopwatch()..start();
-    // On in-memory databases there is no durable storage, so the durability
-    // classes are meaningless; skip the pragma toggle entirely.
-    final inMemory = path == ':memory:';
-    final useFull = durability == DurabilityClass.full && !inMemory;
-    if (useFull && _synchronous != 'FULL') {
-      await traceExecute('PRAGMA synchronous=FULL');
-      _synchronous = 'FULL';
-    }
-    try {
-      final changes = <ChangeSet>[];
-      final recordEvents = <RecordChangeEvent>[];
-      final result = await db.transaction((txn) async {
-        final tx = Tx.internal(this, txn, changes, recordEvents: recordEvents);
-        return tx.runInZone(() => action(tx));
-      });
-      for (final cs in changes) {
-        _tables[cs.store]?.readCache.invalidate(cs.ids);
-        changeBus.emit(cs);
-      }
-      for (final event in recordEvents) {
-        changeBus.emitEvent(event);
-      }
-      return result;
-    } finally {
-      if (useFull && _synchronous != 'NORMAL') {
-        try {
-          await traceExecute('PRAGMA synchronous=NORMAL');
-          _synchronous = 'NORMAL';
-        } catch (_) {}
-      }
-      perf.recordWriteTransaction(sw.elapsedMicroseconds);
-    }
   }
 
   /// Executes SQL, notifying the test [TestHooks.onExecute] observer.
@@ -685,4 +717,146 @@ class LocalPocket with ChangeBusAwareLP {
     } catch (_) {}
     await db.close();
   }
+}
+
+/// One group-commit unit: mutations submitted in the same event-loop turn
+/// share a single SQLite transaction (one fsync). Members run under the
+/// group-level Tx; in a multi-member group each member additionally runs
+/// inside a SAVEPOINT so one failing member rolls back only itself.
+class _CommitGroup {
+  final LocalPocket pocket;
+  final DurabilityClass durability;
+  final members = <_CommitMember>[];
+
+  /// Set once [flush] has started: later arrivals open their own group.
+  bool sealed = false;
+
+  _CommitGroup(this.pocket, this.durability);
+
+  /// Takes the single-writer slot immediately (preserving submission-order
+  /// FIFO for reads and later writes) and waits for the end-of-turn barrier
+  /// before committing, so sibling mutations in the same turn can join.
+  void reserve() {
+    final barrier = Completer<void>();
+    unawaited(pocket.writeQueue.run(() async {
+      await barrier.future;
+      // Member completers already received any per-member error; swallow the
+      // queue-level rethrow so it never becomes an unhandled async error.
+      try {
+        await flush();
+      } catch (_) {}
+    }));
+    // scheduleMicrotask would close the group BEFORE sibling awaits in the
+    // same turn run; Timer(Duration.zero) defers past them, capturing the
+    // whole burst.
+    Timer.run(() {
+      if (identical(pocket._pendingGroup, this)) pocket._pendingGroup = null;
+      barrier.complete();
+    });
+  }
+
+  /// Runs all joined members inside ONE write transaction. In multi-member
+  /// groups a member whose body throws rolls back to its savepoint and that
+  /// member alone completes with the error; the rest still commit. A SOLO
+  /// member runs directly — identical to the pre-group-commit path, so
+  /// savepoint naming and rollback semantics are unchanged for sequential
+  /// writes.
+  Future<void> flush() async {
+    sealed = true;
+    if (members.isEmpty) return;
+    final solo = members.length == 1;
+    if (!solo) {
+      pocket.perf.groupCommits++;
+      pocket.perf.groupCommitMembers += members.length;
+    }
+    // Already inside the WriteQueue slot taken by [reserve] — never re-enter
+    // the queue here (it would deadlock on our own reserved slot).
+    final sw = Stopwatch()..start();
+    final inMemory = pocket.path == ':memory:';
+    final useFull = durability == DurabilityClass.full && !inMemory;
+    if (useFull && pocket._synchronous != 'FULL') {
+      await pocket.traceExecute('PRAGMA synchronous=FULL');
+      pocket._synchronous = 'FULL';
+    }
+    final changes = <ChangeSet>[];
+    final recordEvents = <RecordChangeEvent>[];
+    // Member outcomes are stashed and surfaced only AFTER the transaction
+    // callback resolves: completing inside the callback would resume the
+    // awaiting caller BEFORE COMMIT executes, letting it observe pre-commit
+    // state (a real bug: the sync engine drained an empty outbox).
+    final outcomes = <(_CommitMember, Object?, Object?, StackTrace?)>[];
+    try {
+      await pocket.db.transaction((txn) async {
+        final tx =
+            Tx.internal(pocket, txn, changes, recordEvents: recordEvents);
+        if (solo) {
+          try {
+            final result = await tx.runInZone(() => members.single.action(tx));
+            outcomes.add((members.single, result, null, null));
+          } catch (e, st) {
+            outcomes.add((members.single, null, e, st));
+            rethrow;
+          }
+        } else {
+          for (final member in members) {
+            try {
+              final result = await tx.runInZone(
+                  () => tx.transaction((m) => member.action(m)));
+              outcomes.add((member, result, null, null));
+            } catch (e, st) {
+              outcomes.add((member, null, e, st));
+            }
+          }
+        }
+      });
+      // COMMIT has executed: now resolve every caller.
+      for (final (m, result, err, st) in outcomes) {
+        if (err != null) {
+          m.completer.completeError(err, st);
+        } else {
+          m.completer.complete(result);
+        }
+      }
+      for (final cs in changes) {
+        pocket._tables[cs.store]?.readCache.invalidate(cs.ids);
+        pocket.changeBus.emit(cs);
+      }
+      for (final event in recordEvents) {
+        pocket.changeBus.emitEvent(event);
+      }
+    } catch (e) {
+      // The transaction failed at BEGIN/COMMIT/rollback level. Members whose
+      // own body already failed must still receive THEIR error (not a generic
+      // group failure); members with a stashed success keep it — their writes
+      // are rolled back with the transaction and the caller learns via the
+      // rethrown error below.
+      for (final (m, _, err, mst) in outcomes) {
+        if (err != null && !m.completer.isCompleted) {
+          m.completer.completeError(err, mst);
+        }
+      }
+      rethrow;
+    } finally {
+      if (useFull && pocket._synchronous != 'NORMAL') {
+        try {
+          await pocket.traceExecute('PRAGMA synchronous=NORMAL');
+          pocket._synchronous = 'NORMAL';
+        } catch (_) {}
+      }
+      pocket.perf.recordWriteTransaction(sw.elapsedMicroseconds);
+      // Safety net: a BEGIN-level failure (e.g. closed handle) unwinds before
+      // any member ran. No caller may hang on an uncompleted completer.
+      for (final member in members) {
+        if (!member.completer.isCompleted) {
+          member.completer.completeError(StateError('Group commit failed.'));
+        }
+      }
+    }
+  }
+}
+
+class _CommitMember {
+  final Future<dynamic> Function(Tx tx) action;
+  final completer = Completer<dynamic>();
+  _CommitMember(this.action);
 }

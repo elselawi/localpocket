@@ -222,12 +222,19 @@ class Outbox {
       updatedAt: now,
       dependsOnOp: outboxOp?.dependsOnOp,
     );
-    if (outboxOp == null) {
-      await exec.insert('lp_outbox', outboxMap);
-    } else {
-      await exec.update('lp_outbox', outboxMap,
-          where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+    // Single-statement upsert on the (store, record_id) primary key — one
+    // round-trip replaces the old insert-or-update branch pair.
+    final outboxCols = outboxColumns;
+    final outboxUpsert = StringBuffer(
+        'INSERT INTO lp_outbox (${quotedColumnList(outboxCols)}) '
+        'VALUES (${placeholders(outboxCols.length)}) '
+        'ON CONFLICT(store, record_id) DO UPDATE SET ');
+    for (var i = 0; i < outboxCols.length; i++) {
+      if (i > 0) outboxUpsert.write(', ');
+      outboxUpsert.write('"${outboxCols[i]}" = excluded."${outboxCols[i]}"');
     }
+    await exec.execute(
+        outboxUpsert.toString(), rowValuesInOrder(outboxMap, outboxCols));
 
     final prevRev = syncRow?.localRev ?? 0;
     final syncRowMap = buildSyncRow(
@@ -248,12 +255,17 @@ class Outbox {
       lastError: clearError ? null : syncRow?.lastError,
       schemaVer: schema.version,
     );
-    if (syncRow == null) {
-      await exec.insert('lp_sync_row', syncRowMap);
-    } else {
-      await exec.update('lp_sync_row', syncRowMap,
-          where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+    final syncCols = syncRowColumns;
+    final syncUpsert = StringBuffer(
+        'INSERT INTO lp_sync_row (${quotedColumnList(syncCols)}) '
+        'VALUES (${placeholders(syncCols.length)}) '
+        'ON CONFLICT(store, record_id) DO UPDATE SET ');
+    for (var i = 0; i < syncCols.length; i++) {
+      if (i > 0) syncUpsert.write(', ');
+      syncUpsert.write('"${syncCols[i]}" = excluded."${syncCols[i]}"');
     }
+    await exec.execute(
+        syncUpsert.toString(), rowValuesInOrder(syncRowMap, syncCols));
 
     return LocalWriteResult(vanished: false, opId: opId);
   }

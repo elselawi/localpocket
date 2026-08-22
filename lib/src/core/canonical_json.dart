@@ -16,6 +16,31 @@ String canonicalize(Object? value) {
   return buffer.toString();
 }
 
+/// Serializes [value] canonically into [out] and returns the EXACT UTF-8
+/// byte length of what was written.
+///
+/// Counts bytes per rune in the same single pass (1/2/3/4 by code-point
+/// range) so callers get the identical number `utf8.encode(...).length`
+/// would produce — without allocating a second encoded copy. Used by
+/// maxDocBytes validation on hot write paths.
+int canonicalizeInto(StringBuffer out, Object? value) {
+  _writeCanonical(out, value);
+  final s = out.toString();
+  var bytes = 0;
+  for (final rune in s.runes) {
+    if (rune < 0x80) {
+      bytes += 1;
+    } else if (rune < 0x800) {
+      bytes += 2;
+    } else if (rune < 0x10000) {
+      bytes += 3;
+    } else {
+      bytes += 4;
+    }
+  }
+  return bytes;
+}
+
 void _writeCanonical(StringBuffer out, Object? value) {
   if (value == null) {
     out.write('null');

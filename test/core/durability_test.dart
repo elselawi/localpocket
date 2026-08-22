@@ -161,7 +161,7 @@ void main() {
         await tx.collection('widgets').put(
             record(id: generateRecordId(), name: 'x'),
             durability: DurabilityClass.normal);
-      });
+      }, durability: DurabilityClass.full);
 
       final toggles = recorder.statements
           .where((s) => s.contains('PRAGMA synchronous'))
