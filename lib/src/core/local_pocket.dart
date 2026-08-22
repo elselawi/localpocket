@@ -800,8 +800,8 @@ class _CommitGroup {
         } else {
           for (final member in members) {
             try {
-              final result = await tx.runInZone(
-                  () => tx.transaction((m) => member.action(m)));
+              final result = await tx
+                  .runInZone(() => tx.transaction((m) => member.action(m)));
               outcomes.add((member, result, null, null));
             } catch (e, st) {
               outcomes.add((member, null, e, st));
