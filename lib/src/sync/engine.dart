@@ -582,6 +582,7 @@ class SyncEngine {
       pushed: pushReport.pushed,
       deadLettered: pushReport.deadLettered,
       blocked: pushReport.blocked,
+      discarded: pushReport.discarded,
       hadError: cycleHadError,
     );
     return lastReport!;
