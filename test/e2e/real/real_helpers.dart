@@ -103,6 +103,11 @@ class RealHarness {
     String? path,
     bool start = true,
     SyncConfig? config,
+    List<CollectionSchema>? stores,
+    BlobStore? blobStore,
+    FieldCipher? fieldCipher,
+    String? identity,
+    List<String>? storesList,
   }) async {
     final tokens = RealPbTokenProvider(
       baseUrl: Uri.parse(testPBServer),
@@ -112,12 +117,15 @@ class RealHarness {
     final backend = PocketBaseBackend(
       baseUrl: Uri.parse(testPBServer),
       tokenProvider: tokens,
-      stores: [store],
+      stores: storesList ?? [store],
       transport: tokens.transport,
+      identity: identity,
     );
     final pocket = await openPocket(
-      stores: [widgetsSchema(name: store)],
+      stores: stores ?? [widgetsSchema(name: store)],
       path: path,
+      blobStore: blobStore,
+      fieldCipher: fieldCipher,
     );
     final engine = SyncEngine(
       pocket: pocket,
