@@ -32,6 +32,10 @@ class SyncReport {
   /// Number of operations parked in the recoverable `blocked` state.
   final int blocked;
 
+  /// Number of local edits discarded in favor of the remote deletion
+  /// (`MissingRemotePolicy.discardLocal`).
+  final int discarded;
+
   /// Whether the cycle encountered an error.
   final bool hadError;
 
@@ -42,13 +46,15 @@ class SyncReport {
     this.pushed = 0,
     this.deadLettered = 0,
     this.blocked = 0,
+    this.discarded = 0,
     this.hadError = false,
   });
 
   @override
   String toString() =>
       'SyncReport(pulled: $pulled, swept: $swept, pushed: $pushed, '
-      'deadLettered: $deadLettered, blocked: $blocked, hadError: $hadError)';
+      'deadLettered: $deadLettered, blocked: $blocked, '
+      'discarded: $discarded, hadError: $hadError)';
 }
 
 /// Current synchronization status suitable for a status indicator.

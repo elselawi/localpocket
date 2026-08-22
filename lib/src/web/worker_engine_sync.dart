@@ -146,6 +146,7 @@ mixin WorkerSyncHandlers on WorkerEngineHost {
         'swept': report.swept,
         'pushed': report.pushed,
         'deadLettered': report.deadLettered,
+        'discarded': report.discarded,
         'hadError': report.hadError,
       };
 }

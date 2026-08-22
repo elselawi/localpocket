@@ -4,6 +4,7 @@ import 'package:meta/meta.dart';
 
 import '../core/change_bus.dart';
 import '../core/local_pocket.dart';
+import 'apply_lane.dart';
 import 'puller.dart';
 import 'pusher.dart';
 import 'status.dart';
@@ -83,6 +84,13 @@ class SyncEngine {
   /// them and no DB work outlives the pocket (teardown race).
   Future<void> _fastPathTail = Future.value();
 
+  /// Shared remote-application lane: every transaction that writes remote
+  /// state (pull pages, sweep batches, hidden marks, fast-path applies) is
+  /// serialized through this lane, so remote application is one logical
+  /// stream across cycles, sweeps, and realtime events. Network work stays
+  /// outside the lane.
+  final ApplyLane _applyLane = ApplyLane();
+
   StreamSubscription<ChangeSet>? _changesSub;
   StreamSubscription<BackendHint>? _hintsSub;
   Timer? _syncTimer;
@@ -127,8 +135,8 @@ class SyncEngine {
       config: this.config,
       blobStore: pocket.blobStore,
     );
-    puller =
-        Puller(pocket, backend, this.config, syncStore, fileLane: fileLane);
+    puller = Puller(pocket, backend, this.config, syncStore,
+        fileLane: fileLane, applyLane: _applyLane);
     sweeper = Sweeper(pocket, backend, this.config, syncStore, puller);
     pusher = Pusher(pocket, backend, this.config, syncStore,
         onAuthError: _onAuthError);
@@ -199,6 +207,9 @@ class SyncEngine {
     await _cycleTail;
     // ... and any realtime fast-path apply that was still in flight.
     await _fastPathTail;
+    // ... and any remote apply still in the shared lane (cycles enqueue
+    // applies while they drain, so the lane is drained after both tails).
+    await _applyLane.idle;
     // ... and any status emission still querying the (soon-closed) DB.
     await _statusTail;
     await _changesSub?.cancel();
