@@ -80,9 +80,28 @@ class Outbox {
   Outbox.internal(this.pocket);
 
   /// Generates a unique operation ID for durable outbox effects.
+  ///
+  /// Four 32-bit draws from the secure RNG (128 bits total, same entropy as
+  /// the old 32 single-digit draws) formatted as 32 lowercase hex characters.
+  /// One draw per hex digit cost ~32x more secure-RNG round trips — this
+  /// matters in bulk (100K ops ≈ 170 ms of op-id generation alone).
   String generateOpId() {
     final rng = _rng;
-    return List.generate(32, (_) => rng.nextInt(16).toRadixString(16)).join();
+    const hex = '0123456789abcdef';
+    final out = StringBuffer();
+    for (var i = 0; i < 4; i++) {
+      final v = rng.nextInt(1 << 32);
+      out
+        ..write(hex[(v >> 28) & 0xf])
+        ..write(hex[(v >> 24) & 0xf])
+        ..write(hex[(v >> 20) & 0xf])
+        ..write(hex[(v >> 16) & 0xf])
+        ..write(hex[(v >> 12) & 0xf])
+        ..write(hex[(v >> 8) & 0xf])
+        ..write(hex[(v >> 4) & 0xf])
+        ..write(hex[v & 0xf]);
+    }
+    return out.toString();
   }
 
   // ------------------------------------------------------------ read helpers --
@@ -209,63 +228,110 @@ class Outbox {
         <String>{...?outboxOp?.dirtyFields, ...dirtyFields}.toList()..sort();
     final createdAt = outboxOp?.createdAt ?? now;
 
-    final outboxMap = buildOutboxRow(
-      store: store,
-      recordId: id,
-      kind: opKind!,
-      payloadJson: payloadJson,
-      baseUpdated: baseUpdated,
-      baseHash: baseHash,
-      dirtyFieldsJson: jsonEncode(mergedDirty),
-      opId: opId,
-      createdAt: createdAt,
-      updatedAt: now,
-      dependsOnOp: outboxOp?.dependsOnOp,
-    );
-    // Single-statement upsert on the (store, record_id) primary key — one
-    // round-trip replaces the old insert-or-update branch pair.
-    final outboxCols = outboxColumns;
-    final outboxUpsert =
-        StringBuffer('INSERT INTO lp_outbox (${quotedColumnList(outboxCols)}) '
-            'VALUES (${placeholders(outboxCols.length)}) '
-            'ON CONFLICT(store, record_id) DO UPDATE SET ');
-    for (var i = 0; i < outboxCols.length; i++) {
-      if (i > 0) outboxUpsert.write(', ');
-      outboxUpsert.write('"${outboxCols[i]}" = excluded."${outboxCols[i]}"');
-    }
-    await exec.execute(
-        outboxUpsert.toString(), rowValuesInOrder(outboxMap, outboxCols));
-
+    final dirtyFieldsJson = jsonEncode(mergedDirty);
     final prevRev = syncRow?.localRev ?? 0;
-    final syncRowMap = buildSyncRow(
-      store: store,
-      recordId: id,
-      remoteUpdated: syncRow?.remoteUpdated,
-      lastSeenAt: syncRow?.lastSeenAt,
-      baseUpdated: baseUpdated,
-      baseHash: baseHash,
-      baseJson: baseJson,
-      syncState: SyncState.dirty,
-      dirtyFieldsJson: jsonEncode(mergedDirty),
-      localRev: prevRev + 1,
-      accessState: syncRow?.accessState ?? AccessState.visible,
-      opId: opId,
-      attemptCount: clearError ? 0 : (syncRow?.attemptCount ?? 0),
-      nextRetryAt: clearError ? 0 : (syncRow?.nextRetryAt ?? 0),
-      lastError: clearError ? null : syncRow?.lastError,
-      schemaVer: schema.version,
-    );
-    final syncCols = syncRowColumns;
-    final syncUpsert =
-        StringBuffer('INSERT INTO lp_sync_row (${quotedColumnList(syncCols)}) '
-            'VALUES (${placeholders(syncCols.length)}) '
-            'ON CONFLICT(store, record_id) DO UPDATE SET ');
-    for (var i = 0; i < syncCols.length; i++) {
-      if (i > 0) syncUpsert.write(', ');
-      syncUpsert.write('"${syncCols[i]}" = excluded."${syncCols[i]}"');
+    // Single-statement writes on the (store, record_id) primary key. On the
+    // update path only the columns a local mutation can actually change are
+    // SET (`kind`, `payload_json`, `dirty_fields`, `updated_at`):
+    // `base_updated`, `base_hash`, `created_at`, `op_id`, and
+    // `depends_on_op` are immutable once the op exists, so skipping them
+    // saves bind work and WAL bytes without changing any stored value.
+    // Row existence is known from the prefetched state and all writes
+    // serialize through the single-writer queue, so plain INSERT/UPDATE
+    // replaces ON CONFLICT DO UPDATE (no conflict-resolution machinery) and
+    // values bind directly (no intermediate row maps).
+    final outboxCols = outboxColumns;
+    if (outboxOp == null) {
+      final outboxInsert =
+          'INSERT INTO lp_outbox (${quotedColumnList(outboxCols)}) '
+          'VALUES (${placeholders(outboxCols.length)})';
+      await exec.execute(
+          outboxInsert,
+          outboxValuesInOrder(
+            store: store,
+            recordId: id,
+            kind: opKind!,
+            payloadJson: payloadJson,
+            baseUpdated: baseUpdated,
+            baseHash: baseHash,
+            dirtyFieldsJson: dirtyFieldsJson,
+            opId: opId,
+            createdAt: createdAt,
+            updatedAt: now,
+            dependsOnOp: outboxOp?.dependsOnOp,
+          ));
+    } else {
+      await exec.execute(
+          'UPDATE lp_outbox SET "kind" = ?, "payload_json" = ?, '
+          '"dirty_fields" = ?, "updated_at" = ? '
+          'WHERE "store" = ? AND "record_id" = ?',
+          [opKind!.name, payloadJson, dirtyFieldsJson, now, store, id]);
     }
-    await exec.execute(
-        syncUpsert.toString(), rowValuesInOrder(syncRowMap, syncCols));
+
+    final syncCols = syncRowColumns;
+    // On the update path, SET only the columns this mutation changes.
+    // `base_*` are immutable once captured (present on every dirty row), so
+    // they are only written on the first dirt (no existing op); the
+    // error-clear reset columns are written only when clearing an error.
+    // `remote_updated`, `last_seen_at`, and `access_state` are preserved
+    // from the existing row by omission.
+    final syncSetCols = <String>[
+      'sync_state',
+      'dirty_fields',
+      'local_rev',
+      'op_id',
+      'schema_ver',
+      if (outboxOp == null) ...const [
+        'base_updated',
+        'base_hash',
+        'base_json',
+      ],
+      if (clearError) ...const ['attempt_count', 'next_retry_at', 'last_error'],
+    ];
+    if (syncRow == null) {
+      final syncInsert =
+          'INSERT INTO lp_sync_row (${quotedColumnList(syncCols)}) '
+          'VALUES (${placeholders(syncCols.length)})';
+      await exec.execute(
+          syncInsert,
+          syncRowValuesInOrder(
+            store: store,
+            recordId: id,
+            remoteUpdated: syncRow?.remoteUpdated,
+            lastSeenAt: syncRow?.lastSeenAt,
+            baseUpdated: baseUpdated,
+            baseHash: baseHash,
+            baseJson: baseJson,
+            syncState: SyncState.dirty,
+            dirtyFieldsJson: dirtyFieldsJson,
+            localRev: prevRev + 1,
+            accessState: syncRow?.accessState ?? AccessState.visible,
+            opId: opId,
+            attemptCount: clearError ? 0 : (syncRow?.attemptCount ?? 0),
+            nextRetryAt: clearError ? 0 : (syncRow?.nextRetryAt ?? 0),
+            lastError: clearError ? null : syncRow?.lastError,
+            schemaVer: schema.version,
+          ));
+    } else {
+      final syncUpdate = StringBuffer('UPDATE lp_sync_row SET ');
+      for (var i = 0; i < syncSetCols.length; i++) {
+        if (i > 0) syncUpdate.write(', ');
+        syncUpdate.write('"${syncSetCols[i]}" = ?');
+      }
+      syncUpdate.write(' WHERE "store" = ? AND "record_id" = ?');
+      // Argument order mirrors [syncSetCols] exactly.
+      await exec.execute(syncUpdate.toString(), [
+        SyncState.dirty.name,
+        dirtyFieldsJson,
+        prevRev + 1,
+        opId,
+        schema.version,
+        if (outboxOp == null) ...[baseUpdated, baseHash, baseJson],
+        if (clearError) ...[0, 0, null],
+        store,
+        id,
+      ]);
+    }
 
     return LocalWriteResult(vanished: false, opId: opId);
   }

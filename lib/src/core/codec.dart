@@ -91,6 +91,52 @@ Map<String, Object?> encodeDbRow(
   return row;
 }
 
+/// Encodes a single declared field's value exactly as [encodeDbRow] would
+/// store it (same cipher resolution and kind rules), for targeted
+/// single-column UPDATEs on the dirty-patch fast path.
+Object? encodeFieldValue(
+  CollectionSchema schema,
+  Field field,
+  Object? value, {
+  FieldCipher? cipher,
+  CryptoProvider? cryptoProvider,
+}) {
+  final fc = cipher ?? cryptoProvider?.getFieldCipher(schema.name, field.name);
+  return _encodeValue(field, value, cipher: fc);
+}
+
+/// Appends a full DB row's values in [encodeDbRow]'s exact column order
+/// (`id`, declared fields in schema order, `extra`, `archived`, `hidden`)
+/// onto [target] — the bulk-insert binding form that skips the intermediate
+/// row map entirely.
+void appendDomainValues(
+  List<Object?> target,
+  CollectionSchema schema, {
+  required String id,
+  required Map<String, Object?> logical,
+  required bool archived,
+  FieldCipher? cipher,
+  CryptoProvider? cryptoProvider,
+}) {
+  final declared = schema.declaredFieldNames;
+  target.add(id);
+  for (final f in schema.fields) {
+    final fc = cipher ?? cryptoProvider?.getFieldCipher(schema.name, f.name);
+    target.add(_encodeValue(f, logical[f.name], cipher: fc));
+  }
+  final extra = <String, Object?>{};
+  for (final e in logical.entries) {
+    if (e.key == 'id' || e.key == 'archived' || declared.contains(e.key)) {
+      continue;
+    }
+    extra[e.key] = e.value;
+  }
+  target
+    ..add(extra.isEmpty ? '' : canonicalize(extra))
+    ..add(archived ? 1 : 0)
+    ..add(0);
+}
+
 /// Encodes a batch of logical records synchronously.
 List<Map<String, Object?>> encodeDbRows(
   CollectionSchema schema,
@@ -178,29 +224,41 @@ List<Map<String, Object?>> decodeDbRowsProjected(
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
 }) {
+  // Resolve the field for each requested column ONCE per page instead of
+  // once per cell — range/top-K/pagination pages decode hundreds of rows
+  // per call, and each lookup was a schema hash-map probe.
+  final resolved = <(String, Field?)>[];
+  var wantArchived = false;
+  for (final name in columns) {
+    if (name == 'id') continue;
+    if (name == 'archived') {
+      wantArchived = true;
+      continue;
+    }
+    resolved.add((name, schema.fieldByName(name)));
+  }
   return [
     for (final r in dbRows)
-      _decodeDbRowProjected(schema, r, columns,
-          cipher: cipher, cryptoProvider: cryptoProvider),
+      _decodeDbRowProjectedResolved(r, resolved, wantArchived,
+          cipher: cipher, cryptoProvider: cryptoProvider, store: schema.name),
   ];
 }
 
-Map<String, Object?> _decodeDbRowProjected(
-  CollectionSchema schema,
+Map<String, Object?> _decodeDbRowProjectedResolved(
   Map<String, Object?> dbRow,
-  List<String> columns, {
+  List<(String, Field?)> resolved,
+  bool wantArchived, {
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
+  required String store,
 }) {
   final logical = <String, Object?>{'id': dbRow['id']};
-  for (final name in columns) {
-    if (name == 'id' || name == 'archived') continue;
-    final f = schema.fieldByName(name);
+  for (final (name, f) in resolved) {
     if (f == null) continue;
     logical[name] = _decodeStoredValue(f, dbRow[name],
-        cipher: cipher, cryptoProvider: cryptoProvider, store: schema.name);
+        cipher: cipher, cryptoProvider: cryptoProvider, store: store);
   }
-  if (columns.contains('archived')) {
+  if (wantArchived) {
     logical['archived'] = dbRow['archived'] == 1;
   }
   return logical;
@@ -227,7 +285,7 @@ Future<List<Map<String, Object?>>> decodeDbRowsAsync(
 ///
 /// This is the single source of the "stored value → logical value" coercion
 /// rules, shared by the full [decodeDbRow] and projection-aware
-/// [_decodeDbRowProjected] paths so they cannot drift.
+/// [_decodeDbRowProjectedResolved] paths so they cannot drift.
 Object? _decodeStoredValue(
   Field f,
   Object? stored, {
@@ -296,10 +354,15 @@ Object? _encodeValue(Field f, Object? v, {FieldCipher? cipher}) {
 
 /// Builds the full remote payload map for a logical record:
 /// `{id, ...declared, ...extra, archived?}`. `archived` is `true` or omitted.
+///
+/// [idOverride] replaces `logical['id']` without requiring a separate
+/// spread-copy of the logical map (bulk-insert fast path passes the record
+/// id directly).
 Map<String, Object?> buildPayload(
-    CollectionSchema schema, Map<String, Object?> logical) {
+    CollectionSchema schema, Map<String, Object?> logical,
+    {Object? idOverride}) {
   final declared = schema.declaredFieldNames;
-  final data = <String, Object?>{'id': logical['id']};
+  final data = <String, Object?>{'id': idOverride ?? logical['id']};
   for (final f in schema.fields) {
     final v = logical[f.name];
     if (v != null) {
@@ -314,6 +377,56 @@ Map<String, Object?> buildPayload(
   }
   if (logical['archived'] == true) data['archived'] = true;
   return data;
+}
+
+/// Writes the canonical JSON payload of [logical] directly into [out] —
+/// byte-identical to `canonicalizeInto(out, buildPayload(schema, logical,
+/// idOverride: idOverride))` — without building the intermediate payload
+/// map. Mirrors [buildPayload]'s field selection exactly; all keys are
+/// strings, so no toString-collision can occur. Returns the exact UTF-8 byte
+/// length written.
+int canonicalizePayloadInto(
+  StringBuffer out,
+  CollectionSchema schema,
+  Map<String, Object?> logical, {
+  Object? idOverride,
+}) {
+  final declared = schema.declaredFieldNames;
+  final entries = <(String, Object?)>[];
+  entries.add(('id', idOverride ?? logical['id']));
+  for (final f in schema.fields) {
+    final v = logical[f.name];
+    if (v != null) {
+      entries.add((f.name, f.kind == FieldKind.bool ? (v == true) : v));
+    }
+  }
+  for (final e in logical.entries) {
+    if (e.key == 'id' || e.key == 'archived' || declared.contains(e.key)) {
+      continue;
+    }
+    entries.add((e.key, e.value));
+  }
+  if (logical['archived'] == true) entries.add(('archived', true));
+  // Canonical key order: sorted lexicographically (all keys are Strings).
+  entries.sort((a, b) => a.$1.compareTo(b.$1));
+  out.write('{');
+  var bytes = 1;
+  var first = true;
+  for (final (key, value) in entries) {
+    if (!first) {
+      out.write(',');
+      bytes++;
+    }
+    first = false;
+    final k = jsonEncode(key);
+    out.write(k);
+    bytes += utf8BytesOf(k);
+    out.write(':');
+    bytes++;
+    bytes += writeCanonicalValue(out, value);
+  }
+  out.write('}');
+  return bytes + 1;
 }
 
 String canonicalPayload(

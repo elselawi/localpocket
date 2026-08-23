@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
+import 'package:sqlite3/sqlite3.dart' show SqliteException;
 import 'database_adapter.dart';
 
-import 'canonical_json.dart';
 import 'change_bus.dart';
 import 'codec.dart';
 import 'errors.dart';
@@ -312,21 +312,42 @@ class Collection with ChangeBusAwareStore {
     merged['id'] = id;
     final payloadBuffer = StringBuffer();
     final payloadBytes =
-        canonicalizeInto(payloadBuffer, buildPayload(_schema, merged));
+        canonicalizePayloadInto(payloadBuffer, _schema, merged);
     final payloadJson = payloadBuffer.toString();
     // Validators see the logical form without the synthetic `id` key (same as
     // the normal `_mutate` path); the payload is already validated by size.
     _validate(id, {...merged}..remove('id'),
         precomputedPayload: payloadJson, precomputedPayloadBytes: payloadBytes);
 
-    final row = encodeDbRow(
-      _schema,
-      id: id,
-      logical: merged,
-      archived: merged['archived'] == true,
-      cipher: _pocket.fieldCipher,
-      cryptoProvider: _pocket.cryptoProvider,
-    );
+    final dirtyFields =
+        _dirtyFields(currentPayload, merged, MutationAction.update);
+
+    // Targeted single-field UPDATE (drift-gap P1): when exactly ONE declared
+    // field changed and nothing else moved, write only that column — plus
+    // `hidden=0`, which [encodeDbRow] always emits — instead of re-encoding
+    // every column and the whole `extra` JSON blob. The statement shape is
+    // canonicalized (single field + hidden vs full row) so the prepared
+    // statement cache stays hot.
+    Map<String, Object?> row;
+    if (dirtyFields.length == 1 &&
+        _schema.declaredFieldNames.contains(dirtyFields.single)) {
+      final field = _schema.fieldByName(dirtyFields.single)!;
+      row = {
+        field.name: encodeFieldValue(_schema, field, merged[field.name],
+            cipher: _pocket.fieldCipher,
+            cryptoProvider: _pocket.cryptoProvider),
+        'hidden': 0,
+      };
+    } else {
+      row = encodeDbRow(
+        _schema,
+        id: id,
+        logical: merged,
+        archived: merged['archived'] == true,
+        cipher: _pocket.fieldCipher,
+        cryptoProvider: _pocket.cryptoProvider,
+      );
+    }
     try {
       await _ex.update(_table.tableName, row, where: 'id = ?', whereArgs: [id]);
     } catch (e) {
@@ -334,8 +355,6 @@ class Collection with ChangeBusAwareStore {
     }
     hooks?.mutationCrashPoint?.call('after-domain-write');
 
-    final dirtyFields =
-        _dirtyFields(currentPayload, merged, MutationAction.update);
     await _pocket.outbox.applyLocalMutation(
       table: _table,
       exec: _ex,
@@ -381,6 +400,27 @@ class Collection with ChangeBusAwareStore {
     String recordId;
     Map<String, Object?>? existingRow = existing;
     Map<String, Object?> logical;
+    // Populated when the combined probe below ran (plain put/update without
+    // prefetched state): reuses its sync-row and outbox results so the later
+    // per-table reads are skipped entirely.
+    SyncRowState? probedSr;
+    OutboxOp? probedOp;
+
+    // Without prefetched state, fetch the domain row, sync row, and outbox op
+    // in ONE three-way LEFT JOIN (putAll and the patch fallback supply
+    // prefetched state and keep their existing read shapes).
+    Future<Map<String, Object?>?> probeExisting(String recordId) async {
+      if (existingRow != null ||
+          prefetchedSyncRow != null ||
+          prefetchedOp != null) {
+        return existingRow = existingRow ?? await _readLogical(recordId);
+      }
+      final probed = await _probeRowWithSync(recordId);
+      existingRow = probed.$1;
+      probedSr = probed.$2;
+      probedOp = probed.$3;
+      return existingRow;
+    }
 
     if (action == MutationAction.createOrUpdate) {
       final rid = (record!['id'] as String?) ?? generateRecordId();
@@ -390,13 +430,13 @@ class Collection with ChangeBusAwareStore {
             field: 'id');
       }
       recordId = rid;
-      existingRow = existingRow ?? await _readLogical(recordId);
+      await probeExisting(recordId);
       logical = _logicalFromRecord(record, recordId);
       action =
           existingRow == null ? MutationAction.create : MutationAction.update;
     } else if (action == MutationAction.update) {
       recordId = id!;
-      existingRow = existingRow ?? await _readLogical(recordId);
+      await probeExisting(recordId);
       if (existingRow == null) {
         throw RecordNotFoundException('No record $name/$recordId to update.');
       }
@@ -404,37 +444,39 @@ class Collection with ChangeBusAwareStore {
     } else {
       // archive / restore
       recordId = id!;
-      existingRow = existingRow ?? await _readLogical(recordId);
+      await probeExisting(recordId);
       if (existingRow == null) {
         throw RecordNotFoundException(
             'No record $name/$recordId to archive/restore.');
       }
-      logical = {...existingRow, 'archived': action == MutationAction.archive};
+      logical = {...existingRow!, 'archived': action == MutationAction.archive};
     }
 
     // Single canonical serialization per put: reused by validation
     // (maxDocBytes — measured from the same buffer, no UTF-8 re-encode), the
     // outbox payload, and — on first dirt — the base snapshot hash.
     final payloadBuffer = StringBuffer();
-    final payloadBytes = canonicalizeInto(
-        payloadBuffer,
-        buildPayload(
-            _schema, {...logical, if (recordId.isNotEmpty) 'id': recordId}));
+    final payloadBytes = canonicalizePayloadInto(
+        payloadBuffer, _schema, logical,
+        idOverride: recordId.isNotEmpty ? recordId : null);
     final payloadJson = payloadBuffer.toString();
 
     _validate(recordId, logical,
         precomputedPayload: payloadJson, precomputedPayloadBytes: payloadBytes);
 
     // A fresh create cannot have existing sync/outbox rows (id is the PK), so
-    // skip the reads on the hot create path. putAll supplies prefetched state
-    // to skip the per-record reads entirely.
+    // skip the reads on the hot create path. putAll and the combined probe
+    // supply prefetched state to skip the per-record reads entirely.
     final sr = existingRow == null
         ? null
         : (prefetchedSyncRow ??
+            probedSr ??
             await _pocket.outbox.readSyncRow(_ex, name, recordId));
     final outboxOp = existingRow == null
         ? null
-        : (prefetchedOp ?? await _pocket.outbox.readOp(_ex, name, recordId));
+        : (prefetchedOp ??
+            probedOp ??
+            await _pocket.outbox.readOp(_ex, name, recordId));
 
     // Edits are blocked while a row is held in conflict.
     if (sr != null && sr.syncState == SyncState.conflict) {
@@ -448,7 +490,7 @@ class Collection with ChangeBusAwareStore {
         existingRow != null && (sr == null || sr.syncState == SyncState.clean);
     BaseSnapshot? base;
     if (existingRow != null && firstDirt) {
-      final payload = canonicalPayload(_schema, existingRow);
+      final payload = canonicalPayload(_schema, existingRow!);
       base = BaseSnapshot(
         baseJson: payload,
         baseHash: sha256Hex(payload),
@@ -465,11 +507,32 @@ class Collection with ChangeBusAwareStore {
       cryptoProvider: _pocket.cryptoProvider,
     );
 
+    final dirtyFields = _dirtyFields(existingRow, logical, action);
+
+    // Targeted single-field UPDATE on the update path (same shape as the
+    // dirty-patch fast path): when exactly ONE declared field changed and
+    // nothing else moved, write only that column plus `hidden=0` (which
+    // [encodeDbRow] always emits) instead of re-encoding every column.
+    Map<String, Object?> writeRow;
+    if (existingRow != null &&
+        dirtyFields.length == 1 &&
+        _schema.declaredFieldNames.contains(dirtyFields.single)) {
+      final field = _schema.fieldByName(dirtyFields.single)!;
+      writeRow = {
+        field.name: encodeFieldValue(_schema, field, logical[field.name],
+            cipher: _pocket.fieldCipher,
+            cryptoProvider: _pocket.cryptoProvider),
+        'hidden': 0,
+      };
+    } else {
+      writeRow = row;
+    }
+
     try {
       if (existingRow == null) {
-        await _ex.insert(_table.tableName, row);
+        await _ex.insert(_table.tableName, writeRow);
       } else {
-        await _ex.update(_table.tableName, row,
+        await _ex.update(_table.tableName, writeRow,
             where: 'id = ?', whereArgs: [recordId]);
       }
     } catch (e) {
@@ -477,7 +540,6 @@ class Collection with ChangeBusAwareStore {
     }
     hooks?.mutationCrashPoint?.call('after-domain-write');
 
-    final dirtyFields = _dirtyFields(existingRow, logical, action);
     await _pocket.outbox.applyLocalMutation(
       table: _table,
       exec: _ex,
@@ -542,10 +604,20 @@ class Collection with ChangeBusAwareStore {
     final tableName = _table.tableName;
 
     // Resolve and validate ids up front so the chunked probes only ever see
-    // well-formed keys.
+    // well-formed keys. When EVERY id is freshly generated (no explicit id
+    // anywhere in the batch), the ids are unique and previously unseen by
+    // construction — the time-prefixed monotonic counter plus a random suffix
+    // — so the existence probe and duplicate detection are skipped entirely
+    // (measured ~14% of bulk-insert time on 100K rows). A generated id can
+    // only collide with a stored row if the system clock regresses across a
+    // restart (then the INSERT raises the normal constraint error instead of
+    // silently updating).
     final resolved = <(String, Map<String, Object?>)>[];
+    var allGenerated = true;
     for (final record in records) {
-      final rid = (record['id'] as String?) ?? generateRecordId();
+      final explicit = record['id'];
+      if (explicit != null) allGenerated = false;
+      final rid = (explicit as String?) ?? generateRecordId();
       if (!isValidRecordId(rid)) {
         throw ValidationException(
             'Invalid record id "$rid"; expected [a-z0-9]{15}.',
@@ -556,16 +628,37 @@ class Collection with ChangeBusAwareStore {
 
     // Duplicate ids must follow sequential put() semantics (last write wins
     // with the first write's base preserved) — fall back to the per-record
-    // path when a batch repeats an id.
-    final counts = <String, int>{};
-    for (final (rid, _) in resolved) {
-      counts[rid] = (counts[rid] ?? 0) + 1;
+    // path when a batch repeats an id. Generated ids are unique, so this
+    // check is skipped for fully-generated batches.
+    var hasDuplicates = false;
+    if (!allGenerated) {
+      final counts = <String, int>{};
+      for (final (rid, _) in resolved) {
+        counts[rid] = (counts[rid] ?? 0) + 1;
+      }
+      hasDuplicates = counts.values.any((c) => c > 1);
     }
-    final hasDuplicates = counts.values.any((c) => c > 1);
 
-    // Chunked existence probe: full rows for every id in the batch
-    // (SELECT * WHERE id IN (...)). Absence => fresh create.
-    const probePage = 500;
+    // Fast attempt WITHOUT any existence probe: the common all-create batch
+    // pays zero probing (measured ~14% of 100K bulk-insert time). A
+    // constraint failure (an id already exists) makes the fast path delete
+    // exactly the rows it inserted and throw [_BatchInsertConflict]; the
+    // fallback below then probes and applies per-record updates with any
+    // pre-existing rows intact.
+    if (!hasDuplicates) {
+      try {
+        await _putAllBatchCreate(exec, resolved);
+        _tx!.addChange(ChangeSet(name, {for (final (id, _) in resolved) id}));
+        return;
+      } on _BatchInsertConflict {
+        // Fall through to the probe + per-record path below.
+      }
+    }
+
+    // Existence probe (reached only for duplicate-id batches or after a
+    // fast-attempt conflict): full rows for every id in the batch so the
+    // update path can merge onto the existing state.
+    const probePage = 2000;
     final existingById = <String, Map<String, Object?>>{};
     for (var start = 0; start < resolved.length; start += probePage) {
       final end = (start + probePage).clamp(0, resolved.length);
@@ -579,17 +672,6 @@ class Collection with ChangeBusAwareStore {
             cipher: _pocket.fieldCipher,
             cryptoProvider: _pocket.cryptoProvider);
       }
-    }
-
-    final hasUpdates = resolved.any((e) => existingById.containsKey(e.$1));
-
-    // Pure-create batches (no duplicate ids, no existing rows) take the Batch
-    // fast path (collapse the ~3 per-record FFI dispatches
-    // into one `Batch.commit` per ~1,000 records).
-    if (!hasDuplicates && !hasUpdates) {
-      await _putAllBatchCreate(exec, resolved);
-      _tx!.addChange(ChangeSet(name, {for (final (id, _) in resolved) id}));
-      return;
     }
 
     // Chunked sync/outbox state resolution for rows that already exist
@@ -638,94 +720,284 @@ class Collection with ChangeBusAwareStore {
 
   /// Batch fast path for all-create `putAll`: inserts
   /// domain/outbox/sync rows inside the current transaction.
+  ///
+  /// On a [DirectSqliteDatabase] (no test execution hook attached) this uses
+  /// multi-row VALUES chunks: N records per `INSERT` per table, so the
+  /// per-record cost of statement-cache lookups, SQL-string building, and
+  /// statement dispatch collapses to ~3 dispatches per 250 records. Any
+  /// constraint backstop failure on a chunk falls back to per-record inserts
+  /// so errors stay attributed and translated exactly as before.
   Future<void> _putAllBatchCreate(DatabaseExecutor exec,
+      List<(String, Map<String, Object?>)> records) async {
+    final db = _pocket.db;
+    if (db is DirectSqliteDatabase && _pocket.testHooks?.onExecute == null) {
+      await _putAllBatchCreateDirect(exec, records);
+      return;
+    }
+    final now = _pocket.now();
+    final wantsEvents = _tx?.wantsRecordEvents ?? false;
+    final logicals = <(String, Map<String, Object?>)>[];
+    var inserted = 0;
+    try {
+      for (final (rid, record) in records) {
+        final logical = await _batchCreateInsertOne(exec, db, rid, record, now);
+        if (wantsEvents) logicals.add((rid, logical));
+        inserted++;
+      }
+    } on SqliteException {
+      // A record conflicted (its id already existed). Remove exactly the
+      // records this loop fully inserted (the conflicting record cleaned its
+      // own partial writes) and signal the probe + per-record fallback.
+      final ids = [for (var i = 0; i < inserted; i++) records[i].$1];
+      await _deleteFastInserted(exec, ids);
+      throw _BatchInsertConflict();
+    }
+    if (wantsEvents) {
+      for (final (rid, logical) in logicals) {
+        _tx!.addRecordEvent(RecordChangeEvent(
+          store: name,
+          id: rid,
+          origin: ChangeOrigin.local,
+          action: ChangeAction.create,
+          oldRecord: null,
+          newRecord: logical,
+          changedFields: logical.keys.where((k) => k != 'id').toSet(),
+        ));
+      }
+    }
+  }
+
+  Future<void> _putAllBatchCreateDirect(DatabaseExecutor exec,
       List<(String, Map<String, Object?>)> records) async {
     final schema = _schema;
     final now = _pocket.now();
-    final db = _pocket.db;
+    final db = _pocket.db as DirectSqliteDatabase;
 
-    // If using DirectSqliteDatabase, we can bind directly to prepared statements
-    // with fixed column lists for max insertion throughput. Column names/order
-    // come from the shared `outboxColumns`/`syncRowColumns` constants so the
-    // prepared-statement and map-based paths can never drift.
-    final insertOutboxSql = 'INSERT INTO lp_outbox '
-        '(${quotedColumnList(outboxColumns)}) '
-        'VALUES (${placeholders(outboxColumns.length)})';
-    final insertSyncRowSql = 'INSERT INTO lp_sync_row '
-        '(${quotedColumnList(syncRowColumns)}) '
-        'VALUES (${placeholders(syncRowColumns.length)})';
+    // Column order matches encodeDbRow exactly (id, declared fields in
+    // schema order, extra, archived, hidden) — the shared
+    // outboxColumns/syncRowColumns constants own the bookkeeping order.
+    final domainCols = <String>[
+      'id',
+      for (final f in schema.fields) f.name,
+      'extra',
+      'archived',
+      'hidden',
+    ];
+    final domainSqlPrefix =
+        'INSERT INTO "${_table.tableName}" (${quotedColumnList(domainCols)}) VALUES ';
+    final outboxSqlPrefix =
+        'INSERT INTO lp_outbox (${quotedColumnList(outboxColumns)}) VALUES ';
+    final syncSqlPrefix =
+        'INSERT INTO lp_sync_row (${quotedColumnList(syncRowColumns)}) VALUES ';
+    String valuesTemplate(int cols, int rows) =>
+        List.filled(rows, '(${placeholders(cols)})').join(', ');
 
-    for (final (rid, record) in records) {
-      final logical = _logicalFromRecord(record, rid);
-      final payloadBuffer = StringBuffer();
-      final payloadBytes = canonicalizeInto(
-          payloadBuffer, buildPayload(schema, {...logical, 'id': rid}));
-      final payloadJson = payloadBuffer.toString();
-      _validate(rid, logical,
-          precomputedPayload: payloadJson,
-          precomputedPayloadBytes: payloadBytes);
-      final row = encodeDbRow(
-        schema,
-        id: rid,
-        logical: logical,
-        archived: logical['archived'] == true,
-        cipher: _pocket.fieldCipher,
-        cryptoProvider: _pocket.cryptoProvider,
-      );
-      final opId = _pocket.outbox.generateOpId();
-      final outboxRow = buildOutboxRow(
-        store: name,
-        recordId: rid,
-        kind: OutboxKind.upsert,
-        payloadJson: payloadJson,
-        dirtyFieldsJson: kAllDirtyFieldsJson,
-        opId: opId,
-        createdAt: now,
-        updatedAt: now,
-      );
-      final syncRow = buildSyncRow(
-        store: name,
-        recordId: rid,
-        syncState: SyncState.dirty,
-        dirtyFieldsJson: kAllDirtyFieldsJson,
-        localRev: 1,
-        opId: opId,
-        schemaVer: schema.version,
-      );
-      try {
-        if (db is DirectSqliteDatabase &&
-            _pocket.testHooks?.onExecute == null) {
-          final cols = row.keys.map((k) => '"$k"').join(', ');
-          final ph = List.filled(row.length, '?').join(', ');
-          final domainSql =
-              'INSERT INTO "${_table.tableName}" ($cols) VALUES ($ph)';
-          db.getPreparedStatement(domainSql).execute(row.values.toList());
-          db
-              .getPreparedStatement(insertOutboxSql)
-              .execute(rowValuesInOrder(outboxRow, outboxColumns));
-          db
-              .getPreparedStatement(insertSyncRowSql)
-              .execute(rowValuesInOrder(syncRow, syncRowColumns));
-        } else {
-          await exec.insert(_table.tableName, row);
-          await exec.insert('lp_outbox', outboxRow);
-          await exec.insert('lp_sync_row', syncRow);
-        }
-        if (_tx?.wantsRecordEvents ?? false) {
-          _tx!.addRecordEvent(RecordChangeEvent(
-            store: name,
+    const chunkSize = 500;
+    // Reused across records: clearing is far cheaper than 100K allocations.
+    final payloadBuffer = StringBuffer();
+    // The id-stripping copy (`_logicalFromRecord`) exists so custom
+    // validators and record events never observe the synthetic `id` key.
+    // When neither can observe anything, pass the caller's map directly.
+    final wantsEvents = _tx?.wantsRecordEvents ?? false;
+    final copyLogical = _schema.validator != null || wantsEvents;
+    final allLogicals = wantsEvents ? <(String, Map<String, Object?>)>[] : null;
+    for (var start = 0; start < records.length; start += chunkSize) {
+      final end = (start + chunkSize).clamp(0, records.length);
+      final chunkLen = end - start;
+      final domainVals = <Object?>[];
+      final outboxVals = <Object?>[];
+      final syncVals = <Object?>[];
+      for (var i = start; i < end; i++) {
+        final (rid, record) = records[i];
+        final logical = copyLogical ? _logicalFromRecord(record, rid) : record;
+        payloadBuffer.clear();
+        final payloadBytes = canonicalizePayloadInto(
+            payloadBuffer, schema, logical,
+            idOverride: rid);
+        final payloadJson = payloadBuffer.toString();
+        _validate(rid, logical,
+            precomputedPayload: payloadJson,
+            precomputedPayloadBytes: payloadBytes);
+        // Map-free domain encoding: appends the row values in exactly
+        // [domainCols] order (same shape encodeDbRow would produce).
+        appendDomainValues(domainVals, schema,
             id: rid,
-            origin: ChangeOrigin.local,
-            action: ChangeAction.create,
-            oldRecord: null,
-            newRecord: logical,
-            changedFields: logical.keys.where((k) => k != 'id').toSet(),
-          ));
+            logical: logical,
+            archived: logical['archived'] == true,
+            cipher: _pocket.fieldCipher,
+            cryptoProvider: _pocket.cryptoProvider);
+        final opId = _pocket.outbox.generateOpId();
+        appendOutboxValues(outboxVals,
+            store: name,
+            recordId: rid,
+            kind: OutboxKind.upsert,
+            payloadJson: payloadJson,
+            dirtyFieldsJson: kAllDirtyFieldsJson,
+            opId: opId,
+            createdAt: now,
+            updatedAt: now);
+        appendSyncRowValues(syncVals,
+            store: name,
+            recordId: rid,
+            syncState: SyncState.dirty,
+            dirtyFieldsJson: kAllDirtyFieldsJson,
+            localRev: 1,
+            opId: opId,
+            schemaVer: schema.version);
+        allLogicals?.add((rid, logical));
+      }
+      var domainDone = false;
+      var outboxDone = false;
+      try {
+        db
+            .getPreparedStatement(
+                '$domainSqlPrefix${valuesTemplate(domainCols.length, chunkLen)}')
+            .execute(domainVals);
+        domainDone = true;
+        db
+            .getPreparedStatement(
+                '$outboxSqlPrefix${valuesTemplate(outboxColumns.length, chunkLen)}')
+            .execute(outboxVals);
+        outboxDone = true;
+        db
+            .getPreparedStatement(
+                '$syncSqlPrefix${valuesTemplate(syncRowColumns.length, chunkLen)}')
+            .execute(syncVals);
+      } on SqliteException {
+        // Remove exactly what this attempt inserted: all prior chunks (every
+        // table) plus this chunk's tables that landed before the failure. The
+        // failing table's rows — the pre-existing conflict — stay intact for
+        // the fallback update path.
+        final priorIds = [for (var i = 0; i < start; i++) records[i].$1];
+        await _deleteFastInserted(exec, priorIds);
+        if (domainDone || outboxDone) {
+          final chunkIds = [for (var i = start; i < end; i++) records[i].$1];
+          final ph = List.filled(chunkIds.length, '?').join(', ');
+          if (domainDone) {
+            await exec.delete(_table.tableName,
+                where: 'id IN ($ph)', whereArgs: chunkIds);
+          }
+          if (outboxDone) {
+            final args = [name, ...chunkIds];
+            await exec.delete('lp_outbox',
+                where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+          }
         }
-      } catch (e) {
-        throw translateConstraintError(e);
+        throw _BatchInsertConflict();
       }
     }
+    if (wantsEvents) {
+      for (final (rid, logical) in allLogicals!) {
+        _tx!.addRecordEvent(RecordChangeEvent(
+          store: name,
+          id: rid,
+          origin: ChangeOrigin.local,
+          action: ChangeAction.create,
+          oldRecord: null,
+          newRecord: logical,
+          changedFields: logical.keys.where((k) => k != 'id').toSet(),
+        ));
+      }
+    }
+  }
+
+  /// Per-record create insert: builds payload, row, and bookkeeping values,
+  /// then inserts domain/outbox/sync rows. On a constraint failure it removes
+  /// only the rows THIS record inserted (the failing table's row — a
+  /// pre-existing conflict — stays) and rethrows, so the batch caller can
+  /// unwind and fall back to the probe + per-record update path.
+  Future<Map<String, Object?>> _batchCreateInsertOne(DatabaseExecutor exec,
+      Database db, String rid, Map<String, Object?> record, int now) async {
+    final schema = _schema;
+    final logical = _logicalFromRecord(record, rid);
+    final payloadBuffer = StringBuffer();
+    final payloadBytes = canonicalizePayloadInto(payloadBuffer, schema, logical,
+        idOverride: rid);
+    final payloadJson = payloadBuffer.toString();
+    _validate(rid, logical,
+        precomputedPayload: payloadJson, precomputedPayloadBytes: payloadBytes);
+    final row = encodeDbRow(
+      schema,
+      id: rid,
+      logical: logical,
+      archived: logical['archived'] == true,
+      cipher: _pocket.fieldCipher,
+      cryptoProvider: _pocket.cryptoProvider,
+    );
+    final opId = _pocket.outbox.generateOpId();
+    final outboxRow = buildOutboxRow(
+      store: name,
+      recordId: rid,
+      kind: OutboxKind.upsert,
+      payloadJson: payloadJson,
+      dirtyFieldsJson: kAllDirtyFieldsJson,
+      opId: opId,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final syncRow = buildSyncRow(
+      store: name,
+      recordId: rid,
+      syncState: SyncState.dirty,
+      dirtyFieldsJson: kAllDirtyFieldsJson,
+      localRev: 1,
+      opId: opId,
+      schemaVer: schema.version,
+    );
+    var domainDone = false;
+    var outboxDone = false;
+    try {
+      if (db is DirectSqliteDatabase && _pocket.testHooks?.onExecute == null) {
+        final cols = row.keys.map((k) => '"$k"').join(', ');
+        final ph = List.filled(row.length, '?').join(', ');
+        final domainSql =
+            'INSERT INTO "${_table.tableName}" ($cols) VALUES ($ph)';
+        db.getPreparedStatement(domainSql).execute(row.values.toList());
+        domainDone = true;
+        db
+            .getPreparedStatement('INSERT INTO lp_outbox '
+                '(${quotedColumnList(outboxColumns)}) '
+                'VALUES (${placeholders(outboxColumns.length)})')
+            .execute(rowValuesInOrder(outboxRow, outboxColumns));
+        outboxDone = true;
+        db
+            .getPreparedStatement('INSERT INTO lp_sync_row '
+                '(${quotedColumnList(syncRowColumns)}) '
+                'VALUES (${placeholders(syncRowColumns.length)})')
+            .execute(rowValuesInOrder(syncRow, syncRowColumns));
+      } else {
+        await exec.insert(_table.tableName, row);
+        domainDone = true;
+        await exec.insert('lp_outbox', outboxRow);
+        outboxDone = true;
+        await exec.insert('lp_sync_row', syncRow);
+      }
+    } catch (e) {
+      if (domainDone) {
+        await exec.delete(_table.tableName, where: 'id = ?', whereArgs: [rid]);
+      }
+      if (outboxDone) {
+        await exec.delete('lp_outbox',
+            where: 'store = ? AND record_id = ?', whereArgs: [name, rid]);
+      }
+      rethrow;
+    }
+    return logical;
+  }
+
+  /// Removes the given ids' rows from all three write-path tables — used to
+  /// unwind the bulk-create fast path when a later record conflicts. Only
+  /// ids the fast path itself inserted are ever passed here.
+  Future<void> _deleteFastInserted(
+      DatabaseExecutor exec, List<String> ids) async {
+    if (ids.isEmpty) return;
+    final ph = List.filled(ids.length, '?').join(', ');
+    await exec.delete(_table.tableName, where: 'id IN ($ph)', whereArgs: ids);
+    final args = [name, ...ids];
+    await exec.delete('lp_outbox',
+        where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+    await exec.delete('lp_sync_row',
+        where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
   }
 
   Map<String, Object?> _logicalFromRecord(
@@ -764,25 +1036,102 @@ class Collection with ChangeBusAwareStore {
         cipher: _pocket.fieldCipher, cryptoProvider: _pocket.cryptoProvider);
   }
 
+  /// One three-way LEFT JOIN returning the domain row, its sync row, and its
+  /// outbox op — three point reads collapsed into one round trip on the
+  /// put/update hot path. Every `lp_sync_row`/`lp_outbox` column is aliased
+  /// so a user field named like a bookkeeping column can never collide.
+  Future<(Map<String, Object?>?, SyncRowState?, OutboxOp?)> _probeRowWithSync(
+      String id) async {
+    final rows = await _ex.rawQuery(
+        'SELECT w.*, '
+        's.store AS s_store, s.record_id AS s_record_id, '
+        's.remote_updated AS s_remote_updated, '
+        's.last_seen_at AS s_last_seen_at, s.base_updated AS s_base_updated, '
+        's.base_hash AS s_base_hash, s.base_json AS s_base_json, '
+        's.sync_state AS s_sync_state, s.dirty_fields AS s_dirty_fields, '
+        's.local_rev AS s_local_rev, s.access_state AS s_access_state, '
+        's.op_id AS s_op_id, s.attempt_count AS s_attempt_count, '
+        's.next_retry_at AS s_next_retry_at, s.last_error AS s_last_error, '
+        's.schema_ver AS s_schema_ver, '
+        'o.store AS o_store, o.record_id AS o_record_id, o.kind AS o_kind, '
+        'o.payload_json AS o_payload_json, o.base_updated AS o_base_updated, '
+        'o.base_hash AS o_base_hash, o.dirty_fields AS o_dirty_fields, '
+        'o.op_id AS o_op_id, o.created_at AS o_created_at, '
+        'o.updated_at AS o_updated_at, o.depends_on_op AS o_depends_on_op '
+        'FROM "${_table.tableName}" w '
+        'LEFT JOIN lp_sync_row s ON s.store = ? AND s.record_id = w.id '
+        'LEFT JOIN lp_outbox o ON o.store = ? AND o.record_id = w.id '
+        'WHERE w.id = ? LIMIT 1',
+        [name, name, id]);
+    if (rows.isEmpty) return (null, null, null);
+    final row = rows.first;
+    final logical = decodeDbRow(_schema, row,
+        cipher: _pocket.fieldCipher, cryptoProvider: _pocket.cryptoProvider);
+    final sr = row['s_sync_state'] != null
+        ? SyncRowState.fromRow({
+            'store': row['s_store'],
+            'record_id': row['s_record_id'],
+            'remote_updated': row['s_remote_updated'],
+            'last_seen_at': row['s_last_seen_at'],
+            'base_updated': row['s_base_updated'],
+            'base_hash': row['s_base_hash'],
+            'base_json': row['s_base_json'],
+            'sync_state': row['s_sync_state'],
+            'dirty_fields': row['s_dirty_fields'],
+            'local_rev': row['s_local_rev'],
+            'access_state': row['s_access_state'],
+            'op_id': row['s_op_id'],
+            'attempt_count': row['s_attempt_count'],
+            'next_retry_at': row['s_next_retry_at'],
+            'last_error': row['s_last_error'],
+            'schema_ver': row['s_schema_ver'],
+          })
+        : null;
+    final op = row['o_kind'] != null
+        ? OutboxOp.fromRow({
+            'store': row['o_store'],
+            'record_id': row['o_record_id'],
+            'kind': row['o_kind'],
+            'payload_json': row['o_payload_json'],
+            'base_updated': row['o_base_updated'],
+            'base_hash': row['o_base_hash'],
+            'dirty_fields': row['o_dirty_fields'],
+            'op_id': row['o_op_id'],
+            'created_at': row['o_created_at'],
+            'updated_at': row['o_updated_at'],
+            'depends_on_op': row['o_depends_on_op'],
+          })
+        : null;
+    return (logical, sr, op);
+  }
+
   /// Returns a record by ID and applies any pending lazy document migrations.
   ///
   /// Returns `null` when no local record has the requested [id].
   ///
-  /// A single LEFT JOIN against `lp_sync_row` returns the domain row AND the
-  /// sync-row `schema_ver` in one SQL round-trip (point-read profile: `get()`
-  /// was two round-trips; the join halves that cost).
+  /// For schemas above version 1, a single LEFT JOIN against `lp_sync_row`
+  /// returns the domain row AND the sync-row `schema_ver` in one SQL
+  /// round-trip. Version-1 schemas can never have a pending lazy migration,
+  /// so the join is skipped entirely — point reads are a plain indexed
+  /// `SELECT * WHERE id = ?`, the same shape as a bare SQLite read.
   Future<Map<String, Object?>?> get(String id) async {
     // Outside an explicit Tx, point reads can check the LRU read cache.
     if (_tx == null && _table.readCache.containsKey(id)) {
       return _table.readCache.get(id);
     }
 
-    final rows = await _ex.rawQuery(
-        'SELECT w.*, s.schema_ver AS lp_schema_ver '
-        'FROM ${_table.tableName} w '
-        'LEFT JOIN lp_sync_row s ON s.store = ? AND s.record_id = w.id '
-        'WHERE w.id = ? LIMIT 1',
-        [name, id]);
+    final List<Map<String, Object?>> rows;
+    if (_schema.version > 1) {
+      rows = await _ex.rawQuery(
+          'SELECT w.*, s.schema_ver AS lp_schema_ver '
+          'FROM ${_table.tableName} w '
+          'LEFT JOIN lp_sync_row s ON s.store = ? AND s.record_id = w.id '
+          'WHERE w.id = ? LIMIT 1',
+          [name, id]);
+    } else {
+      rows = await _ex.rawQuery(
+          'SELECT * FROM "${_table.tableName}" WHERE id = ? LIMIT 1', [id]);
+    }
     if (rows.isEmpty) {
       if (_tx == null) {
         _table.readCache.set(id, null);
@@ -869,3 +1218,9 @@ class Collection with ChangeBusAwareStore {
   Stream<Map<String, Object?>?> watchOne(String id) =>
       OneWatcher(_pocket, _table, id).startStream();
 }
+
+/// Signals that the bulk-create fast path hit a constraint conflict (an id in
+/// the batch already exists) and `putAll` should fall back to the probe +
+/// per-record update path. The fast path already removed exactly the rows it
+/// inserted, so pre-existing rows are intact when the fallback probes.
+class _BatchInsertConflict implements Exception {}

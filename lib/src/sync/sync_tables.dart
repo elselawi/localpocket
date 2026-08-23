@@ -168,19 +168,84 @@ Map<String, Object?> buildOutboxRow({
   required int updatedAt,
   String? dependsOnOp,
 }) {
+  final values = outboxValuesInOrder(
+    store: store,
+    recordId: recordId,
+    kind: kind,
+    payloadJson: payloadJson,
+    baseUpdated: baseUpdated,
+    baseHash: baseHash,
+    dirtyFieldsJson: dirtyFieldsJson,
+    opId: opId,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+    dependsOnOp: dependsOnOp,
+  );
   return {
-    'store': store,
-    'record_id': recordId,
-    'kind': kind.name,
-    'payload_json': payloadJson,
-    'base_updated': baseUpdated,
-    'base_hash': baseHash,
-    'dirty_fields': dirtyFieldsJson,
-    'op_id': opId,
-    'created_at': createdAt,
-    'updated_at': updatedAt,
-    'depends_on_op': dependsOnOp,
+    for (var i = 0; i < outboxColumns.length; i++) outboxColumns[i]: values[i],
   };
+}
+
+/// The `lp_outbox` row values in [outboxColumns] order — the allocation-free
+/// binding form for the bulk-insert fast path (no intermediate map).
+List<Object?> outboxValuesInOrder({
+  required String store,
+  required String recordId,
+  required OutboxKind kind,
+  required String payloadJson,
+  String? baseUpdated,
+  String baseHash = '',
+  required String dirtyFieldsJson,
+  required String opId,
+  required int createdAt,
+  required int updatedAt,
+  String? dependsOnOp,
+}) {
+  final values = <Object?>[];
+  appendOutboxValues(values,
+      store: store,
+      recordId: recordId,
+      kind: kind,
+      payloadJson: payloadJson,
+      baseUpdated: baseUpdated,
+      baseHash: baseHash,
+      dirtyFieldsJson: dirtyFieldsJson,
+      opId: opId,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      dependsOnOp: dependsOnOp);
+  return values;
+}
+
+/// Appends the `lp_outbox` row values in [outboxColumns] order onto
+/// [target] — lets a bulk INSERT bind many rows into one flat list without
+/// per-record intermediate lists.
+void appendOutboxValues(
+  List<Object?> target, {
+  required String store,
+  required String recordId,
+  required OutboxKind kind,
+  required String payloadJson,
+  String? baseUpdated,
+  String baseHash = '',
+  required String dirtyFieldsJson,
+  required String opId,
+  required int createdAt,
+  required int updatedAt,
+  String? dependsOnOp,
+}) {
+  target
+    ..add(store)
+    ..add(recordId)
+    ..add(kind.name)
+    ..add(payloadJson)
+    ..add(baseUpdated)
+    ..add(baseHash)
+    ..add(dirtyFieldsJson)
+    ..add(opId)
+    ..add(createdAt)
+    ..add(updatedAt)
+    ..add(dependsOnOp);
 }
 
 /// Builds a full `lp_sync_row` row for a dirty local mutation.
@@ -202,24 +267,110 @@ Map<String, Object?> buildSyncRow({
   String? lastError,
   required int schemaVer,
 }) {
+  final values = syncRowValuesInOrder(
+    store: store,
+    recordId: recordId,
+    remoteUpdated: remoteUpdated,
+    lastSeenAt: lastSeenAt,
+    baseUpdated: baseUpdated,
+    baseHash: baseHash,
+    baseJson: baseJson,
+    syncState: syncState,
+    dirtyFieldsJson: dirtyFieldsJson,
+    localRev: localRev,
+    accessState: accessState,
+    opId: opId,
+    attemptCount: attemptCount,
+    nextRetryAt: nextRetryAt,
+    lastError: lastError,
+    schemaVer: schemaVer,
+  );
   return {
-    'store': store,
-    'record_id': recordId,
-    'remote_updated': remoteUpdated,
-    'last_seen_at': lastSeenAt,
-    'base_updated': baseUpdated,
-    'base_hash': baseHash,
-    'base_json': baseJson,
-    'sync_state': syncState.name,
-    'dirty_fields': dirtyFieldsJson,
-    'local_rev': localRev,
-    'access_state': accessState.name,
-    'op_id': opId,
-    'attempt_count': attemptCount,
-    'next_retry_at': nextRetryAt,
-    'last_error': lastError,
-    'schema_ver': schemaVer,
+    for (var i = 0; i < syncRowColumns.length; i++)
+      syncRowColumns[i]: values[i],
   };
+}
+
+/// The `lp_sync_row` row values in [syncRowColumns] order — the
+/// allocation-free binding form for the bulk-insert fast path.
+List<Object?> syncRowValuesInOrder({
+  required String store,
+  required String recordId,
+  String? remoteUpdated,
+  int? lastSeenAt,
+  String? baseUpdated,
+  String baseHash = '',
+  String? baseJson,
+  required SyncState syncState,
+  required String dirtyFieldsJson,
+  required int localRev,
+  AccessState accessState = AccessState.visible,
+  String? opId,
+  int attemptCount = 0,
+  int nextRetryAt = 0,
+  String? lastError,
+  required int schemaVer,
+}) {
+  final values = <Object?>[];
+  appendSyncRowValues(values,
+      store: store,
+      recordId: recordId,
+      remoteUpdated: remoteUpdated,
+      lastSeenAt: lastSeenAt,
+      baseUpdated: baseUpdated,
+      baseHash: baseHash,
+      baseJson: baseJson,
+      syncState: syncState,
+      dirtyFieldsJson: dirtyFieldsJson,
+      localRev: localRev,
+      accessState: accessState,
+      opId: opId,
+      attemptCount: attemptCount,
+      nextRetryAt: nextRetryAt,
+      lastError: lastError,
+      schemaVer: schemaVer);
+  return values;
+}
+
+/// Appends the `lp_sync_row` row values in [syncRowColumns] order onto
+/// [target] — lets a bulk INSERT bind many rows into one flat list without
+/// per-record intermediate lists.
+void appendSyncRowValues(
+  List<Object?> target, {
+  required String store,
+  required String recordId,
+  String? remoteUpdated,
+  int? lastSeenAt,
+  String? baseUpdated,
+  String baseHash = '',
+  String? baseJson,
+  required SyncState syncState,
+  required String dirtyFieldsJson,
+  required int localRev,
+  AccessState accessState = AccessState.visible,
+  String? opId,
+  int attemptCount = 0,
+  int nextRetryAt = 0,
+  String? lastError,
+  required int schemaVer,
+}) {
+  target
+    ..add(store)
+    ..add(recordId)
+    ..add(remoteUpdated)
+    ..add(lastSeenAt)
+    ..add(baseUpdated)
+    ..add(baseHash)
+    ..add(baseJson)
+    ..add(syncState.name)
+    ..add(dirtyFieldsJson)
+    ..add(localRev)
+    ..add(accessState.name)
+    ..add(opId)
+    ..add(attemptCount)
+    ..add(nextRetryAt)
+    ..add(lastError)
+    ..add(schemaVer);
 }
 
 /// Values of [row] in [columns] order — used to bind a map-shaped row to the

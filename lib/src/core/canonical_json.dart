@@ -12,20 +12,22 @@ import 'dart:convert';
 /// conflict base snapshots, and payload generation.
 String canonicalize(Object? value) {
   final buffer = StringBuffer();
-  _writeCanonical(buffer, value);
+  writeCanonicalValue(buffer, value);
   return buffer.toString();
 }
 
 /// Serializes [value] canonically into [out] and returns the EXACT UTF-8
-/// byte length of what was written.
-///
-/// Counts bytes per rune in the same single pass (1/2/3/4 by code-point
-/// range) so callers get the identical number `utf8.encode(...).length`
-/// would produce — without allocating a second encoded copy. Used by
-/// maxDocBytes validation on hot write paths.
+/// byte length of what was written (counted during the write itself — no
+/// second pass over the buffer). Used by maxDocBytes validation on hot write
+/// paths.
 int canonicalizeInto(StringBuffer out, Object? value) {
-  _writeCanonical(out, value);
-  final s = out.toString();
+  return writeCanonicalValue(out, value);
+}
+
+/// The EXACT UTF-8 byte length of [s], counted per rune in one pass
+/// (1/2/3/4 by code-point range) — the number `utf8.encode(s).length` would
+/// produce without the encoded copy.
+int utf8BytesOf(String s) {
   var bytes = 0;
   for (final rune in s.runes) {
     if (rune < 0x80) {
@@ -41,33 +43,63 @@ int canonicalizeInto(StringBuffer out, Object? value) {
   return bytes;
 }
 
-void _writeCanonical(StringBuffer out, Object? value) {
+/// The EXACT UTF-8 byte length of everything currently in [out], counted per
+/// rune in one pass — the number `utf8.encode(out.toString()).length` would
+/// produce without the encoded copy. Prefer [writeCanonicalValue]'s return
+/// value on hot paths (it counts during the write, avoiding this buffer copy).
+int utf8ByteLength(StringBuffer out) => utf8BytesOf(out.toString());
+
+/// Writes [value] in canonical JSON form into [out] (sorted object keys,
+/// integral-double normalization, no insignificant whitespace) and returns
+/// the EXACT UTF-8 byte length written. Public so composed serializers (e.g.
+/// the fused payload writer in the codec) can emit byte-identical output
+/// without an intermediate map.
+int writeCanonicalValue(StringBuffer out, Object? value) {
   if (value == null) {
     out.write('null');
-  } else if (value is bool) {
+    return 4;
+  }
+  if (value is bool) {
     out.write(value ? 'true' : 'false');
-  } else if (value is int) {
-    out.write(value.toString());
-  } else if (value is double) {
-    if (value.isFinite &&
-        value == value.roundToDouble() &&
-        value.abs() < 1e15) {
-      out.write(value.round().toString());
-    } else {
-      out.write(value.toString());
-    }
-  } else if (value is num) {
-    out.write(value.toString());
-  } else if (value is String) {
-    out.write(jsonEncode(value));
-  } else if (value is List) {
+    return value ? 4 : 5;
+  }
+  if (value is int) {
+    final s = value.toString();
+    out.write(s);
+    return s.length;
+  }
+  if (value is double) {
+    final s =
+        (value.isFinite && value == value.roundToDouble() && value.abs() < 1e15)
+            ? value.round().toString()
+            : value.toString();
+    out.write(s);
+    return s.length;
+  }
+  if (value is num) {
+    final s = value.toString();
+    out.write(s);
+    return s.length;
+  }
+  if (value is String) {
+    final s = jsonEncode(value);
+    out.write(s);
+    return utf8BytesOf(s);
+  }
+  if (value is List) {
     out.write('[');
+    var bytes = 1;
     for (var i = 0; i < value.length; i++) {
-      if (i > 0) out.write(',');
-      _writeCanonical(out, value[i]);
+      if (i > 0) {
+        out.write(',');
+        bytes++;
+      }
+      bytes += writeCanonicalValue(out, value[i]);
     }
     out.write(']');
-  } else if (value is Map) {
+    return bytes + 1;
+  }
+  if (value is Map) {
     // Keys are stringified and sorted lexicographically. Lookups must use the
     // ORIGINAL key (a non-String key never matches its `toString()` form), and
     // two distinct keys that stringify identically (e.g. `1` vs `'1'`) cannot
@@ -84,17 +116,23 @@ void _writeCanonical(StringBuffer out, Object? value) {
     }
     entries.sort((a, b) => a.$1.compareTo(b.$1));
     out.write('{');
+    var bytes = 1;
     var first = true;
     for (final (key, original) in entries) {
-      if (!first) out.write(',');
+      if (!first) {
+        out.write(',');
+        bytes++;
+      }
       first = false;
-      out.write(jsonEncode(key));
+      final k = jsonEncode(key);
+      out.write(k);
+      bytes += utf8BytesOf(k);
       out.write(':');
-      _writeCanonical(out, value[original]);
+      bytes++;
+      bytes += writeCanonicalValue(out, value[original]);
     }
     out.write('}');
-  } else {
-    throw ArgumentError(
-        'Cannot canonicalize value of type ${value.runtimeType}');
+    return bytes + 1;
   }
+  throw ArgumentError('Cannot canonicalize value of type ${value.runtimeType}');
 }

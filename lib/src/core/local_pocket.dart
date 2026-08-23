@@ -108,10 +108,18 @@ class PointReadCache {
   void invalidate(Iterable<String> ids) {
     if (ids.isEmpty) {
       _cache.clear();
-    } else {
-      for (final id in ids) {
-        _cache.remove(id);
-      }
+      return;
+    }
+    // Invalidation is conservative: when the change set is at least as large
+    // as the cache (e.g. a bulk putAll), clearing the whole cache is cheaper
+    // than removing every id one by one and strictly safe — extra misses
+    // only cost future reads, never correctness.
+    if (ids.length >= _cache.length) {
+      _cache.clear();
+      return;
+    }
+    for (final id in ids) {
+      _cache.remove(id);
     }
   }
 
@@ -224,6 +232,17 @@ class LocalPocket with ChangeBusAwareLP {
   @visibleForTesting
   bool optimizeRanOnClose = false;
 
+  /// Coalescing window for group commit (default zero = end-of-turn only).
+  ///
+  /// When positive, mutations submitted from separate event-loop turns may
+  /// still share one SQLite transaction (one fsync) as long as they arrive
+  /// within [groupCommitWindow] of each other. A read arriving during the
+  /// window flushes the pending group first, preserving read-your-writes and
+  /// FIFO. Callers of the LAST write in a burst observe latency up to the
+  /// window; set it to the maximum fsync latency you are willing to trade
+  /// for batch throughput.
+  final Duration groupCommitWindow;
+
   LocalPocket._({
     required this.path,
     required this.db,
@@ -235,6 +254,7 @@ class LocalPocket with ChangeBusAwareLP {
     this.blobStore,
     this.fieldCipher,
     this.cryptoProvider,
+    this.groupCommitWindow = Duration.zero,
   }) : perf = PerfCounters() {
     writeQueue = WriteQueue(onQueueDepthChanged: perf.queueChanged);
     outbox = Outbox.internal(this);
@@ -281,6 +301,7 @@ class LocalPocket with ChangeBusAwareLP {
     String? wasmAssetPath,
     String? workerAssetPath,
     int Function()? now,
+    Duration groupCommitWindow = Duration.zero,
   }) async {
     if (encrypted && platform == PlatformProfile.web) {
       throw UnsupportedError('SQLCipher is unsupported on web platform.');
@@ -312,6 +333,7 @@ class LocalPocket with ChangeBusAwareLP {
         blobStore: blobStore,
         fieldCipher: fieldCipher,
         cryptoProvider: cryptoProvider,
+        groupCommitWindow: groupCommitWindow,
       );
       await _recordCoreMigration(db, pocket.now);
       for (final schema in stores) {
@@ -333,7 +355,13 @@ class LocalPocket with ChangeBusAwareLP {
       try {
         await db.execute('PRAGMA journal_mode=WAL');
       } catch (_) {}
-      await db.execute('PRAGMA wal_autocheckpoint=1000');
+      // Auto-checkpointing is DISABLED: with the default 1000 pages the
+      // committing connection checkpoints INLINE, stalling writes for
+      // milliseconds once the WAL crosses ~4 MB (measured p99 5-6 ms).
+      // Instead, `_noteWriteCommitted` schedules non-blocking
+      // `wal_checkpoint(PASSIVE)` off the writer's path after write bursts,
+      // and `runMaintenance`/`walCheckpoint` retain the truncating variant.
+      await db.execute('PRAGMA wal_autocheckpoint=0');
       await db.execute('PRAGMA mmap_size=67108864');
     }
     await db.execute('PRAGMA synchronous=NORMAL');
@@ -476,10 +504,18 @@ class LocalPocket with ChangeBusAwareLP {
   _CommitGroup? _pendingGroup;
 
   /// Starts a new commit group and schedules its flush at the end of the
-  /// current event-loop turn, giving concurrently-submitted mutations the
-  /// chance to join before the transaction opens.
+  /// current event-loop turn (or after the configured coalescing window),
+  /// giving concurrently-submitted mutations the chance to join before the
+  /// transaction opens.
   Future<T> _startGroup<T>(
       Future<dynamic> Function(Tx tx) action, DurabilityClass durability) {
+    // A different-durability submission cannot join the pending group; with a
+    // coalescing window enabled, flush the pending group early so this call
+    // does not stall behind the other group's window (FIFO is preserved — the
+    // pending group holds the queue slot first).
+    if (groupCommitWindow > Duration.zero) {
+      _pendingGroup?.flushEarly();
+    }
     final group = _CommitGroup(this, durability);
     _pendingGroup = group;
     group.reserve();
@@ -505,6 +541,11 @@ class LocalPocket with ChangeBusAwareLP {
     // writes through the same queue: a read transaction held open on the
     // connection would otherwise make a queued write's BEGIN IMMEDIATE fail
     // with "cannot start a transaction within a transaction".
+    // With a coalescing window open, a read also flushes the pending group
+    // first so read-your-writes holds without waiting out the window.
+    if (groupCommitWindow > Duration.zero) {
+      _pendingGroup?.flushEarly();
+    }
     return writeQueue.run(() => db.transaction((txn) async {
           final changes = <ChangeSet>[];
           final tx = Tx.internal(this, txn, changes, readOnly: true);
@@ -544,6 +585,18 @@ class LocalPocket with ChangeBusAwareLP {
   Future<void> walCheckpoint() async {
     if (capabilities.walSupported) {
       await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+    }
+  }
+
+  /// Runs a non-blocking `PRAGMA wal_checkpoint(PASSIVE)` — checkpoints as
+  /// many WAL frames as possible without blocking readers or writers, and
+  /// returns immediately otherwise. With `wal_autocheckpoint=0` this is the
+  /// WAL-bounding knob invoked opportunistically after write bursts (see
+  /// `_noteWriteCommitted`); [walCheckpoint] remains the truncating,
+  /// user-visible variant.
+  Future<void> walCheckpointPassive() async {
+    if (capabilities.walSupported) {
+      await db.execute('PRAGMA wal_checkpoint(PASSIVE)');
     }
   }
 
@@ -690,6 +743,27 @@ class LocalPocket with ChangeBusAwareLP {
     }
   }
 
+  /// Write transactions committed since the last opportunistic passive WAL
+  /// checkpoint (see `_applyPragmas` — auto-checkpointing is off).
+  int _writesSinceCheckpoint = 0;
+
+  /// How many committed write transactions may elapse before the next
+  /// opportunistic `wal_checkpoint(PASSIVE)` is attempted. Keeps the WAL
+  /// bounded at ~64 × (row image + page) without ever checkpointing inline.
+  static const int _passiveCheckpointEveryWrites = 64;
+
+  /// Called after every committed write transaction. Once enough writes have
+  /// accumulated, schedules a non-blocking passive checkpoint off the
+  /// writer's path: PASSIVE never blocks, so this cannot stall the next
+  /// commit, and a closed/unavailable handle is swallowed silently.
+  void _noteWriteCommitted() {
+    if (++_writesSinceCheckpoint < _passiveCheckpointEveryWrites) return;
+    _writesSinceCheckpoint = 0;
+    Timer.run(() {
+      unawaited(walCheckpointPassive().catchError((Object _) {}));
+    });
+  }
+
   /// Invalidates watchers after changes made outside this [LocalPocket]
   /// connection.
   ///
@@ -731,13 +805,18 @@ class _CommitGroup {
   /// Set once [flush] has started: later arrivals open their own group.
   bool sealed = false;
 
+  Completer<void>? _barrier;
+  bool _barrierDone = false;
+
   _CommitGroup(this.pocket, this.durability);
 
   /// Takes the single-writer slot immediately (preserving submission-order
   /// FIFO for reads and later writes) and waits for the end-of-turn barrier
-  /// before committing, so sibling mutations in the same turn can join.
+  /// before committing, so sibling mutations in the same turn (or, with a
+  /// coalescing window configured, within the window) can join.
   void reserve() {
     final barrier = Completer<void>();
+    _barrier = barrier;
     unawaited(pocket.writeQueue.run(() async {
       await barrier.future;
       // Member completers already received any per-member error; swallow the
@@ -748,11 +827,26 @@ class _CommitGroup {
     }));
     // scheduleMicrotask would close the group BEFORE sibling awaits in the
     // same turn run; Timer(Duration.zero) defers past them, capturing the
-    // whole burst.
-    Timer.run(() {
-      if (identical(pocket._pendingGroup, this)) pocket._pendingGroup = null;
-      barrier.complete();
-    });
+    // whole burst. A positive coalescing window keeps the barrier open even
+    // longer so bursts across turns can join (a read or a
+    // different-durability submission flushes it early).
+    final window = pocket.groupCommitWindow;
+    if (window > Duration.zero) {
+      Timer(window, flushEarly);
+    } else {
+      Timer.run(flushEarly);
+    }
+  }
+
+  /// Completes the end-of-turn / end-of-window barrier early. Called when a
+  /// read arrives (read-your-writes must not wait out the window) or when a
+  /// different-durability submission needs its own group. Idempotent — the
+  /// window timer and explicit flushes race harmlessly.
+  void flushEarly() {
+    if (_barrierDone) return;
+    _barrierDone = true;
+    if (identical(pocket._pendingGroup, this)) pocket._pendingGroup = null;
+    _barrier?.complete();
   }
 
   /// Runs all joined members inside ONE write transaction. In multi-member
@@ -844,6 +938,10 @@ class _CommitGroup {
         } catch (_) {}
       }
       pocket.perf.recordWriteTransaction(sw.elapsedMicroseconds);
+      // WAL auto-checkpointing is disabled; opportunistically bound the WAL
+      // from here (off the writer's critical path — the schedule is deferred
+      // to the next event-loop turn).
+      pocket._noteWriteCommitted();
       // Safety net: a BEGIN-level failure (e.g. closed handle) unwinds before
       // any member ran. No caller may hang on an uncompleted completer.
       for (final member in members) {
