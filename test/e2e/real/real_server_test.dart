@@ -308,6 +308,47 @@ void main() {
       expect(local!['name'], 'via-sse');
     });
 
+    test('real_realtime_update_fastpath', () async {
+      final store = uniqueStore();
+      final a = await RealHarness.create(store: store);
+      final b = await createSecondClient(store);
+      registerCleanup(a);
+      registerCleanup(b);
+
+      final id = generateRecordId();
+      await a.backend.createRecord(
+          id: id, store: store, dataJson: '{"name":"v1","qty":1}');
+      await a.engine.syncNow();
+      await b.engine.syncNow();
+      expect((await a.pocket.collection(store).get(id))!['qty'], 1);
+
+      // A connects its realtime feed; the connect doorbell only schedules a
+      // far-future pull-only cycle, so A's ONLY path to the update below is
+      // the realtime fast-path.
+      await a.backend.startRealtime();
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      final actionsBefore = a.engine.debugActions.length;
+
+      // B updates the EXISTING record through the real server.
+      await b.pocket.collection(store).patch(id, {'qty': 42});
+      await b.engine.syncNow();
+
+      // A's realtime fast-path applies the new field WITHOUT an explicit
+      // syncNow (and without any full cycle).
+      await Future<void>.delayed(const Duration(milliseconds: 2000));
+      final local = await a.pocket.collection(store).get(id);
+      expect(local, isNotNull);
+      expect(local!['qty'], 42,
+          reason: 'the update fast-path applied the new field');
+      expect(local['name'], 'v1', reason: 'untouched fields are preserved');
+
+      final actions = a.engine.debugActions.sublist(actionsBefore);
+      expect(actions, contains('fast:$store'),
+          reason: 'the update took the realtime fast path on A');
+      expect(actions, isNot(contains('cycle')),
+          reason: 'A never ran a full sync cycle');
+    });
+
     test('real_realtime_delete_emits_verified_hint', () async {
       final store = uniqueStore();
       final a = await RealHarness.create(store: store);
@@ -364,6 +405,63 @@ void main() {
       final local = await h.pocket.collection(store).get(id);
       expect(local, isNotNull, reason: 'sweep found the direct server create');
       expect(local!['name'], 'swept');
+    });
+
+    test('real_sweep_unhide', () async {
+      final store = uniqueStore();
+      final h = await RealHarness.create(store: store);
+      registerCleanup(h);
+
+      final id = generateRecordId();
+      final token = await h.tokens.currentToken();
+      final base = Uri.parse(testPBServer);
+      Future<void> create(Map<String, Object?> data) async {
+        final res = await h.tokens.transport.send(HttpRequest(
+          method: 'POST',
+          url: base.resolve('/api/collections/data/records'),
+          headers: {
+            'Authorization': 'Bearer ${token.value}',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'id': id, 'store': store, 'data': data}),
+        ));
+        expect(res.status, inInclusiveRange(200, 299));
+      }
+
+      Future<void> remove() async {
+        final res = await h.tokens.transport.send(HttpRequest(
+          method: 'DELETE',
+          url: base.resolve('/api/collections/data/records/$id'),
+          headers: {'Authorization': 'Bearer ${token.value}'},
+        ));
+        expect(res.status, 204, reason: 'PB answers 204 with an empty body');
+      }
+
+      await create({'name': 'swing'});
+      await h.engine.syncNow();
+      expect(await h.pocket.collection(store).get(id), isNotNull);
+
+      // Raw server-side delete (no SSE event): the forced sweep HIDES the
+      // row — retained but out of the default query scope.
+      await remove();
+      await h.engine.invalidateVisibility();
+      expect(await h.pocket.collection(store).get(id), isNotNull,
+          reason: 'hidden, never hard-deleted');
+      expect(await h.pocket.collection(store).query().all().count(), 0);
+
+      // The SAME id is re-created server-side (the record is visible again).
+      // A forced sweep re-sees it and the row leaves the hidden scope. (The
+      // live server stamps a fresh `updated`, so the pull may be the first
+      // re-seer; the pin is the hidden -> visible anti-entropy round-trip,
+      // which the create-only sweep test does not cover.)
+      await create({'name': 'swing-again'});
+      await h.engine.invalidateVisibility();
+      expect(await h.pocket.collection(store).query().all().count(), 1,
+          reason: 'the re-listed record is visible again after the sweep');
+      expect(
+          (await h.pocket.collection(store).get(id))!['name'], 'swing-again');
+      final sr = await h.pocket.outbox.readSyncRow(h.pocket.db, store, id);
+      expect(sr!.accessState, AccessState.visible);
     });
 
     test('real_archived_convention', () async {
