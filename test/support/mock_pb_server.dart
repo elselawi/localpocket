@@ -10,7 +10,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:localpocket/localpocket.dart' show generateRecordId;
+import 'package:localpocket/localpocket.dart'
+    show generateRecordId, recordIdPattern;
 import 'package:localpocket/sync.dart';
 
 class PbRecord {
@@ -20,6 +21,7 @@ class PbRecord {
   String updated;
   List<String> imgs;
   bool serverHidden; // list/view rule revoked
+  bool hideFromList; // list rule only: still GET-able by id (404 on view)
   bool banned; // rejects writes (for poison testing)
 
   PbRecord({
@@ -29,11 +31,16 @@ class PbRecord {
     required this.updated,
     this.imgs = const [],
     this.serverHidden = false,
+    this.hideFromList = false,
     this.banned = false,
   });
 
   Map<String, Object?> toJson() => {
         'id': id,
+        // Real PB echoes collectionId/collectionName on every record payload;
+        // normalization must drop these unknown top-level keys.
+        'collectionId': 'data',
+        'collectionName': 'data',
         'store': store,
         'data': data,
         'imgs': imgs,
@@ -87,6 +94,20 @@ class MockPbServer {
   /// and observe the client's recovery.
   Duration batchLatency = Duration.zero;
 
+  /// Mirrors real PB: a batch request with more than this many ops is
+  /// rejected with a 400 and the client binary-splits until every op lands
+  /// (the live pb.apexo.app server caps at 101).
+  int maxBatchRequests = 101;
+
+  /// Mirrors real PB's whole-request body-size cap for the batch endpoint
+  /// (32 MB default) — distinct from the per-record [maxDataBytes] ceiling.
+  int maxBatchBodyBytes = 33554432;
+
+  /// Mirrors real PB's `_superusers` login route: credentials matching
+  /// [superuserEmail]/[superuserPassword] mint a working bearer token.
+  String superuserEmail = 'admin@example.com';
+  String superuserPassword = 'secret';
+
   int listCalls = 0;
   int viewCalls = 0;
   int createCalls = 0;
@@ -97,9 +118,32 @@ class MockPbServer {
   final List<String> subscribeBodies = [];
   final List<String> batchBodies = [];
 
+  /// Bodies of batch requests that were ACCEPTED (answered 200) — lets an
+  /// e2e pin that post-split requests respect the whole-body byte cap.
+  final List<String> batchAcceptedBodies = [];
+
+  /// Batch items whose body carried a per-item `Authorization` header. Real
+  /// PB IGNORES inner auth headers — every item shares the outer request's
+  /// Authorization. A compliant adapter never sends them; the recorder lets
+  /// an e2e pin that.
+  final List<String> batchItemAuthHeaders = [];
+
   String? lastFilter;
   String? lastBody;
   String? lastAuthHeader;
+
+  /// Recorders for wire-contract assertions (PB pagination quirks).
+  String? lastSort;
+  int? lastPerPage;
+  int? lastPage;
+  int? lastTotalItems;
+  int? lastTotalPages;
+  String? lastFields;
+
+  /// Invoked after every list response with the current [listCalls] count —
+  /// lets a test commit a record (e.g. one with a backdated timestamp)
+  /// between the pages of a pull.
+  void Function(int listCalls)? onListCall;
 
   HttpServer? _server;
   final List<HttpResponse> _sseResponses = [];
@@ -166,6 +210,10 @@ class MockPbServer {
 
   /// Permission flip: the record vanishes from list AND view.
   void hideServerSide(String id) => records[id]!.serverHidden = true;
+
+  /// List-rule flip only: the record leaves every list response (so pulls
+  /// and sweeps never see it) but stays GET-able by id.
+  void hideFromListsOnly(String id) => records[id]!.hideFromList = true;
 
   /// Permission restored: visible again, keeping its (possibly stale) updated.
   void restoreServerSide(String id) => records[id]!.serverHidden = false;
@@ -239,6 +287,15 @@ class MockPbServer {
         }
         return;
       }
+      if (path == '/api/collections/_superusers/auth-with-password') {
+        if (method != 'POST') {
+          req.response.statusCode = 405;
+          await req.response.close();
+          return;
+        }
+        await _handleSuperuserLogin(req);
+        return;
+      }
       final recordMatch =
           RegExp(r'^/api/collections/data/records/([^/]+)$').firstMatch(path);
       if (recordMatch != null) {
@@ -247,6 +304,12 @@ class MockPbServer {
           await _handleView(req, id);
         } else if (method == 'PATCH') {
           await _handlePatch(req, id);
+        } else if (method == 'DELETE') {
+          // Real PB: DELETE answers 204 with an empty body — never parsed as
+          // JSON by the backend.
+          records.remove(id);
+          req.response.statusCode = 204;
+          await req.response.close();
         } else {
           req.response.statusCode = 405;
           await req.response.close();
@@ -256,8 +319,7 @@ class MockPbServer {
       final fileMatch =
           RegExp(r'^/api/files/data/([^/]+)/(.+)$').firstMatch(path);
       if (fileMatch != null && method == 'GET') {
-        await _handleFileDownload(req,
-            Uri.decodeComponent(fileMatch.group(1)!),
+        await _handleFileDownload(req, Uri.decodeComponent(fileMatch.group(1)!),
             Uri.decodeComponent(fileMatch.group(2)!));
         return;
       }
@@ -288,23 +350,59 @@ class MockPbServer {
 
   // ------------------------------------------------------------- list --
 
+  /// Real PB `_superusers/auth-with-password`: mints a bearer token when the
+  /// identity/password match [superuserEmail]/[superuserPassword], otherwise
+  /// a 400 "Failed to authenticate." (the AuthError mapping must not depend
+  /// on the body text).
+  Future<void> _handleSuperuserLogin(HttpRequest req) async {
+    final body =
+        jsonDecode(await utf8.decoder.bind(req).join()) as Map<String, Object?>;
+    if (body['identity'] == superuserEmail &&
+        body['password'] == superuserPassword) {
+      return _sendJson(req, 200, {
+        'token': 'superuser-token',
+        'record': {'id': 'su_001', 'email': superuserEmail},
+      });
+    }
+    return _sendJson(req, 400, {'message': 'Failed to authenticate.'});
+  }
+
   Future<void> _handleList(HttpRequest req) async {
     listCalls++;
     if (!_authed(req)) return _sendJson(req, 401, {'message': 'Unauthorized'});
     final q = req.uri.queryParameters;
     lastFilter = q['filter'];
+    lastSort = q['sort'] ?? 'updated,id';
     final filter = q['filter'] ?? '';
     final sort = q['sort'] ?? 'updated,id';
-    final perPage = int.tryParse(q['perPage'] ?? '200') ?? 200;
+    // Real PB pagination quirks: perPage defaults to 30 and is capped at 500
+    // (anything above is a 400); `page` beyond the last page is an EMPTY
+    // items array, never an error; `skipTotal=1` answers totalItems and
+    // totalPages as -1 (a naive client looping on totalPages would loop
+    // forever).
+    final perPage = int.tryParse(q['perPage'] ?? '') ?? 30;
+    final page = int.tryParse(q['page'] ?? '') ?? 1;
+    final skipTotal = q['skipTotal'] == '1';
     final fields = q['fields'];
+    lastPerPage = perPage;
+    lastPage = page;
+    if (perPage < 1 || perPage > 500) {
+      return _sendJson(req, 400, {
+        'message':
+            'Invalid perPage value: $perPage (must be between 1 and 500).'
+      });
+    }
 
     var list = records.values
-        .where((r) => !r.serverHidden && _matchesFilter(r, filter))
+        .where((r) =>
+            !r.serverHidden && !r.hideFromList && _matchesFilter(r, filter))
         .toList();
 
     if (sort == 'id') {
       list.sort((a, b) => a.id.compareTo(b.id));
     } else {
+      // Real PB orders by `updated,id` — the explicit id tiebreak is what
+      // makes the sort stable for same-millisecond timestamps.
       list.sort((a, b) {
         final u = a.updated.compareTo(b.updated);
         if (u != 0) return u;
@@ -312,17 +410,25 @@ class MockPbServer {
       });
     }
 
-    final page = list.take(perPage).toList();
+    final paged = page < 1
+        ? <PbRecord>[]
+        : list.skip((page - 1) * perPage).take(perPage).toList();
     final items = fields == null
-        ? page.map((r) => r.toJson()).toList()
-        : page.map((r) => _project(r, fields)).toList();
+        ? paged.map((r) => r.toJson()).toList()
+        : paged.map((r) => _project(r, fields)).toList();
+    lastTotalItems = skipTotal ? -1 : list.length;
+    lastTotalPages = skipTotal ? -1 : (list.length / perPage).ceil();
+    lastFields = fields;
     await _sendJson(req, 200, {
-      'page': 1,
+      'page': page,
       'perPage': perPage,
-      'totalItems': list.length,
-      'totalPages': (list.length / perPage).ceil(),
+      'totalItems': lastTotalItems,
+      'totalPages': lastTotalPages,
       'items': items,
     });
+    // Post-response hook: lets a test commit a record (e.g. one with a
+    // backdated timestamp) between the pages of a pull.
+    onListCall?.call(listCalls);
   }
 
   Map<String, Object?> _project(PbRecord r, String fields) {
@@ -367,17 +473,32 @@ class MockPbServer {
     return parts;
   }
 
-  final _predRe =
-      RegExp(r'''^([A-Za-z_][A-Za-z0-9_]*)~?([>=<]+)\s*'((?:[^'\\]|\\.)*)'$''');
+  /// Matches `field='v'`, `field>='v'`, `field>'v'` AND `field~'v'` (the
+  /// tilde and the comparison op are captured separately — the op is empty
+  /// for `~`).
+  final _predRe = RegExp(
+      r'''^([A-Za-z_][A-Za-z0-9_]*)(~?)([>=<]*)\s*'((?:[^'\\]|\\.)*)'$''');
 
   bool _evalPredicate(PbRecord r, String pred) {
     final m = _predRe.firstMatch(pred);
     if (m == null) return true; // unknown syntax: be permissive
     final field = m.group(1)!;
-    final op = m.group(2)!;
-    final value = _unescape(m.group(3)!);
+    final tilde = m.group(2)!;
+    final op = m.group(3)!;
+    final value = _unescape(m.group(4)!);
     final actual = _fieldValue(r, field);
     if (actual == null) return false;
+    if (tilde == '~') {
+      // Real PB's `~` auto-wraps in %...% ONLY when the value carries no
+      // `%` already; a literal `%` is a LIKE wildcard. The sweep's bucket
+      // probe (`id~'a%'`) is a PREFIX match precisely because PB does NOT
+      // re-wrap an already-suffixed value.
+      if (value.contains('%')) {
+        final pattern = value.split('%').map(RegExp.escape).join('.*');
+        return RegExp('^$pattern\$').hasMatch(actual);
+      }
+      return actual.contains(value);
+    }
     switch (op) {
       case '=':
         return actual == value;
@@ -385,11 +506,6 @@ class MockPbServer {
         return actual.compareTo(value) >= 0;
       case '>':
         return actual.compareTo(value) > 0;
-      case '~':
-        if (value.endsWith('%')) {
-          return actual.startsWith(value.substring(0, value.length - 1));
-        }
-        return actual.contains(value);
     }
     return false;
   }
@@ -406,15 +522,16 @@ class MockPbServer {
     return null;
   }
 
-  /// Decodes one escape: `\\` → `\` and `\'` → `'` (and `\x` → `x`), in a
-  /// single left-to-right pass so escaped backslashes never re-interpret the
-  /// following escape.
+  /// Mirrors real PB's filter escaping (verified live): `\` is an escape ONLY
+  /// before `'` (`\'` → `'`); a backslash before any other character is a
+  /// LITERAL backslash — `\\` stays two backslashes and `\x` stays `\x`.
+  /// Single left-to-right pass.
   String _unescape(String s) {
     final b = StringBuffer();
     for (var i = 0; i < s.length; i++) {
       final c = s[i];
-      if (c == '\\' && i + 1 < s.length) {
-        b.write(s[i + 1]);
+      if (c == '\\' && i + 1 < s.length && s[i + 1] == "'") {
+        b.write("'");
         i++;
       } else {
         b.write(c);
@@ -456,11 +573,26 @@ class MockPbServer {
     final body =
         jsonDecode(await utf8.decoder.bind(req).join()) as Map<String, Object?>;
     lastBody = jsonEncode(body);
-    final id = body['id'] as String? ?? generateRecordId();
     final store = body['store'] as String? ?? '';
+    final id = body['id'] as String? ?? generateRecordId();
+    // Real PB enforces the record-id shape ([a-z0-9]{15}) regardless of any
+    // declared pattern: uppercase / wrong-length ids are a 400.
+    if (!recordIdPattern.hasMatch(id)) {
+      return _sendJson(req, 400, {
+        'message': 'Failed to create record.',
+        'data': {
+          'id': {
+            'code': 'validation_invalid_pk',
+            'message': 'The record primary key must be [a-z0-9] and 15 chars.',
+          }
+        },
+      });
+    }
     final data = body['data'] is Map
         ? Map<String, Object?>.from(body['data'] as Map)
         : <String, Object?>{};
+    // PB server-managed timestamps: a client-sent `updated` (top-level in the
+    // body) is ignored — the server stamps its own on write.
     if (_jsonSize(data) > maxDataBytes) {
       return _sendJson(req, 400, {
         'message': 'Payload too large',
@@ -517,8 +649,8 @@ class MockPbServer {
     // APPEND server-renamed files, `imgs-` removes by name, `data` merges.
     final ct = req.headers.contentType;
     if (ct?.mimeType == 'multipart/form-data') {
-      final raw =
-          await req.fold<List<int>>(<int>[], (acc, chunk) => acc..addAll(chunk));
+      final raw = await req
+          .fold<List<int>>(<int>[], (acc, chunk) => acc..addAll(chunk));
       // Derive the boundary from the BODY's first line (`--<boundary>\r\n`):
       // dart:io's Content-Type parameter parsing can mangle the boundary
       // value, so the actual delimiter used in the body is authoritative.
@@ -526,8 +658,7 @@ class MockPbServer {
       final firstLine = firstCrlf < 0
           ? ''
           : utf8.decode(raw.sublist(0, firstCrlf), allowMalformed: true);
-      final boundary =
-          firstLine.startsWith('--') ? firstLine.substring(2) : '';
+      final boundary = firstLine.startsWith('--') ? firstLine.substring(2) : '';
       final parts = _parseMultipart(raw, boundary);
       for (final part in parts) {
         if (part.name == 'imgs-' && part.filename == null) {
@@ -558,6 +689,8 @@ class MockPbServer {
     final data = body['data'] is Map
         ? Map<String, Object?>.from(body['data'] as Map)
         : r.data;
+    // PB server-managed timestamps: a client-sent `updated` is ignored and
+    // the server stamps its own below.
     if (_jsonSize(data) > maxDataBytes) {
       return _sendJson(req, 400, {
         'message': 'Payload too large',
@@ -580,8 +713,8 @@ class MockPbServer {
     }
     _recordToken(req);
     if (!_authed(req)) return _sendJson(req, 401, {'message': 'Unauthorized'});
-    final body =
-        jsonDecode(await utf8.decoder.bind(req).join()) as Map<String, Object?>;
+    final rawBody = await utf8.decoder.bind(req).join();
+    final body = jsonDecode(rawBody) as Map<String, Object?>;
     lastBody = jsonEncode(body);
     batchBodies.add(jsonEncode(body));
     if (!batchEnabled) {
@@ -591,6 +724,20 @@ class MockPbServer {
     if (requests is! List || requests.isEmpty) {
       return _sendJson(req, 200, {
         'data': {'results': <Object?>[]}
+      });
+    }
+    // Real PB batch ceilings: the request COUNT and the whole-request BODY
+    // SIZE are server settings — exceeding either is a 400 (the per-record
+    // data ceiling is a separate check below).
+    if (requests.length > maxBatchRequests) {
+      return _sendJson(req, 400, {
+        'message':
+            'The request contains more than $maxBatchRequests batch requests.'
+      });
+    }
+    if (utf8.encode(rawBody).length > maxBatchBodyBytes) {
+      return _sendJson(req, 400, {
+        'message': 'The request body size exceeds the maximum allowed size.'
       });
     }
 
@@ -606,6 +753,10 @@ class MockPbServer {
           bodyMap is! Map) {
         return _sendJson(req, 400, {'message': 'Unsupported batch request.'});
       }
+      if (r.containsKey('headers') || r.containsKey('Authorization')) {
+        // Real PB silently drops these; we just RECORD the violation.
+        batchItemAuthHeaders.add(jsonEncode(r));
+      }
       final dataJson = jsonEncode(bodyMap['data']);
       if (poisonEnabled && dataJson.contains('"poison"')) {
         return _sendJson(req, 400, {
@@ -618,6 +769,21 @@ class MockPbServer {
       final data = bodyMap['data'] is Map
           ? Map<String, Object?>.from(bodyMap['data'] as Map)
           : <String, Object?>{};
+      // Real PB enforces the record-id shape on batch items too: one bad id
+      // fails the WHOLE request transactionally (validated up front).
+      final reqId = bodyMap['id'];
+      if (reqId is! String || !recordIdPattern.hasMatch(reqId)) {
+        return _sendJson(req, 400, {
+          'message': 'One or more requests failed.',
+          'data': {
+            'id': {
+              'code': 'validation_invalid_pk',
+              'message':
+                  'The record primary key must be [a-z0-9] and 15 chars.',
+            }
+          },
+        });
+      }
       if (_jsonSize(data) > maxDataBytes) {
         return _sendJson(req, 400, {'message': 'Payload too large'});
       }
@@ -660,6 +826,7 @@ class MockPbServer {
       for (final op in ops)
         {'body': records[op['id']]!.toJson(), 'status': 200},
     ];
+    batchAcceptedBodies.add(rawBody);
     // Real PB batch response: a top-level array of {body, status}.
     await _sendJson(req, 200, results);
   }
@@ -736,14 +903,10 @@ class MockPbServer {
     if (pos < 0) return parts;
     pos += delim.length;
     while (true) {
-      if (pos + 1 < body.length &&
-          body[pos] == 0x2d &&
-          body[pos + 1] == 0x2d) {
+      if (pos + 1 < body.length && body[pos] == 0x2d && body[pos + 1] == 0x2d) {
         break; // final `--boundary--`
       }
-      if (pos + 1 < body.length &&
-          body[pos] == 0x0d &&
-          body[pos + 1] == 0x0a) {
+      if (pos + 1 < body.length && body[pos] == 0x0d && body[pos + 1] == 0x0a) {
         pos += 2;
       } else if (pos < body.length && body[pos] == 0x0a) {
         pos += 1;

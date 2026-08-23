@@ -84,13 +84,19 @@ abstract class WireServer {
   /// mock; a unique per-run store on the live server).
   String get store;
 
+  /// A sibling store on the SAME server, for multi-store scenarios
+  /// a fixed name on the mock, a unique per-run store on the live
+  /// server that [close] also cleans up.
+  String get siblingStore;
+
   /// Opens the server (the mock binds its HTTP port; the live server is a
   /// no-op since auth is lazy).
   Future<void> start();
 
   /// Builds a fresh client bound to this server. [storeBuilders] lets custom
   /// schemas be (re)named to the server's store. Defaults to the canonical
-  /// widgets schema.
+  /// widgets schema. [maxBatch] overrides the backend's advertised batch
+  /// ceiling (scenarios that intentionally exceed a server's request cap).
   Future<WireClient> createClient({
     String? path,
     bool autoStart = true,
@@ -101,6 +107,7 @@ abstract class WireServer {
     int maxDocBytes = 1900000,
     String? identity,
     List<String>? storesList,
+    int? maxBatch,
   });
 
   /// Builds a client whose credential provider is supplied by the test
@@ -151,6 +158,9 @@ class MockWireServer extends WireServer {
   String get store => 'widgets';
 
   @override
+  String get siblingStore => 'widgets_b';
+
+  @override
   Future<void> start() async {
     if (!_started) {
       await mock.start();
@@ -169,6 +179,7 @@ class MockWireServer extends WireServer {
     int maxDocBytes = 1900000,
     String? identity,
     List<String>? storesList,
+    int? maxBatch,
   }) async {
     await start();
     final h = await PbEngineHarness.create(
@@ -182,6 +193,7 @@ class MockWireServer extends WireServer {
       fieldCipher: fieldCipher,
       maxDocBytes: maxDocBytes,
       identity: identity,
+      maxBatch: maxBatch,
     );
     _clientClosers.add(h.close);
     return WireClient(
@@ -286,6 +298,9 @@ class RealWireServer extends WireServer {
   @override
   String get store => _store;
 
+  @override
+  String get siblingStore => '${_store}_b';
+
   /// The live credential provider (for live-only scenarios that inspect the
   /// superuser login/refresh handshake directly).
   RealPbTokenProvider get tokens => _tokens;
@@ -311,6 +326,7 @@ class RealWireServer extends WireServer {
     int maxDocBytes = 1900000,
     String? identity,
     List<String>? storesList,
+    int? maxBatch,
   }) async {
     final h = await RealHarness.create(
       store: _store,
@@ -322,6 +338,7 @@ class RealWireServer extends WireServer {
       fieldCipher: fieldCipher,
       identity: identity,
       storesList: storesList,
+      maxBatch: maxBatch,
     );
     _clientClosers.add(h.close);
     return WireClient(
@@ -442,6 +459,9 @@ class RealWireServer extends WireServer {
     _closeHooks.clear();
     try {
       await cleanupStore(_tokens, _store);
+    } catch (_) {}
+    try {
+      await cleanupStore(_tokens, siblingStore);
     } catch (_) {}
     _tokens.transport.close();
   }

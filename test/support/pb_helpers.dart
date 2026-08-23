@@ -70,6 +70,7 @@ class PbEngineHarness {
     int maxDocBytes = 1900000,
     BlobStore? blobStore,
     FieldCipher? fieldCipher,
+    int? maxBatch,
   }) async {
     final t = tokens ?? TestTokenProvider();
     final backend = PocketBaseBackend(
@@ -77,6 +78,7 @@ class PbEngineHarness {
       tokenProvider: t,
       stores: storesList ?? const ['widgets'],
       identity: identity,
+      maxBatch: maxBatch ?? 25,
     );
     final pocket = await openPocket(
         stores: stores ?? [widgetsSchema()],

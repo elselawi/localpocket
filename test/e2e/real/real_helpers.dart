@@ -108,6 +108,7 @@ class RealHarness {
     FieldCipher? fieldCipher,
     String? identity,
     List<String>? storesList,
+    int? maxBatch,
   }) async {
     final tokens = RealPbTokenProvider(
       baseUrl: Uri.parse(testPBServer),
@@ -120,6 +121,7 @@ class RealHarness {
       stores: storesList ?? [store],
       transport: tokens.transport,
       identity: identity,
+      maxBatch: maxBatch ?? 200,
     );
     final pocket = await openPocket(
       stores: stores ?? [widgetsSchema(name: store)],
