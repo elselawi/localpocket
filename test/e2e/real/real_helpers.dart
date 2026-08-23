@@ -66,14 +66,13 @@ class RealPbTokenProvider implements TokenProvider {
   @override
   Future<Token> refreshToken(Token current) async {
     refreshes++;
+    // Live-verified: PB's `auth-refresh` requires the token in the
+    // Authorization HEADER (RequireSameCollectionContextAuth); the body copy
+    // is redundant and is NOT sent (see pb_quirk_auth_test.dart #37).
     final res = await transport.send(HttpRequest(
       method: 'POST',
       url: baseUrl.resolve('/api/collections/_superusers/auth-refresh'),
-      headers: {
-        'Authorization': 'Bearer ${current.value}',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({'token': current.value}),
+      headers: {'Authorization': 'Bearer ${current.value}'},
     ));
     if (res.status == 200) {
       final body = jsonDecode(res.body) as Map<String, Object?>;
