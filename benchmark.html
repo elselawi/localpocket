@@ -662,6 +662,52 @@
             color: #e6dcc8;
         }
 
+        /* ---------- Positioning note ---------- */
+        .position-note {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-strong);
+            border-left: 3px solid var(--accent);
+            border-radius: var(--radius);
+            padding: 1.4rem clamp(1.4rem, 4vw, 2.2rem);
+            margin-bottom: 1.6rem;
+            box-shadow: var(--shadow-card);
+        }
+
+        .position-note .p-icon {
+            flex: 0 0 auto;
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: var(--accent-dim);
+            display: grid;
+            place-items: center;
+            font-size: 1.15rem;
+            color: var(--accent-strong);
+        }
+
+        .position-note h3 {
+            font-size: 1.05rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--text);
+            margin: 0;
+        }
+
+        .position-note p {
+            margin: 0.55rem 0 0;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            line-height: 1.7;
+        }
+
+        .position-note p strong {
+            color: var(--text);
+            font-weight: 600;
+        }
+
         /* ---------- Loading / error ---------- */
         #loading {
             display: flex;
@@ -765,6 +811,23 @@
 
     <main class="wrap">
 
+        <div class="position-note" id="positionNote">
+            <div class="p-icon">⚖</div>
+            <div>
+                <h3>How to read these numbers</h3>
+                <p>
+                    LocalPocket does not aim to be the <em>fastest</em> engine on this chart.
+                    It is a local-first database, and every write also persists a durable
+                    outbox intent and a sync-state row alongside the domain row — the other
+                    engines here write only the domain row, so their write numbers measure a
+                    smaller job. Our goal is to stay <strong>fast and optimized for the
+                        feature set we provide</strong>: SQLite-parity reads, indexed queries,
+                    transactions, concurrent access, and local-first sync — without
+                    sacrificing correctness or durability to chase a rank.
+                </p>
+            </div>
+        </div>
+
         <div id="loading">
             <div class="spinner"></div> Loading baseline results…
         </div>
@@ -829,7 +892,7 @@
             "use strict";
 
             const BASELINE_FILE =
-                "benchmark/baseline/localpocket_comparative_2026-08-23_090511.json";
+                "benchmark/baseline/localpocket_comparative_2026-08-23_191835.json";
 
             /* ---- peer presentation ---- */
             const PEERS = {
