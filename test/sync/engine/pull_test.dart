@@ -596,8 +596,8 @@ void main() {
       h.engine.handleHint(BackendHint('ghost-store', BackendHintKind.changed,
           remoteRec(generateRecordId(), store: 'ghost-store')));
       // A record-less hint for the same wrong store is dropped too.
-      h.engine
-          .handleHint(const BackendHint('ghost-store', BackendHintKind.deleted));
+      h.engine.handleHint(
+          const BackendHint('ghost-store', BackendHintKind.deleted));
       await Future<void>.delayed(Duration.zero);
       expect(h.engine.debugActions, isNot(contains('fast:ghost-store')),
           reason: 'a wrong-store changed hint never fast-paths');

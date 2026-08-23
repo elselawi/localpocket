@@ -209,7 +209,8 @@ void main() {
           (await h.pocket.collection('widgets').get(id))!['name'], 'in-flight');
     });
 
-    test('a wrong-store hint is dropped at the door; later realtime applies work',
+    test(
+        'a wrong-store hint is dropped at the door; later realtime applies work',
         () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);

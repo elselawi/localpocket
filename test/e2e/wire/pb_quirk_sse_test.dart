@@ -222,13 +222,11 @@ void main() {
       // an unregistered store (pulling one throws an uncaught StateError
       // that aborts the cycle and wedges the engine in `pulling`).
       final otherId = mock.seed(store: 'other', data: {'name': 'x'});
-      mock.pushEvent(
-          record: mock.records[otherId]!.toJson(), action: 'create');
+      mock.pushEvent(record: mock.records[otherId]!.toJson(), action: 'create');
       await Future<void>.delayed(const Duration(milliseconds: 400));
 
       expect(mock.listCalls, listCallsAfterConnect,
-          reason:
-              'no pull was scheduled for the unmanaged store (the old code '
+          reason: 'no pull was scheduled for the unmanaged store (the old code '
               'issued a list request for it and crashed the cycle)');
       expect(a.engine.state, isNot(SyncEngineState.pulling),
           reason: 'the engine never wedged in a dead pull state');

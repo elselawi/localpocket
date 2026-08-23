@@ -233,8 +233,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 150));
       await sub.cancel();
       expect(hints.any((h) => h.store == 'ghosts'), isFalse,
-          reason:
-              'the remote collection carries every store, but events for '
+          reason: 'the remote collection carries every store, but events for '
               'stores this backend does not manage are dropped — relaying '
               'them made the engine schedule a pull cycle for an '
               'unregistered store, which crashed the whole cycle '
