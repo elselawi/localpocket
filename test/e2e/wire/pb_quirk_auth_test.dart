@@ -100,11 +100,10 @@ void main() {
       // non-2xx to a typed `AuthError` (never parsing the body text) parks
       // the engine in `authRequired` — message-independent end-to-end.
       final loginTokens = _LoginProbeTokens(s);
-      final a = await s.createClientWithTokenProvider(
-          tokens: () => loginTokens);
+      final a =
+          await s.createClientWithTokenProvider(tokens: () => loginTokens);
       expect(a.engine.state, SyncEngineState.authRequired,
-          reason:
-              'a failed login surfaces as a typed AuthError, parked — the '
+          reason: 'a failed login surfaces as a typed AuthError, parked — the '
               'engine never inspects the message text');
 
       // Local-first edits keep working while unauthorized.
@@ -228,8 +227,7 @@ void main() {
       expect(ra2.hadError, isFalse);
       expect(rb2.hadError, isFalse);
       expect(shared.refreshCalls, 4,
-          reason:
-              'one 401-driven refresh per client — the burst never herds');
+          reason: 'one 401-driven refresh per client — the burst never herds');
       // The last request of each retried cycle carried the ROTATED token
       // (the pull route only sets `lastAuthHeader` — `receivedTokens` records
       // only write/realtime routes).
@@ -269,8 +267,8 @@ class _LoginProbeTokens implements TokenProvider {
       final base = s is MockWireServer
           ? Uri.parse((s as MockWireServer).mock.baseUrl.toString())
           : Uri.parse(testPBServer);
-      final req = await client.postUrl(base
-          .resolve('/api/collections/_superusers/auth-with-password'));
+      final req = await client.postUrl(
+          base.resolve('/api/collections/_superusers/auth-with-password'));
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode(
           {'identity': 'nobody@example.com', 'password': 'wrong-password'}));

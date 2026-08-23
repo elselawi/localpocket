@@ -861,9 +861,9 @@ class MockPbServer {
     // 36-char clientId in `data` (older servers used a bare PB_CONNECT line).
     // Every (re)connect mints a FRESH clientId — the server drops all prior
     // subscriptions with the old connection, so the client MUST re-subscribe.
-    final clientId =
-        List.generate(36, (_) => 'abcdefghijklmnopqrstuvwxyz012345'[_realtimeSeq % 36])
-            .join();
+    final clientId = List.generate(
+            36, (_) => 'abcdefghijklmnopqrstuvwxyz012345'[_realtimeSeq % 36])
+        .join();
     _realtimeSeq++;
     res.write(
         'id:$clientId\nevent:PB_CONNECT\ndata:{"clientId":"$clientId"}\n\n');

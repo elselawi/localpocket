@@ -84,11 +84,11 @@ void main() {
       final body = <int>[];
       void part(String name, {String? filename, List<int>? bytes}) {
         body.addAll(utf8.encode('--$boundary\r\n'));
-        body.addAll(utf8.encode(
-            'Content-Disposition: form-data; name="$name"'
+        body.addAll(utf8.encode('Content-Disposition: form-data; name="$name"'
             '${filename != null ? '; filename="$filename"' : ''}\r\n'));
         if (bytes != null) {
-          body.addAll(utf8.encode('Content-Type: application/octet-stream\r\n'));
+          body.addAll(
+              utf8.encode('Content-Type: application/octet-stream\r\n'));
         }
         body.addAll(utf8.encode('\r\n'));
         if (bytes != null) {
@@ -111,7 +111,8 @@ void main() {
       final text = await res.transform(utf8.decoder).join();
       Map<String, Object?>? decoded;
       try {
-        decoded = text.isEmpty ? null : jsonDecode(text) as Map<String, Object?>;
+        decoded =
+            text.isEmpty ? null : jsonDecode(text) as Map<String, Object?>;
       } catch (_) {
         decoded = null;
       }
@@ -236,8 +237,8 @@ void main() {
 
       // NEGATIVE: removing by the ORIGINAL client filename is a no-op — the
       // server answers 200 with `imgs` unchanged and the file still there.
-      final kept = await a.backend.updateRecordFiles(
-          id: id, removeNames: ['orig.bin']);
+      final kept =
+          await a.backend.updateRecordFiles(id: id, removeNames: ['orig.bin']);
       expect(kept.imgs, [serverName],
           reason: 'a wrong-name removal is a silent no-op (never a 400, '
               'never a partial wipe)');
@@ -280,8 +281,7 @@ void main() {
       // Whole-field wipe: ONE imgs- carrying every name at once.
       final wiped =
           await a.backend.updateRecordFiles(id: id, removeNames: names);
-      expect(wiped.imgs, isEmpty,
-          reason: 'the wipe response carries imgs: []');
+      expect(wiped.imgs, isEmpty, reason: 'the wipe response carries imgs: []');
       expect(await remoteImgs(s, id), isEmpty,
           reason: 'the next GET confirms the field is empty');
       if (mock != null) {
@@ -298,7 +298,8 @@ void main() {
         'rely on the pull)', (s) async {
       final a = await fileClient(s);
       final id = await s.createRecord(s.store, {'name': 'f'});
-      final updatedBefore = (await s.readRecord(s.store, id))!['updated'] as String;
+      final updatedBefore =
+          (await s.readRecord(s.store, id))!['updated'] as String;
 
       final bytes = List<int>.filled(128, 5);
       final uploaded = await a.backend.updateRecordFilesStream(
@@ -318,13 +319,12 @@ void main() {
               'EMPIRICAL PIN: a file upload bumps the server-managed updated '
               '(the mock re-stamps it too — a deliberate mirror that agrees)');
 
-      final cleared = await a.backend.updateRecordFiles(
-          id: id, removeNames: uploaded.imgs.cast<String>());
+      final cleared = await a.backend
+          .updateRecordFiles(id: id, removeNames: uploaded.imgs.cast<String>());
       final updatedAfterRemove =
           (await s.readRecord(s.store, id))!['updated'] as String;
       expect(updatedAfterRemove, isNot(updatedAfterUpload),
-          reason:
-              'EMPIRICAL PIN: a file removal also bumps updated — a pull '
+          reason: 'EMPIRICAL PIN: a file removal also bumps updated — a pull '
               're-delivers the record, so the file lane can rely on it');
       expect(cleared.imgs, isEmpty);
     });
@@ -350,8 +350,8 @@ void main() {
       // With the token in the Authorization header the exact bytes come back
       // on both backends (live: the superuser bearer; mock: any accepted).
       final token = s is RealWireServer ? await s.tokens.currentToken() : null;
-      final (status, body) = await rawDownload(s, id, serverName,
-          token: token?.value);
+      final (status, body) =
+          await rawDownload(s, id, serverName, token: token?.value);
       expect(status, 200, reason: 'the canonical download path answers 200');
       expect(body, bytes, reason: 'the exact uploaded bytes come back');
 
@@ -370,8 +370,7 @@ void main() {
       }
     });
 
-    liveOnly(
-        'the LIVE data collection\'s file access: probe token-less reads',
+    liveOnly('the LIVE data collection\'s file access: probe token-less reads',
         (s) async {
       final a = await fileClient(s);
       final id = await s.createRecord(s.store, {'name': 'pub'});
