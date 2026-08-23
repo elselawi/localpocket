@@ -2,6 +2,12 @@
 /// and PocketBase-compatible timestamp helpers.
 library;
 
+/// PocketBase's hard per-page ceiling: a list `perPage` above this is
+/// rejected with a 400 (and an absent `perPage` defaults to 30). The engine
+/// clamps every page size to this so a configured `maxPage` above the cap
+/// still converges.
+const int pbMaxPage = 500;
+
 // ---------------------------------------------------------------------------
 // Typed sync errors. The engine maps these to retry / dead-letter
 // decisions; they are never strings.

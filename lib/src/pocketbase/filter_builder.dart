@@ -9,16 +9,15 @@
 /// ```
 library;
 
-/// Single-quote a string literal for a PB filter, escaping embedded quotes
-/// and backslashes.
+/// Single-quote a string literal for a PB filter, escaping embedded quotes.
 ///
-/// Backslashes are escaped FIRST (`\` → `\\`) so a value containing a
-/// backslash immediately before a quote (`a\'b`) cannot smuggle an unescaped
-/// quote through the escaping pass and terminate the literal early. Both
-/// escapes decode back to the original value under a parser that treats `\`
-/// as the escape character.
-String quote(String s) =>
-    "'${s.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'";
+/// Real PocketBase treats `\` as an escape ONLY before `'`: `\'` → `'`, and
+/// a backslash before any other character is a LITERAL backslash — `\\` stays
+/// two backslashes and `\x` stays `\x` (verified live against pb.apexo.app).
+/// So only quotes are escaped and backslashes pass through verbatim. That is
+/// injection-safe: every `'` in the value is escaped, so no embedded quote —
+/// even one preceded by a backslash — can ever terminate the literal early.
+String quote(String s) => "'${s.replaceAll("'", "\\'")}'";
 
 /// `(store='{store}' && updated>='{fromUpdated}')` — the delta-pull filter.
 String pullFilter(String store, String fromUpdated) =>

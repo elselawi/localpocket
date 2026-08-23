@@ -88,13 +88,16 @@ class Sweeper {
     final remoteSeen = <String>{};
     var fetched = 0;
     String? cursorId;
+    // PB hard-caps perPage at 500; the same clamped size drives the request
+    // and the page-completion check below.
+    final pageSize = config.maxPage.clamp(1, pbMaxPage).toInt();
 
     while (true) {
       final page = await backend.listChanges(
         store,
         idPrefix: prefix,
         fromId: cursorId,
-        perPage: config.maxPage,
+        perPage: pageSize,
       );
       if (page.isEmpty) break;
       for (final r in page) {
@@ -118,7 +121,7 @@ class Sweeper {
         fetched += needsFetch.length;
       }
       cursorId = page.last.id;
-      if (page.length < config.maxPage) break;
+      if (page.length < pageSize) break;
     }
 
     // Rows in this bucket that the remote no longer lists are hidden — never

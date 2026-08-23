@@ -43,20 +43,21 @@ void main() {
       expect(quote('_x'), "'_x'");
     });
 
-    test('quote escapes backslashes before quotes (no early termination)', () {
-      // A literal backslash is escaped so a backslash-then-quote cannot
-      // smuggle an unescaped quote out of the literal.
-      expect(quote(r'back\slash'), r"'back\\slash'");
+    test('quote escapes quotes; backslashes pass through (real PB semantics)',
+        () {
+      // Real PB treats `\` as an escape ONLY before `'` (verified live):
+      // `\'` -> `'`, and a backslash before any other char is LITERAL.
+      expect(quote(r'back\slash'), r"'back\slash'");
       // backslash immediately before a quote: the quote is still escaped.
-      expect(quote(r"a\'b"), r"'a\\\'b'");
-      expect(quote(r"end\\"), r"'end\\\\'");
+      expect(quote(r"a\'b"), r"'a\\'b'");
+      expect(quote(r"end\\"), r"'end\\'");
       expect(quote(r"'lead"), r"'\'lead'");
-      // Round-trip: a single-pass unescape restores the original value.
-      String unescape(String s) {
+      // Round-trip under PB's rule (`\'` -> `'`, other backslashes literal).
+      String pbUnescape(String s) {
         final b = StringBuffer();
         for (var i = 0; i < s.length; i++) {
-          if (s[i] == '\\' && i + 1 < s.length) {
-            b.write(s[i + 1]);
+          if (s[i] == '\\' && i + 1 < s.length && s[i + 1] == "'") {
+            b.write("'");
             i++;
           } else {
             b.write(s[i]);
@@ -66,8 +67,8 @@ void main() {
       }
 
       for (final v in [r'back\slash', r"a\'b", r'end\\', r"'lead", r'a\\b']) {
-        expect(unescape(quote(v).substring(1, quote(v).length - 1)), v,
-            reason: '"$v" round-trips');
+        expect(pbUnescape(quote(v).substring(1, quote(v).length - 1)), v,
+            reason: '"$v" round-trips under real PB escaping');
       }
     });
 
@@ -100,8 +101,7 @@ void main() {
       // Ids / buckets with filter metacharacters stay inside one literal.
       for (final v in ["a'b", 'a&&b', 'a)b', 'a)b||c', r'a\b', ' a ']) {
         final sweep = sweepFilter('widgets', v);
-        expect(sweep,
-            contains("'${v.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}%'"),
+        expect(sweep, contains("'${v.replaceAll("'", "\\'")}%'"),
             reason: '"$v" stays inside the literal');
       }
     });

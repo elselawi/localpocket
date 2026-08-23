@@ -75,13 +75,16 @@ void main() {
       final last3 = all.sublist(3).toList();
       final first3 = all.sublist(0, 3).toList();
       // The server serves the newest page first, then the older one: the pull
-      // cursor advances past the earlier records.
+      // cursor advances past the earlier records, so the rewind window never
+      // re-applies them (a cursor-based `<=` skip is the pull's idempotency
+      // AND purge-finality authority — never the rewind).
       h.mock.script('listChanges', [MockReturn(last3), MockReturn(first3)]);
       await h.engine.syncNow();
       expect(await h.pocket.collection('widgets').query().all().count(), 3,
-          reason: 'newest page applied; older records missed');
+          reason: 'newest page applied; older records missed by the pull');
 
-      // The sweep heals the miss: never-applied rows get a targeted fetch.
+      // The anti-entropy sweep heals the miss: never-applied rows get a
+      // targeted fetch regardless of their position relative to the cursor.
       await h.engine.sweeper.sweepBucket('widgets', 0);
       expect(await h.pocket.collection('widgets').query().all().count(), 6);
       for (final id in ids) {

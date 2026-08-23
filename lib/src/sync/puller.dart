@@ -87,13 +87,17 @@ class Puller {
     var quarantined = 0;
     var conflicts = 0;
     var hitPageLimit = false;
+    // PB hard-caps perPage at 500 (above is a 400, absent defaults to 30).
+    // The SAME clamped size must drive both the request and the page-completion
+    // check below, or a maxPage above the cap would prematurely terminate.
+    final pageSize = config.maxPage.clamp(1, pbMaxPage).toInt();
 
     while (true) {
       final page = await backend.listChanges(
         store,
         fromUpdated: from,
         fromId: fromId,
-        perPage: config.maxPage,
+        perPage: pageSize,
       );
       if (page.isEmpty) break;
       pocket.perf.pullPages++;
@@ -119,7 +123,13 @@ class Puller {
             final written = <String>{};
             for (final item in normalizedBatch) {
               final r = item.remote;
-              // Idempotent re-delivery from the rewind window.
+              // Idempotent re-delivery from the rewind window. The cursor
+              // bound is deliberately the skip authority: a record at/below
+              // the cursor was already applied (or deliberately purged — see
+              // the local-final purge contract), so re-deliveries are no-ops.
+              // A record genuinely MISSED by a reordered/mid-walk page is
+              // healed by the anti-entropy sweep's targeted fetch, never by
+              // the pull's rewind window.
               if (c != null && _tupleLte(r, c)) continue;
               final ApplyResult result;
               if (written.contains(r.id)) {
@@ -166,7 +176,7 @@ class Puller {
       from = last.updated;
       fromId = last.id;
       pages++;
-      if (page.length < config.maxPage) break;
+      if (page.length < pageSize) break;
       if (pages >= config.maxPagesPerPass) {
         hitPageLimit = true;
         break;

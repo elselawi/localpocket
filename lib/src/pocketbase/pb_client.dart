@@ -40,7 +40,9 @@ class PbClient {
     final query = <String, String>{
       'filter': filter,
       'sort': idPrefix == null ? 'updated,id' : 'id',
-      'perPage': '$perPage',
+      // Defense-in-depth: the engine clamps to [pbMaxPage] already, but the
+      // wire contract rejects anything above it with a 400 — never send it.
+      'perPage': '${perPage.clamp(1, pbMaxPage).toInt()}',
       'skipTotal': '1',
       if (fields != null) 'fields': fields.join(','),
     };
