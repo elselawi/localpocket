@@ -299,6 +299,13 @@ class SyncEngine {
   @visibleForTesting
   void handleHint(BackendHint hint) {
     if (!_started) return;
+    // A hint for a store this engine does not manage (a realtime event for
+    // another store in the same remote collection, a doorbell from a
+    // misconfigured backend, etc.) must NEVER schedule a cycle: pulling an
+    // unregistered store throws a non-SyncError StateError that aborts the
+    // whole cycle (no push, no sweep) and wedges the engine in `pulling`.
+    // Drop it here — the per-store pull loops iterate only managed stores.
+    if (!pocket.storeNames.contains(hint.store)) return;
     final rec = hint.record;
     if (rec != null && hint.kind == BackendHintKind.changed) {
       debugActions.add('fast:${hint.store}');

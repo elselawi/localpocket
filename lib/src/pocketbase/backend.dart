@@ -178,6 +178,10 @@ class PocketBaseBackend implements SyncBackend {
   }
 
   void _onRealtimeEvent(PbRealtimeEvent ev) {
+    // The remote collection carries every store; only events for stores this
+    // backend manages may become hints (the engine also guards, but dropping
+    // foreign events here avoids the wasted delete-verification GET too).
+    if (!stores.contains(ev.record.store)) return;
     if (ev.action == 'delete') {
       // delete events always verify via targeted GET.
       unawaited(_verifyDelete(ev.record));
@@ -188,6 +192,7 @@ class PocketBaseBackend implements SyncBackend {
   }
 
   Future<void> _verifyDelete(RemoteRecord ev) async {
+    if (!stores.contains(ev.store)) return;
     RemoteRecord? current;
     try {
       current = await _client.getRecord(ev.id);

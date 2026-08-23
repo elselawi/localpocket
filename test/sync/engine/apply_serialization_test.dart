@@ -209,12 +209,14 @@ void main() {
           (await h.pocket.collection('widgets').get(id))!['name'], 'in-flight');
     });
 
-    test('a failed fast-path apply does not poison later fast-path applies',
+    test('a wrong-store hint is dropped at the door; later realtime applies work',
         () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);
 
-      // An event for an unknown store fails inside the lane.
+      // An event for an unknown store is dropped BEFORE it can enter the
+      // apply lane (a fast-path for an unregistered store throws StateError
+      // from requireTable — the engine ignores such hints outright).
       h.engine.handleHint(BackendHint(
         'bogus',
         BackendHintKind.changed,
@@ -230,7 +232,8 @@ void main() {
       ));
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
-      expect(h.engine.debugActions, contains('fast:bogus'));
+      expect(h.engine.debugActions, isNot(contains('fast:bogus')),
+          reason: 'the wrong-store hint never entered the apply lane');
       expect(h.engine.debugActions, contains('fast:widgets'));
       expect((await h.pocket.collection('widgets').get(id))!['name'], 'after');
     });

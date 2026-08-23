@@ -104,8 +104,7 @@ void main() {
     // -------------------------------------------------------------- #26 --
     wireTest(
         'SSE reconnect mints a NEW clientId and re-POSTs the full '
-        'subscription set after the server drops the connection',
-        (s) async {
+        'subscription set after the server drops the connection', (s) async {
       final mock = (s as MockWireServer).mock;
       final a = await s.createClient();
       await a.backend.startRealtime();
@@ -124,18 +123,15 @@ void main() {
       // a new GET connect, a new subscribe POST, and a NEW subscription body.
       expect(mock.subscribeBodies, hasLength(2),
           reason: 'every reconnect re-posts the subscription body');
-      final first =
-          jsonDecode(mock.subscribeBodies[0]) as Map<String, Object?>;
+      final first = jsonDecode(mock.subscribeBodies[0]) as Map<String, Object?>;
       final second =
           jsonDecode(mock.subscribeBodies[1]) as Map<String, Object?>;
       expect(first['clientId'] as String, isNot(second['clientId'] as String),
-          reason:
-              'a reconnect mints a NEW clientId (the old subscriptions die '
+          reason: 'a reconnect mints a NEW clientId (the old subscriptions die '
               'with the dropped connection)');
       expect(second['clientId'] as String, isNotEmpty);
       expect(second['subscriptions'], ['data'],
-          reason:
-              'the FULL subscription set is re-posted (all stores live in '
+          reason: 'the FULL subscription set is re-posted (all stores live in '
               'the data collection), never a partial delta');
       expect(mock.realtimeConnects, greaterThanOrEqualTo(2),
           reason: 'the backend genuinely re-established the feed');
@@ -183,10 +179,10 @@ void main() {
       // spurious apply in the client's store).
       if (mock != null) {
         final otherId = mock.seed(store: 'other', data: {'name': 'x'});
-        mock.pushEvent(record: mock.records[otherId]!.toJson(),
-            action: 'create');
-        mock.pushEvent(record: mock.records[otherId]!.toJson(),
-            action: 'update');
+        mock.pushEvent(
+            record: mock.records[otherId]!.toJson(), action: 'create');
+        mock.pushEvent(
+            record: mock.records[otherId]!.toJson(), action: 'update');
         await Future<void>.delayed(const Duration(milliseconds: 500));
         expect(await a.pocket.collection(s.store).query().all().count(), 0,
             reason: "a foreign-store event never touches the client's store");
@@ -204,6 +200,47 @@ void main() {
           reason: 'the pull converged the write even without an SSE event');
       expect(await a.engine.syncStore.countPending(), 0);
     });
+
+    wireTest(
+        'a realtime event for an UNMANAGED store never schedules a pull '
+        'cycle (production debounce)', (s) async {
+      final mock = (s as MockWireServer).mock;
+      // PRODUCTION-like debounce: the hint's pull-only cycle WOULD fire
+      // in-window (wireConfig's 365-day default hides the defect).
+      final a = await s.createClient(
+          config: wireConfig(pushDebounce: const Duration(milliseconds: 50)));
+      await a.backend.startRealtime();
+      await settleRealtime(s);
+      // Settle the connect's own gap-close pull (realtimeDebounce 300ms +
+      // pushDebounce 50ms) before snapshotting the list-call baseline.
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      final listCallsAfterConnect = mock.listCalls;
+
+      // The live `data` collection carries EVERY store, so a subscriber
+      // receives events for stores it does not manage. Such an event must be
+      // dropped at the source — the engine never schedules a pull cycle for
+      // an unregistered store (pulling one throws an uncaught StateError
+      // that aborts the cycle and wedges the engine in `pulling`).
+      final otherId = mock.seed(store: 'other', data: {'name': 'x'});
+      mock.pushEvent(
+          record: mock.records[otherId]!.toJson(), action: 'create');
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+
+      expect(mock.listCalls, listCallsAfterConnect,
+          reason:
+              'no pull was scheduled for the unmanaged store (the old code '
+              'issued a list request for it and crashed the cycle)');
+      expect(a.engine.state, isNot(SyncEngineState.pulling),
+          reason: 'the engine never wedged in a dead pull state');
+
+      // The engine stays fully usable: a manual cycle pulls ITS OWN store
+      // and never surfaces the foreign event.
+      final id = await s.createRecord(s.store, {'name': 'mine'});
+      final report = await a.engine.syncNow();
+      expect(report.hadError, isFalse);
+      expect(await a.pocket.collection(s.store).get(id), isNotNull);
+      expect(await a.engine.syncStore.countPending(), 0);
+    }, live: false);
 
     // -------------------------------------------------------------- #28 --
     wireTest(
@@ -226,16 +263,14 @@ void main() {
       mock.delete(ghostId);
       mock.pushEvent(record: ghostSnapshot, action: 'delete');
 
-      await waitFor(
-          () => hints.any((h) => h.kind == BackendHintKind.deleted),
+      await waitFor(() => hints.any((h) => h.kind == BackendHintKind.deleted),
           'the delete-verification never emitted the deleted hint');
 
       // The embedded snapshot was NEVER applied as a live upsert: the row
       // was not inserted, no sync row was created, nothing is pending.
       expect(await a.pocket.collection(s.store).get(ghostId), isNull,
           reason: 'the embedded deleted record was never inserted');
-      expect(
-          await a.pocket.outbox.readSyncRow(a.pocket.db, s.store, ghostId),
+      expect(await a.pocket.outbox.readSyncRow(a.pocket.db, s.store, ghostId),
           isNull,
           reason: 'no sync metadata was created for the ghost');
       expect(await a.engine.syncStore.countPending(), 0,
@@ -253,8 +288,7 @@ void main() {
 
       await waitFor(
           () =>
-              hints.where((h) => h.kind == BackendHintKind.deleted).length >=
-              2,
+              hints.where((h) => h.kind == BackendHintKind.deleted).length >= 2,
           'the second delete-verification never emitted its hint');
 
       expect(await a.pocket.collection(s.store).get(knownId), isNotNull,

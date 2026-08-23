@@ -205,7 +205,7 @@ void main() {
           reason: 'no hint for a store that was never configured');
     });
 
-    test('an event for an unknown store yields a hint without crashing',
+    test('an event for an unknown store is dropped at the source (no hint)',
         () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
@@ -232,9 +232,31 @@ void main() {
       );
       await Future<void>.delayed(const Duration(milliseconds: 150));
       await sub.cancel();
-      expect(hints.any((h) => h.store == 'ghosts'), isTrue,
+      expect(hints.any((h) => h.store == 'ghosts'), isFalse,
           reason:
-              'the adapter relays events it observes, even for unknown stores');
+              'the remote collection carries every store, but events for '
+              'stores this backend does not manage are dropped — relaying '
+              'them made the engine schedule a pull cycle for an '
+              'unregistered store, which crashed the whole cycle '
+              '(StateError from requireTable)');
+
+      // A DELETE event for the same foreign store is dropped before the
+      // verify-GET too: no wasted view request, no hint.
+      final viewsBefore = server.viewCalls;
+      server.pushEvent(
+        record: {
+          'id': 'r1',
+          'store': 'ghosts',
+          'data': {'name': 'x'},
+          'updated': server.nextUpdated()
+        },
+        action: 'delete',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(server.viewCalls, viewsBefore,
+          reason: 'the foreign delete event never triggered a verify-GET');
+      expect(hints.any((h) => h.store == 'ghosts'), isFalse,
+          reason: 'the foreign delete event yielded no hint either');
     });
 
     test('authChanged hints are treated as pull doorbells by the engine',

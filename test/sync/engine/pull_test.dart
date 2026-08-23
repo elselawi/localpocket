@@ -584,17 +584,31 @@ void main() {
       }
     });
 
-    test('wrong-store fast-path record falls back without crashing', () async {
+    test('wrong-store hints are ignored: no fast-path, no pull, no crash',
+        () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);
 
-      // A record claiming a store that does not exist on this pocket.
+      // A record claiming a store that does not exist on this pocket. The
+      // engine drops it at the door: a fast-path attempt or a scheduled pull
+      // for an unregistered store would throw a non-SyncError StateError
+      // (pocket.requireTable) that aborts the whole cycle.
       h.engine.handleHint(BackendHint('ghost-store', BackendHintKind.changed,
           remoteRec(generateRecordId(), store: 'ghost-store')));
-      // No crash, and a pull is scheduled for that store.
+      // A record-less hint for the same wrong store is dropped too.
+      h.engine
+          .handleHint(const BackendHint('ghost-store', BackendHintKind.deleted));
       await Future<void>.delayed(Duration.zero);
-      expect(h.engine.debugActions, contains('fast:ghost-store'));
+      expect(h.engine.debugActions, isNot(contains('fast:ghost-store')),
+          reason: 'a wrong-store changed hint never fast-paths');
+      expect(h.engine.debugActions, isNot(contains('pull:ghost-store')),
+          reason: 'a wrong-store hint never schedules a pull cycle');
       expect(h.engine.state, isNot(SyncEngineState.closed));
+
+      // The engine stays fully usable: a manual cycle never surfaces the
+      // ghost store and never crashes.
+      final report = await h.engine.syncNow();
+      expect(report.hadError, isFalse);
     });
 
     test('hints after stop are ignored', () async {
