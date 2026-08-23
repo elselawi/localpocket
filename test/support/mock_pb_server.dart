@@ -150,6 +150,7 @@ class MockPbServer {
   final List<Completer<void>> _sseHolders = [];
   final int _clockBase = DateTime.utc(2026, 1, 1).millisecondsSinceEpoch;
   int _tick = 0;
+  int _realtimeSeq = 0;
 
   int get port => _server!.port;
   Uri get baseUrl => Uri.parse('http://127.0.0.1:$port');
@@ -664,6 +665,11 @@ class MockPbServer {
         if (part.name == 'imgs-' && part.filename == null) {
           final names =
               (jsonDecode(utf8.decode(part.bytes)) as List).cast<String>();
+          // Real PB deletes the physical files when their names leave the
+          // record's field (a later download answers 404).
+          for (final n in names) {
+            fileBytes.remove('${r.id}/$n');
+          }
           r.imgs = r.imgs.where((n) => !names.contains(n)).toList();
         } else if (part.name == 'imgs+' && part.filename != null) {
           final renamed = 'file_${_tick}_${part.filename}';
@@ -853,9 +859,12 @@ class MockPbServer {
         false; // without this, dart:io buffers chunks until close
     // Real PB v0.23+ handshake (live-verified): an SSE event carrying the
     // 36-char clientId in `data` (older servers used a bare PB_CONNECT line).
+    // Every (re)connect mints a FRESH clientId — the server drops all prior
+    // subscriptions with the old connection, so the client MUST re-subscribe.
     final clientId =
-        List.generate(36, (_) => 'abcdefghijklmnopqrstuvwxyz012345'[_tick % 36])
+        List.generate(36, (_) => 'abcdefghijklmnopqrstuvwxyz012345'[_realtimeSeq % 36])
             .join();
+    _realtimeSeq++;
     res.write(
         'id:$clientId\nevent:PB_CONNECT\ndata:{"clientId":"$clientId"}\n\n');
     await res.flush();
