@@ -1,6 +1,7 @@
 @Tags(['real'])
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:localpocket/localpocket.dart';
@@ -18,6 +19,18 @@ import 'real_helpers.dart';
 /// up after itself. Run with:
 ///   dart test test/e2e/real/real_server_test.dart
 void main() {
+  /// Polls until [predicate] or fails after [deadlineMs]. The shared live
+  /// server's realtime delivery latency varies under concurrent load, so
+  /// latency-dependent assertions poll instead of trusting a fixed sleep.
+  Future<void> waitFor(FutureOr<bool> Function() predicate, String reason,
+      {int deadlineMs = 15000}) async {
+    final deadline = DateTime.now().add(Duration(milliseconds: deadlineMs));
+    while (!await predicate()) {
+      if (DateTime.now().isAfter(deadline)) fail(reason);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
+
   group('live PocketBase E2E (real server)', () {
     test('real_superuser_auth_and_scoped_requests', () async {
       final tokens = RealPbTokenProvider(
@@ -302,9 +315,10 @@ void main() {
 
       // A's realtime receives the embedded record and fast-path applies it
       // WITHOUT an explicit syncNow.
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      await waitFor(
+          () async => (await a.pocket.collection(store).get(id)) != null,
+          'realtime fast-path never applied the record');
       final local = await a.pocket.collection(store).get(id);
-      expect(local, isNotNull, reason: 'realtime fast-path applied the record');
       expect(local!['name'], 'via-sse');
     });
 
@@ -335,7 +349,10 @@ void main() {
 
       // A's realtime fast-path applies the new field WITHOUT an explicit
       // syncNow (and without any full cycle).
-      await Future<void>.delayed(const Duration(milliseconds: 2000));
+      await waitFor(() async {
+        final rec = await a.pocket.collection(store).get(id);
+        return rec != null && rec['qty'] == 42;
+      }, 'the update fast-path never applied the new field');
       final local = await a.pocket.collection(store).get(id);
       expect(local, isNotNull);
       expect(local!['qty'], 42,
@@ -372,7 +389,8 @@ void main() {
             .resolve('/api/collections/data/records/$id'),
         headers: {'Authorization': 'Bearer ${token.value}'},
       ));
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      await waitFor(() => hints.any((h) => h.kind == BackendHintKind.deleted),
+          'delete events never emitted the verified hint');
       await sub.cancel();
       expect(hints.any((h) => h.kind == BackendHintKind.deleted), isTrue,
           reason: 'delete events verify via GET then emit a deleted hint');
@@ -589,9 +607,10 @@ void main() {
       final sub = h.backend.hints().listen(hints.add);
       addTearDown(() => sub.cancel());
       await h.backend.startRealtime();
-      await Future<void>.delayed(const Duration(seconds: 3));
+      await waitFor(() => hints.any((hint) => hint.store == store),
+          'the connect (gap close) never hinted the store');
       expect(hints.any((hint) => hint.store == store), isTrue,
           reason: 'the connect (gap close) hints the store');
-    }, timeout: const Timeout(Duration(seconds: 20)));
+    }, timeout: const Timeout(Duration(seconds: 30)));
   });
 }
