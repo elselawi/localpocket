@@ -344,7 +344,11 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     await send(WireOp.vacuum, {'pages': pages});
   }
 
-  /// Removes up to [maxEntries] acknowledged entries from the sync outbox.
+  /// Removes orphaned or settled (clean) entries from the sync outbox.
+  ///
+  /// Pending ops are never evicted: the op is the only record of an unsynced
+  /// local edit. [maxEntries] is retained for API compatibility but no longer
+  /// bounds the outbox.
   Future<int> pruneOutbox({int maxEntries = 10000}) async {
     final res = (decodeWireValue(
             (await send(WireOp.pruneOutbox, {'maxEntries': maxEntries}))!))!

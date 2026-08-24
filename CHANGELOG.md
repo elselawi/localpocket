@@ -1,3 +1,11 @@
+## Unreleased
+
+- `pruneOutbox` no longer evicts non-clean outbox ops under the `maxEntries`
+  cap: evicting `error`/`inFlight`/`quarantine` ops silently deleted unsynced
+  local edits and left dangling `op_id`s. Pruning is now strictly clean-only
+  (settled or orphaned ops are removed; every pending op is retained).
+  `maxEntries` is kept for API compatibility but is no longer enforced.
+
 ## 0.1.1
 
 - Using sqlite3 instead of sqflite

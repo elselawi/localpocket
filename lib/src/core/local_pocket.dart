@@ -637,13 +637,26 @@ class LocalPocket with ChangeBusAwareLP {
     }
   }
 
-  /// Prunes orphaned or superseded outbox operations, bounds maximum outbox size,
-  /// and clears historical detached records while keeping un-synced dirty records.
+  /// Prunes orphaned or superseded outbox operations.
+  ///
+  /// Only outbox rows whose sync row is `clean` (the edit has settled) or that
+  /// have no sync row at all (orphaned) are removed. Ops in every other state —
+  /// `dirty`, `inFlight`, `conflict`, `blocked`, `error`, `quarantine` — are
+  /// always retained: the op is the only record of that pending edit, and
+  /// evicting it would silently lose unsynced local data and leave the sync
+  /// row with a dangling `op_id` (violating the sync-invariants oracle).
+  ///
+  /// [maxEntries] is retained for API compatibility but is no longer enforced:
+  /// bounding the outbox by evicting non-clean ops deletes pending local
+  /// edits, so pruning is strictly clean-only.
   Future<int> pruneOutbox({int maxEntries = 10000}) async {
     var pruned = 0;
     await transaction((tx) async {
       final exec = tx.executor;
-      // 1. Remove orphaned outbox entries whose corresponding sync row is clean or gone
+      // Remove outbox entries whose sync row is clean (the edit settled) or
+      // absent (orphaned). Never evict the op of a dirty/inFlight/conflict/
+      // blocked/error/quarantine row: the op is the only record of the
+      // unsynced edit, and removing it would create a dangling op_id.
       final orphaned = await exec.rawQuery(
         'SELECT o.store, o.record_id FROM lp_outbox o '
         'LEFT JOIN lp_sync_row s ON s.store = o.store AND s.record_id = o.record_id '
@@ -655,27 +668,6 @@ class LocalPocket with ChangeBusAwareLP {
         await exec.delete('lp_outbox',
             where: 'store = ? AND record_id = ?', whereArgs: [st, id]);
         pruned++;
-      }
-
-      // 2. Bound outbox size by evicting oldest clean-eligible entries if exceeding maxEntries
-      final countRow = await exec.rawQuery('SELECT COUNT(*) c FROM lp_outbox');
-      final count = (countRow.first['c'] as int?) ?? 0;
-      if (count > maxEntries) {
-        final excess = count - maxEntries;
-        final oldest = await exec.rawQuery(
-          'SELECT o.store, o.record_id FROM lp_outbox o '
-          'JOIN lp_sync_row s ON s.store = o.store AND s.record_id = o.record_id '
-          "WHERE s.sync_state NOT IN ('dirty', 'conflict', 'blocked') "
-          'ORDER BY o.created_at ASC LIMIT ?',
-          [excess],
-        );
-        for (final r in oldest) {
-          final st = r['store']! as String;
-          final id = r['record_id']! as String;
-          await exec.delete('lp_outbox',
-              where: 'store = ? AND record_id = ?', whereArgs: [st, id]);
-          pruned++;
-        }
       }
     });
     return pruned;
