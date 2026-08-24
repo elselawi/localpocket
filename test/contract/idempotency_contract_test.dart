@@ -9,11 +9,11 @@ import '../sync/engine/mock_backend.dart';
 
 /// A batch-enabled mock that records the opIds of every batch attempt.
 class _RecordingBatchBackend extends MockSyncBackend {
-  final List<List<String>> sentOpIds = [];
 
   _RecordingBatchBackend() {
     batchEnabled = true;
   }
+  final List<List<String>> sentOpIds = [];
 
   @override
   Future<List<PushResult>> pushBatch(List<PushOp> ops) async {

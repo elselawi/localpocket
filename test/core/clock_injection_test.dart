@@ -74,7 +74,7 @@ void main() {
   });
 
   test('op queue created_at uses the injected clock', () async {
-    var clock = 1700000000000;
+    const clock = 1700000000000;
     final pocket = await openPocket(now: () => clock);
     addTearDown(pocket.close);
     await pocket.opQueue.enqueue(
@@ -88,7 +88,7 @@ void main() {
   });
 
   test('store registration created_at uses the injected clock', () async {
-    var clock = 1700000000000;
+    const clock = 1700000000000;
     final pocket = await openPocket(now: () => clock);
     addTearDown(pocket.close);
     final row = (await pocket.db
@@ -99,7 +99,7 @@ void main() {
   });
 
   test('compact defaults its cutoff to the injected clock', () async {
-    var clock = 1800000000000;
+    const clock = 1800000000000;
     final pocket = await openPocket(now: () => clock);
     addTearDown(pocket.close);
 

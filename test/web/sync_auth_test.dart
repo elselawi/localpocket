@@ -74,7 +74,7 @@ void main() {
         },
       };
       expect(event['op'], WireOp.syncStatus);
-      expect((event['status'] as Map)['pending'], 2);
+      expect((event['status']! as Map)['pending'], 2);
     });
 
     test('authRequired error code mapping', () {

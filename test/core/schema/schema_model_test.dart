@@ -605,5 +605,5 @@ Map<String, Object?> _renameTitle(Map<String, Object?> doc) => {
 
 Map<String, Object?> _incrementVersion(Map<String, Object?> doc) => {
       ...doc,
-      'version': (doc['version'] as int) + 1,
+      'version': (doc['version']! as int) + 1,
     };

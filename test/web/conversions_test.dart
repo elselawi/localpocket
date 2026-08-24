@@ -30,7 +30,7 @@ void main() {
     test('rejects unsupported objects with a typed error', () {
       expect(() => encodeWireValue(Object()), throwsArgumentError);
       expect(
-        () => encodeWireValue(Stream<int>.empty()),
+        () => encodeWireValue(const Stream<int>.empty()),
         throwsArgumentError,
       );
       expect(() => encodeWireValue([Object()]), throwsArgumentError);

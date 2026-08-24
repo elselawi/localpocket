@@ -135,7 +135,7 @@ void main() {
       expect(recorder.single, contains(' GROUP BY region'));
       expect({for (final r in rows) r['region']: r['total']},
           {'east': 15, 'west': 30});
-      db.close();
+      await db.close();
     });
 
     test('having filters grouped results after aggregation', () async {
@@ -152,7 +152,7 @@ void main() {
       expect(rows, hasLength(1));
       expect(rows.single['region'], 'west');
       expect(rows.single['total'], 30);
-      db.close();
+      await db.close();
     });
 
     test('distinct: true emits SELECT DISTINCT and deduplicates rows',
@@ -163,7 +163,7 @@ void main() {
       final rows = await db.query('sales', columns: ['region'], distinct: true);
       expect(recorder.single, startsWith('SELECT DISTINCT '));
       expect(rows.map((r) => r['region']).toList(), hasLength(2));
-      db.close();
+      await db.close();
     });
 
     test('empty groupBy and having strings are omitted', () async {
@@ -173,7 +173,7 @@ void main() {
       await db.query('sales', groupBy: '', having: '');
       expect(recorder.single, isNot(contains('GROUP BY')));
       expect(recorder.single, isNot(contains('HAVING')));
-      db.close();
+      await db.close();
     });
 
     test(
@@ -201,7 +201,7 @@ void main() {
       expect(sql.indexOf(' HAVING'), lessThan(sql.indexOf(' ORDER BY')));
       expect(sql.indexOf(' ORDER BY'), lessThan(sql.indexOf(' LIMIT')));
       expect(sql.indexOf(' LIMIT'), lessThan(sql.indexOf(' OFFSET')));
-      db.close();
+      await db.close();
     });
   });
 
@@ -461,7 +461,7 @@ void main() {
       expect(recorder, contains('BEGIN IMMEDIATE'));
       expect(recorder, contains('COMMIT'));
       expect(recorder, isNot(contains('BEGIN EXCLUSIVE')));
-      db.close();
+      await db.close();
     });
 
     test('exclusive transaction uses BEGIN EXCLUSIVE', () async {
@@ -475,7 +475,7 @@ void main() {
         await txn.insert('t', {'id': 'a', 'v': 'a'});
       }, exclusive: true);
       expect(recorder, contains('BEGIN EXCLUSIVE'));
-      db.close();
+      await db.close();
     });
 
     test('nested direct transaction fails clearly without breaking the outer',
@@ -511,7 +511,7 @@ void main() {
       return db;
     }
 
-    test('255 distinct prepared statements stay cached and correct', () {
+    test('255 distinct prepared statements stay cached and correct', () async {
       final db = cacheDb();
       final sqls = <String>[
         for (var i = 0; i < 255; i++) 'SELECT v FROM t WHERE id = $i'
@@ -523,10 +523,10 @@ void main() {
       for (var i = 0; i < sqls.length; i++) {
         expect(db.selectSync(sqls[i]).single['v'], 'v$i');
       }
-      db.close();
+      await db.close();
     });
 
-    test('256th statement is cached without eviction of correctness', () {
+    test('256th statement is cached without eviction of correctness', () async {
       final db = cacheDb();
       final sqls = <String>[
         for (var i = 0; i < 256; i++) 'SELECT v FROM t WHERE id = $i'
@@ -534,10 +534,11 @@ void main() {
       for (var i = 0; i < sqls.length; i++) {
         expect(db.selectSync(sqls[i]).single['v'], 'v$i');
       }
-      db.close();
+      await db.close();
     });
 
-    test('more than 256 statements evict the oldest and stay correct', () {
+    test('more than 256 statements evict the oldest and stay correct',
+        () async {
       final db = cacheDb();
       final sqls = <String>[
         for (var i = 0; i < 300; i++) 'SELECT v FROM t WHERE id = $i'
@@ -550,21 +551,22 @@ void main() {
       for (var i = 0; i < 300; i++) {
         expect(db.selectSync(sqls[i]).single['v'], 'v$i');
       }
-      db.close();
+      await db.close();
     });
 
-    test('getPreparedStatement reuses the same handle for identical SQL', () {
+    test('getPreparedStatement reuses the same handle for identical SQL',
+        () async {
       final db = cacheDb();
       final a = db.getPreparedStatement('SELECT v FROM t WHERE id = 1');
       final b = db.getPreparedStatement('SELECT v FROM t WHERE id = 1');
       expect(identical(a, b), isTrue);
       expect(a.select().single['v'], 'v1');
-      db.close();
+      await db.close();
     });
 
     test(
         'selectSync and executeSync continue using prepared statements after 256 statements',
-        () {
+        () async {
       final db = cacheDb();
       // Fill statement cache beyond 256 items
       for (var i = 0; i < 300; i++) {
@@ -591,11 +593,11 @@ void main() {
           isTrue);
       expect(db.selectSync(targetQuery).single['v'], 'v100_updated2');
 
-      db.close();
+      await db.close();
     });
 
     test('LRU promotion keeps a hot statement cached under eviction pressure',
-        () {
+        () async {
       final db = cacheDb();
       // Fill the 256-entry cache with distinct statements (insertion order
       // 0..255). ids 1000+ do not exist in `t`; we only need the statements.
@@ -618,7 +620,7 @@ void main() {
           reason: 'a promoted statement survives eviction (true LRU)');
       expect(db.selectSync(first).single['v'], 'v0',
           reason: 'the surviving statement is still correct');
-      db.close();
+      await db.close();
     });
   });
 

@@ -211,7 +211,7 @@ void main() {
           reason: 'the same cached nested map is returned on each hit');
 
       expect(deepEquals(f1, f2), isTrue,
-          reason: "when returning from cache we should return a deep copy");
+          reason: 'when returning from cache we should return a deep copy');
     });
   });
 

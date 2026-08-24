@@ -59,7 +59,7 @@ void main() {
 
     test('health reports a live engine', () async {
       final result =
-          await h.sendOk(h.req(WireOp.health)) as Map<String, Object?>;
+          (await h.sendOk(h.req(WireOp.health)))! as Map<String, Object?>;
       expect(result['ok'], isTrue);
       expect(result['sqliteVersion'], isA<String>());
       expect(result['journalMode'], isA<String>());
@@ -67,7 +67,7 @@ void main() {
 
     test('capabilities reports the live engine capability snapshot', () async {
       final result =
-          await h.sendOk(h.req(WireOp.capabilities)) as Map<String, Object?>;
+          (await h.sendOk(h.req(WireOp.capabilities)))! as Map<String, Object?>;
       expect(result['worker'], isTrue);
       expect(result['durable'], isTrue);
       expect(result['persistent'], isTrue);
@@ -277,7 +277,7 @@ void main() {
       expect(events, isNotEmpty);
       final ev = events.last['event'];
       expect(ev, isA<Map>());
-      final event = (ev as Map).map((k, v) => MapEntry(k.toString(), v));
+      final event = (ev! as Map).map((k, v) => MapEntry(k.toString(), v));
       expect(event['store'], 'widgets');
       expect(event['id'], id);
       expect(event['action'], 'create');
@@ -309,16 +309,16 @@ void main() {
           .limit(50)
           .compilePlan();
       final result =
-          await h.sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan)))
+          (await h.sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
               as Map<String, Object?>;
-      final items = (result['items'] as List).cast<Map>();
+      final items = (result['items']! as List).cast<Map>();
       expect(items, hasLength(1));
       expect(items.first['name'], 'banana');
     });
 
     test('count / ids / sum aggregate ops', () async {
       Future<Map<String, Object?>> run(QueryPlan plan) async =>
-          (await h.sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))
+          (await h.sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
               as Map<String, Object?>;
 
       final count = await run(
@@ -327,7 +327,7 @@ void main() {
 
       final ids = await run(
           h.pocket.collection('widgets').query().limit(50).compileIdsPlan());
-      expect((ids['ids'] as List), hasLength(3));
+      expect((ids['ids']! as List), hasLength(3));
 
       final sum = await run(h.pocket
           .collection('widgets')
@@ -341,7 +341,7 @@ void main() {
       final plan =
           h.pocket.collection('widgets').query().limit(50).compileExplainPlan();
       final result =
-          await h.sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan)))
+          (await h.sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
               as Map<String, Object?>;
       expect(result['plan'], isA<String>());
       expect(result['plan'], isNotEmpty);
@@ -354,10 +354,10 @@ void main() {
           .orderBy('name')
           .limit(50)
           .compilePlan();
-      final result = await h.sendOk(h.req(WireOp.compiledQuery,
-          args: planPayload(plan, pageLimit: 2))) as Map<String, Object?>;
+      final result = (await h.sendOk(h.req(WireOp.compiledQuery,
+          args: planPayload(plan, pageLimit: 2))))! as Map<String, Object?>;
       expect(result['hasMore'], isTrue);
-      expect((result['items'] as List), hasLength(2));
+      expect((result['items']! as List), hasLength(2));
       expect(result['lastRow'], isA<Map>());
     });
 
@@ -436,8 +436,8 @@ void main() {
         await h.close();
       });
       final result =
-          await h.sendOk(h.req(WireOp.txBegin)) as Map<String, Object?>;
-      sessionId = result['sessionId'] as int;
+          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
+      sessionId = (result['sessionId']! as int);
     });
 
     test('tx session CRUD + commit persists', () async {
@@ -498,10 +498,10 @@ void main() {
         ],
       }));
 
-      final sp = await h
-              .sendOk(h.req(WireOp.txSavepoint, args: {'sessionId': sessionId}))
+      final sp = (await h
+              .sendOk(h.req(WireOp.txSavepoint, args: {'sessionId': sessionId})))!
           as Map<String, Object?>;
-      final spName = sp['savepoint'] as String;
+      final spName = sp['savepoint']! as String;
 
       await h.sendOk(h.req(WireOp.txMutateBatch, args: {
         'sessionId': sessionId,
@@ -530,8 +530,8 @@ void main() {
 
       // Bookkeeping: the savepoint was removed, so a new savepoint reuses the
       // name (no unbounded growth / collision).
-      final sp2 = await h
-              .sendOk(h.req(WireOp.txSavepoint, args: {'sessionId': sessionId}))
+      final sp2 = (await h
+              .sendOk(h.req(WireOp.txSavepoint, args: {'sessionId': sessionId})))!
           as Map<String, Object?>;
       expect(sp2['savepoint'], spName);
 
@@ -596,13 +596,13 @@ void main() {
           .where('name', eq: 'apple')
           .limit(50)
           .compilePlan();
-      final watchId = 7;
-      final result = await h.sendOk(h.req(WireOp.watchQuery, args: {
+      const watchId = 7;
+      final result = (await h.sendOk(h.req(WireOp.watchQuery, args: {
         ...planPayload(plan),
         'watchId': watchId,
-      })) as Map<String, Object?>;
+      })))! as Map<String, Object?>;
       expect(result['watchId'], watchId);
-      final initial = (result['items'] as List).cast<Map>();
+      final initial = (result['items']! as List).cast<Map>();
       expect(initial, hasLength(1));
       expect(initial.first['name'], 'apple');
 
@@ -633,12 +633,12 @@ void main() {
           .select(['name'])
           .limit(50)
           .compilePlan();
-      final watchId = 8;
-      final result = await h.sendOk(h.req(WireOp.watchQuery, args: {
+      const watchId = 8;
+      final result = (await h.sendOk(h.req(WireOp.watchQuery, args: {
         ...planPayload(plan),
         'watchId': watchId,
-      })) as Map<String, Object?>;
-      final initial = (result['items'] as List).cast<Map>();
+      })))! as Map<String, Object?>;
+      final initial = (result['items']! as List).cast<Map>();
       expect(initial.single.keys, ['name']);
     });
 
@@ -669,11 +669,11 @@ void main() {
       await h.put('widgets', record(name: 'one', qty: 1), id: id);
 
       const watchId = 10;
-      final result = await h.sendOk(h.req(WireOp.watchOne, args: {
+      final result = (await h.sendOk(h.req(WireOp.watchOne, args: {
         'watchId': watchId,
         'store': 'widgets',
         'id': id,
-      })) as Map<String, Object?>;
+      })))! as Map<String, Object?>;
       expect((decodeWireValue(result['item']) as Map)['name'], 'one');
 
       await h.put('widgets', record(name: 'one-updated', qty: 2), id: id);
@@ -741,7 +741,7 @@ void main() {
 
     test('sync_status before start reports closed', () async {
       final result =
-          await h.sendOk(h.req(WireOp.syncStatus)) as Map<String, Object?>;
+          (await h.sendOk(h.req(WireOp.syncStatus)))! as Map<String, Object?>;
       expect(result['state'], 'closed');
     });
   });
@@ -757,12 +757,12 @@ void main() {
     });
 
     Future<int> beginUpload(String recordId, int size) async {
-      final result = await h.sendOk(h.req(WireOp.fileUploadBegin, args: {
+      final result = (await h.sendOk(h.req(WireOp.fileUploadBegin, args: {
         'store': 'widgets',
         'recordId': recordId,
         'size': size,
-      })) as Map<String, Object?>;
-      return result['uploadId'] as int;
+      })))! as Map<String, Object?>;
+      return result['uploadId']! as int;
     }
 
     Future<void> chunk(int uploadId, List<int> bytes) async {
@@ -780,28 +780,28 @@ void main() {
       await chunk(uploadId, payload.sublist(0, 5));
       await chunk(uploadId, payload.sublist(5));
 
-      final result = await h.sendOk(
-              h.req(WireOp.fileUploadFinish, args: {'uploadId': uploadId}))
+      final result = (await h.sendOk(
+              h.req(WireOp.fileUploadFinish, args: {'uploadId': uploadId})))!
           as Map<String, Object?>;
       expect(result['refId'], isA<String>());
       expect(result['hash'], isA<String>());
       expect(result['state'], 'pending_upload');
 
       // list sees the ref
-      final list = await h.sendOk(h.req(WireOp.fileList, args: {
+      final list = (await h.sendOk(h.req(WireOp.fileList, args: {
         'store': 'widgets',
         'recordId': id,
-      })) as Map<String, Object?>;
-      final refs = (list['refs'] as List).cast<Map>();
+      })))! as Map<String, Object?>;
+      final refs = (list['refs']! as List).cast<Map>();
       expect(refs, hasLength(1));
       expect(refs.single['refId'], result['refId']);
 
       // open round-trips the bytes
-      final opened = await h.sendOk(h.req(WireOp.fileOpen, args: {
+      final opened = (await h.sendOk(h.req(WireOp.fileOpen, args: {
         'store': 'widgets',
         'recordId': id,
         'refId': result['refId'],
-      })) as Map<String, Object?>;
+      })))! as Map<String, Object?>;
       final bytes = decodeWireValue(opened['bytes']) as List<int>;
       expect(utf8.decode(bytes), 'hello worker file');
       expect(opened['size'], payload.length);
@@ -854,8 +854,8 @@ void main() {
     });
 
     test('conflicts_list on a clean store is empty', () async {
-      final result = await h
-              .sendOk(h.req(WireOp.conflictsList, args: {'store': 'widgets'}))
+      final result = (await h
+              .sendOk(h.req(WireOp.conflictsList, args: {'store': 'widgets'})))!
           as Map<String, Object?>;
       expect(result['conflicts'], isEmpty);
     });
@@ -891,12 +891,12 @@ void main() {
       await h.sendOk(h.req(WireOp.walCheckpoint));
       await h.sendOk(h.req(WireOp.vacuum));
       final pruned =
-          await h.sendOk(h.req(WireOp.pruneOutbox)) as Map<String, Object?>;
+          (await h.sendOk(h.req(WireOp.pruneOutbox)))! as Map<String, Object?>;
       expect(pruned['pruned'], isA<int>());
-      final compacted = await h.sendOk(h.req(WireOp.compact, args: {
+      final compacted = (await h.sendOk(h.req(WireOp.compact, args: {
         'store': 'widgets',
         'olderThanMs': 0,
-      })) as Map<String, Object?>;
+      })))! as Map<String, Object?>;
       expect(compacted['compacted'], isA<int>());
       await h.sendOk(h.req(WireOp.runMaintenance));
     });

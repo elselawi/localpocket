@@ -88,7 +88,7 @@ void main() {
       final text = await res.transform(utf8.decoder).join();
       expect(res.statusCode, 200, reason: 'raw list: ${res.statusCode} $text');
       final body = jsonDecode(text) as Map<String, Object?>;
-      return (body['items'] as List).cast<Map<String, Object?>>();
+      return (body['items']! as List).cast<Map<String, Object?>>();
     } finally {
       client.close(force: true);
     }
@@ -103,8 +103,8 @@ void main() {
       const forged = '1999-01-01 00:00:00.000Z';
       final resp = await rawCreate(s, s.store, {'name': 'stamped'},
           forgedUpdated: forged);
-      final id = resp['id'] as String;
-      final stamped = resp['updated'] as String;
+      final id = resp['id']! as String;
+      final stamped = resp['updated']! as String;
       expect(stamped, isNot(forged),
           reason: 'the server ignored the client-sent updated');
       expect(stamped, endsWith('Z'), reason: 'fixed-width UTC wire format');
@@ -299,8 +299,8 @@ void main() {
       final idB = await s.createRecord(s.store, {'name': 'isob'});
       final ra = await s.readRecord(s.store, idA);
       final rb = await s.readRecord(s.store, idB);
-      final ua = ra!['updated'] as String;
-      final ub = rb!['updated'] as String;
+      final ua = ra!['updated']! as String;
+      final ub = rb!['updated']! as String;
       expect(ua, matches(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}Z$'),
           reason: 'the wire format is the SPACE form');
 

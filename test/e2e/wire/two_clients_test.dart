@@ -37,7 +37,7 @@ void main() {
 
   /// The `data` map of a server-side record (from [WireServer.readRecord]).
   Map<String, Object?> dataOf(Map<String, Object?>? rec) =>
-      (rec!['data'] as Map).cast<String, Object?>();
+      (rec!['data']! as Map).cast<String, Object?>();
 
   /// Drains [c]'s outbox with a loud bounded guard.
   Future<void> drain(WireClient c) async {
@@ -230,11 +230,11 @@ void main() {
       final onState = on.mock.records.values
           .map((r) => content(r.data))
           .toList()
-        ..sort((x, y) => (x['name'] as String).compareTo(y['name'] as String));
+        ..sort((x, y) => (x['name']! as String).compareTo(y['name']! as String));
       final offState = off.mock.records.values
           .map((r) => content(r.data))
           .toList()
-        ..sort((x, y) => (x['name'] as String).compareTo(y['name'] as String));
+        ..sort((x, y) => (x['name']! as String).compareTo(y['name']! as String));
       expect(onState, offState, reason: 'identical remote state');
     }, live: false);
 

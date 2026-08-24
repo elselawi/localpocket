@@ -10,6 +10,15 @@ import 'mock_pb_server.dart';
 
 /// A controllable token provider for auth tests.
 class TestTokenProvider implements TokenProvider {
+
+  TestTokenProvider({
+    this.tokenValue = 'token-a',
+    this.refreshTo = 'token-b',
+    this.identityValue = 'user-1',
+    this.expiresAt,
+    this.issuedAt,
+    this.refreshDelay = Duration.zero,
+  });
   String tokenValue;
   String refreshTo;
   String identityValue;
@@ -20,15 +29,6 @@ class TestTokenProvider implements TokenProvider {
   /// Artificial refresh latency so concurrent 401s overlap the in-flight
   /// refresh (the in-process server otherwise serializes sub-ms responses).
   Duration refreshDelay;
-
-  TestTokenProvider({
-    this.tokenValue = 'token-a',
-    this.refreshTo = 'token-b',
-    this.identityValue = 'user-1',
-    this.expiresAt,
-    this.issuedAt,
-    this.refreshDelay = Duration.zero,
-  });
 
   @override
   String get identity => identityValue;
@@ -49,14 +49,14 @@ class TestTokenProvider implements TokenProvider {
 
 /// A full adapter-backed engine harness (pocket + backend + engine).
 class PbEngineHarness {
+
+  PbEngineHarness(
+      this.pocket, this.backend, this.engine, this.server, this.tokens);
   final LocalPocket pocket;
   final PocketBaseBackend backend;
   final SyncEngine engine;
   final MockPbServer server;
   final TestTokenProvider tokens;
-
-  PbEngineHarness(
-      this.pocket, this.backend, this.engine, this.server, this.tokens);
 
   static Future<PbEngineHarness> create({
     required MockPbServer server,

@@ -172,7 +172,7 @@ void main() {
       h.mock.lostCreateResponse = true;
       await h.engine.syncNow();
       expect(h.mock.records.containsKey(id), isTrue);
-      var row = await sr(h.pocket, id);
+      final row = await sr(h.pocket, id);
       expect(row!.syncState, SyncState.dirty, reason: 'retry pending');
 
       // Retry: the server reports a duplicate; GET verifies and ACKs.
@@ -202,7 +202,7 @@ void main() {
       h.mock.lostUpdateResponse = true;
       await h.engine.syncNow();
       expect(h.mock.records[id]!.data['qty'], 5);
-      var row = await sr(h.pocket, id);
+      final row = await sr(h.pocket, id);
       expect(row!.syncState, SyncState.dirty, reason: 'retry pending');
 
       // Retry: GET shows updated != base, hash == payload -> ACK no-op.

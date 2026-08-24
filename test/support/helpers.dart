@@ -31,8 +31,7 @@ CollectionSchema<Object?> widgetsSchema({
   Map<int, DocumentMigration>? documentMigrations,
   FtsSpec? fts,
   bool refFk = false,
-}) {
-  return CollectionSchema(
+}) => CollectionSchema(
     name: name,
     version: version,
     fields: [
@@ -54,7 +53,6 @@ CollectionSchema<Object?> widgetsSchema({
     documentMigrations: documentMigrations ?? const {},
     fts: fts,
   );
-}
 
 Future<LocalPocket> openPocket({
   Database? database,
@@ -69,8 +67,7 @@ Future<LocalPocket> openPocket({
   int maxDocBytes = 1900000,
   BlobStore? blobStore,
   int Function()? now,
-}) async {
-  return LocalPocket.open(
+}) async => LocalPocket.open(
     path: path ?? ':memory:',
     database: database,
     stores: stores ?? [widgetsSchema()],
@@ -84,7 +81,6 @@ Future<LocalPocket> openPocket({
     blobStore: blobStore,
     now: now,
   );
-}
 
 /// A record builder for the `widgets` schema.
 Map<String, Object?> record({
@@ -101,8 +97,7 @@ Map<String, Object?> record({
   String? phone,
   bool? archived,
   Map<String, Object?> extra = const {},
-}) {
-  return {
+}) => {
     if (id != null) 'id': id,
     if (name != null) 'name': name,
     if (qty != null) 'qty': qty,
@@ -117,12 +112,11 @@ Map<String, Object?> record({
     if (archived != null) 'archived': archived,
     ...extra,
   };
-}
 
 /// A temporary file-backed database (for WAL / concurrency tests).
 class TempDb {
-  final String path;
   TempDb(this.path);
+  final String path;
 
   Future<void> cleanup() async {
     for (final suffix in ['', '-wal', '-shm']) {

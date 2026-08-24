@@ -132,7 +132,7 @@ void main() {
       expect(await s.countRecords(s.store), 3,
           reason: 'the fixed record converges after re-push');
       expect(
-          (await s.readRecord(s.store, poisonId))!['data']
+          (await s.readRecord(s.store, poisonId))!['data']!
               as Map<String, Object?>,
           containsPair('name', 'fixed'));
     }, live: false);

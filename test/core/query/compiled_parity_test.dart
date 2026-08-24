@@ -107,8 +107,8 @@ void main() {
     hasMore = true;
     while (hasMore) {
       final res = await runCompiled(compiled, cursor: compiledCursor);
-      compiledItems.addAll((res['items'] as List).cast<Map<String, Object?>>());
-      hasMore = res['hasMore'] as bool;
+      compiledItems.addAll((res['items']! as List).cast<Map<String, Object?>>());
+      hasMore = (res['hasMore']! as bool);
       final last = res['lastRow'] as Map<String, Object?>?;
       compiledCursor =
           hasMore && last != null ? compiled.cursorForCompiledRow(last) : null;

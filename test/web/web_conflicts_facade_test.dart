@@ -111,6 +111,8 @@ void main() {
     expect(watch.$2, {'watchId': watchId});
     expect(fake.workerEventDecoders.containsKey(watchId), isTrue);
     expect(fake.workerStreams.containsKey(watchId), isTrue);
+    final controller = fake.workerStreams[watchId]!;
+    expect(controller.isClosed, isFalse);
 
     // A raw wire list is decoded into typed ConflictRecords.
     fake.deliverWorkerEvent(watchId, [encodeConflictRecord(c1)]);
@@ -121,6 +123,8 @@ void main() {
     // Cancelling removes the decoder and sends watch_cancel.
     await sub.cancel();
     await pumpEventQueue();
+    await controller.close();
+    expect(controller.isClosed, isTrue);
     expect(fake.workerEventDecoders.containsKey(watchId), isFalse);
     expect(fake.workerStreams.containsKey(watchId), isFalse);
     final cancel = fake.sent.where((s) => s.$1 == WireOp.watchCancel).single;

@@ -828,8 +828,8 @@ class _NullCryptoProvider implements CryptoProvider {
 
 /// A [CryptoProvider] that returns a different cipher per (store, field).
 class _PerFieldProvider implements CryptoProvider {
-  final Map<(String, String), FieldCipher> _byField;
   _PerFieldProvider(this._byField);
+  final Map<(String, String), FieldCipher> _byField;
 
   @override
   FieldCipher? getFieldCipher(String storeName, String fieldName) =>

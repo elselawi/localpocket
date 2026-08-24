@@ -88,7 +88,7 @@ void main() {
       expect(res.statusCode, inInclusiveRange(200, 299),
           reason: 'raw list: ${res.statusCode} $text');
       final body = jsonDecode(text) as Map<String, Object?>;
-      return (body['items'] as List).cast<Map<String, Object?>>();
+      return (body['items']! as List).cast<Map<String, Object?>>();
     } finally {
       client.close(force: true);
     }
@@ -178,9 +178,9 @@ void main() {
       const quoteStore = "o'brien's";
       const slashStore = r'o\x';
       final idQ =
-          (await rawCreate(s, quoteStore, {'name': 'q'}))['id'] as String;
+          (await rawCreate(s, quoteStore, {'name': 'q'}))['id']! as String;
       final idS =
-          (await rawCreate(s, slashStore, {'name': 's'}))['id'] as String;
+          (await rawCreate(s, slashStore, {'name': 's'}))['id']! as String;
 
       // The lib escapes `'` -> `\'`; backslashes pass through verbatim.
       final fQuote = pullFilter(quoteStore, '1970-01-01 00:00:00.000Z');
@@ -193,7 +193,7 @@ void main() {
       // Both servers parse the escaped quote back and match.
       final listQuote = await rawList(s, fQuote);
       expect([for (final r in listQuote) r['id']], contains(idQ),
-          reason: "escaped quote matches on the server");
+          reason: 'escaped quote matches on the server');
       // ...and a literal backslash matches too (escaping it to `\\` would
       // NOT match on real PB).
       final listSlash = await rawList(s, fSlash);

@@ -247,7 +247,7 @@ void main() {
       // Corrupt: force the row clean while its outbox op remains.
       await h.pocket.db.execute(
           'UPDATE lp_sync_row SET sync_state = ? '
-          "WHERE store = ? AND record_id = ?",
+          'WHERE store = ? AND record_id = ?',
           ['clean', 'widgets', id]);
       await expectOracleToFail(h.pocket, 'widgets', id);
     });

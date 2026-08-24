@@ -86,10 +86,10 @@ void main() {
 
     // Maintenance + auth/offline transitions while the storm settles.
     futures.add(() async {
-      h.engine.setConnectivity(false);
+      await h.engine.setConnectivity(false);
       await Future<void>.delayed(const Duration(milliseconds: 5));
-      h.engine.setConnectivity(true);
-      h.engine.invalidateVisibility();
+      await h.engine.setConnectivity(true);
+      await h.engine.invalidateVisibility();
     }());
 
     await Future.wait(futures);

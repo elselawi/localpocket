@@ -13,8 +13,7 @@ void main() {
   CollectionSchema<Object?> v2Schema({
     List<StoreMigration> migrations = const [],
     Map<int, DocumentMigration> documentMigrations = const {},
-  }) {
-    return CollectionSchema(
+  }) => CollectionSchema(
       name: 'widgets',
       version: 2,
       fields: [...widgetsSchema().fields, Field.text('nickname')],
@@ -22,7 +21,6 @@ void main() {
       migrations: migrations,
       documentMigrations: documentMigrations,
     );
-  }
 
   Future<void> insertBulk(LocalPocket pocket, int n, {int chunk = 5000}) async {
     for (var start = 0; start < n; start += chunk) {
@@ -201,7 +199,7 @@ void main() {
           firstInt(await v2.db.rawQuery('SELECT COUNT(*) AS c FROM widgets'))!;
       expect(total, 25000);
       final nulls = firstInt(await v2.db.rawQuery(
-          "SELECT COUNT(*) AS c FROM widgets WHERE nickname IS NULL"))!;
+          'SELECT COUNT(*) AS c FROM widgets WHERE nickname IS NULL'))!;
       expect(nulls, 0, reason: 'backfill completed for all rows');
       final sample = await v2.db
           .rawQuery('SELECT id, nickname FROM widgets ORDER BY rowid LIMIT 3');

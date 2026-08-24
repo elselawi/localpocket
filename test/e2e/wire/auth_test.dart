@@ -202,10 +202,9 @@ void main() {
 /// delegates to the live credential provider when running against the real
 /// server, or emits a mock-accepted token when hermetic.
 class _GatedTokens implements TokenProvider {
+  _GatedTokens(WireServer s) : _inner = s is RealWireServer ? s.tokens : null;
   final RealPbTokenProvider? _inner;
   bool healthy = false;
-
-  _GatedTokens(WireServer s) : _inner = s is RealWireServer ? s.tokens : null;
 
   @override
   String get identity => 'gated-user';
@@ -213,14 +212,16 @@ class _GatedTokens implements TokenProvider {
   @override
   Future<Token> currentToken() async {
     if (!healthy) throw AuthError('session revoked');
-    if (_inner != null) return _inner!.currentToken();
+    final inner = _inner;
+    if (inner case final provider?) return provider.currentToken();
     return Token('recovered-token');
   }
 
   @override
   Future<Token> refreshToken(Token current) async {
     if (!healthy) throw AuthError('session revoked');
-    if (_inner != null) return _inner!.refreshToken(current);
+    final inner = _inner;
+    if (inner case final provider?) return provider.refreshToken(current);
     return Token('recovered-token');
   }
 }

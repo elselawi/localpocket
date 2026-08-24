@@ -57,11 +57,11 @@ void main() {
     await col.search('n1').limit(50).fetch();
     // 5. Outbox drain join (raw query — added explicitly below).
     await db.outbox.drain(limit: 10);
-    sql.add("SELECT o.* FROM lp_outbox o "
-        "JOIN lp_sync_row s ON o.store = s.store AND o.record_id = s.record_id "
+    sql.add('SELECT o.* FROM lp_outbox o '
+        'JOIN lp_sync_row s ON o.store = s.store AND o.record_id = s.record_id '
         "WHERE s.sync_state NOT IN ('error','quarantine','conflict') "
-        "AND (s.next_retry_at IS NULL OR s.next_retry_at <= ?) "
-        "ORDER BY o.created_at ASC, o.rowid ASC LIMIT ?");
+        'AND (s.next_retry_at IS NULL OR s.next_retry_at <= ?) '
+        'ORDER BY o.created_at ASC, o.rowid ASC LIMIT ?');
     // 6. Sweep bucket scan.
     sql.add(
         'SELECT record_id FROM lp_sync_row WHERE store = ? AND record_id LIKE ?');

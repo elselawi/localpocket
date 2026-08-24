@@ -307,7 +307,7 @@ void main() {
 
       // Make the first blob unreferenced and old; keep the second referenced.
       final blobs = await pocket.db
-          .rawQuery("SELECT hash FROM lp_blobs WHERE refcount = 1");
+          .rawQuery('SELECT hash FROM lp_blobs WHERE refcount = 1');
       await pocket.db.execute(
           'DELETE FROM lp_file_refs WHERE hash = ?', [blobs[0]['hash']]);
       await pocket.db.execute('UPDATE lp_blobs SET refcount = 0 WHERE hash = ?',
@@ -367,7 +367,7 @@ void main() {
           [recC]);
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       final blobs = await pocket.db
-          .rawQuery("SELECT hash FROM lp_blobs ORDER BY size ASC");
+          .rawQuery('SELECT hash FROM lp_blobs ORDER BY size ASC');
       // Set distinct last_access: A oldest, C newest.
       await pocket.db.execute(
           'UPDATE lp_blobs SET last_access = ? WHERE size = ?',

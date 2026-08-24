@@ -10,11 +10,6 @@ import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/sync.dart';
 
 class MockRecord {
-  final String id;
-  final String store;
-  Map<String, Object?> data;
-  String updated;
-  List<String> imgs;
   MockRecord({
     required this.id,
     required this.store,
@@ -22,6 +17,11 @@ class MockRecord {
     required this.updated,
     this.imgs = const [],
   });
+  final String id;
+  final String store;
+  Map<String, Object?> data;
+  String updated;
+  List<String> imgs;
   RemoteRecord toRemote() => RemoteRecord(
       id: id, store: store, updated: updated, data: data, imgs: imgs);
 }
@@ -31,14 +31,14 @@ sealed class MockBehavior {}
 
 /// Throw this exact error.
 class MockThrow extends MockBehavior {
-  final Object error;
   MockThrow(this.error);
+  final Object error;
 }
 
 /// Return this exact value instead of the default behavior.
 class MockReturn extends MockBehavior {
-  final Object? value;
   MockReturn(this.value);
+  final Object? value;
 }
 
 /// Simulate a network drop (transient error).
@@ -177,7 +177,7 @@ class MockSyncBackend implements SyncBackend {
     try {
       final b = await _next('listChanges');
       if (b is MockThrow) throw b.error;
-      if (b is MockReturn) return (b.value as List).cast<RemoteRecord>();
+      if (b is MockReturn) return (b.value! as List).cast<RemoteRecord>();
       if (b is MockDrop) throw TransientNetworkError();
       _checkAuth();
 
@@ -330,7 +330,7 @@ class MockSyncBackend implements SyncBackend {
     downloadFileCalls++;
     final b = await _next('downloadFile');
     if (b is MockThrow) throw b.error;
-    if (b is MockReturn) return b.value as Stream<List<int>>;
+    if (b is MockReturn) return b.value! as Stream<List<int>>;
     if (b is MockDrop) throw TransientNetworkError();
     _checkAuth();
 
@@ -384,7 +384,7 @@ class MockSyncBackend implements SyncBackend {
           o.upsert ? 'upsert' : (o.baseUpdated == null ? 'create' : 'update')));
     final b = await _next('pushBatch');
     if (b is MockThrow) throw b.error;
-    if (b is MockReturn) return (b.value as List).cast<PushResult>();
+    if (b is MockReturn) return (b.value! as List).cast<PushResult>();
     if (b is MockDrop) throw TransientNetworkError();
     _checkAuth();
     if (poisonEnabled && ops.any((o) => o.dataJson.contains('"poison"'))) {

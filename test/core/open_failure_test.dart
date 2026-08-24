@@ -199,10 +199,10 @@ void main() {
 /// A [Database] that fails (throws) once a statement starts with [failOnPrefix],
 /// and records close calls. Wraps a real in-memory SQLite handle.
 class _FailingDb extends DirectSqliteDatabase {
-  final String failOnPrefix;
-  int closeCount = 0;
 
   _FailingDb(super.rawDb, {required this.failOnPrefix});
+  final String failOnPrefix;
+  int closeCount = 0;
 
   @override
   void executeSync(String sql, [List<Object?> parameters = const []]) {

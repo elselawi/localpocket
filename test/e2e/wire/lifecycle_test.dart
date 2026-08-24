@@ -63,7 +63,7 @@ void main() {
       await a.engine.syncNow();
 
       // The wire carries the LOGICAL value (encryption is at-rest only).
-      expect((await s.readRecord(s.store, id))!['data'] as Map<String, Object?>,
+      expect((await s.readRecord(s.store, id))!['data']! as Map<String, Object?>,
           containsPair('secret', secret),
           reason: 'the wire transports the logical (plaintext) value');
       // ...but A's domain table stores ciphertext, never the plaintext.

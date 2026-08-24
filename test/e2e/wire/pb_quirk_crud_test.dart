@@ -126,7 +126,7 @@ void main() {
       });
       expect(status, 400, reason: 'a duplicate is a 400, not a 409');
       final decoded = jsonDecode(body) as Map<String, Object?>;
-      expect((((decoded['data'] as Map)['id']) as Map)['code'],
+      expect((((decoded['data']! as Map)['id']) as Map)['code'],
           'validation_pk_invalid');
 
       // Local convergence: A recovered through the DuplicateIdError path; a
@@ -303,10 +303,10 @@ void main() {
       });
       expect(createStatus, inInclusiveRange(200, 299));
       final resp = jsonDecode(createBody) as Map<String, Object?>;
-      final id = resp['id'] as String;
+      final id = resp['id']! as String;
 
       // CREATE side: the echoed data has no `archived` key at all.
-      final echoedData = resp['data'] as Map;
+      final echoedData = resp['data']! as Map;
       expect(echoedData.containsKey('archived'), isFalse,
           reason: 'archived:false is localpocket-only; PB omits the key');
 
@@ -353,7 +353,7 @@ void main() {
       final created = jsonDecode(createBody) as Map<String, Object?>;
       expect(created['collectionId'], isNotNull);
       expect(created['collectionName'], isNotNull);
-      final id = created['id'] as String;
+      final id = created['id']! as String;
 
       // UPDATE response echoes them too.
       final (patchStatus, patchBody) = await rawSend(
@@ -419,9 +419,9 @@ void main() {
       });
       expect(cStatus, inInclusiveRange(200, 299));
       final created = jsonDecode(cBody) as Map<String, Object?>;
-      final id = created['id'] as String;
+      final id = created['id']! as String;
       final createdAt = created['created'] as String?;
-      final updatedAt = created['updated'] as String;
+      final updatedAt = created['updated']! as String;
       expect(createdAt, isNotNull);
       expect(createdAt, updatedAt,
           reason: 'first create stamps created == updated');

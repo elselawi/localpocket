@@ -173,11 +173,11 @@ Future<void> _drainAll(EngineHarness h) async {
 }
 
 class _PoisoningMockSyncBackend extends MockSyncBackend {
-  final Set<String> poisonIds;
 
   _PoisoningMockSyncBackend(this.poisonIds) {
     batchEnabled = true;
   }
+  final Set<String> poisonIds;
 
   @override
   Future<List<PushResult>> pushBatch(List<PushOp> ops) async {
@@ -191,9 +191,9 @@ class _PoisoningMockSyncBackend extends MockSyncBackend {
 }
 
 class _RateLimitingMockSyncBackend extends MockSyncBackend {
-  final void Function() onAction;
 
   _RateLimitingMockSyncBackend(this.onAction);
+  final void Function() onAction;
 
   @override
   Future<RemoteRecord?> getRecord(String id) {

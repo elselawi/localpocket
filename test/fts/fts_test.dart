@@ -9,8 +9,7 @@ void main() {
       int version = 1,
       List<StoreMigration> migrations = const [],
       bool keepUnsyncedArchives = true,
-    }) {
-      return CollectionSchema<Object?>(
+    }) => CollectionSchema<Object?>(
         name: 'articles',
         version: version,
         keepUnsyncedArchives: keepUnsyncedArchives,
@@ -22,7 +21,6 @@ void main() {
         fts: const FtsSpec(['title', 'body']),
         migrations: migrations,
       );
-    }
 
     test('external content triggers keep index in sync', () async {
       final t = await tempDbPath();

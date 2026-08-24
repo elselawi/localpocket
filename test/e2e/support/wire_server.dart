@@ -38,15 +38,15 @@ List<CollectionSchema> _resolveSchemas(
 
 /// One client bound to a [WireServer]: the pocket + engine a scenario drives.
 class WireClient {
+
+  WireClient(this.pocket, this.engine, this.backend, this.tokenProvider,
+      this.blobStore, this.store);
   final LocalPocket pocket;
   final SyncEngine engine;
   final PocketBaseBackend backend;
   final TokenProvider tokenProvider;
   final BlobStore? blobStore;
   final String store;
-
-  WireClient(this.pocket, this.engine, this.backend, this.tokenProvider,
-      this.blobStore, this.store);
 }
 
 /// The canonical config for shared wire scenarios — tuned to run correctly on
@@ -282,11 +282,6 @@ class MockWireServer extends WireServer {
 /// Live variant: speaks raw HTTP to the server in `test/secret.dart`, with
 /// clients built like `RealHarness`.
 class RealWireServer extends WireServer {
-  final RealPbTokenProvider _tokens;
-  final String _store = uniqueStore();
-  final List<Future<void> Function()> _clientClosers = [];
-  final List<Future<void> Function()> _closeHooks = [];
-  PocketBaseBackend? _opsBackend;
 
   RealWireServer()
       : _tokens = RealPbTokenProvider(
@@ -294,6 +289,11 @@ class RealWireServer extends WireServer {
           email: testPBEmail,
           password: testPBPassword,
         );
+  final RealPbTokenProvider _tokens;
+  final String _store = uniqueStore();
+  final List<Future<void> Function()> _clientClosers = [];
+  final List<Future<void> Function()> _closeHooks = [];
+  PocketBaseBackend? _opsBackend;
 
   @override
   String get store => _store;
@@ -431,7 +431,7 @@ class RealWireServer extends WireServer {
       ));
       expect(res.status, 200);
       final body = jsonDecode(res.body) as Map<String, Object?>;
-      final items = body['items'] as List;
+      final items = body['items']! as List;
       count += items.length;
       if (items.length < 200) break;
       page++;

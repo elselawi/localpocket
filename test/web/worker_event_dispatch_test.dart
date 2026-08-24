@@ -34,7 +34,7 @@ void main() {
       );
 
       await pumpEventQueue();
-      final value = values.single as Map;
+      final value = values.single! as Map;
       expect(value['id'], 'abc');
       expect(value['made_on'], DateTime.utc(2026, 1, 2, 3, 4, 5));
       await controller.close();
@@ -47,7 +47,7 @@ void main() {
 
       final streams = <int, StreamController<dynamic>>{2: controller};
       final decoders = <int, Object? Function(Object?)>{
-        2: (raw) => 'decoded:${(raw as List).length}',
+        2: (raw) => 'decoded:${(raw! as List).length}',
       };
       handleWorkerEventEnvelope(
         {
@@ -69,7 +69,11 @@ void main() {
       await controller.close();
     });
 
-    test('an error field is delivered as a typed watch error', () async {
+    test(
+        'an error field is delivered as a typed watch error and closes the stream',
+        () async {
+      // The event handler closes this controller after delivering the error.
+      // ignore: close_sinks
       final controller = StreamController<dynamic>();
       final errors = <Object?>[];
       controller.stream.listen((_) {}, onError: errors.add);
@@ -95,7 +99,7 @@ void main() {
       final err = errors.single as RemoteLocalPocketException;
       expect(err.code, 'watch');
       expect(err.message, 'watch failed');
-      await controller.close();
+      expect(controller.isClosed, isTrue);
     });
 
     test('sync_status is wire-decoded onto the status controller', () async {
@@ -226,6 +230,34 @@ void main() {
       await pumpEventQueue();
       expect(values, isEmpty);
       await controller.close();
+    });
+
+    test('malformed record_event payloads are ignored instead of crashing',
+        () async {
+      final changeBus = ChangeBus();
+      final events = <RecordChangeEvent>[];
+      changeBus.events.listen(events.add);
+
+      expect(
+        () => handleWorkerEventEnvelope(
+          {
+            'v': webProtocolVersion,
+            'op': WireOp.recordEvent,
+            'event': encodeWireValue({'id': 'abc'}),
+          },
+          workerStreams: const {},
+          workerEventDecoders: const {},
+          authRequiredController: StreamController<void>.broadcast(),
+          syncStatusController:
+              StreamController<Map<String, Object?>>.broadcast(),
+          changeBus: changeBus,
+        ),
+        returnsNormally,
+      );
+
+      await pumpEventQueue();
+      expect(events, isEmpty);
+      changeBus.close();
     });
 
     test('events targeting a closed stream are dropped', () async {

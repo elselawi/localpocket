@@ -327,8 +327,8 @@ void main() {
 }
 
 class _PlainException implements Exception {
-  final String message;
   _PlainException(this.message);
+  final String message;
   @override
   String toString() => message;
 }

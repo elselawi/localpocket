@@ -143,7 +143,7 @@ void main() {
       );
       addTearDown(pocket.close);
 
-      final now = 1000000000;
+      const now = 1000000000;
       final oldSeen = now - const Duration(days: 100).inMilliseconds;
       final recentSeen = now - const Duration(days: 10).inMilliseconds;
 

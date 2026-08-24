@@ -9,13 +9,6 @@ import 'package:localpocket/src/web/protocol.dart';
 
 /// A recorded `filesUpload` call.
 class RecordedFileUpload {
-  final String store;
-  final String recordId;
-  final List<int> bytes;
-  final String field;
-  final String name;
-  final int? expectedSize;
-  final String? expectedSha256;
 
   RecordedFileUpload({
     required this.store,
@@ -26,6 +19,13 @@ class RecordedFileUpload {
     this.expectedSize,
     this.expectedSha256,
   });
+  final String store;
+  final String recordId;
+  final List<int> bytes;
+  final String field;
+  final String name;
+  final int? expectedSize;
+  final String? expectedSha256;
 }
 
 /// In-memory [WebFacadeHost] for driving the facade proxy classes on the VM.
@@ -37,7 +37,7 @@ class RecordedFileUpload {
 class FakeFacadeHost implements WebFacadeHost {
   FakeFacadeHost(this.schemas);
 
-  final Map<String, CollectionSchema> schemas;
+  final Map<String, CollectionSchema<Object?>> schemas;
 
   /// Every envelope sent through [send], in order: (op, args).
   final List<(String, Map<String, Object?>)> sent = [];
@@ -61,6 +61,18 @@ class FakeFacadeHost implements WebFacadeHost {
       StreamController<Map<String, Object?>>.broadcast();
   final StreamController<void> authRequiredController =
       StreamController<void>.broadcast();
+
+  /// Closes the fake host's streams and change bus.
+  Future<void> close() async {
+    changeBus.close();
+    await Future.wait([
+      syncStatusController.close(),
+      authRequiredController.close(),
+      ...workerStreams.values.map((stream) => stream.close()),
+    ]);
+    workerStreams.clear();
+    workerEventDecoders.clear();
+  }
 
   @override
   int nextRequestId = 1000;

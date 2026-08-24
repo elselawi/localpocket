@@ -351,6 +351,15 @@ void main() {
 /// A configurable fake [Database] whose `rawQuery` answers exactly the
 /// statements `SqliteCapabilities.probe` issues.
 class _FakeProbeDatabase implements Database {
+
+  _FakeProbeDatabase({
+    required this.version,
+    required this.compileOptions,
+    required this.journalMode,
+    this.fts5ProbeSucceeds = false,
+    this.journalModeEmptyRows = false,
+    this.journalModeRaw,
+  });
   final String version;
   final List<String> compileOptions;
   final String? journalMode;
@@ -367,15 +376,6 @@ class _FakeProbeDatabase implements Database {
   final Object? journalModeRaw;
 
   bool journalModeQueried = false;
-
-  _FakeProbeDatabase({
-    required this.version,
-    required this.compileOptions,
-    required this.journalMode,
-    this.fts5ProbeSucceeds = false,
-    this.journalModeEmptyRows = false,
-    this.journalModeRaw,
-  });
 
   @override
   Future<List<Map<String, Object?>>> rawQuery(String sql,

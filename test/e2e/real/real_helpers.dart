@@ -20,6 +20,13 @@ import '../../support/helpers.dart';
 /// Logs in against the `_superusers` collection with the test credentials and
 /// refreshes via `auth-refresh` (token in header AND body).
 class RealPbTokenProvider implements TokenProvider {
+
+  RealPbTokenProvider({
+    required this.baseUrl,
+    required this.email,
+    required this.password,
+    HttpTransport? transport,
+  }) : transport = transport ?? PackageHttpTransport();
   final Uri baseUrl;
   final String email;
   final String password;
@@ -28,13 +35,6 @@ class RealPbTokenProvider implements TokenProvider {
   String? _identity;
   int logins = 0;
   int refreshes = 0;
-
-  RealPbTokenProvider({
-    required this.baseUrl,
-    required this.email,
-    required this.password,
-    HttpTransport? transport,
-  }) : transport = transport ?? PackageHttpTransport();
 
   @override
   String get identity => _identity ?? 'superuser';
@@ -89,13 +89,13 @@ class RealPbTokenProvider implements TokenProvider {
 
 /// A full adapter-backed engine harness pointed at the REAL server.
 class RealHarness {
+
+  RealHarness(this.pocket, this.backend, this.engine, this.tokens, this.store);
   final LocalPocket pocket;
   final PocketBaseBackend backend;
   final SyncEngine engine;
   final RealPbTokenProvider tokens;
   final String store;
-
-  RealHarness(this.pocket, this.backend, this.engine, this.tokens, this.store);
 
   static Future<RealHarness> create({
     required String store,

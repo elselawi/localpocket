@@ -162,10 +162,10 @@ void main() {
 
 /// Counts live [DirectSqliteDatabase] instances for connection-leak checks.
 class _CountingDb extends DirectSqliteDatabase {
-  static int live = 0;
   _CountingDb(super.db) {
     live++;
   }
+  static int live = 0;
 
   @override
   Future<void> close() async {

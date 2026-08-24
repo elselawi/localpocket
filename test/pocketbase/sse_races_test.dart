@@ -10,7 +10,7 @@ import '../support/pb_helpers.dart';
 /// Realtime SSE handshake / auth / stop races and event validation /
 /// ordering, driven through [PbRealtime] over a fake transport.
 void main() {
-  final handshake = 'id:h1\nevent:PB_CONNECT\ndata:{"clientId":"cid"}\n\n';
+  const handshake = 'id:h1\nevent:PB_CONNECT\ndata:{"clientId":"cid"}\n\n';
 
   String eventFrame(String id,
           {String action = 'update',
@@ -263,7 +263,7 @@ void main() {
           StreamedHttpResponse(200, const {}, controller.stream));
       await rt.start();
 
-      final text = '$handshake'
+      const text = '$handshake'
           'event:data\ndata:{"record":{},"action":"update"}\n\n'
           'event:data\ndata:{"record":{"id":5,"store":["x"],"updated":null,"data":"nope","imgs":[1,2,"ok.png"]},"action":"update"}\n\n';
       controller.add(utf8.encode(text));
@@ -372,9 +372,9 @@ void main() {
 
 /// Delegates to a [FakeTransport] but records when [send] is invoked.
 class _RecordingTransport extends HttpTransport {
+  _RecordingTransport(this.inner, this.onSend);
   final HttpTransport inner;
   final void Function() onSend;
-  _RecordingTransport(this.inner, this.onSend);
 
   @override
   Future<HttpResponse> send(HttpRequest request) async {
@@ -392,9 +392,9 @@ class _RecordingTransport extends HttpTransport {
 
 /// Delegates to a transport but holds [openStream] until the gate completes.
 class _GateTransport extends HttpTransport {
+  _GateTransport(this.inner, this.gate);
   final HttpTransport inner;
   final Completer<void> gate;
-  _GateTransport(this.inner, this.gate);
 
   @override
   Future<StreamedHttpResponse> openStream(HttpRequest request) async {

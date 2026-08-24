@@ -204,7 +204,7 @@ void main() {
         headers: {'Authorization': 'Bearer ${token.value}'},
       ));
       final body = jsonDecode(res.body) as Map<String, Object?>;
-      expect((body['items'] as List).length, 120,
+      expect((body['items']! as List).length, 120,
           reason: 'all 120 records landed despite the batch cap');
     });
 
@@ -241,7 +241,7 @@ void main() {
         headers: {'Authorization': 'Bearer ${token.value}'},
       ));
       final body = jsonDecode(res.body) as Map<String, Object?>;
-      expect((body['items'] as List).length, 150);
+      expect((body['items']! as List).length, 150);
     });
 
     test('real_two_client_disjoint_edits_converge', () async {

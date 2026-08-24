@@ -25,7 +25,7 @@ void main() {
       expect(op, WireOp.mutateBatch);
       expect(args['store'], 'widgets');
       expect(args, isNot(contains('sessionId')));
-      final mutations = (args['mutations'] as List).cast<Map>();
+      final mutations = (args['mutations']! as List).cast<Map>();
       expect(mutations.single, {
         'action': 'put',
         'record': encodeWireValue(record),
@@ -39,7 +39,7 @@ void main() {
 
       final (op, args) = fake.sent.single;
       expect(op, WireOp.mutateBatch);
-      final mutations = (args['mutations'] as List).cast<Map>();
+      final mutations = (args['mutations']! as List).cast<Map>();
       expect(mutations, hasLength(2));
       expect(mutations[0], {'action': 'put', 'record': encodeWireValue(r1)});
       expect(mutations[1], {'action': 'put', 'record': encodeWireValue(r2)});
@@ -51,7 +51,7 @@ void main() {
 
       final (op, args) = fake.sent.single;
       expect(op, WireOp.mutateBatch);
-      final mutations = (args['mutations'] as List).cast<Map>();
+      final mutations = (args['mutations']! as List).cast<Map>();
       expect(mutations.single, {
         'action': 'patch',
         'id': 'abc',
@@ -69,11 +69,11 @@ void main() {
       final restoreArgs = fake.sent[1].$2;
       final purgeArgs = fake.sent[2].$2;
 
-      expect((archiveArgs['mutations'] as List).cast<Map>().single,
+      expect((archiveArgs['mutations']! as List).cast<Map>().single,
           {'action': 'archive', 'id': 'a1'});
-      expect((restoreArgs['mutations'] as List).cast<Map>().single,
+      expect((restoreArgs['mutations']! as List).cast<Map>().single,
           {'action': 'restore', 'id': 'a2'});
-      expect((purgeArgs['mutations'] as List).cast<Map>().single,
+      expect((purgeArgs['mutations']! as List).cast<Map>().single,
           {'action': 'purge', 'id': 'a3'});
     });
 
@@ -148,6 +148,17 @@ void main() {
       fake.responses[WireOp.watchOne] = {'item': null};
       final events = <Map<String, Object?>?>[];
       final sub = col.watchOne('gone').listen(events.add);
+      await pumpEventQueue();
+      expect(events, hasLength(1));
+      expect(events.single, isNull);
+      await sub.cancel();
+    });
+
+    test('malformed watch_one payloads are treated as null instead of crashing',
+        () async {
+      fake.responses[WireOp.watchOne] = 'unexpected';
+      final events = <Map<String, Object?>?>[];
+      final sub = col.watchOne('broken').listen(events.add);
       await pumpEventQueue();
       expect(events, hasLength(1));
       expect(events.single, isNull);

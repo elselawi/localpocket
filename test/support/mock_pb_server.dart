@@ -15,15 +15,6 @@ import 'package:localpocket/localpocket.dart'
 import 'package:localpocket/sync.dart';
 
 class PbRecord {
-  String id;
-  String store;
-  Map<String, Object?> data;
-  String updated;
-  List<String> imgs;
-  bool serverHidden; // list/view rule revoked
-  bool hideFromList; // list rule only: still GET-able by id (404 on view)
-  bool banned; // rejects writes (for poison testing)
-
   PbRecord({
     required this.id,
     required this.store,
@@ -34,6 +25,15 @@ class PbRecord {
     this.hideFromList = false,
     this.banned = false,
   });
+
+  String id;
+  String store;
+  Map<String, Object?> data;
+  String updated;
+  List<String> imgs;
+  bool serverHidden; // list/view rule revoked
+  bool hideFromList; // list rule only: still GET-able by id (404 on view)
+  bool banned; // rejects writes (for poison testing)
 
   Map<String, Object?> toJson() => {
         'id': id,
@@ -53,10 +53,10 @@ class PbRecord {
 /// A single multipart part: form field [name] (+ optional [filename] for
 /// file parts) and its raw [bytes].
 class _MultipartPart {
+  _MultipartPart(this.name, this.filename, this.bytes);
   final String name;
   final String? filename;
   final List<int> bytes;
-  _MultipartPart(this.name, this.filename, this.bytes);
 }
 
 class MockPbServer {
@@ -229,7 +229,7 @@ class MockPbServer {
     for (final res in List<HttpResponse>.of(_sseResponses)) {
       try {
         res.write(frame);
-        res.flush();
+        unawaited(res.flush());
       } catch (_) {}
     }
   }
@@ -238,7 +238,7 @@ class MockPbServer {
     for (final res in List<HttpResponse>.of(_sseResponses)) {
       try {
         res.write(text);
-        res.flush();
+        unawaited(res.flush());
       } catch (_) {}
     }
   }
@@ -246,7 +246,7 @@ class MockPbServer {
   void closeSse() {
     for (final res in List<HttpResponse>.of(_sseResponses)) {
       try {
-        res.close();
+        unawaited(res.close());
       } catch (_) {}
     }
     for (final h in List<Completer<void>>.of(_sseHolders)) {
@@ -394,7 +394,7 @@ class MockPbServer {
       });
     }
 
-    var list = records.values
+    final list = records.values
         .where((r) =>
             !r.serverHidden && !r.hideFromList && _matchesFilter(r, filter))
         .toList();
@@ -590,7 +590,7 @@ class MockPbServer {
       });
     }
     final data = body['data'] is Map
-        ? Map<String, Object?>.from(body['data'] as Map)
+        ? Map<String, Object?>.from(body['data']! as Map)
         : <String, Object?>{};
     // PB server-managed timestamps: a client-sent `updated` (top-level in the
     // body) is ignored — the server stamps its own on write.
@@ -693,7 +693,7 @@ class MockPbServer {
         jsonDecode(await utf8.decoder.bind(req).join()) as Map<String, Object?>;
     lastBody = jsonEncode(body);
     final data = body['data'] is Map
-        ? Map<String, Object?>.from(body['data'] as Map)
+        ? Map<String, Object?>.from(body['data']! as Map)
         : r.data;
     // PB server-managed timestamps: a client-sent `updated` is ignored and
     // the server stamps its own below.
@@ -810,7 +810,7 @@ class MockPbServer {
     // Apply all atomically (roll back everything on any failure).
     final applied = <String, PbRecord>{};
     for (final op in ops) {
-      final id = op['id'] as String;
+      final id = op['id']! as String;
       final existing = records[id];
       if (existing != null && existing.banned) {
         _rollback(applied);
@@ -819,10 +819,10 @@ class MockPbServer {
       final rec = existing ??
           PbRecord(
               id: id,
-              store: op['store'] as String,
+              store: op['store']! as String,
               data: {},
               updated: nextUpdated());
-      rec.data = op['data'] as Map<String, Object?>;
+      rec.data = op['data']! as Map<String, Object?>;
       rec.updated = nextUpdated();
       if (existing == null) records[id] = rec;
       applied[id] = rec;

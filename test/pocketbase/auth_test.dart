@@ -365,13 +365,6 @@ void main() {
 
 /// A scriptable [TokenProvider] with call counters and failure injection.
 class _ScriptedProvider implements TokenProvider {
-  String value;
-  DateTime? expiresAt;
-  DateTime? issuedAt;
-  int currentCalls = 0;
-  int refreshCalls = 0;
-  Object? refreshError;
-  Duration refreshDelay;
 
   _ScriptedProvider({
     this.value = 'initial',
@@ -380,6 +373,13 @@ class _ScriptedProvider implements TokenProvider {
     this.refreshError,
     this.refreshDelay = Duration.zero,
   });
+  String value;
+  DateTime? expiresAt;
+  DateTime? issuedAt;
+  int currentCalls = 0;
+  int refreshCalls = 0;
+  Object? refreshError;
+  Duration refreshDelay;
 
   @override
   String get identity => 'user-1';

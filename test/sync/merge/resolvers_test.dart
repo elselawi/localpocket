@@ -477,7 +477,7 @@ void main() {
     });
 
     test('overflow policy: huge ints stay int without throwing', () {
-      final huge = 1 << 62;
+      const huge = 1 << 62;
       // 0 + (2^62 - 0) + (2^62 + 1 - 0) = 2^63 + 1 -> wraps under 64-bit
       // arithmetic (documented Dart int behavior; no exception).
       final m = mergeCount(0, huge, huge + 1);

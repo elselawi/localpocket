@@ -67,12 +67,12 @@ void main() {
     fake.responses[WireOp.watchQuery] = {'items': <Object?>[]};
     final sub1 = builder.watch().listen((_) {});
     await pumpEventQueue();
-    final id1 = watchEnvelope()['watchId'] as int;
+    final id1 = watchEnvelope()['watchId']! as int;
     await sub1.cancel();
 
     final sub2 = builder.watch().listen((_) {});
     await pumpEventQueue();
-    final id2 = watchEnvelope()['watchId'] as int;
+    final id2 = watchEnvelope()['watchId']! as int;
 
     expect(id2, id1 + 1);
     await sub2.cancel();

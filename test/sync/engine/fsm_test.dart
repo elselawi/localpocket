@@ -93,15 +93,15 @@ void main() {
 
       // Offline park, then reconnect back to idle.
       states.clear();
-      h.engine.setConnectivity(false);
+      await h.engine.setConnectivity(false);
       await Future<void>.delayed(const Duration(milliseconds: 5));
       expect(h.engine.state, SyncEngineState.offline);
-      h.engine.setConnectivity(true);
+      await h.engine.setConnectivity(true);
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(h.engine.state, SyncEngineState.idle);
 
       // Pause / resume.
-      h.engine.pause();
+      await h.engine.pause();
       await Future<void>.delayed(const Duration(milliseconds: 5));
       expect(h.engine.state, SyncEngineState.paused);
       await h.engine.resume();
@@ -158,7 +158,7 @@ void main() {
       final h = await EngineHarness.create();
       addTearDown(h.close);
 
-      h.engine.setConnectivity(false);
+      await h.engine.setConnectivity(false);
       await Future<void>.delayed(const Duration(milliseconds: 5));
       expect(h.engine.state, SyncEngineState.offline);
 
@@ -168,7 +168,7 @@ void main() {
       expect(h.mock.records, isEmpty, reason: 'nothing leaves while offline');
 
       // Reconnect: settle timer (zero in tests) returns to idle and syncs.
-      h.engine.setConnectivity(true);
+      await h.engine.setConnectivity(true);
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(h.engine.state, SyncEngineState.idle);
       expect(h.mock.records.length, 1,
@@ -283,7 +283,7 @@ void main() {
       // The restarted engine delivers events on a FRESH stream.
       final states = <SyncEngineState>[];
       final sub = h.engine.stateChanges.listen(states.add);
-      h.engine.pause();
+      await h.engine.pause();
       await Future<void>.delayed(Duration.zero);
       expect(states, contains(SyncEngineState.paused),
           reason: 'restarted engine emits state on a fresh stream');
@@ -395,10 +395,10 @@ void main() {
               testConfig(connectivitySettle: const Duration(milliseconds: 30)));
       addTearDown(h.close);
 
-      h.engine.setConnectivity(false);
+      await h.engine.setConnectivity(false);
       await Future<void>.delayed(const Duration(milliseconds: 5));
       expect(h.engine.state, SyncEngineState.offline);
-      h.engine.setConnectivity(true); // schedules the settle timer
+      await h.engine.setConnectivity(true); // schedules the settle timer
       await h.engine.stop();
 
       // The settle timer was cancelled: no cycle after stop.
@@ -588,10 +588,10 @@ void main() {
       addTearDown(h.close);
 
       await h.pocket.collection('widgets').put(record(name: 'x'));
-      h.engine.setConnectivity(false);
-      h.engine.setConnectivity(true);
-      h.engine.setConnectivity(false);
-      h.engine.setConnectivity(true);
+      await h.engine.setConnectivity(false);
+      await h.engine.setConnectivity(true);
+      await h.engine.setConnectivity(false);
+      await h.engine.setConnectivity(true);
       await Future<void>.delayed(const Duration(milliseconds: 120));
 
       expect(h.engine.state, SyncEngineState.idle);

@@ -43,7 +43,7 @@ void main() {
 
   /// The current server-side `imgs` list for [id].
   Future<List<Object?>> remoteImgs(WireServer s, String id) async =>
-      (await s.readRecord(s.store, id))!['imgs'] as List;
+      (await s.readRecord(s.store, id))!['imgs']! as List;
 
   /// A file-enabled client bound to [s].
   Future<WireClient> fileClient(WireServer s) async {
@@ -170,7 +170,7 @@ void main() {
           s, '/api/collections/data/records/$id',
           uploads: {'imgs+': ('same.bin', bytes)});
       expect(s1, 200, reason: 'first raw upload accepted');
-      final imgs1 = (r1!['imgs'] as List).cast<String>();
+      final imgs1 = (r1!['imgs']! as List).cast<String>();
       expect(imgs1, hasLength(1));
       final firstServerName = imgs1.single;
 
@@ -178,7 +178,7 @@ void main() {
           s, '/api/collections/data/records/$id',
           uploads: {'imgs+': ('same.bin', bytes)});
       expect(s2, 200, reason: 'second raw upload accepted');
-      final imgs2 = (r2!['imgs'] as List).cast<String>();
+      final imgs2 = (r2!['imgs']! as List).cast<String>();
       expect(imgs2, hasLength(2),
           reason: 'a second upload of identical bytes APPENDS, never '
               'overwrites');
@@ -231,7 +231,7 @@ void main() {
           bytes: Stream.value(bytes),
           name: 'orig.bin');
       await a.engine.syncNow();
-      final serverName = (await remoteImgs(s, id)).single as String;
+      final serverName = (await remoteImgs(s, id)).single! as String;
       expect(serverName, isNot('orig.bin'),
           reason: 'the server renamed the upload (server-minted name)');
 
@@ -299,7 +299,7 @@ void main() {
       final a = await fileClient(s);
       final id = await s.createRecord(s.store, {'name': 'f'});
       final updatedBefore =
-          (await s.readRecord(s.store, id))!['updated'] as String;
+          (await s.readRecord(s.store, id))!['updated']! as String;
 
       final bytes = List<int>.filled(128, 5);
       final uploaded = await a.backend.updateRecordFilesStream(
@@ -313,7 +313,7 @@ void main() {
         },
       );
       final updatedAfterUpload =
-          (await s.readRecord(s.store, id))!['updated'] as String;
+          (await s.readRecord(s.store, id))!['updated']! as String;
       expect(updatedAfterUpload, isNot(updatedBefore),
           reason:
               'EMPIRICAL PIN: a file upload bumps the server-managed updated '
@@ -322,7 +322,7 @@ void main() {
       final cleared = await a.backend
           .updateRecordFiles(id: id, removeNames: uploaded.imgs.cast<String>());
       final updatedAfterRemove =
-          (await s.readRecord(s.store, id))!['updated'] as String;
+          (await s.readRecord(s.store, id))!['updated']! as String;
       expect(updatedAfterRemove, isNot(updatedAfterUpload),
           reason: 'EMPIRICAL PIN: a file removal also bumps updated — a pull '
               're-delivers the record, so the file lane can rely on it');
@@ -345,7 +345,7 @@ void main() {
           bytes: Stream.value(bytes),
           name: 'dl.bin');
       await a.engine.syncNow();
-      final serverName = (await remoteImgs(s, id)).single as String;
+      final serverName = (await remoteImgs(s, id)).single! as String;
 
       // With the token in the Authorization header the exact bytes come back
       // on both backends (live: the superuser bearer; mock: any accepted).
@@ -385,7 +385,7 @@ void main() {
           ),
         },
       );
-      final serverName = (await s.readRecord(s.store, id))!['imgs'] as List;
+      final serverName = (await s.readRecord(s.store, id))!['imgs']! as List;
 
       // EMPIRICAL PIN: the live data collection serves files to an
       // UNAUTHENTICATED request — its `tokenRequired` is OFF (public files;

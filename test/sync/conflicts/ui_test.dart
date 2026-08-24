@@ -208,7 +208,7 @@ void main() {
       await a.engine.syncNow();
 
       await a.pocket.collection('widgets').patch(id, {'name': 'local_val'});
-      final remoteUpdated = '2026-08-14 14:00:00.000Z';
+      const remoteUpdated = '2026-08-14 14:00:00.000Z';
       mock.records[id] = MockRecord(
         id: id,
         store: 'widgets',

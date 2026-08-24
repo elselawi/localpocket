@@ -311,8 +311,8 @@ class _NoMultipartTransport extends HttpTransport {
 
 /// A minimal [http.BaseClient] whose responses are fully scriptable.
 class _StreamedClient extends http.BaseClient {
-  final Future<http.StreamedResponse> Function(http.BaseRequest) handler;
   _StreamedClient(this.handler);
+  final Future<http.StreamedResponse> Function(http.BaseRequest) handler;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) =>

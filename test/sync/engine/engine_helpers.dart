@@ -23,8 +23,7 @@ SyncConfig testConfig({
   Duration? connectivitySettle,
   Duration? purgeHiddenAfter,
   int Function()? now,
-}) {
-  return SyncConfig(
+}) => SyncConfig(
     maxPage: maxPage,
     maxPagesPerPass: maxPagesPerPass,
     rewind: rewind ?? const Duration(seconds: 5),
@@ -40,14 +39,13 @@ SyncConfig testConfig({
     purgeHiddenAfter: purgeHiddenAfter,
     now: now,
   );
-}
 
 class EngineHarness {
+
+  EngineHarness(this.pocket, this.mock, this.engine);
   final LocalPocket pocket;
   final MockSyncBackend mock;
   final SyncEngine engine;
-
-  EngineHarness(this.pocket, this.mock, this.engine);
 
   static Future<EngineHarness> create({
     List<CollectionSchema>? stores,

@@ -33,6 +33,13 @@ class RecordingSink implements WorkerEventSink {
 /// the same parse → dispatch → handler → reply path the worker runs, but
 /// without `dart:js_interop`, so it runs under `dart test`.
 class WorkerHarness {
+
+  WorkerHarness._({
+    required this.rawDb,
+    required this.pocket,
+    required this.engine,
+    required this.sink,
+  });
   /// The native in-memory database the engine executes against.
   final sqlite.Database rawDb;
 
@@ -47,13 +54,6 @@ class WorkerHarness {
   final RecordingSink sink;
 
   int _counter = 0;
-
-  WorkerHarness._({
-    required this.rawDb,
-    required this.pocket,
-    required this.engine,
-    required this.sink,
-  });
 
   /// Opens a harness with the canonical `widgets` schema (or [stores]) and an
   /// in-memory blob store.

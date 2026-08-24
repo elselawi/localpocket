@@ -36,7 +36,7 @@ void main() {
       final rnd = Random(42);
 
       // Initial cursor check on Fast client
-      var initCursor = await hFast.engine.syncStore.readCursor('widgets');
+      final initCursor = await hFast.engine.syncStore.readCursor('widgets');
       expect(initCursor, isNull);
 
       for (var i = 0; i < eventCount; i++) {

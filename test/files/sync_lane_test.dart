@@ -392,8 +392,7 @@ void main() {
 
   group('file-op retry persistence', () {
     Future<EngineHarness> harness(
-        MockSyncBackend mock, BlobStore blobStore, TempDb dbPath) {
-      return EngineHarness.create(
+        MockSyncBackend mock, BlobStore blobStore, TempDb dbPath) => EngineHarness.create(
         mock: mock,
         config: testConfig(
             pushDebounce: const Duration(days: 365),
@@ -401,7 +400,6 @@ void main() {
         path: dbPath.path,
         blobStore: blobStore,
       );
-    }
 
     Future<Map<String, Object?>> queueOpRow(
         EngineHarness h, String kind) async {
@@ -619,14 +617,12 @@ void main() {
 
   group('remote file-list shrink reconciliation', () {
     Future<EngineHarness> shrinkHarness(
-        MockSyncBackend mock, BlobStore blobStore, TempDb dbPath) {
-      return EngineHarness.create(
+        MockSyncBackend mock, BlobStore blobStore, TempDb dbPath) => EngineHarness.create(
         mock: mock,
         config: convConfig(),
         path: dbPath.path,
         blobStore: blobStore,
       );
-    }
 
     test('synced refs shrink: the gone file is removed with refcount release',
         () async {

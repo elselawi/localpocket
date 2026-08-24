@@ -68,7 +68,7 @@ void main() {
           final content = await f.readAsString();
           expect(content, isNot(contains("import 'dart:io'")),
               reason: '${f.path} must not import dart:io');
-          expect(content, isNot(contains("package:http/")),
+          expect(content, isNot(contains('package:http/')),
               reason: '${f.path} must not import http');
         }
       }
@@ -107,10 +107,9 @@ void main() {
       addTearDown(pocket.close);
       recorder.statements.clear();
 
-      await pocket
-          .collection('widgets')
-          .put(record(id: generateRecordId(), name: 'x'),
-              durability: DurabilityClass.full);
+      await pocket.collection('widgets').put(
+          record(id: generateRecordId(), name: 'x'),
+          durability: DurabilityClass.full);
 
       expect(recorder.statements, contains('PRAGMA synchronous=FULL'));
       expect(recorder.statements, contains('PRAGMA synchronous=NORMAL'));
@@ -183,7 +182,7 @@ void main() {
       var writeDone = false;
       final writeF =
           pocket.collection('widgets').put(record(id: id, name: 'x'));
-      writeF.whenComplete(() => writeDone = true);
+      unawaited(writeF.whenComplete(() => writeDone = true));
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(writeDone, isFalse,
           reason: 'the writer must queue behind the open read, not fail');

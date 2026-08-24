@@ -30,7 +30,7 @@ void main() {
     );
   }
 
-  final handshake = 'id:h1\nevent:PB_CONNECT\ndata:{"clientId":"cid-123"}\n\n';
+  const handshake = 'id:h1\nevent:PB_CONNECT\ndata:{"clientId":"cid-123"}\n\n';
 
   String eventFrame(String id, String name,
           {String action = 'update', String? store}) =>
@@ -74,7 +74,7 @@ void main() {
     fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
     await rt.start();
 
-    final name = 'héllo 世界 🚀';
+    const name = 'héllo 世界 🚀';
     final full = handshake + eventFrame('r1', name);
     final frame = utf8.encode(full);
     // Split INSIDE the first byte of 世: byte offset of the char start + 1.
@@ -100,7 +100,7 @@ void main() {
     fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
     await rt.start();
 
-    final crlfHandshake =
+    const crlfHandshake =
         'id:h1\r\nevent:PB_CONNECT\r\ndata:{"clientId":"c1"}\r\n\r\n';
     final crlfEvent = eventFrame('r2', 'n2').replaceAll('\n', '\r\n');
     controller.add(utf8.encode(crlfHandshake + crlfEvent));
@@ -141,7 +141,7 @@ void main() {
     fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
     await rt.start();
 
-    final text = 'event:PB_CONNECT\n\n'
+    const text = 'event:PB_CONNECT\n\n'
         'event:data\n'
         'data:{"record":{"id":"r4","store":"widgets","updated":"2026-08-15 10:00:00.000Z","data":{"id":"r4"}},"action":"update"}\n\n';
     controller.add(utf8.encode(text));
@@ -163,7 +163,7 @@ void main() {
     fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
     await rt.start();
 
-    final text = 'event:PB_CONNECT\n'
+    const text = 'event:PB_CONNECT\n'
         ': keepalive\n'
         '\n'
         'event:data\n'
@@ -188,7 +188,7 @@ void main() {
     fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
     await rt.start();
 
-    final text = '$handshake'
+    const text = '$handshake'
         'event:data\n'
         'data:{"record":{"id":"r6","store":"widgets","updated":"2026-08-15 10:00:00.000Z","data":{"id":"r6"}}\n'
         'data:,"action":"update"}\n\n';
@@ -303,7 +303,7 @@ void main() {
     fake.streamResponse(StreamedHttpResponse(200, const {}, controller.stream));
     await rt.start();
 
-    final text = 'event:data\ndata:{not json}\n\n'
+    const text = 'event:data\ndata:{not json}\n\n'
         'event:PB_CONNECT\ndata:{"clientId":123}\n\n'
         'event:data\ndata:{"record":{"id":"ok","updated":"2026-08-15 10:00:00.000Z"},"action":"update"}\n\n';
     controller.add(utf8.encode(text));

@@ -109,8 +109,8 @@ abstract class SearchHandle {
 }
 
 class NativeSearchHandle implements SearchHandle {
-  final SearchBuilder _builder;
   NativeSearchHandle(this._builder);
+  final SearchBuilder _builder;
 
   @override
   SearchHandle limit(int n) {
@@ -141,11 +141,11 @@ class NativeSearchHandle implements SearchHandle {
 }
 
 class CompiledSearchHandle implements SearchHandle {
-  final LocalPocket _pocket;
-  final SearchBuilder _builder;
 
   CompiledSearchHandle(this._pocket, CollectionSchema schema, String term)
       : _builder = SearchBuilder.compileOnly(schema, term);
+  final LocalPocket _pocket;
+  final SearchBuilder _builder;
 
   @override
   SearchHandle limit(int n) {
@@ -189,8 +189,8 @@ class CompiledSearchHandle implements SearchHandle {
 }
 
 class NativeQueryHandle implements QueryHandle {
-  QueryBuilder _builder;
   NativeQueryHandle(this._builder);
+  QueryBuilder _builder;
 
   @override
   QueryHandle where(
@@ -310,11 +310,11 @@ class NativeQueryHandle implements QueryHandle {
 }
 
 class CompiledQueryHandle implements QueryHandle {
-  final LocalPocket _pocket;
-  QueryBuilder _builder;
 
   CompiledQueryHandle(this._pocket, CollectionSchema schema)
       : _builder = QueryBuilder.compileOnly(schema);
+  final LocalPocket _pocket;
+  QueryBuilder _builder;
 
   @override
   QueryHandle where(
@@ -497,14 +497,14 @@ class CompiledQueryHandle implements QueryHandle {
 }
 
 class NativeQueryHarness extends QueryHarness {
+
+  NativeQueryHarness(this.pocket, this.col, this.schema);
   @override
   final LocalPocket pocket;
   @override
   final Collection col;
   @override
   final CollectionSchema<Object?> schema;
-
-  NativeQueryHarness(this.pocket, this.col, this.schema);
 
   @override
   QueryHandle query() => NativeQueryHandle(col.query());
@@ -514,14 +514,14 @@ class NativeQueryHarness extends QueryHarness {
 }
 
 class CompiledQueryHarness extends QueryHarness {
+
+  CompiledQueryHarness(this.pocket, this.col, this.schema);
   @override
   final LocalPocket pocket;
   @override
   final Collection col;
   @override
   final CollectionSchema<Object?> schema;
-
-  CompiledQueryHarness(this.pocket, this.col, this.schema);
 
   @override
   QueryHandle query() => CompiledQueryHandle(pocket, schema);
@@ -532,7 +532,7 @@ class CompiledQueryHarness extends QueryHarness {
 }
 
 List<String> idsOf(List<Map<String, Object?>> rows) =>
-    [for (final r in rows) r['id'] as String];
+    [for (final r in rows) r['id']! as String];
 
 String encodeCursor(Map<String, Object?> payload) =>
     base64UrlEncode(utf8.encode(jsonEncode(payload)));

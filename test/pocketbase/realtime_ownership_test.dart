@@ -94,7 +94,7 @@ void main() {
       // Subscribe AFTER restart: the fresh stream is the live one.
       final states = <SyncEngineState>[];
       final sub = h.engine.stateChanges.listen(states.add);
-      h.engine.pause();
+      await h.engine.pause();
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(h.engine.state, SyncEngineState.paused,
           reason: 'restarted engine transitioned');

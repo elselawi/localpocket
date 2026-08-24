@@ -126,10 +126,10 @@ void main() {
       final first = jsonDecode(mock.subscribeBodies[0]) as Map<String, Object?>;
       final second =
           jsonDecode(mock.subscribeBodies[1]) as Map<String, Object?>;
-      expect(first['clientId'] as String, isNot(second['clientId'] as String),
+      expect(first['clientId']! as String, isNot(second['clientId']! as String),
           reason: 'a reconnect mints a NEW clientId (the old subscriptions die '
               'with the dropped connection)');
-      expect(second['clientId'] as String, isNotEmpty);
+      expect(second['clientId']! as String, isNotEmpty);
       expect(second['subscriptions'], ['data'],
           reason: 'the FULL subscription set is re-posted (all stores live in '
               'the data collection), never a partial delta');

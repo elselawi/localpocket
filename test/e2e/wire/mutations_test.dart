@@ -67,7 +67,7 @@ void main() {
       .first['c'] as int;
 
   Map<String, Object?> dataOf(Map<String, Object?>? rec) =>
-      (rec!['data'] as Map).cast<String, Object?>();
+      (rec!['data']! as Map).cast<String, Object?>();
 
   group('E2E remote mutations (mock + live)', () {
     wireTest('server-side delete propagates as a hide, never a hard delete',

@@ -838,7 +838,7 @@ void main() {
 
       // The server normalizes the payload (renames, bumps qty) and stamps a
       // server-side updated time.
-      final serverUpdated = '2026-02-03 04:05:06.000Z';
+      const serverUpdated = '2026-02-03 04:05:06.000Z';
       h.mock.script('createRecord', [
         MockReturn(RemoteRecord(
             id: id,
@@ -922,7 +922,7 @@ void main() {
       final before = (await sr(h.pocket, id))!.remoteUpdated;
 
       // Server bumps its updated time on the PATCH response.
-      final serverUpdated = '2026-03-04 05:06:07.000Z';
+      const serverUpdated = '2026-03-04 05:06:07.000Z';
       h.mock.script('updateRecord', [
         MockReturn(RemoteRecord(
             id: id,

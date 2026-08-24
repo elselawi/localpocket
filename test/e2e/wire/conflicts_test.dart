@@ -110,7 +110,7 @@ void main() {
 
   /// The current server-side `data` payload for [id].
   Future<Map<String, Object?>> remoteData(WireServer s, String id) async =>
-      (await s.readRecord(s.store, id))!['data'] as Map<String, Object?>;
+      (await s.readRecord(s.store, id))!['data']! as Map<String, Object?>;
 
   /// Two isolated clients (separate file DBs + transports) bound to [s].
   /// Defaults to the [reviewSchema] so conflicts escalate to `lp_conflicts`.
@@ -359,8 +359,8 @@ void main() {
         ],
         storesList: const ['notes', 'sets'],
       );
-      final storeN = 'notes';
-      final storeS = 'sets';
+      const storeN = 'notes';
+      const storeS = 'sets';
 
       // --- AppendOnlyListResolver over the wire ---
       final noteId = await s.createRecord(storeN, {
@@ -388,7 +388,7 @@ void main() {
       expect(tagsOnA.length, 3, reason: 'and no duplication');
       expect(tagsOnB.length, 3);
       expect(
-          (await s.readRecord(storeN, noteId))!['data'] as Map<String, Object?>,
+          (await s.readRecord(storeN, noteId))!['data']! as Map<String, Object?>,
           containsPair('tags', containsAll(['a', 'b'])));
       expect(await b.pocket.conflicts.listOpen(store: storeN), isEmpty);
       // --- SetUnionWithDeletionWinsResolver over the wire ---

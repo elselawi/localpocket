@@ -41,6 +41,34 @@ void main() {
     expect(cleaned, isFalse);
   });
 
+  test('start or register failures still clean up the watch registration',
+      () async {
+    var cleaned = false;
+
+    await expectLater(
+      initializeWebWatch<void>(
+        start: () => throw StateError('start failed'),
+        register: () {},
+        initialize: () async {},
+        cleanup: () async => cleaned = true,
+      ),
+      throwsStateError,
+    );
+    expect(cleaned, isTrue);
+
+    cleaned = false;
+    await expectLater(
+      initializeWebWatch<void>(
+        start: () {},
+        register: () => throw StateError('register failed'),
+        initialize: () async {},
+        cleanup: () async => cleaned = true,
+      ),
+      throwsStateError,
+    );
+    expect(cleaned, isTrue);
+  });
+
   group('WatchSubscriptionTracker (WEB-01)', () {
     test('normal registration and unregistration runs in order', () async {
       final tracker = WatchSubscriptionTracker();

@@ -50,7 +50,7 @@ void main() {
       expect(quote(r'back\slash'), r"'back\slash'");
       // backslash immediately before a quote: the quote is still escaped.
       expect(quote(r"a\'b"), r"'a\\'b'");
-      expect(quote(r"end\\"), r"'end\\'");
+      expect(quote(r'end\\'), r"'end\\'");
       expect(quote(r"'lead"), r"'\'lead'");
       // Round-trip under PB's rule (`\'` -> `'`, other backslashes literal).
       String pbUnescape(String s) {
@@ -92,7 +92,7 @@ void main() {
           sweepFilter('s', '', fromId: ''), "(store='s' && id~'%' && id>'')");
 
       // A store name that itself contains filter syntax.
-      final trickyStore = "weird'&&name=x";
+      const trickyStore = "weird'&&name=x";
       final f = pullFilter(trickyStore, '2026-01-01 00:00:00.000Z');
       expect(f, contains("'weird\\'&&name=x'"),
           reason: 'the embedded quote is escaped, not a boundary');
@@ -132,7 +132,7 @@ void main() {
       ]) {
         final f = pullFilter('widgets', hostile);
         // Every single quote inside is escaped, so the literal cannot close.
-        final inner = f.substring(f.indexOf("updated>=") + "updated>=".length);
+        final inner = f.substring(f.indexOf('updated>=') + 'updated>='.length);
         final value = inner.substring(0, inner.length - 1); // strip trailing )
         expect(value.startsWith("'"), isTrue);
         expect(value.endsWith("'"), isTrue);
@@ -210,7 +210,7 @@ void main() {
     test('operator whitelist rejects injection', () {
       // The filter builder only ever emits = / >= / > / ~ with quoted
       // literals. A hostile store/id cannot break out of the quotes.
-      final hostile = "x') OR 1=1 --";
+      const hostile = "x') OR 1=1 --";
       final filter = pullFilter(hostile, '2026-01-01 00:00:00.000Z');
       // The embedded quote is escaped, so the literal cannot terminate early.
       expect(filter, contains("x\\') OR 1=1 --'"));

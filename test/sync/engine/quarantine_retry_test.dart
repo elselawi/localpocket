@@ -19,7 +19,7 @@ void main() {
   group('quarantine retry (#17)', () {
     test('pull quarantine records attempt_count=1 and a future next_retry_at',
         () async {
-      var clock = 1000000;
+      const clock = 1000000;
       final h =
           await EngineHarness.create(config: testConfig(now: () => clock));
       addTearDown(h.close);
@@ -41,7 +41,7 @@ void main() {
 
     test('sweeper skips quarantined records whose backoff has not elapsed',
         () async {
-      var clock = 1000000;
+      const clock = 1000000;
       final h =
           await EngineHarness.create(config: testConfig(now: () => clock));
       addTearDown(h.close);

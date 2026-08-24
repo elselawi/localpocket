@@ -249,14 +249,14 @@ void main() {
 
 /// Hermetic mock of an encrypted Database (e.g. SQLCipher wrapper)
 class _MockSqlCipherDatabase extends DirectSqliteDatabase {
-  final String _path;
-  final String password;
 
   _MockSqlCipherDatabase._(
     super.rawDb, {
     required String path,
     required this.password,
   }) : _path = path;
+  final String _path;
+  final String password;
 
   static Uint8List _xorBytes(Uint8List input, String password) {
     final keyBytes = Uint8List.fromList(password.codeUnits);

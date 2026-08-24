@@ -5,8 +5,8 @@ import 'package:test/test.dart';
 import '../../support/helpers.dart';
 
 class FakeSqliteException implements Exception {
-  final String message;
   FakeSqliteException(this.message);
+  final String message;
   @override
   String toString() => message;
 }
@@ -148,7 +148,7 @@ void main() {
       final pocket = await openPocket();
       addTearDown(pocket.close);
       final id = generateRecordId();
-      final value = 'héllo wörld 🎉 emoji 👨‍👩‍👧‍👦';
+      const value = 'héllo wörld 🎉 emoji 👨‍👩‍👧‍👦';
       await pocket.collection('widgets').put(record(id: id, name: value));
       final r = await pocket.collection('widgets').get(id);
       expect(r!['name'], value);

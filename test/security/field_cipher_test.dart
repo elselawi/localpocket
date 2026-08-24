@@ -675,9 +675,9 @@ String bytesToHexHelper(List<int> b) =>
 /// A [Random] that yields a fixed sequence of bytes, used to pin the AES-GCM
 /// nonce to a known value for known-answer tests.
 class _FixedRandom implements Random {
+  _FixedRandom(this._bytes);
   final List<int> _bytes;
   int _i = 0;
-  _FixedRandom(this._bytes);
 
   @override
   int nextInt(int max) => _bytes[_i++ % _bytes.length];

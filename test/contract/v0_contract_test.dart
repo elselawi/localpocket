@@ -128,7 +128,7 @@ void main() {
       expect(server.batchBodies, hasLength(1));
       final body =
           jsonDecode(server.batchBodies.single) as Map<String, Object?>;
-      final requests = body['requests'] as List;
+      final requests = body['requests']! as List;
       expect(requests, hasLength(1));
       final req = requests.single as Map;
       expect(req['method'], 'PUT');

@@ -232,7 +232,7 @@ void main() {
       expect(entry['store'], 'widgets');
       expect(entry['record_id'], id);
       expect(entry['error'], 'boom');
-      final payload = (entry['payload_json'] as String);
+      final payload = (entry['payload_json']! as String);
       expect(payload, contains('"name":"bob"'));
       expect(payload, contains('"qty":7'));
       expect(payload, contains('"id":"$id"'), reason: 'payload carries the id');

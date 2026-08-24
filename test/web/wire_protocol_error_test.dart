@@ -156,7 +156,7 @@ void main() {
       expect(stableWireErrorType(ProtocolError('proto')), 'ProtocolError');
       expect(stableWireErrorType(StateError('state')), 'StateError');
       expect(stableWireErrorType(ArgumentError('arg')), 'ArgumentError');
-      expect(stableWireErrorType(FormatException('fmt')), 'FormatException');
+      expect(stableWireErrorType(const FormatException('fmt')), 'FormatException');
       expect(stableWireErrorType(RangeError('range')), 'RangeError');
       expect(stableWireErrorType(UnsupportedError('unsupported')), 'UnsupportedError');
       // Unknown exceptions must return the stable fallback 'unknown', not minified runtimeType

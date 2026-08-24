@@ -8,10 +8,16 @@ void main() {
   group('terminateWorkerStreams', () {
     test('emits error then done on all worker-owned streams and clears maps',
         () async {
+      // These controllers are closed by terminateWorkerStreams, which owns
+      // their lifecycle for this test.
+      // ignore: close_sinks
       final watchController1 = StreamController<dynamic>();
+      // ignore: close_sinks
       final watchController2 = StreamController<dynamic>();
+      // ignore: close_sinks
       final syncStatusController =
           StreamController<Map<String, Object?>>.broadcast();
+      // ignore: close_sinks
       final authRequiredController = StreamController<void>.broadcast();
 
       final workerStreams = <int, StreamController<dynamic>>{
@@ -80,6 +86,10 @@ void main() {
 
       expect(workerStreams, isEmpty);
       expect(workerDecoders, isEmpty);
+      await watchController1.close();
+      await watchController2.close();
+      await syncStatusController.close();
+      await authRequiredController.close();
     });
 
     test(

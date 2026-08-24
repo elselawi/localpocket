@@ -58,7 +58,7 @@ void main() {
 
   /// The current server-side `imgs` list for [id].
   Future<List<Object?>> remoteImgs(WireServer s, String id) async =>
-      (await s.readRecord(s.store, id))!['imgs'] as List;
+      (await s.readRecord(s.store, id))!['imgs']! as List;
 
   group('E2E files over the wire', () {
     wireTest(
@@ -87,7 +87,7 @@ void main() {
       expect(imgs, hasLength(1),
           reason: 'the upload appended one server-renamed file');
       if (s is MockWireServer) {
-        final remoteName = imgs.single as String;
+        final remoteName = imgs.single! as String;
         expect(s.mock.fileBytes.containsKey('$id/$remoteName'), isTrue);
         expect(s.mock.fileBytes['$id/$remoteName'], bytes,
             reason: 'the exact bytes landed on the server');
@@ -153,7 +153,7 @@ void main() {
       expect(
           after.singleWhere((r) => r['kind'] == 'fileUpload')['state'], 'done',
           reason: 'the file op settled in the same cycle as the create');
-      expect((await s.readRecord(s.store, id))!['data'] as Map<String, Object?>,
+      expect((await s.readRecord(s.store, id))!['data']! as Map<String, Object?>,
           containsPair('name', 'pending'),
           reason: 'the record create landed');
       expect(await remoteImgs(s, id), hasLength(1),

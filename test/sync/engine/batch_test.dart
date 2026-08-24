@@ -172,7 +172,7 @@ void main() {
       final (h, ids) = await threeCreates();
       addTearDown(h.close);
       final op0 = await opIdFor(h, ids[0]);
-      final updated = '2026-02-03 04:05:06.000Z';
+      const updated = '2026-02-03 04:05:06.000Z';
       h.mock.script('pushBatch', [
         MockReturn([
           PushResult(

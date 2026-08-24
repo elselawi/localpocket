@@ -244,9 +244,9 @@ void main() {
 /// parsed. Once [healthy], it delegates to a valid credential so the engine
 /// can drain.
 class _LoginProbeTokens implements TokenProvider {
+  _LoginProbeTokens(this.s);
   final WireServer s;
   bool healthy = false;
-  _LoginProbeTokens(this.s);
 
   @override
   String get identity => 'login-probe';
