@@ -17,13 +17,14 @@ import 'sql_utils.dart';
 /// - Destructive: 12-step table rebuild with a `VACUUM INTO` backup step.
 /// - Downgrade guard lives in `LocalPocket._registerStore`.
 class Migrator {
+  /// Maximum number of rows processed in one migration backfill chunk.
   static const int backfillChunk = 10000;
 
   /// Runs all pending [StoreMigration] steps for [schema] starting after
   /// [fromVersion], then bumps `lp_stores.schema_ver`.
   static Future<void> migrateStore(
     LocalPocket pocket,
-    CollectionSchema schema, {
+    CollectionSchema<Object?> schema, {
     required int fromVersion,
   }) async {
     final db = pocket.db;
@@ -83,12 +84,13 @@ class Migrator {
     });
   }
 
-  static Future<void> _additiveMigration(
-      LocalPocket pocket, CollectionSchema schema, StoreMigration m) async {
+  static Future<void> _additiveMigration(LocalPocket pocket,
+      CollectionSchema<Object?> schema, StoreMigration m) async {
     final db = pocket.db;
     final existingColumns = (await db
             .rawQuery('PRAGMA table_info(${DdlCompiler.quote(schema.name)})'))
         .map((r) => r['name'])
+        .whereType<String>()
         .toSet();
     for (final f in m.addedFields) {
       if (f.required) {
@@ -104,14 +106,17 @@ class Migrator {
       await db
           .execute('ALTER TABLE ${DdlCompiler.quote(schema.name)} ADD COLUMN '
               '${DdlCompiler.quote(f.name)} ${f.sqlType}');
+      // Keep the in-memory set in sync so duplicate entries in addedFields do
+      // not issue the same ALTER TABLE statement twice.
+      existingColumns.add(f.name);
     }
     if (m.transform != null) {
       await _chunkedBackfill(pocket, schema, m);
     }
   }
 
-  static Future<void> _chunkedBackfill(
-      LocalPocket pocket, CollectionSchema schema, StoreMigration m) async {
+  static Future<void> _chunkedBackfill(LocalPocket pocket,
+      CollectionSchema<Object?> schema, StoreMigration m) async {
     final db = pocket.db;
     final key = 'migration:${schema.name}:${m.toVersion}:cursor';
     final cursorStr = await _kvGet(db, key);
@@ -127,7 +132,7 @@ class Migrator {
       final updates = <(int, Map<String, Object?>)>[];
       var lastRowid = cursor;
       for (final r in rows) {
-        lastRowid = r['rowid'] as int;
+        lastRowid = r['rowid']! as int;
         final logical = decodeDbRow(schema, r);
         final values = m.transform!(logical);
         if (values.isNotEmpty) updates.add((lastRowid, values));
@@ -164,8 +169,8 @@ class Migrator {
   /// 12-step destructive rebuild:
   /// backup → create new → copy (chunked, transformed) → verify counts →
   /// drop old → rename → recreate indexes/FTS → verify.
-  static Future<void> _rebuildStore(
-      LocalPocket pocket, CollectionSchema schema, StoreMigration m) async {
+  static Future<void> _rebuildStore(LocalPocket pocket,
+      CollectionSchema<Object?> schema, StoreMigration m) async {
     final db = pocket.db;
     if (!pocket.destructiveBackup) {
       throw DestructiveMigrationRefusedError(
@@ -203,13 +208,13 @@ class Migrator {
           final logical = decodeDbRow(schema, r);
           final newLogical = m.transform?.call(logical) ?? logical;
           final row = encodeDbRow(schema,
-              id: logical['id'] as String,
+              id: logical['id']! as String,
               logical: newLogical,
               archived: newLogical['archived'] == true);
           await txn.insert(newTable, row);
         }
       });
-      cursor = rows.last['rowid'] as int;
+      cursor = rows.last['rowid']! as int;
       if (rows.length < backfillChunk) break;
     }
 
@@ -269,7 +274,7 @@ class Migrator {
     return p.join(dir, name);
   }
 
-  static Field? _fieldByName(CollectionSchema schema, String name) {
+  static Field? _fieldByName(CollectionSchema<Object?> schema, String name) {
     for (final f in schema.fields) {
       if (f.name == name) return f;
     }

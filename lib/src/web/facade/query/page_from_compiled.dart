@@ -4,11 +4,11 @@ import 'package:localpocket/src/web/conversions.dart';
 
 /// Decodes a page response produced by the worker's compiled `query` path.
 Page pageFromCompiled(QueryBuilder core, Map<String, Object?> res) {
-  final items = (res['items'] as List).map((i) {
-    final d = decodeWireValue(i) as Map;
+  final items = (res['items']! as List).map((i) {
+    final d = decodeWireValue(i)! as Map;
     return d.map((k, v) => MapEntry(k.toString(), v));
   }).toList();
-  final hasMore = res['hasMore'] as bool;
+  final hasMore = res['hasMore']! as bool;
   final rawLast = res['lastRow'];
   return Page(
     items: items,

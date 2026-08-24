@@ -30,7 +30,7 @@ mixin WorkerFilesHandlers on WorkerEngineHost {
       WorkerEventSink sink, WebRequest req) async {
     final uploadId =
         WireArgs(req.args).requireInt('uploadId', op: 'file_upload_chunk');
-    final bytes = decodeWireValue(req.args['chunk']) as List<int>;
+    final bytes = decodeWireValue(req.args['chunk'])! as List<int>;
     _uploadSessions.addChunk(
       uploadId: uploadId,
       chunk: Uint8List.fromList(bytes),

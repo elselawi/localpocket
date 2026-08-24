@@ -11,10 +11,10 @@ part of 'worker_engine.dart';
 /// Minimal worker-owned token bridge. The page remains responsible for
 /// refresh; the current bearer value is replaced through sync_update_auth.
 final class _WebTokenProvider implements TokenProvider {
-  String? value;
-  final String identityValue;
 
   _WebTokenProvider(this.value, this.identityValue);
+  String? value;
+  final String identityValue;
 
   @override
   Future<Token> currentToken() async => Token(value ?? '');
@@ -122,11 +122,9 @@ mixin WorkerSyncHandlers on WorkerEngineHost {
   }
 
   Future<Object?> _handleSyncStatus(
-      WorkerEventSink sink, WebRequest req) async {
-    return _lastSyncStatus == null
+      WorkerEventSink sink, WebRequest req) async => _lastSyncStatus == null
         ? {'state': SyncEngineState.closed.name}
         : _encodeSyncStatus(_lastSyncStatus!);
-  }
 
   static Map<String, Object?> _encodeSyncStatus(SyncStatus status) => {
         'state': status.state.name,

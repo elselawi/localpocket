@@ -2,11 +2,11 @@ import 'package:sqlite3/common.dart';
 
 /// Root of all typed errors thrown by localpocket.
 sealed class LocalPocketError implements Exception {
-  /// Human-readable description of the failure.
-  final String message;
 
   /// Creates a LocalPocket error.
   LocalPocketError(this.message);
+  /// Human-readable description of the failure.
+  final String message;
 
   /// Includes the concrete error type and message.
   @override
@@ -15,22 +15,22 @@ sealed class LocalPocketError implements Exception {
 
 /// Caller bug / bad input — never retried.
 class ValidationException extends LocalPocketError {
-  final String? field;
   ValidationException(super.message, {this.field});
+  final String? field;
 }
 
 /// A SQLite unique constraint was violated.
 class UniqueConstraintException extends LocalPocketError {
-  final String field;
-  final Object? value;
   UniqueConstraintException({required this.field, this.value, String? message})
       : super(message ?? 'Unique constraint violated on "$field".');
+  final String field;
+  final Object? value;
 }
 
 class NotNullConstraintException extends LocalPocketError {
-  final String field;
   NotNullConstraintException({required this.field, String? message})
       : super(message ?? 'NOT NULL constraint violated on "$field".');
+  final String field;
 }
 
 class CheckConstraintException extends LocalPocketError {

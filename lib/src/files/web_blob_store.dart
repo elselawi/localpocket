@@ -21,11 +21,11 @@ import 'blob_store.dart';
 /// - Does NOT create object URLs (window-scope work); see
 ///   [web_blob_object_url.dart].
 class WebBlobStore extends BlobStore {
-  final String _rootPrefix;
-  final Map<String, Uint8List> _memoryFallback = {};
 
   WebBlobStore({String rootPrefix = 'localpocket_blobs'})
       : _rootPrefix = rootPrefix;
+  final String _rootPrefix;
+  final Map<String, Uint8List> _memoryFallback = {};
 
   /// The OPFS root directory for this store's blobs, or `null` when OPFS is
   /// unavailable (for example in a worker without storage, or non-secure

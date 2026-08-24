@@ -33,19 +33,31 @@ enum ApplyResult {
   skipped,
 }
 
+/// Summary of one incremental pull pass.
 class PullReport {
+  /// Creates a report for a pull pass.
+  const PullReport(this.store, this.applied, this.pages,
+      {this.quarantined = 0, this.conflicts = 0, this.hitPageLimit = false});
+
+  /// The store that was pulled.
   final String store;
+
+  /// The number of records written to the domain.
   final int applied;
+
+  /// The number of records quarantined during the pull.
   final int quarantined;
+
+  /// The number of conflicts escalated during the pull.
   final int conflicts;
+
+  /// The number of pages processed.
   final int pages;
 
   /// Whether the pull stopped because [maxPagesPerPass] was reached with a
   /// full page (more changes likely remain) — the engine uses this to continue
   /// immediately instead of waiting for the next sync interval.
   final bool hitPageLimit;
-  const PullReport(this.store, this.applied, this.pages,
-      {this.quarantined = 0, this.conflicts = 0, this.hitPageLimit = false});
 }
 
 /// Incremental pull + the conflict-aware applier.
@@ -53,10 +65,24 @@ class PullReport {
 /// This is the single authoritative ingest path: SSE hints, sweeps and manual
 /// refreshes all funnel through [pullStore]/[applyRemote].
 class Puller {
+  /// Creates a puller for [pocket] using [backend] and [config].
+  Puller(this.pocket, this.backend, this.config, this.syncStore,
+      {this.fileLane, ApplyLane? applyLane})
+      : applyLane = applyLane ?? ApplyLane();
+
+  /// The local database and collection registry.
   final LocalPocket pocket;
+
+  /// The remote synchronization backend.
   final SyncBackend backend;
+
+  /// Pull and retry configuration.
   final SyncConfig config;
+
+  /// Persistent synchronization metadata store.
   final SyncStore syncStore;
+
+  /// Optional file synchronization lane for attachment reconciliation.
   final FileSyncLane? fileLane;
 
   /// Shared serialization lane for every remote-application transaction in
@@ -66,16 +92,14 @@ class Puller {
   /// defaults to a private lane.
   final ApplyLane applyLane;
 
-  Puller(this.pocket, this.backend, this.config, this.syncStore,
-      {this.fileLane, ApplyLane? applyLane})
-      : applyLane = applyLane ?? ApplyLane();
-
+  /// The initial remote timestamp used when no cursor exists.
   static const String epoch = '1970-01-01 00:00:00.000Z';
 
   int _nowMs() => config.now();
 
   // ------------------------------------------------------------------ pull --
 
+  /// Pulls and applies the next remote change pages for [store].
   Future<PullReport> pullStore(String store) async {
     var cursor = await syncStore.readCursor(store);
     var from =
@@ -317,7 +341,7 @@ class Puller {
       _probeBatchRows(
     DatabaseExecutor exec,
     String store,
-    CollectionSchema schema,
+    CollectionSchema<Object?> schema,
     List<String> pageIds,
   ) async {
     final srById = <String, SyncRowState>{};
@@ -331,12 +355,12 @@ class Puller {
           'SELECT * FROM lp_sync_row WHERE store = ? AND record_id IN ($ph)',
           [store, ...chunk]);
       for (final r in srRows) {
-        srById[r['record_id'] as String] = SyncRowState.fromRow(r);
+        srById[r['record_id']! as String] = SyncRowState.fromRow(r);
       }
       final domRows = await exec.query(pocket.requireTable(store).tableName,
           where: 'id IN ($ph)', whereArgs: chunk);
       for (final r in domRows) {
-        localById[r['id'] as String] = decodeDbRow(schema, r,
+        localById[r['id']! as String] = decodeDbRow(schema, r,
             cipher: pocket.fieldCipher, cryptoProvider: pocket.cryptoProvider);
       }
     }
@@ -345,6 +369,7 @@ class Puller {
 
   // --------------------------------------------------------------- applier --
 
+  /// Applies one remote record inside the supplied transaction.
   Future<ApplyResult> applyRemote(
     Tx tx,
     String store,
@@ -367,6 +392,7 @@ class Puller {
     );
   }
 
+  /// Applies a previously normalized remote record inside a transaction.
   Future<ApplyResult> applyNormalizedRemote(
       Tx tx, String store, NormalizedRemoteRecord item,
       {SyncRowState? prefetchedSyncRow,
@@ -547,11 +573,9 @@ class Puller {
       }
       // 3-way merge: remote is the trunk; local changes apply on top.
       final basePayload = parsePayloadJson(sr?.baseJson);
+      final resolver = schema.conflictPolicy.collectionResolver;
       final policy = MergePolicy(
-        collectionResolver:
-            schema.conflictPolicy.collectionResolver is ConflictResolver
-                ? schema.conflictPolicy.collectionResolver as ConflictResolver
-                : null,
+        collectionResolver: resolver is ConflictResolver ? resolver : null,
         fieldOverrides: schema.conflictPolicy.fieldOverrides,
         editsUnarchive: schema.conflictPolicy.editsUnarchive,
       );
@@ -616,7 +640,7 @@ class Puller {
     DatabaseExecutor exec,
     String store,
     RemoteRecord remote,
-    CollectionSchema schema,
+    CollectionSchema<Object?> schema,
     SyncRowState? sr,
     Map<String, Object?> localPayload,
     MergeResult outcome,
@@ -660,7 +684,7 @@ class Puller {
 
   Future<void> _quarantineMapFailure(
       DatabaseExecutor exec,
-      CollectionSchema schema,
+      CollectionSchema<Object?> schema,
       String store,
       RemoteRecord remote,
       String message) async {
@@ -805,7 +829,7 @@ class Puller {
             );
             final oldRowsById = <String, Map<String, Object?>>{};
             for (final r in existingRows) {
-              final id = r['id'] as String;
+              final id = r['id']! as String;
               oldRowsById[id] = decodeDbRow(schema, r,
                   cipher: pocket.fieldCipher,
                   cryptoProvider: pocket.cryptoProvider);

@@ -6,12 +6,7 @@ import 'schema.dart';
 
 /// The compiled artifact of a [CollectionSchema]: DDL statements plus warnings.
 class CompiledSchema {
-  final CollectionSchema schema;
-  final String tableDdl;
-  final List<String> indexDdl;
-  final List<String> ftsDdl;
-  final List<String> warnings;
-
+  /// Creates a compiled schema artifact.
   const CompiledSchema({
     required this.schema,
     required this.tableDdl,
@@ -19,16 +14,40 @@ class CompiledSchema {
     required this.ftsDdl,
     required this.warnings,
   });
+
+  /// The schema from which this artifact was compiled.
+  final CollectionSchema<Object?> schema;
+
+  /// DDL for creating the collection table.
+  final String tableDdl;
+
+  /// DDL for creating ordinary and unique indexes.
+  final List<String> indexDdl;
+
+  /// DDL for creating the optional FTS table and triggers.
+  final List<String> ftsDdl;
+
+  /// Non-fatal schema quality warnings.
+  final List<String> warnings;
 }
 
 /// Compiles a [CollectionSchema] into per-store DDL.
 class DdlCompiler {
-  final SqliteCapabilities capabilities;
-
+  /// Creates a compiler for [capabilities].
   DdlCompiler(this.capabilities);
 
-  static const Set<String> reservedColumns = {'id', 'archived', 'hidden', 'extra'};
+  /// SQLite capabilities used to select compatible DDL features.
+  final SqliteCapabilities capabilities;
 
+  /// Columns managed internally by LocalPocket.
+  static const Set<String> reservedColumns = {
+    'id',
+    'archived',
+    'hidden',
+    'extra'
+  };
+
+  /// Quotes a SQLite identifier.
   static String quote(String id) => '"${id.replaceAll('"', '""')}"';
 
   static bool _isPrefix(List<String> shortCols, List<String> longCols) {
@@ -41,7 +60,7 @@ class DdlCompiler {
 
   /// Validates and compiles the schema, throwing [SchemaRegistrationError] on
   /// any invalid declaration.
-  CompiledSchema compile(CollectionSchema schema) {
+  CompiledSchema compile(CollectionSchema<Object?> schema) {
     final warnings = <String>[];
     final names = <String>{};
 
@@ -79,7 +98,8 @@ class DdlCompiler {
             warnings.add(
                 'Duplicate index columns ${schema.indexes[i].columns} (declarations ${i + 1} and ${j + 1}).');
           }
-        } else if (_isPrefix(schema.indexes[j].columns, schema.indexes[i].columns) &&
+        } else if (_isPrefix(
+                schema.indexes[j].columns, schema.indexes[i].columns) &&
             !schema.indexes[j].unique) {
           warnings.add(
               'Index ${schema.indexes[j].columns} is prefix-subsumed by index ${schema.indexes[i].columns}.');
@@ -95,16 +115,20 @@ class DdlCompiler {
       }
       for (final c in fts.fields) {
         if (!names.contains(c)) {
-          throw SchemaRegistrationError('FTS field "$c" is not a declared field.');
+          throw SchemaRegistrationError(
+              'FTS field "$c" is not a declared field.');
         }
       }
     }
     for (final f in schema.fields) {
-      if (f.kind == FieldKind.enumValue && (f.enumValues == null || f.enumValues!.isEmpty)) {
-        throw SchemaRegistrationError('Enum field "${f.name}" must declare values.');
+      if (f.kind == FieldKind.enumValue &&
+          (f.enumValues == null || f.enumValues!.isEmpty)) {
+        throw SchemaRegistrationError(
+            'Enum field "${f.name}" must declare values.');
       }
       if (f.kind == FieldKind.ref && (f.refTo == null || f.refTo!.isEmpty)) {
-        throw SchemaRegistrationError('Ref field "${f.name}" must declare its target store.');
+        throw SchemaRegistrationError(
+            'Ref field "${f.name}" must declare its target store.');
       }
     }
 
@@ -117,13 +141,14 @@ class DdlCompiler {
     );
   }
 
-  String _buildTable(CollectionSchema schema) {
+  String _buildTable(CollectionSchema<Object?> schema) {
     final cols = <String>['  id TEXT PRIMARY KEY'];
     for (final f in schema.fields) {
       var col = '  ${quote(f.name)} ${f.sqlType}';
       if (f.required) col += ' NOT NULL';
       if (f.kind == FieldKind.enumValue && capabilities.hasStrict) {
-        final vals = f.enumValues!.map((v) => "'${v.replaceAll("'", "''")}'").join(', ');
+        final vals =
+            f.enumValues!.map((v) => "'${v.replaceAll("'", "''")}'").join(', ');
         col += ' CHECK (${quote(f.name)} IN ($vals))';
       }
       if (f.kind == FieldKind.ref && f.enforceFk) {
@@ -140,7 +165,7 @@ class DdlCompiler {
     return buf.toString();
   }
 
-  List<String> _buildIndexes(CollectionSchema schema) {
+  List<String> _buildIndexes(CollectionSchema<Object?> schema) {
     final out = <String>[];
     for (final ix in schema.indexes) {
       final cols = _indexColumns(ix.columns);
@@ -161,8 +186,7 @@ class DdlCompiler {
     // field not already covered by a declared index.
     for (final f in schema.fields) {
       if (f.kind != FieldKind.ref) continue;
-      final covered = schema.indexes
-          .any((ix) => ix.columns.contains(f.name));
+      final covered = schema.indexes.any((ix) => ix.columns.contains(f.name));
       if (covered) continue;
       final name = 'ix_${schema.name}_live_${f.name}';
       out.add('CREATE INDEX ${quote(name)} ON ${quote(schema.name)} '
@@ -184,7 +208,7 @@ class DdlCompiler {
     return result;
   }
 
-  List<String> _buildFts(CollectionSchema schema) {
+  List<String> _buildFts(CollectionSchema<Object?> schema) {
     final fts = schema.fts;
     if (fts == null) return const [];
     final out = <String>[];
@@ -193,27 +217,28 @@ class DdlCompiler {
     final cols = fts.fields;
     final newRefs = cols.map((c) => 'new.${quote(c)}').join(', ');
     final oldRefs = cols.map((c) => 'old.${quote(c)}').join(', ');
-
     out.add('CREATE VIRTUAL TABLE ${quote(table)} USING fts5(\n'
         '  ${cols.join(', ')},\n'
         "  content = '$store',\n"
         "  content_rowid = 'rowid'\n"
         ');');
 
-    out.add('CREATE TRIGGER ${quote('${store}_ai')} AFTER INSERT ON ${quote(store)} BEGIN\n'
+    out.add(
+        'CREATE TRIGGER ${quote('${store}_ai')} AFTER INSERT ON ${quote(store)} BEGIN\n'
         '  INSERT INTO ${quote(table)}(rowid, ${cols.join(', ')}) '
         'VALUES (new.rowid, $newRefs);\n'
         'END;');
 
-    out.add('CREATE TRIGGER ${quote('${store}_ad')} AFTER DELETE ON ${quote(store)} BEGIN\n'
-        "  INSERT INTO ${quote(table)}(${quote(table)}, rowid, ${cols.join(', ')}) "
-        "VALUES ('delete', old.rowid, $oldRefs);\n"
+    out.add(
+        'CREATE TRIGGER ${quote('${store}_ad')} AFTER DELETE ON ${quote(store)} BEGIN\n'
+        '  INSERT INTO ${quote(table)}(${quote(table)}, rowid, ${cols.join(', ')}) '
+        'VALUES (\'delete\', old.rowid, $oldRefs);\n'
         'END;');
 
-    final changed = cols
-        .map((c) => 'new.${quote(c)} IS NOT old.${quote(c)}')
-        .join(' OR ');
-    out.add('CREATE TRIGGER ${quote('${store}_au')} AFTER UPDATE ON ${quote(store)} '
+    final changed =
+        cols.map((c) => 'new.${quote(c)} IS NOT old.${quote(c)}').join(' OR ');
+    out.add(
+        'CREATE TRIGGER ${quote('${store}_au')} AFTER UPDATE ON ${quote(store)} '
         'WHEN $changed BEGIN\n'
         "  INSERT INTO ${quote(table)}(${quote(table)}, rowid, ${cols.join(', ')}) "
         "VALUES ('delete', old.rowid, $oldRefs);\n"

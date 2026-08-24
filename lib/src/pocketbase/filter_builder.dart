@@ -21,16 +21,16 @@ String quote(String s) => "'${s.replaceAll("'", "\\'")}'";
 
 /// `(store='{store}' && updated>='{fromUpdated}')` — the delta-pull filter.
 String pullFilter(String store, String fromUpdated) =>
-    "(store=${quote(store)} && updated>=${quote(fromUpdated)})";
+    '(store=${quote(store)} && updated>=${quote(fromUpdated)})';
 
 /// Appends the tuple tie-break for the sweep keyset to an existing filter.
 String pullPageFilter(String filter, String fromId) =>
-    "$filter && id>${quote(fromId)}";
+    '$filter && id>${quote(fromId)}';
 
 /// `(store='{store}' && id~'{bucket}%' [&& id>'{fromId}'])` — the anti-entropy
 /// bucket scan. The keyset continuation is appended only when [fromId] is set.
 String sweepFilter(String store, String bucket, {String? fromId}) {
-  final base = "(store=${quote(store)} && id~${quote('$bucket%')}";
+  final base = '(store=${quote(store)} && id~${quote('$bucket%')}';
   if (fromId == null) return '$base)';
-  return "$base && id>${quote(fromId)})";
+  return '$base && id>${quote(fromId)})';
 }

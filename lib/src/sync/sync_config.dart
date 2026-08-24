@@ -13,6 +13,27 @@ import 'dart:math';
 /// - negative `backoffBase`/`backoffCap` behave as zero,
 /// - exponential growth is integer and overflow-safe (capped at `backoffCap`).
 class SyncConfig {
+
+  /// Creates synchronization configuration with conservative defaults.
+  const SyncConfig({
+    this.maxPage = 200,
+    this.maxPagesPerPass = 100,
+    this.rewind = const Duration(seconds: 5),
+    this.sweepBucketCount = 36,
+    this.bucketsPerSweep = 2,
+    this.sweepInterval = const Duration(hours: 24),
+    this.pushDebounce = const Duration(milliseconds: 500),
+    this.syncInterval = const Duration(minutes: 5),
+    this.connectivitySettle = const Duration(seconds: 1),
+    this.maxBatch = 25,
+    this.backoffBase = const Duration(seconds: 1),
+    this.backoffCap = const Duration(minutes: 5),
+    this.maxAttempts = 8,
+    this.purgeHiddenAfter,
+    double Function(int attempt)? jitter,
+    int Function()? now,
+  })  : jitter = jitter ?? _defaultJitter,
+        now = now ?? _wallClock;
   /// Pull page size (server max 500; default 200).
   final int maxPage;
 
@@ -52,27 +73,6 @@ class SyncConfig {
 
   /// Injectable clock (epoch ms). Defaults to the wall clock.
   final int Function() now;
-
-  /// Creates synchronization configuration with conservative defaults.
-  const SyncConfig({
-    this.maxPage = 200,
-    this.maxPagesPerPass = 100,
-    this.rewind = const Duration(seconds: 5),
-    this.sweepBucketCount = 36,
-    this.bucketsPerSweep = 2,
-    this.sweepInterval = const Duration(hours: 24),
-    this.pushDebounce = const Duration(milliseconds: 500),
-    this.syncInterval = const Duration(minutes: 5),
-    this.connectivitySettle = const Duration(seconds: 1),
-    this.maxBatch = 25,
-    this.backoffBase = const Duration(seconds: 1),
-    this.backoffCap = const Duration(minutes: 5),
-    this.maxAttempts = 8,
-    this.purgeHiddenAfter,
-    double Function(int attempt)? jitter,
-    int Function()? now,
-  })  : jitter = jitter ?? _defaultJitter,
-        now = now ?? _wallClock;
 
   static double _defaultJitter(int attempt) => 0.5 + Random().nextDouble();
 

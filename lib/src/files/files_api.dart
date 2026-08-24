@@ -12,6 +12,20 @@ import '../sync/sync_tables.dart';
 
 /// Representation of a file ref in `lp_file_refs`.
 class FileRef {
+  /// Creates a file-reference value.
+  const FileRef({
+    required this.refId,
+    required this.store,
+    required this.recordId,
+    required this.field,
+    required this.hash,
+    required this.state,
+    this.remoteName,
+    this.nextRetryAt = 0,
+    this.attemptCount = 0,
+    this.lastError,
+  });
+
   /// Stable local file-reference ID.
   final String refId;
 
@@ -42,30 +56,17 @@ class FileRef {
   /// Most recent file-operation error.
   final String? lastError;
 
-  /// Creates a file-reference value.
-  const FileRef({
-    required this.refId,
-    required this.store,
-    required this.recordId,
-    required this.field,
-    required this.hash,
-    this.remoteName,
-    required this.state,
-    this.nextRetryAt = 0,
-    this.attemptCount = 0,
-    this.lastError,
-  });
-
+  /// Creates a file reference from a database row.
   static FileRef fromRow(Map<String, Object?> row) => parseRowModel(
         'lp_file_refs',
         () => FileRef(
-          refId: row['ref_id'] as String,
-          store: row['store'] as String,
-          recordId: row['record_id'] as String,
-          field: row['field'] as String,
-          hash: row['hash'] as String,
+          refId: row['ref_id']! as String,
+          store: row['store']! as String,
+          recordId: row['record_id']! as String,
+          field: row['field']! as String,
+          hash: row['hash']! as String,
           remoteName: row['remote_name'] as String?,
-          state: row['state'] as String,
+          state: row['state']! as String,
           nextRetryAt: row['next_retry_at'] as int? ?? 0,
           attemptCount: row['attempt_count'] as int? ?? 0,
           lastError: row['last_error'] as String?,
@@ -76,13 +77,13 @@ class FileRef {
 /// App-facing Files API on LocalPocket.
 /// Application-facing attachment and blob lifecycle API.
 class LocalPocketFiles {
+  /// Internal constructor used by [LocalPocket].
+  LocalPocketFiles.internal(this._pocket, {this.blobStore});
+
   final LocalPocket _pocket;
 
   /// Blob store used for attachment bytes.
   final BlobStore? blobStore;
-
-  /// Internal constructor used by [LocalPocket].
-  LocalPocketFiles.internal(this._pocket, {this.blobStore});
 
   BlobStore get _requireBlobStore {
     final bs = blobStore;
@@ -313,7 +314,7 @@ class LocalPocketFiles {
         await exec.update(
           'lp_op_queue',
           {'state': 'done'},
-          where: "kind = ? AND payload_json LIKE ?",
+          where: 'kind = ? AND payload_json LIKE ?',
           whereArgs: [OpQueueKind.fileUpload.name, '%"ref_id":"${ref.refId}"%'],
         );
       } else {
@@ -361,7 +362,39 @@ class LocalPocketFiles {
       count += await bs.cleanTmp(olderThan: tmpGrace);
     }
 
-    // 2. Clean blobs with refcount = 0 and last_access older than grace
+    // 3. Remove refs whose owning record no longer exists. This must happen
+    // before blob collection so their references cannot keep blobs alive.
+    await _pocket.transaction((tx) async {
+      final exec = tx.executor;
+      for (final store in _pocket.storeNames) {
+        final orphaned = await exec.rawQuery(
+          'SELECT f.ref_id, f.hash FROM lp_file_refs f '
+          'WHERE f.store = ? AND NOT EXISTS ('
+          'SELECT 1 FROM "${store.replaceAll('"', '""')}" r '
+          'WHERE r.id = f.record_id)',
+          [store],
+        );
+        for (final row in orphaned) {
+          final refId = row['ref_id']! as String;
+          final hash = row['hash']! as String;
+          await exec
+              .delete('lp_file_refs', where: 'ref_id = ?', whereArgs: [refId]);
+          await exec.execute(
+            'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
+            [hash],
+          );
+          await exec.update(
+            'lp_op_queue',
+            {'state': 'done'},
+            where: 'payload_json LIKE ?',
+            whereArgs: ['%"ref_id":"$refId"%'],
+          );
+          count++;
+        }
+      }
+    });
+
+    // 3. Clean blobs with refcount = 0 and last_access older than grace
     final cutoff = _pocket.now() - blobGrace.inMilliseconds;
     const pageSize = 250;
     while (true) {
@@ -375,7 +408,7 @@ class LocalPocketFiles {
       );
       if (deadBlobs.isEmpty) break;
       for (final b in deadBlobs) {
-        final hash = b['hash'] as String;
+        final hash = b['hash']! as String;
         if (bs != null) await bs.delete(hash);
         await _pocket.db
             .delete('lp_blobs', where: 'hash = ?', whereArgs: [hash]);
@@ -411,8 +444,8 @@ class LocalPocketFiles {
       if (candidates.isEmpty) break;
       for (final row in candidates) {
         if (currentSize <= maxBytes) break;
-        final hash = row['hash'] as String;
-        final size = row['size'] as int;
+        final hash = row['hash']! as String;
+        final size = row['size']! as int;
 
         await bs.delete(hash);
         await _pocket.db.update(

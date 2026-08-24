@@ -9,35 +9,48 @@ import 'package:localpocket/src/web/facade/search/web_search_forwarder.dart';
 import 'package:localpocket/src/web/facade/web_collection_mixin.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
+/// A transaction session on the web worker.
 class WebTx {
-  final WebFacadeHost _pocket;
-  final int sessionId;
-
+  /// Creates a transaction facade for [sessionId].
   WebTx.ins(this._pocket, this.sessionId);
 
-  WebTxCollection collection(String name) {
-    return WebTxCollection._(_pocket, _pocket.schemaFor(name), sessionId);
-  }
+  final WebFacadeHost _pocket;
 
+  /// Identifier of the worker-side transaction session.
+  final int sessionId;
+
+  /// Returns a collection facade bound to this transaction.
+  WebTxCollection collection(String name) =>
+      WebTxCollection._(_pocket, _pocket.schemaFor(name), sessionId);
+
+  /// Creates a query builder bound to this transaction.
   WebTxQueryBuilder query(String store) =>
       WebTxQueryBuilder._(_pocket, _pocket.schemaFor(store), sessionId);
 
+  /// Creates a full-text search builder bound to this transaction.
   WebTxSearchQueryBuilder search(String store, String term) =>
       WebTxSearchQueryBuilder._(
           _pocket, _pocket.schemaFor(store), sessionId, term);
 
-  /// Nested transaction implemented as a savepoint on the active session.
+  /// Runs [action] in a nested transaction implemented as a savepoint.
   Future<T> transaction<T>(Future<T> Function(WebTx tx) action) async {
-    final spRes = (await _pocket
-        .send(WireOp.txSavepoint, {'sessionId': sessionId})) as Map;
-    final savepoint = spRes['savepoint'] as String;
+    final spRes =
+        await _pocket.send(WireOp.txSavepoint, {'sessionId': sessionId});
+    if (spRes is! Map) {
+      throw StateError('Transaction savepoint response was malformed.');
+    }
+    final savepointValue = spRes['savepoint'];
+    if (savepointValue is! String) {
+      throw StateError('Transaction savepoint response was malformed.');
+    }
+    final savepoint = savepointValue;
 
     try {
       final res = await action(this);
       await _pocket.send(
           WireOp.txRelease, {'sessionId': sessionId, 'savepoint': savepoint});
       return res;
-    } catch (e) {
+    } catch (_) {
       try {
         await _pocket.send(WireOp.txRollbackTo,
             {'sessionId': sessionId, 'savepoint': savepoint});
@@ -47,18 +60,21 @@ class WebTx {
   }
 }
 
+/// Query builder bound to a web transaction session.
 class WebTxQueryBuilder
     with
         QueryForwarder<WebTxQueryBuilder>,
         WebCompiledQueryForwarder<WebTxQueryBuilder> {
+  WebTxQueryBuilder._(this._pocket, this.schema, this.sessionId)
+      : _core = QueryBuilder.compileOnly(schema);
+
   final WebFacadeHost _pocket;
-  final CollectionSchema schema;
+
+  /// Schema of the collection queried by this builder.
+  final CollectionSchema<Object?> schema;
   @override
   final int sessionId;
   QueryBuilder _core;
-
-  WebTxQueryBuilder._(this._pocket, this.schema, this.sessionId)
-      : _core = QueryBuilder.compileOnly(schema);
 
   @override
   WebFacadeHost get pocket => _pocket;
@@ -70,21 +86,24 @@ class WebTxQueryBuilder
   set queryCore(QueryBuilder value) => _core = value;
 }
 
+/// Full-text search builder bound to a web transaction session.
 class WebTxSearchQueryBuilder
     with
         SearchForwarder<WebTxSearchQueryBuilder>,
         WebCompiledSearchForwarder<WebTxSearchQueryBuilder> {
+  WebTxSearchQueryBuilder._(
+      this._pocket, this.schema, this.sessionId, this.term)
+      : _core = SearchBuilder.compileOnly(schema, term);
+
   final WebFacadeHost _pocket;
-  final CollectionSchema schema;
+
+  /// Schema of the collection searched by this builder.
+  final CollectionSchema<Object?> schema;
   @override
   final int sessionId;
   @override
   final String term;
   final SearchBuilder _core;
-
-  WebTxSearchQueryBuilder._(
-      this._pocket, this.schema, this.sessionId, this.term)
-      : _core = SearchBuilder.compileOnly(schema, term);
 
   @override
   WebFacadeHost get pocket => _pocket;
@@ -95,12 +114,14 @@ class WebTxSearchQueryBuilder
 
 /// Main-thread collection bound to a transaction session.
 class WebTxCollection with WireCollectionMixin {
+  WebTxCollection._(this._pocket, this.schema, this.sessionId);
+
   final WebFacadeHost _pocket;
-  final CollectionSchema schema;
+
+  /// Schema of the collection exposed by this facade.
+  final CollectionSchema<Object?> schema;
   @override
   final int sessionId;
-
-  WebTxCollection._(this._pocket, this.schema, this.sessionId);
 
   @override
   WebFacadeHost get pocket => _pocket;

@@ -20,9 +20,7 @@ String canonicalize(Object? value) {
 /// byte length of what was written (counted during the write itself — no
 /// second pass over the buffer). Used by maxDocBytes validation on hot write
 /// paths.
-int canonicalizeInto(StringBuffer out, Object? value) {
-  return writeCanonicalValue(out, value);
-}
+int canonicalizeInto(StringBuffer out, Object? value) => writeCanonicalValue(out, value);
 
 /// The EXACT UTF-8 byte length of [s], counted per rune in one pass
 /// (1/2/3/4 by code-point range) — the number `utf8.encode(s).length` would

@@ -5,6 +5,15 @@ enum PlatformProfile { native, web }
 
 /// Probing result of the SQLite engine.
 class SqliteCapabilities {
+
+  /// Creates a capability snapshot.
+  const SqliteCapabilities({
+    required this.sqliteVersion,
+    required this.hasStrict,
+    required this.walSupported,
+    required this.hasFts5,
+    required this.platform,
+  });
   /// SQLite engine version reported by the connection.
   final String sqliteVersion;
 
@@ -19,15 +28,6 @@ class SqliteCapabilities {
 
   /// Platform profile used during capability probing.
   final PlatformProfile platform;
-
-  /// Creates a capability snapshot.
-  const SqliteCapabilities({
-    required this.sqliteVersion,
-    required this.hasStrict,
-    required this.walSupported,
-    required this.hasFts5,
-    required this.platform,
-  });
 
   /// Read-heavy mmap is only meaningful on native with WAL.
   bool get hasMmap => platform == PlatformProfile.native && walSupported;
@@ -56,15 +56,13 @@ class SqliteCapabilities {
     String v, {
     PlatformProfile platform = PlatformProfile.native,
     bool hasFts5 = true,
-  }) {
-    return SqliteCapabilities(
+  }) => SqliteCapabilities(
       sqliteVersion: v,
       hasStrict: versionAtLeast(v, 3, 37),
       walSupported: platform == PlatformProfile.native,
       hasFts5: hasFts5,
       platform: platform,
     );
-  }
 
   /// Serializes this capability snapshot for diagnostics.
   Map<String, Object?> toJson() => {
@@ -84,7 +82,7 @@ class SqliteCapabilities {
   static Future<SqliteCapabilities> probe(
       Database db, PlatformProfile platform) async {
     final version = (await db.rawQuery('SELECT sqlite_version() AS v'))
-        .first['v'] as String;
+        .first['v']! as String;
     final compileOptions = (await db.rawQuery('PRAGMA compile_options'))
         .map((r) => r.values.first)
         .whereType<String>()

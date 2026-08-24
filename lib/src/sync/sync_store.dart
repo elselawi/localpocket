@@ -9,34 +9,34 @@ import '../core/sql_utils.dart';
 
 /// Identity-scoped pull cursor.
 class PullCursor {
+
+  /// Creates a pull cursor.
+  const PullCursor(this.updated, this.id);
   /// Last remote update timestamp.
   final String updated;
 
   /// ID tie-breaker at [updated].
   final String id;
-
-  /// Creates a pull cursor.
-  const PullCursor(this.updated, this.id);
 }
 
 /// Rotating anti-entropy sweep state.
 class SweepState {
+
+  /// Creates sweep state.
+  const SweepState(this.bucket, this.lastSweepAt);
   /// Last bucket visited, or `-1` before the first sweep.
   final int bucket;
 
   /// Time of the last completed sweep.
   final int? lastSweepAt;
-
-  /// Creates sweep state.
-  const SweepState(this.bucket, this.lastSweepAt);
 }
 
 /// Persists pull cursors, sweep progress, and aggregate sync status.
 class SyncStore {
-  final LocalPocket pocket;
-  final String scope;
 
   SyncStore(this.pocket, this.scope);
+  final LocalPocket pocket;
+  final String scope;
 
   Future<PullCursor?> readCursor(String store) async {
     final rows = await pocket.db.query('lp_sync_state',

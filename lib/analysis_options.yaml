@@ -1,0 +1,8 @@
+include: ../analysis_options.yaml
+
+linter:
+  rules:
+    # Internal implementation files expose data models and transport helpers;
+    # public API documentation is maintained at the facade layer.
+    public_member_api_docs: false
+    no_adjacent_strings_in_list: false

@@ -20,15 +20,15 @@ import 'worker_engine.dart';
 /// Database controller that opens the SQLite connection in the dedicated worker
 /// and boots the existing [LocalPocket] engine around it.
 final class LocalPocketDatabaseController extends DatabaseController {
+  /// Creates the web database controller.
   const LocalPocketDatabaseController();
 
   @override
   Future<JSAny?> handleCustomRequest(
     ClientConnection connection,
     CustomClientRequest request,
-  ) async {
-    return {'kind': 'ready'}.jsify();
-  }
+  ) async =>
+      {'kind': 'ready'}.jsify();
 
   @override
   Future<WorkerDatabase> openDatabase(
@@ -38,60 +38,67 @@ final class LocalPocketDatabaseController extends DatabaseController {
     JSAny? additionalData,
   ) async {
     final rawDb = sqlite3.open(path, vfs: vfs);
-
-    // Assert journal mode TRUNCATE immediately after open per §6.8
-    rawDb.execute('PRAGMA journal_mode=TRUNCATE');
-    final mode = rawDb.select('PRAGMA journal_mode').first.columnAt(0);
-    if (mode.toString().toLowerCase() != 'truncate') {
-      rawDb.close();
-      throw StateError('journal_mode read-back was $mode, expected truncate');
-    }
-
     final db = DirectSqliteDatabase(rawDb);
+    var handedToPocket = false;
 
-    // Parse options from additionalData (pure-Dart parser in `open_options.dart`)
-    final options = parseOpenOptions(additionalData?.dartify());
-    final stores = (options['stores'] as List<CollectionSchema>?) ?? [];
-    final maxDocBytes = (options['maxDocBytes'] as int?) ?? 1900000;
-    final destructiveBackup = (options['destructiveBackup'] as bool?) ?? true;
+    try {
+      // Assert journal mode TRUNCATE immediately after open per §6.8.
+      rawDb.execute('PRAGMA journal_mode=TRUNCATE');
+      final mode = rawDb.select('PRAGMA journal_mode').first.columnAt(0);
+      if (mode.toString().toLowerCase() != 'truncate') {
+        throw StateError('journal_mode read-back was $mode, expected truncate');
+      }
+      // Parse options from additionalData (pure-Dart parser in
+      // `open_options.dart`).
+      final options = parseOpenOptions(additionalData?.dartify());
+      final stores = (options['stores'] as List<CollectionSchema>?) ?? [];
+      final maxDocBytes = (options['maxDocBytes'] as int?) ?? 1900000;
+      final destructiveBackup = (options['destructiveBackup'] as bool?) ?? true;
 
-    // Field cipher bridge: reconstruct the engine cipher from the serialized
-    // envelope. Parsing is intentionally OUTSIDE `parseOpenOptions`, which
-    // swallows malformed options — a malformed cipher envelope must fail
-    // loudly, never be silently dropped.
-    final fieldCipher = parseFieldCipherEnvelope(
-        rawOpenOption(additionalData?.dartify(), 'fieldCipher'));
+      // Field cipher bridge: reconstruct the engine cipher from the serialized
+      // envelope. Parsing is intentionally OUTSIDE `parseOpenOptions`, which
+      // swallows malformed options — a malformed cipher envelope must fail
+      // loudly, never be silently dropped.
+      final fieldCipher = parseFieldCipherEnvelope(
+          rawOpenOption(additionalData?.dartify(), 'fieldCipher'));
 
-    // Reject encrypted stores opened without a cipher at open time. A web open
-    // must never silently produce stores that cannot be written.
-    if (hasEncryptedFieldsWithoutCipher(stores, fieldCipher)) {
-      throw ValidationException(
-          'Store declares encrypted fields but no fieldCipher was provided.');
+      // Reject encrypted stores opened without a cipher at open time. A web
+      // open must never silently produce stores that cannot be written.
+      if (hasEncryptedFieldsWithoutCipher(stores, fieldCipher)) {
+        throw ValidationException(
+            'Store declares encrypted fields but no fieldCipher was provided.');
+      }
+
+      // Worker-owned blob store backs LocalPocket.files + the sync file lane.
+      // OPFS access uses @JS('navigator') (no window dependency), so it is
+      // safe inside this dedicated worker; it degrades to an in-memory store
+      // when OPFS is unavailable.
+      final blobStore = WebBlobStore();
+
+      // Boot the LocalPocket engine around this DirectSqliteDatabase.
+      final pocket = await LocalPocket.open(
+        path: path,
+        database: db,
+        stores: stores,
+        platform: PlatformProfile.web,
+        blobStore: blobStore,
+        fieldCipher: fieldCipher,
+        maxDocBytes: maxDocBytes,
+        destructiveBackup: destructiveBackup,
+      );
+      handedToPocket = true;
+
+      return LocalPocketWorkerDatabase(
+        rawDatabase: rawDb,
+        databaseAdapter: db,
+        pocket: pocket,
+      );
+    } catch (_) {
+      if (!handedToPocket) {
+        rawDb.close();
+      }
+      rethrow;
     }
-
-    // Worker-owned blob store backs LocalPocket.files + the sync file lane.
-    // OPFS access uses @JS('navigator') (no window dependency), so it is safe
-    // inside this dedicated worker; it degrades to an in-memory store when OPFS
-    // is unavailable.
-    final blobStore = WebBlobStore();
-
-    // Boot the LocalPocket engine around this DirectSqliteDatabase
-    final pocket = await LocalPocket.open(
-      path: path,
-      database: db,
-      stores: stores,
-      platform: PlatformProfile.web,
-      blobStore: blobStore,
-      fieldCipher: fieldCipher,
-      maxDocBytes: maxDocBytes,
-      destructiveBackup: destructiveBackup,
-    );
-
-    return LocalPocketWorkerDatabase(
-      rawDatabase: rawDb,
-      databaseAdapter: db,
-      pocket: pocket,
-    );
   }
 }
 
@@ -105,11 +112,7 @@ final class LocalPocketDatabaseController extends DatabaseController {
 /// in `worker_engine.dart` so it is unit-testable on the VM against a real
 /// in-memory engine.
 final class LocalPocketWorkerDatabase extends WorkerDatabase {
-  final CommonDatabase rawDatabase;
-  final DirectSqliteDatabase databaseAdapter;
-  final LocalPocket pocket;
-  final WorkerEngine _engine;
-
+  /// Creates a worker database around an initialized [LocalPocket] engine.
   LocalPocketWorkerDatabase({
     required this.rawDatabase,
     required this.databaseAdapter,
@@ -119,6 +122,17 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
           databaseAdapter: databaseAdapter,
           pocket: pocket,
         );
+
+  /// The underlying SQLite database exposed to the worker runtime.
+  final CommonDatabase rawDatabase;
+
+  /// The database adapter used by the [LocalPocket] engine.
+  final DirectSqliteDatabase databaseAdapter;
+
+  /// The local database engine hosted by this worker database.
+  final LocalPocket pocket;
+
+  final WorkerEngine _engine;
 
   @override
   CommonDatabase get database => rawDatabase;
@@ -185,9 +199,9 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 /// Adapts a [ClientConnection] (JS-interop) to the pure-Dart
 /// [WorkerEventSink] the engine emits through.
 final class _ConnectionSink implements WorkerEventSink {
-  final ClientConnection connection;
-
   _ConnectionSink(this.connection);
+
+  final ClientConnection connection;
 
   @override
   void emit(Map<String, Object?> event) {

@@ -69,7 +69,7 @@ Future<Map<String, Object?>> executeCompiledQuery(
       };
     case 'ids':
       return {
-        'ids': [for (final r in rows) r['id'] as String]
+        'ids': [for (final r in rows) r['id']! as String]
       };
     case 'explain':
       return {'plan': rows.map((r) => r['detail']).join('\n')};
@@ -81,7 +81,7 @@ Future<Map<String, Object?>> executeCompiledQuery(
     case 'search':
       return {
         'results': [
-          for (final r in rows) {'id': r['id'] as String, 'score': r['score']}
+          for (final r in rows) {'id': r['id']! as String, 'score': r['score']}
         ]
       };
     default:

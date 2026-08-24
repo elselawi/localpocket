@@ -51,11 +51,11 @@ abstract class CryptoProvider {
 
 /// Simple [CryptoProvider] wrapping a single default [FieldCipher].
 class SingleKeyCryptoProvider implements CryptoProvider {
-  /// Cipher returned for every requested field.
-  final FieldCipher cipher;
 
   /// Creates a provider backed by one cipher.
   SingleKeyCryptoProvider(this.cipher);
+  /// Cipher returned for every requested field.
+  final FieldCipher cipher;
 
   @override
   FieldCipher? getFieldCipher(String storeName, String fieldName) => cipher;
@@ -63,15 +63,15 @@ class SingleKeyCryptoProvider implements CryptoProvider {
 
 /// Standard AES-256-GCM cipher with a fresh 12-byte random IV per value.
 class AesGcmFieldCipher implements FieldCipher {
-  /// Creates an AES-256-GCM field cipher from a 32-byte key.
-  final Uint8List _key;
-  final _AesContext _context;
-  final Random _random;
 
   AesGcmFieldCipher(List<int> keyBytes, {Random? random})
       : _key = _validatedKey(keyBytes),
         _random = random ?? Random.secure(),
         _context = _AesContext(_validatedKey(keyBytes));
+  /// Creates an AES-256-GCM field cipher from a 32-byte key.
+  final Uint8List _key;
+  final _AesContext _context;
+  final Random _random;
 
   static Uint8List _validatedKey(List<int> keyBytes) {
     if (keyBytes.length != 32) {
@@ -277,10 +277,10 @@ class _AesGcmEngine {
   }
 
   static void _gcmMult(Uint8List x, Uint8List y) {
-    var v0 = (y[0] << 24) | (y[1] << 16) | (y[2] << 8) | y[3];
-    var v1 = (y[4] << 24) | (y[5] << 16) | (y[6] << 8) | y[7];
-    var v2 = (y[8] << 24) | (y[9] << 16) | (y[10] << 8) | y[11];
-    var v3 = (y[12] << 24) | (y[13] << 16) | (y[14] << 8) | y[15];
+    final v0 = (y[0] << 24) | (y[1] << 16) | (y[2] << 8) | y[3];
+    final v1 = (y[4] << 24) | (y[5] << 16) | (y[6] << 8) | y[7];
+    final v2 = (y[8] << 24) | (y[9] << 16) | (y[10] << 8) | y[11];
+    final v3 = (y[12] << 24) | (y[13] << 16) | (y[14] << 8) | y[15];
 
     // Standard GCM field polynomial: R = 0xE1000000 || 0^96
     const r = 0xE1000000;
@@ -314,12 +314,12 @@ class _AesGcmEngine {
   }
 }
 
-class _AesContext {
-  final Uint32List _rk = Uint32List(60); // 15 round keys for AES-256
+class _AesContext { // 15 round keys for AES-256
 
   _AesContext(Uint8List key) {
     _keyExpansion(key);
   }
+  final Uint32List _rk = Uint32List(60);
 
   void encryptBlock(Uint8List input, Uint8List output) {
     var s0 = (input[0] << 24) | (input[1] << 16) | (input[2] << 8) | input[3];

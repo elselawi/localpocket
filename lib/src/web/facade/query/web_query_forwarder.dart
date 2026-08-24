@@ -50,21 +50,21 @@ mixin WebCompiledQueryForwarder<T extends Object> on QueryForwarder<T> {
     final res = await sendCompiledPlan(
         pocket, queryCore.compileDistinctPlan(field),
         sessionId: sessionId);
-    return (res['values'] as List).map(decodeWireValue).toList();
+    return (res['values']! as List).map(decodeWireValue).toList();
   }
 
   /// Returns IDs matching the current query.
   Future<List<String>> ids() async {
     final res = await sendCompiledPlan(pocket, queryCore.compileIdsPlan(),
         sessionId: sessionId);
-    return (res['ids'] as List).cast<String>();
+    return (res['ids']! as List).cast<String>();
   }
 
   /// Returns SQLite's `EXPLAIN QUERY PLAN` output for this query.
   Future<String> explain() async {
     final res = await sendCompiledPlan(pocket, queryCore.compileExplainPlan(),
         sessionId: sessionId);
-    return res['plan'] as String;
+    return res['plan']! as String;
   }
 
   Future<num?> _aggregate(String fn, String field) async {

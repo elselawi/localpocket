@@ -13,17 +13,21 @@ import 'package:localpocket/src/web/protocol.dart';
 /// dispatches a typed wire op that delegates to `pocket.conflicts` in the
 /// worker.
 class WebConflicts {
-  final WebFacadeHost _pocket;
-
+  /// Creates a web conflicts facade bound to [pocket].
   WebConflicts.ins(this._pocket);
+
+  final WebFacadeHost _pocket;
 
   /// Lists all currently open / unresolved conflicts, optionally filtered by
   /// [store]. Sorted by detection time (ascending), matching native.
   Future<List<ConflictRecord>> listOpen({String? store}) async {
-    final res = (await _pocket.send(WireOp.conflictsList, {
+    final response = await _pocket.send(WireOp.conflictsList, {
       if (store != null) 'store': store,
-    })) as Map;
-    return ((res['conflicts'] as List?) ?? const [])
+    });
+    if (response is! Map) {
+      return const <ConflictRecord>[];
+    }
+    return ((response['conflicts'] as List?) ?? const [])
         .map((raw) => decodeConflictRecord(
             (raw as Map).map((k, v) => MapEntry(k.toString(), v))))
         .toList();
@@ -53,7 +57,10 @@ class WebConflicts {
           // native conflicts watch emits the initial list immediately on
           // listen, so no initial snapshot is returned in the request response.
           _pocket.workerEventDecoders[watchId] = (raw) {
-            final list = (raw as List).cast<Map>();
+            if (raw is! List) {
+              return const <ConflictRecord>[];
+            }
+            final list = raw.cast<Map<dynamic, dynamic>>();
             return [
               for (final m in list)
                 decodeConflictRecord(m.map((k, v) => MapEntry(k.toString(), v)))
@@ -70,10 +77,17 @@ class WebConflicts {
         },
         unregister: () => _cancelWatch(watchId),
       ),
-      onCancel: () => _pocket.watchTracker.requestUnregistration(
-        watchId: watchId,
-        unregister: () => _cancelWatch(watchId),
-      ),
+      onCancel: () async {
+        await _pocket.watchTracker.requestUnregistration(
+          watchId: watchId,
+          unregister: () async {
+            await _cancelWatch(watchId);
+            if (!controller.isClosed) {
+              await controller.close();
+            }
+          },
+        );
+      },
     );
     return controller.stream;
   }

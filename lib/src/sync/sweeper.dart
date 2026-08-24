@@ -5,24 +5,44 @@ import 'sync_config.dart';
 import 'sync_store.dart';
 import 'sync_tables.dart';
 
+/// Results from sweeping one store bucket.
 class SweepReport {
-  final String store;
-  final int scanned;
-  final int hidden;
-  final int fetched;
+  /// Creates a sweep report.
   const SweepReport(this.store, this.scanned, this.hidden, this.fetched);
+
+  /// Store that was swept.
+  final String store;
+
+  /// Number of distinct remote records observed.
+  final int scanned;
+
+  /// Number of local records newly marked hidden.
+  final int hidden;
+
+  /// Number of records fetched for targeted self-healing or quarantine retry.
+  final int fetched;
 }
 
 /// Anti-entropy id-range sweep — the only mechanism trusted to
 /// detect visibility changes. Never deletes; only toggles the `hidden` bit.
 class Sweeper {
-  final LocalPocket pocket;
-  final SyncBackend backend;
-  final SyncConfig config;
-  final SyncStore syncStore;
-  final Puller puller;
-
+  /// Creates a sweeper for [pocket] and its synchronization [backend].
   Sweeper(this.pocket, this.backend, this.config, this.syncStore, this.puller);
+
+  /// Local database and collection access.
+  final LocalPocket pocket;
+
+  /// Remote synchronization backend.
+  final SyncBackend backend;
+
+  /// Sweep scheduling and retry configuration.
+  final SyncConfig config;
+
+  /// Persistent synchronization metadata store.
+  final SyncStore syncStore;
+
+  /// Authoritative remote record application path.
+  final Puller puller;
 
   static const String _alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -71,14 +91,14 @@ class Sweeper {
       }
     }
     if (firstError != null) {
-      // Re-throw the original (typed) error after the other stores swept.
-      if (firstError is SyncError) throw firstError;
-      if (firstError is Exception) throw firstError;
-      throw firstError as Error;
+      // Re-throw the original error after the other stores have swept. Do not
+      // cast here: callers may throw any Dart object, not only Error/Exception.
+      throw firstError;
     }
     return reports;
   }
 
+  /// Sweeps one id-prefix bucket for [store].
   Future<SweepReport> sweepBucket(String store, int bucket) async {
     if (bucket < 0 || bucket >= _alphabet.length) {
       throw ArgumentError(
@@ -133,7 +153,7 @@ class Sweeper {
         [store, '$prefix%']);
     final toHide = <String>[];
     for (final r in localRows) {
-      final id = r['record_id'] as String;
+      final id = r['record_id']! as String;
       if (!remoteSeen.contains(id)) {
         // Already-hidden rows are skipped: re-hiding would only churn the
         // change bus and inflate the reported hidden count.
@@ -154,12 +174,12 @@ class Sweeper {
       final purgeCutoff =
           config.now() - config.purgeHiddenAfter!.inMilliseconds;
       final staleHidden = await pocket.db.rawQuery(
-        "SELECT record_id FROM lp_sync_row WHERE store = ? AND access_state = ? "
+        'SELECT record_id FROM lp_sync_row WHERE store = ? AND access_state = ? '
         "AND sync_state = 'clean' AND (last_seen_at IS NOT NULL AND last_seen_at < ?)",
         [store, AccessState.hidden.name, purgeCutoff],
       );
       for (final r in staleHidden) {
-        final id = r['record_id'] as String;
+        final id = r['record_id']! as String;
         await pocket.collection(store).purge(id);
       }
     }
@@ -177,7 +197,7 @@ class Sweeper {
         'AND next_retry_at <= ?',
         [store, '$prefix%', retryCutoff]);
     if (quarantined.isNotEmpty) {
-      final ids = [for (final r in quarantined) r['record_id'] as String];
+      final ids = [for (final r in quarantined) r['record_id']! as String];
       await puller.fetchBatch(store, ids);
       fetched += ids.length;
     }
@@ -198,7 +218,7 @@ class Sweeper {
           'SELECT * FROM lp_sync_row WHERE store = ? AND record_id IN ($ph)',
           [store, ...chunk]);
       for (final r in rows) {
-        result[r['record_id'] as String] = SyncRowState.fromRow(r);
+        result[r['record_id']! as String] = SyncRowState.fromRow(r);
       }
     }
     return result;

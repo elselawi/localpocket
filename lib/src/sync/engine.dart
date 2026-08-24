@@ -34,15 +34,59 @@ import '../files/file_sync_lane.dart';
 ///   freshest base.
 /// - Auth loss pauses; connectivity loss parks; everything stays local-first.
 class SyncEngine {
+  /// Creates a synchronization engine for [pocket] and [backend].
+  ///
+  /// When [config] is omitted the engine inherits the pocket's injected clock
+  /// ([LocalPocket.now]) so persistence bookkeeping and engine scheduling stay
+  /// on one clock.
+  SyncEngine({
+    required this.pocket,
+    required this.backend,
+    SyncConfig? config,
+    this.onAuthRequired,
+  }) : config = config ?? SyncConfig(now: pocket.now) {
+    syncStore = SyncStore(pocket, backend.scopeId);
+    fileLane = FileSyncLane(
+      pocket: pocket,
+      backend: backend,
+      config: this.config,
+      blobStore: pocket.blobStore,
+    );
+    puller = Puller(pocket, backend, this.config, syncStore,
+        fileLane: fileLane, applyLane: _applyLane);
+    sweeper = Sweeper(pocket, backend, this.config, syncStore, puller);
+    pusher = Pusher(pocket, backend, this.config, syncStore,
+        onAuthError: _onAuthError);
+  }
+
+  /// The local pocket whose writes, outbox, and metadata this engine manages.
   final LocalPocket pocket;
+
+  /// The remote backend that provides pull, push, hint, and file-sync work.
   final SyncBackend backend;
+
+  /// The synchronization settings used for debounce windows, polling, and time.
   final SyncConfig config;
+
+  /// Called when the backend reports that authentication is required again.
+  ///
+  /// The engine transitions to [SyncEngineState.authRequired] before invoking
+  /// this callback.
   final FutureOr<void> Function()? onAuthRequired;
 
+  /// Sync bookkeeping for cursor state, pending records, and status counters.
   late final SyncStore syncStore;
+
+  /// Pull coordinator for applying remote records and continuing large stores.
   late final Puller puller;
+
+  /// Visibility sweeper that re-checks hidden and permission-scoped records.
   late final Sweeper sweeper;
+
+  /// Pusher responsible for flushing local writes to the backend.
   late final Pusher pusher;
+
+  /// File transfer lane for blob upload and download synchronization.
   late final FileSyncLane fileLane;
 
   SyncEngineState _state = SyncEngineState.closed;
@@ -111,36 +155,12 @@ class SyncEngine {
   /// Cycles are chained so no two run concurrently.
   Future<SyncReport> _cycleTail = Future.value(const SyncReport());
 
+  /// The most recent sync report produced by the engine.
   SyncReport? lastReport;
 
   /// What each trigger scheduled, for tests.
   @visibleForTesting
   final List<String> debugActions = [];
-
-  /// Creates a synchronization engine for [pocket] and [backend].
-  ///
-  /// When [config] is omitted the engine inherits the pocket's injected clock
-  /// ([LocalPocket.now]) so persistence bookkeeping and engine scheduling stay
-  /// on one clock.
-  SyncEngine({
-    required this.pocket,
-    required this.backend,
-    SyncConfig? config,
-    this.onAuthRequired,
-  }) : config = config ?? SyncConfig(now: pocket.now) {
-    syncStore = SyncStore(pocket, backend.scopeId);
-    fileLane = FileSyncLane(
-      pocket: pocket,
-      backend: backend,
-      config: this.config,
-      blobStore: pocket.blobStore,
-    );
-    puller = Puller(pocket, backend, this.config, syncStore,
-        fileLane: fileLane, applyLane: _applyLane);
-    sweeper = Sweeper(pocket, backend, this.config, syncStore, puller);
-    pusher = Pusher(pocket, backend, this.config, syncStore,
-        onAuthError: _onAuthError);
-  }
 
   /// Current lifecycle state.
   SyncEngineState get state => _state;
@@ -168,7 +188,7 @@ class SyncEngine {
       _statusController = StreamController<SyncStatus>.broadcast();
     }
     _started = true;
-    _transition(SyncEngineState.opening);
+    await _transition(SyncEngineState.opening);
     // Adapter warm-up (batch probe etc.) before any push decision.
     try {
       await backend.prepare();
@@ -187,7 +207,7 @@ class SyncEngine {
       rethrow;
     }
     _syncTimer = Timer.periodic(config.syncInterval, (_) => handleTimer());
-    _transition(_effectiveIdle());
+    await _transition(_effectiveIdle());
     if (_isCurrent(generation)) {
       await syncNow();
     }
@@ -219,11 +239,11 @@ class SyncEngine {
     if (!_stateController.isClosed) {
       _state = SyncEngineState.closed;
       _stateController.add(SyncEngineState.closed);
-      _stateController.close();
+      await _stateController.close();
     } else {
       _state = SyncEngineState.closed;
     }
-    if (!_statusController.isClosed) _statusController.close();
+    if (!_statusController.isClosed) await _statusController.close();
     _state = SyncEngineState.closed;
   }
 
@@ -234,14 +254,14 @@ class SyncEngine {
     return SyncEngineState.idle;
   }
 
-  void _transition(SyncEngineState next) {
+  Future<void> _transition(SyncEngineState next) async {
     if (!_started) {
       _state = next;
       return;
     }
     _state = next;
     if (!_stateController.isClosed) _stateController.add(next);
-    _emitStatus();
+    await _emitStatus();
   }
 
   Future<void> _statusTail = Future.value();
@@ -339,7 +359,7 @@ class SyncEngine {
   void handleTimer() {
     if (!_started) return;
     debugActions.add('cycle');
-    _runExclusiveCycle();
+    unawaited(_runExclusiveCycle());
   }
 
   /// Manual `db.sync.now()` → full cycle, returns a report.
@@ -364,9 +384,9 @@ class SyncEngine {
       _pendingFull = false;
       _pendingPullOnly.clear();
       if (full || pullOnly.isEmpty) {
-        _runExclusiveCycle();
+        unawaited(_runExclusiveCycle());
       } else {
-        _runExclusiveCycle(pullOnly: pullOnly);
+        unawaited(_runExclusiveCycle(pullOnly: pullOnly));
       }
     });
   }
@@ -380,7 +400,7 @@ class SyncEngine {
     _catchupTimer = Timer(Duration.zero, () {
       _catchupTimer = null;
       if (!_started) return;
-      _runExclusiveCycle(pullOnly: stores);
+      unawaited(_runExclusiveCycle(pullOnly: stores));
     });
   }
 
@@ -388,7 +408,7 @@ class SyncEngine {
 
   void _onAuthError() {
     _authInvalid = true;
-    _transition(SyncEngineState.authRequired);
+    unawaited(_transition(SyncEngineState.authRequired));
     final callback = onAuthRequired;
     if (callback != null) {
       unawaited(Future<void>.sync(callback));
@@ -403,7 +423,7 @@ class SyncEngine {
     _authInvalid = false;
     _forceSweepPending = true;
     await pocket.outbox.requeueBlocked();
-    _transition(_effectiveIdle());
+    await _transition(_effectiveIdle());
     await syncNow();
   }
 
@@ -413,25 +433,25 @@ class SyncEngine {
     if (up) {
       _settleTimer?.cancel();
       _settleTimer = Timer(config.connectivitySettle, () async {
-        _transition(_effectiveIdle());
+        await _transition(_effectiveIdle());
         await syncNow();
       });
     } else {
-      _transition(SyncEngineState.offline);
+      await _transition(SyncEngineState.offline);
     }
   }
 
   /// Pauses automatic synchronization while leaving local CRUD available.
   Future<void> pause() async {
     _paused = true;
-    _transition(SyncEngineState.paused);
+    await _transition(SyncEngineState.paused);
   }
 
   /// Resumes synchronization and immediately schedules a cycle.
   Future<void> resume() async {
     if (!_paused) return;
     _paused = false;
-    _transition(_effectiveIdle());
+    await _transition(_effectiveIdle());
     await syncNow();
   }
 
@@ -439,7 +459,7 @@ class SyncEngine {
   ///
   /// Use after changing the remote identity or repairing cursor state.
   Future<void> fullResync() async {
-    _transition(SyncEngineState.fullResync);
+    await _transition(SyncEngineState.fullResync);
     for (final store in pocket.storeNames) {
       await syncStore.clearCursor(store);
     }
@@ -470,7 +490,7 @@ class SyncEngine {
     final generation = _generation;
     if (!_isCurrent(generation)) return const SyncReport();
     if (_paused || _authInvalid || _offline) {
-      _transition(_effectiveIdle());
+      await _transition(_effectiveIdle());
       return const SyncReport();
     }
 
@@ -485,7 +505,7 @@ class SyncEngine {
     // they are continued immediately (page-limit auto-continuation).
     final hitLimitStores = <String>[];
 
-    _transition(SyncEngineState.pulling);
+    await _transition(SyncEngineState.pulling);
     final stores = pullOnly ?? pocket.storeNames.toList();
     for (final store in stores) {
       try {
@@ -502,7 +522,7 @@ class SyncEngine {
       }
     }
     if (_authInvalid) {
-      _transition(SyncEngineState.authRequired);
+      await _transition(SyncEngineState.authRequired);
       lastReport = SyncReport(pulled: pulled, hadError: true);
       return lastReport!;
     }
@@ -521,7 +541,7 @@ class SyncEngine {
       }
     }
 
-    _transition(SyncEngineState.pushing);
+    await _transition(SyncEngineState.pushing);
     var pushReport = const PushReport();
     if (pullFailed) {
       // Do not push against stale remote state (see `pullFailed` above): the
@@ -538,7 +558,7 @@ class SyncEngine {
                   'WHERE last_error IS NOT NULL '
                   'ORDER BY local_rev DESC, rowid DESC LIMIT 1');
           if (errRows.isNotEmpty && errRows.first['last_error'] is String) {
-            _lastError = errRows.first['last_error'] as String;
+            _lastError = errRows.first['last_error']! as String;
           } else {
             _lastError = 'push failed';
           }
@@ -580,7 +600,7 @@ class SyncEngine {
       _lastError = null;
     }
     final idle = _effectiveIdle();
-    _transition(cycleHadError && idle == SyncEngineState.idle
+    await _transition(cycleHadError && idle == SyncEngineState.idle
         ? SyncEngineState.backoff
         : idle);
     lastReport = SyncReport(

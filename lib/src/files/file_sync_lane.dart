@@ -10,35 +10,52 @@ import '../sync/sync_backend.dart';
 import '../sync/sync_config.dart';
 import '../sync/sync_tables.dart';
 
+/// A summary of the work performed by a file synchronization pass.
 class FileSyncReport {
-  final int uploaded;
-  final int downloaded;
-  final int removed;
-  final bool hadError;
-
+  /// Creates a report for a file synchronization pass.
   const FileSyncReport({
     this.uploaded = 0,
     this.downloaded = 0,
     this.removed = 0,
     this.hadError = false,
   });
+
+  /// Number of files uploaded during the sync.
+  final int uploaded;
+
+  /// Number of files downloaded during the sync.
+  final int downloaded;
+
+  /// Number of files removed during the sync.
+  final int removed;
+
+  /// Whether one or more file operations failed during the sync.
+  final bool hadError;
 }
 
 /// The dedicated file synchronization lane.
 ///
 /// Runs after the record push lane (record-first ordering).
 class FileSyncLane {
-  final LocalPocket pocket;
-  final SyncBackend backend;
-  final SyncConfig config;
-  final BlobStore? blobStore;
-
+  /// Creates a file synchronization lane.
   FileSyncLane({
     required this.pocket,
     required this.backend,
     required this.config,
     this.blobStore,
   });
+
+  /// Local database and record store used by the lane.
+  final LocalPocket pocket;
+
+  /// Backend used to upload, download, and remove remote files.
+  final SyncBackend backend;
+
+  /// Synchronization settings, including batching and retry timing.
+  final SyncConfig config;
+
+  /// Store for local blob contents, if file synchronization is enabled.
+  final BlobStore? blobStore;
 
   int _nowMs() => config.now();
 
@@ -92,8 +109,8 @@ class FileSyncLane {
         );
         for (final row in pendingDownloads) {
           try {
-            final refId = row['ref_id'] as String;
-            final recordId = row['record_id'] as String;
+            final refId = row['ref_id']! as String;
+            final recordId = row['record_id']! as String;
             final remoteName = row['remote_name'] as String?;
             if (remoteName != null) {
               await downloadFile(
@@ -121,8 +138,8 @@ class FileSyncLane {
 
   Future<bool> _processUploadOp(OpQueueRow op, BlobStore bs) async {
     final payload = jsonDecode(op.payloadJson) as Map<String, Object?>;
-    final refId = payload['ref_id'] as String;
-    final hash = payload['hash'] as String;
+    final refId = payload['ref_id']! as String;
+    final hash = payload['hash']! as String;
     final name = payload['name'] as String? ?? '$hash.bin';
 
     // Verify blob exists locally
@@ -143,8 +160,9 @@ class FileSyncLane {
 
     String? adoptedFilename;
     if (remoteRec != null) {
+      final hashPrefix = hash.substring(0, hash.length.clamp(0, 10));
       for (final existingName in remoteRec.imgs) {
-        if (existingName.startsWith(hash.substring(0, 10)) ||
+        if ((hashPrefix.isNotEmpty && existingName.startsWith(hashPrefix)) ||
             existingName.startsWith(name)) {
           adoptedFilename = existingName;
           break;
@@ -190,9 +208,9 @@ class FileSyncLane {
 
   Future<bool> _processRemoveOp(OpQueueRow op) async {
     final payload = jsonDecode(op.payloadJson) as Map<String, Object?>;
-    final refId = payload['ref_id'] as String;
+    final refId = payload['ref_id']! as String;
     final remoteName = payload['remote_name'] as String?;
-    final hash = payload['hash'] as String;
+    final hash = payload['hash']! as String;
 
     if (remoteName != null) {
       // Send JSON {"imgs-": [remoteName]}
@@ -306,9 +324,9 @@ class FileSyncLane {
       final remoteName = ref['remote_name'] as String?;
       if (remoteName == null) continue;
       if (desiredNames.contains(remoteName)) continue;
-      final state = ref['state'] as String;
+      final state = ref['state']! as String;
       if (state == 'pending_remove' || state == 'pending_upload') continue;
-      final refId = ref['ref_id'];
+      final refId = ref['ref_id']!;
       await exec
           .delete('lp_file_refs', where: 'ref_id = ?', whereArgs: [refId]);
       final hash = ref['hash'] as String?;

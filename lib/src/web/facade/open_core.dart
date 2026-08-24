@@ -14,6 +14,8 @@ import 'web_storage_capabilities.dart';
 
 /// An asset resolved to a URL by [resolveAssetAsBlobUrl].
 class ResolvedAsset {
+
+  const ResolvedAsset({required this.url, required this.fetched});
   /// The URL to use (a blob URL when a fetch succeeded, otherwise the
   /// [lastResort] plain path).
   final String url;
@@ -21,8 +23,6 @@ class ResolvedAsset {
   /// Whether [url] was produced by a successful fetch (and should therefore
   /// be revoked when the facade closes). `false` for the plain-path fallback.
   final bool fetched;
-
-  const ResolvedAsset({required this.url, required this.fetched});
 }
 
 /// Resolves an asset path to a URL, trying [primary] then each [fallbacks]

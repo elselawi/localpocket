@@ -12,14 +12,14 @@ import 'package:sqlite3/common.dart';
 
 /// A ranked search result from an FTS5 full-text search.
 class SearchResult {
+  /// Creates a ranked search result.
+  const SearchResult({required this.id, required this.score});
+
   /// ID of the matching record.
   final String id;
 
   /// SQLite FTS ranking score.
   final double score;
-
-  /// Creates a ranked search result.
-  const SearchResult({required this.id, required this.score});
 
   @override
   String toString() => 'SearchResult(id: $id, score: $score)';
@@ -35,14 +35,7 @@ class SearchResult {
 
 /// Search builder for FTS5 full-text search.
 class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
-  final LocalPocket? _pocket;
-  final CollectionSchema _schema;
-  final String _term;
-  int? _limit;
-  bool _all = false;
-  bool _includeArchived = false;
-  bool _includeHidden = false;
-
+  /// Internal constructor used by [Collection.search].
   SearchBuilder.internal(this._pocket, this._schema, this._term) {
     if (_schema.fts == null) {
       throw FtsUnavailableError(
@@ -55,7 +48,7 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
   }
 
   /// Compile-only constructor used by the web search-plan transport.
-  SearchBuilder.compileOnly(CollectionSchema schema, String term)
+  SearchBuilder.compileOnly(CollectionSchema<Object?> schema, String term)
       : _pocket = null,
         _schema = schema,
         _term = term {
@@ -65,9 +58,20 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
     }
   }
 
+  final LocalPocket? _pocket;
+  final CollectionSchema<Object?> _schema;
+  final String _term;
+  int? _limit;
+  bool _all = false;
+  bool _includeArchived = false;
+  bool _includeHidden = false;
+
   /// Limits the number of ranked matches returned by [fetch].
   @override
   SearchBuilder limit(int n) {
+    if (n < 0) {
+      throw ValidationException('Limit must be non-negative, got $n.');
+    }
     _limit = n;
     return this;
   }
@@ -182,8 +186,8 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
       return [
         for (final r in rows)
           SearchResult(
-            id: r['id'] as String,
-            score: (r['score'] as num).toDouble(),
+            id: r['id']! as String,
+            score: (r['score']! as num).toDouble(),
           )
       ];
     } on SqliteException catch (e) {

@@ -10,6 +10,14 @@ import 'package:http/http.dart' as http;
 
 /// Buffered HTTP request used by [HttpTransport].
 class HttpRequest {
+  /// Creates an HTTP request.
+  const HttpRequest({
+    required this.method,
+    required this.url,
+    this.headers = const {},
+    this.body,
+  });
+
   /// HTTP method.
   final String method;
 
@@ -21,34 +29,43 @@ class HttpRequest {
 
   /// Optional UTF-8 request body.
   final String? body;
-
-  /// Creates an HTTP request.
-  const HttpRequest({
-    required this.method,
-    required this.url,
-    this.headers = const {},
-    this.body,
-  });
 }
 
 /// A streamed multipart file. The length is required by package:http so the
 /// multipart body can be sent without buffering the file contents.
 class HttpMultipartFile {
-  final String field;
-  final String filename;
-  final int length;
-  final Future<Stream<List<int>>> Function() streamFactory;
-
+  /// Creates a streamed multipart file.
   const HttpMultipartFile({
     required this.field,
     required this.filename,
     required this.length,
     required this.streamFactory,
   });
+
+  /// Form field name for the file.
+  final String field;
+
+  /// Name sent to the server for the file.
+  final String filename;
+
+  /// Number of bytes produced by [streamFactory].
+  final int length;
+
+  /// Creates a fresh byte stream for each request attempt.
+  final Future<Stream<List<int>>> Function() streamFactory;
 }
 
 /// Multipart HTTP request with replayable streamed files.
 class HttpMultipartRequest {
+  /// Creates a multipart request.
+  const HttpMultipartRequest({
+    required this.method,
+    required this.url,
+    this.headers = const {},
+    this.fields = const {},
+    this.files = const [],
+  });
+
   /// HTTP method, normally `PATCH` for PocketBase file updates.
   final String method;
 
@@ -63,19 +80,13 @@ class HttpMultipartRequest {
 
   /// Streamed multipart files.
   final List<HttpMultipartFile> files;
-
-  /// Creates a multipart request.
-  const HttpMultipartRequest({
-    required this.method,
-    required this.url,
-    this.headers = const {},
-    this.fields = const {},
-    this.files = const [],
-  });
 }
 
 /// Buffered HTTP response.
 class HttpResponse {
+  /// Creates an HTTP response value.
+  const HttpResponse(this.status, this.headers, this.body);
+
   /// HTTP status code.
   final int status;
 
@@ -84,16 +95,19 @@ class HttpResponse {
 
   /// UTF-8 response body.
   final String body;
-
-  /// Creates an HTTP response value.
-  const HttpResponse(this.status, this.headers, this.body);
 }
 
 /// A network failure at the transport level (DNS, connection reset, timeout).
 class HttpTransportException implements Exception {
-  final String message;
-  final Object? cause;
+  /// Creates a transport exception with an optional underlying cause.
   HttpTransportException(this.message, [this.cause]);
+
+  /// Human-readable description of the failed operation.
+  final String message;
+
+  /// Underlying error, when one is available.
+  final Object? cause;
+
   @override
   String toString() => 'HttpTransportException: $message';
 }
@@ -101,10 +115,17 @@ class HttpTransportException implements Exception {
 /// A streaming response (for SSE). The byte stream delivers the body without
 /// buffering; it ends when the server closes the connection.
 class StreamedHttpResponse {
-  final int status;
-  final Map<String, String> headers;
-  final Stream<List<int>> stream;
+  /// Creates a streaming HTTP response.
   StreamedHttpResponse(this.status, this.headers, this.stream);
+
+  /// HTTP status code.
+  final int status;
+
+  /// Response headers.
+  final Map<String, String> headers;
+
+  /// Live response body byte stream.
+  final Stream<List<int>> stream;
 }
 
 /// Platform-neutral HTTP transport abstraction.
@@ -138,9 +159,9 @@ abstract class HttpTransport {
   /// This is used for realtime SSE and streamed downloads. Throws
   /// [HttpTransportException] on transport errors; HTTP error statuses are
   /// returned, not thrown.
-  /// on transport errors; HTTP error statuses are returned, not thrown.
   Future<StreamedHttpResponse> openStream(HttpRequest request);
 
+  /// Releases resources held by this transport.
   void close();
 }
 
@@ -148,15 +169,15 @@ abstract class HttpTransport {
 /// per-request [timeout] in seconds).
 /// `package:http` implementation of [HttpTransport].
 class PackageHttpTransport implements HttpTransport {
-  final http.Client _client;
-
-  /// Maximum time allowed for each request operation.
-  final Duration timeout;
-
   /// Creates an HTTP transport, optionally using [client].
   PackageHttpTransport(
       {http.Client? client, this.timeout = const Duration(seconds: 30)})
       : _client = client ?? http.Client();
+
+  final http.Client _client;
+
+  /// Maximum time allowed for each request operation.
+  final Duration timeout;
 
   @override
   Future<HttpResponse> send(HttpRequest request) async {

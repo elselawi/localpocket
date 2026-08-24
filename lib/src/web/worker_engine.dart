@@ -97,27 +97,40 @@ abstract interface class WorkerEventSink {
 
 /// Outcome of handling one worker request envelope.
 sealed class WorkerReply {
-  final int requestId;
+  /// Creates a reply for [requestId].
   const WorkerReply(this.requestId);
+
+  /// The request identifier from the incoming envelope.
+  final int requestId;
 }
 
 /// The request completed; [result] is the structured-clone-safe success value.
 final class WorkerSuccess extends WorkerReply {
-  final Object? result;
+  /// Creates a successful reply.
   const WorkerSuccess(super.requestId, this.result);
+
+  /// The structured-clone-safe success value.
+  final Object? result;
 }
 
 /// The request failed; [code]/[message]/[details] mirror [WebError].
 final class WorkerError extends WorkerReply {
-  final String code;
-  final String message;
-  final Map<String, Object?>? details;
+  /// Creates a failed reply.
   const WorkerError(
     super.requestId,
     this.code,
     this.message, [
     this.details,
   ]);
+
+  /// The wire error code.
+  final String code;
+
+  /// The human-readable error message.
+  final String message;
+
+  /// Optional structured error details.
+  final Map<String, Object?>? details;
 }
 
 /// Parses a raw schema map into a typed [CollectionSchema].
@@ -137,7 +150,7 @@ CollectionSchema<Object?> parseSchema(Object? raw) {
 /// wire map can be indexed by String regardless of the JS-interop key type.
 ///
 /// Shared by [parseSchema] and the web option parser (`open_options.dart`).
-Map<String, Object?> deepStringMap(Map raw) {
+Map<String, Object?> deepStringMap(Map<Object?, Object?> raw) {
   final out = <String, Object?>{};
   raw.forEach((k, v) {
     final key = k.toString();
@@ -166,8 +179,20 @@ Map<String, Object?> deepStringMap(Map raw) {
 /// touch this state directly (same library) without exposing any of it
 /// through the public type.
 abstract class WorkerEngineHost {
+  /// Creates a worker engine host backed by [pocket].
+  WorkerEngineHost({
+    required this.rawDatabase,
+    required this.databaseAdapter,
+    required this.pocket,
+  });
+
+  /// The underlying SQLite database.
   final CommonDatabase rawDatabase;
+
+  /// The adapter used by the LocalPocket engine.
   final DirectSqliteDatabase databaseAdapter;
+
+  /// The LocalPocket engine served by this worker.
   final LocalPocket pocket;
 
   _TxSession? _activeSession;
@@ -182,12 +207,6 @@ abstract class WorkerEngineHost {
   final Set<WorkerEventSink> _connections = {};
   StreamSubscription<RecordChangeEvent>? _eventSubscription;
 
-  WorkerEngineHost({
-    required this.rawDatabase,
-    required this.databaseAdapter,
-    required this.pocket,
-  });
-
   // ------------------------------------------------------- compiled-query --
 
   /// The single read operation: an engine-compiled query plan (SQL + bound
@@ -198,9 +217,8 @@ abstract class WorkerEngineHost {
   /// parser and executor — the read path must be identical for on-demand
   /// fetches and watcher refreshes.
   Future<Object?> _handleCompiledQuery(
-      WorkerEventSink sink, WebRequest req) async {
-    return _dispatchCompiledQuery(req.args);
-  }
+          WorkerEventSink sink, WebRequest req) async =>
+      _dispatchCompiledQuery(req.args);
 
   static const Set<String> _compiledOperations = {
     'query',
@@ -255,8 +273,9 @@ abstract class WorkerEngineHost {
     final projectionRaw = args['projection'];
     final limitRaw = args['limit'];
     final shapeRaw = args['shape'];
+    final typeName = type! as String;
     return QueryPlan(
-      typeName: type as String,
+      typeName: typeName,
       operation: operation,
       compilerVersion: queryCompilerVersion,
       store: store,
@@ -348,8 +367,11 @@ abstract class WorkerEngineHost {
   /// multi-op transaction path) and `tx_mutate_batch` so the action
   /// vocabulary stays in exactly one place. Unknown actions fail with a typed
   /// [ValidationException] — never a silent no-op.
-  Future<void> _applyMutation(Collection col, Map m) async {
-    final action = m['action'] as String;
+  Future<void> _applyMutation(Collection col, Map<Object?, Object?> m) async {
+    final action = m['action'];
+    if (action is! String) {
+      throw ValidationException('Mutation action must be a string.');
+    }
     final record = decodeWireValue(m['record']) as Map<String, Object?>?;
     final id = m['id'] as String?;
     switch (action) {
@@ -413,6 +435,7 @@ final class WorkerEngine extends WorkerEngineHost
         WorkerSyncHandlers,
         WorkerFilesHandlers,
         WorkerConflictsHandlers {
+  /// Creates a worker request-execution engine.
   WorkerEngine({
     required super.rawDatabase,
     required super.databaseAdapter,

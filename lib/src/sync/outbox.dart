@@ -17,6 +17,10 @@ import 'sync_tables.dart';
 /// The captured optimistic-concurrency base of a dirty row.
 /// Stored only while the row is dirty.
 class BaseSnapshot {
+
+  /// Creates a base snapshot.
+  const BaseSnapshot(
+      {required this.baseJson, required this.baseHash, this.baseUpdated});
   /// Canonical JSON captured before the first local edit.
   final String baseJson;
 
@@ -25,26 +29,31 @@ class BaseSnapshot {
 
   /// Remote timestamp observed when the base was captured.
   final String? baseUpdated;
-
-  /// Creates a base snapshot.
-  const BaseSnapshot(
-      {required this.baseJson, required this.baseHash, this.baseUpdated});
 }
 
 /// Result of applying a local mutation to the outbox.
 class LocalWriteResult {
+
+  /// Creates a local-write result.
+  const LocalWriteResult({required this.vanished, this.opId});
   /// Whether the mutation caused an unsynced archived record to vanish.
   final bool vanished;
 
   /// Operation ID created or retained for the mutation.
   final String? opId;
-
-  /// Creates a local-write result.
-  const LocalWriteResult({required this.vanished, this.opId});
 }
 
 /// The local data needed to settle one successful remote push.
 class PushSettlement {
+
+  /// Creates a push-settlement description.
+  const PushSettlement({
+    required this.op,
+    required this.serverDataJson,
+    required this.serverUpdated,
+    required this.pushedPayloadHash,
+    this.mergedLogical,
+  });
   /// Outbox operation acknowledged by the backend.
   final OutboxOp op;
 
@@ -59,25 +68,16 @@ class PushSettlement {
 
   /// Merged local document to write before settling, when applicable.
   final Map<String, Object?>? mergedLogical;
-
-  /// Creates a push-settlement description.
-  const PushSettlement({
-    required this.op,
-    required this.serverDataJson,
-    required this.serverUpdated,
-    required this.pushedPayloadHash,
-    this.mergedLogical,
-  });
 }
 
 /// The durable outbox: a *set* of record identities that differ
 /// from the server, not a log of operations. Coalescing is structural.
 class Outbox {
-  final LocalPocket pocket;
-  final Random _rng = Random.secure();
 
   /// Internal: constructed by [LocalPocket].
   Outbox.internal(this.pocket);
+  final LocalPocket pocket;
+  final Random _rng = Random.secure();
 
   /// Generates a unique operation ID for durable outbox effects.
   ///
@@ -240,7 +240,7 @@ class Outbox {
     // serialize through the single-writer queue, so plain INSERT/UPDATE
     // replaces ON CONFLICT DO UPDATE (no conflict-resolution machinery) and
     // values bind directly (no intermediate row maps).
-    final outboxCols = outboxColumns;
+    const outboxCols = outboxColumns;
     if (outboxOp == null) {
       final outboxInsert =
           'INSERT INTO lp_outbox (${quotedColumnList(outboxCols)}) '
@@ -268,7 +268,7 @@ class Outbox {
           [opKind!.name, payloadJson, dirtyFieldsJson, now, store, id]);
     }
 
-    final syncCols = syncRowColumns;
+    const syncCols = syncRowColumns;
     // On the update path, SET only the columns this mutation changes.
     // `base_*` are immutable once captured (present on every dirty row), so
     // they are only written on the first dirt (no existing op); the
@@ -394,8 +394,7 @@ class Outbox {
   /// only as a test helper; production settlement MUST go through
   /// [settlePush] / [settlePushBatch], which detect newer edits and keep the
   /// row dirty. Dependents are released implicitly (drain re-checks).
-  Future<void> ack(String store, String id, {String? serverUpdated}) {
-    return pocket.transaction((tx) async {
+  Future<void> ack(String store, String id, {String? serverUpdated}) => pocket.transaction((tx) async {
       final exec = tx.executor;
       await exec.delete('lp_outbox',
           where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
@@ -417,7 +416,6 @@ class Outbox {
           where: 'store = ? AND record_id = ?',
           whereArgs: [store, id]);
     });
-  }
 
   /// Settles a successful push:
   ///
@@ -436,8 +434,7 @@ class Outbox {
     required String serverDataJson,
     required String serverUpdated,
     Map<String, Object?>? mergedLogical,
-  }) {
-    return settlePushBatch([
+  }) => settlePushBatch([
       PushSettlement(
         op: OutboxOp(
           store: store,
@@ -455,7 +452,6 @@ class Outbox {
         mergedLogical: mergedLogical,
       ),
     ]);
-  }
 
   /// Settles multiple successful pushes under one local durability boundary.
   ///
@@ -658,8 +654,7 @@ class Outbox {
       {required String error,
       required int attempts,
       required int nextRetryAt,
-      SyncState state = SyncState.dirty}) {
-    return pocket.transaction((tx) async {
+      SyncState state = SyncState.dirty}) => pocket.transaction((tx) async {
       await tx.executor.update(
           'lp_sync_row',
           {
@@ -671,7 +666,6 @@ class Outbox {
           where: 'store = ? AND record_id = ?',
           whereArgs: [store, id]);
     });
-  }
 
   /// Moves an op to a permanent error state and records a dead letter.
   /// The local row and its outbox op stay intact.
@@ -682,8 +676,7 @@ class Outbox {
     required String error,
     required String payloadJson,
     SyncState state = SyncState.error,
-  }) {
-    return pocket.transaction((tx) async {
+  }) => pocket.transaction((tx) async {
       final exec = tx.executor;
       await exec.insert('lp_dead_letter', {
         'at': pocket.now(),
@@ -702,7 +695,6 @@ class Outbox {
           where: 'store = ? AND record_id = ?',
           whereArgs: [store, id]);
     });
-  }
 
   /// Marks a pushed op as BLOCKED — a recoverable permission failure (e.g. a
   /// 403 from a temporarily-revoked write). Unlike dead-lettering, the outbox
@@ -712,8 +704,7 @@ class Outbox {
     required String store,
     required String id,
     String? error,
-  }) {
-    return pocket.transaction((tx) async {
+  }) => pocket.transaction((tx) async {
       final exec = tx.executor;
       await exec.update(
           'lp_sync_row',
@@ -725,13 +716,11 @@ class Outbox {
           where: 'store = ? AND record_id = ?',
           whereArgs: [store, id]);
     });
-  }
 
   /// Requeues blocked operations back to `dirty` so the next push retries
   /// them. Call when permissions may have been restored (e.g. auth recovery or
   /// a visibility/permission change). Returns the number of requeued rows.
-  Future<int> requeueBlocked({String? store}) {
-    return pocket.transaction((tx) async {
+  Future<int> requeueBlocked({String? store}) => pocket.transaction((tx) async {
       final exec = tx.executor;
       final where =
           store == null ? 'sync_state = ?' : 'sync_state = ? AND store = ?';
@@ -748,7 +737,6 @@ class Outbox {
           where: where,
           whereArgs: args);
     });
-  }
 
   /// Advances the base of a dirty row + its outbox op to a fetched remote
   /// version (used after a merge on push and by `applyRemote`).
@@ -778,20 +766,16 @@ class Outbox {
   // ----------------------------------------------------- test / engine tools --
 
   /// Marks a sync row with an explicit state (used by tests).
-  Future<void> setSyncState(String store, String id, SyncState state) {
-    return pocket.transaction((tx) async {
+  Future<void> setSyncState(String store, String id, SyncState state) => pocket.transaction((tx) async {
       await tx.executor.update('lp_sync_row', {'sync_state': state.name},
           where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
     });
-  }
 
   /// Sets/clears the cross-record ordering edge on an outbox op.
-  Future<void> setDependsOn(String store, String id, String? dependsOnOpId) {
-    return pocket.transaction((tx) async {
+  Future<void> setDependsOn(String store, String id, String? dependsOnOpId) => pocket.transaction((tx) async {
       await tx.executor.update('lp_outbox', {'depends_on_op': dependsOnOpId},
           where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
     });
-  }
 
   Future<int> outboxCount() async =>
       firstIntValue(
@@ -807,8 +791,7 @@ class Outbox {
     required int size,
     String? remoteName,
     String state = 'pending_upload',
-  }) {
-    return pocket.transaction((tx) async {
+  }) => pocket.transaction((tx) async {
       final exec = tx.executor;
       final now = pocket.now();
       await upsertBlobReference(exec, hash: hash, size: size, now: now);
@@ -822,5 +805,4 @@ class Outbox {
         'state': state,
       });
     });
-  }
 }

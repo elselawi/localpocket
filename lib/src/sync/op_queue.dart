@@ -7,12 +7,12 @@ import 'sync_tables.dart';
 /// Durable queue for operations that are not expressible as row state, such
 /// as file uploads and removals.
 class OpQueue {
-  /// Database owning this queue.
-  final LocalPocket pocket;
-  final Random _rng = Random.secure();
 
   /// Internal: constructed by [LocalPocket].
   OpQueue.internal(this.pocket);
+  /// Database owning this queue.
+  final LocalPocket pocket;
+  final Random _rng = Random.secure();
 
   /// Adds a pending effect operation, optionally after another operation.
   Future<void> enqueue({
@@ -21,8 +21,7 @@ class OpQueue {
     required OpQueueKind kind,
     required Map<String, Object?> payload,
     String? dependsOnOp,
-  }) {
-    return pocket.transaction((tx) async {
+  }) => pocket.transaction((tx) async {
       await tx.executor.insert('lp_op_queue', {
         'op_id': _newOpId(),
         'store': store,
@@ -34,7 +33,6 @@ class OpQueue {
         'created_at': pocket.now(),
       });
     });
-  }
 
   /// Returns ops ready to run, FIFO by seq, skipping blocked ones.
   ///
@@ -71,12 +69,10 @@ class OpQueue {
   }
 
   /// Marks [opId] completed and releases dependents.
-  Future<void> markDone(String opId) {
-    return pocket.transaction((tx) async {
+  Future<void> markDone(String opId) => pocket.transaction((tx) async {
       await tx.executor.update('lp_op_queue', {'state': 'done'},
           where: 'op_id = ?', whereArgs: [opId]);
     });
-  }
 
   /// Marks [opId] failed and stores [error] for inspection.
   ///
@@ -85,8 +81,7 @@ class OpQueue {
   /// it again once the deadline passes. [attempts] is the total attempt count
   /// (including this failure) and [nextRetryAt] the epoch-ms deadline.
   Future<void> markFailed(String opId, String error,
-      {int attempts = 1, int nextRetryAt = 0}) {
-    return pocket.transaction((tx) async {
+      {int attempts = 1, int nextRetryAt = 0}) => pocket.transaction((tx) async {
       await tx.executor.update(
           'lp_op_queue',
           {
@@ -98,7 +93,6 @@ class OpQueue {
           where: 'op_id = ?',
           whereArgs: [opId]);
     });
-  }
 
   String _newOpId() {
     final rng = _rng;

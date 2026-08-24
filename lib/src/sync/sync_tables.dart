@@ -35,7 +35,7 @@ const List<String> syncSystemDdl = [
       "WHERE sync_state IN ('dirty','in_flight','conflict')",
   'CREATE INDEX IF NOT EXISTS ix_syncrow_attention ON lp_sync_row (store, sync_state) '
       "WHERE sync_state IN ('conflict','error','quarantine','blocked')",
-  "CREATE INDEX IF NOT EXISTS ix_syncrow_hidden ON lp_sync_row (store, record_id) "
+  'CREATE INDEX IF NOT EXISTS ix_syncrow_hidden ON lp_sync_row (store, record_id) '
       "WHERE access_state = 'hidden'",
   '''CREATE TABLE IF NOT EXISTS lp_outbox (
   store      TEXT NOT NULL,
@@ -160,12 +160,12 @@ Map<String, Object?> buildOutboxRow({
   required String recordId,
   required OutboxKind kind,
   required String payloadJson,
-  String? baseUpdated,
-  String baseHash = '',
   required String dirtyFieldsJson,
   required String opId,
   required int createdAt,
   required int updatedAt,
+  String? baseUpdated,
+  String baseHash = '',
   String? dependsOnOp,
 }) {
   final values = outboxValuesInOrder(
@@ -193,12 +193,12 @@ List<Object?> outboxValuesInOrder({
   required String recordId,
   required OutboxKind kind,
   required String payloadJson,
-  String? baseUpdated,
-  String baseHash = '',
   required String dirtyFieldsJson,
   required String opId,
   required int createdAt,
   required int updatedAt,
+  String? baseUpdated,
+  String baseHash = '',
   String? dependsOnOp,
 }) {
   final values = <Object?>[];
@@ -226,12 +226,12 @@ void appendOutboxValues(
   required String recordId,
   required OutboxKind kind,
   required String payloadJson,
-  String? baseUpdated,
-  String baseHash = '',
   required String dirtyFieldsJson,
   required String opId,
   required int createdAt,
   required int updatedAt,
+  String? baseUpdated,
+  String baseHash = '',
   String? dependsOnOp,
 }) {
   target
@@ -252,20 +252,20 @@ void appendOutboxValues(
 Map<String, Object?> buildSyncRow({
   required String store,
   required String recordId,
+  required SyncState syncState,
+  required String dirtyFieldsJson,
+  required int localRev,
+  required int schemaVer,
   String? remoteUpdated,
   int? lastSeenAt,
   String? baseUpdated,
   String baseHash = '',
   String? baseJson,
-  required SyncState syncState,
-  required String dirtyFieldsJson,
-  required int localRev,
   AccessState accessState = AccessState.visible,
   String? opId,
   int attemptCount = 0,
   int nextRetryAt = 0,
   String? lastError,
-  required int schemaVer,
 }) {
   final values = syncRowValuesInOrder(
     store: store,
@@ -296,20 +296,20 @@ Map<String, Object?> buildSyncRow({
 List<Object?> syncRowValuesInOrder({
   required String store,
   required String recordId,
+  required SyncState syncState,
+  required String dirtyFieldsJson,
+  required int localRev,
+  required int schemaVer,
   String? remoteUpdated,
   int? lastSeenAt,
   String? baseUpdated,
   String baseHash = '',
   String? baseJson,
-  required SyncState syncState,
-  required String dirtyFieldsJson,
-  required int localRev,
   AccessState accessState = AccessState.visible,
   String? opId,
   int attemptCount = 0,
   int nextRetryAt = 0,
   String? lastError,
-  required int schemaVer,
 }) {
   final values = <Object?>[];
   appendSyncRowValues(values,
@@ -339,20 +339,20 @@ void appendSyncRowValues(
   List<Object?> target, {
   required String store,
   required String recordId,
+  required SyncState syncState,
+  required String dirtyFieldsJson,
+  required int localRev,
+  required int schemaVer,
   String? remoteUpdated,
   int? lastSeenAt,
   String? baseUpdated,
   String baseHash = '',
   String? baseJson,
-  required SyncState syncState,
-  required String dirtyFieldsJson,
-  required int localRev,
   AccessState accessState = AccessState.visible,
   String? opId,
   int attemptCount = 0,
   int nextRetryAt = 0,
   String? lastError,
-  required int schemaVer,
 }) {
   target
     ..add(store)
@@ -387,23 +387,6 @@ String quotedColumnList(List<String> columns) =>
 String placeholders(int count) => List.filled(count, '?').join(', ');
 
 class SyncRowState {
-  final String store;
-  final String recordId;
-  final String? remoteUpdated;
-  final int? lastSeenAt;
-  final String? baseUpdated;
-  final String? baseHash;
-  final String? baseJson;
-  final SyncState syncState;
-  final List<String> dirtyFields;
-  final int localRev;
-  final AccessState accessState;
-  final String? opId;
-  final int attemptCount;
-  final int nextRetryAt;
-  final String? lastError;
-  final int schemaVer;
-
   const SyncRowState({
     required this.store,
     required this.recordId,
@@ -426,27 +409,72 @@ class SyncRowState {
   factory SyncRowState.fromRow(Map<String, Object?> row) => parseRowModel(
       'lp_sync_row',
       () => SyncRowState(
-            store: row['store'] as String,
-            recordId: row['record_id'] as String,
+            store: row['store']! as String,
+            recordId: row['record_id']! as String,
             remoteUpdated: row['remote_updated'] as String?,
             lastSeenAt: row['last_seen_at'] as int?,
             baseUpdated: row['base_updated'] as String?,
             baseHash: row['base_hash'] as String?,
             baseJson: row['base_json'] as String?,
-            syncState: SyncState.values.byName(row['sync_state'] as String),
+            syncState: SyncState.values.byName(row['sync_state']! as String),
             dirtyFields: decodeJsonStringList(row['dirty_fields']),
             localRev: (row['local_rev'] as int?) ?? 0,
             accessState:
-                AccessState.values.byName(row['access_state'] as String),
+                AccessState.values.byName(row['access_state']! as String),
             opId: row['op_id'] as String?,
             attemptCount: (row['attempt_count'] as int?) ?? 0,
             nextRetryAt: (row['next_retry_at'] as int?) ?? 0,
             lastError: row['last_error'] as String?,
             schemaVer: (row['schema_ver'] as int?) ?? 1,
           ));
+  final String store;
+  final String recordId;
+  final String? remoteUpdated;
+  final int? lastSeenAt;
+  final String? baseUpdated;
+  final String? baseHash;
+  final String? baseJson;
+  final SyncState syncState;
+  final List<String> dirtyFields;
+  final int localRev;
+  final AccessState accessState;
+  final String? opId;
+  final int attemptCount;
+  final int nextRetryAt;
+  final String? lastError;
+  final int schemaVer;
 }
 
 class OutboxOp {
+  const OutboxOp({
+    required this.store,
+    required this.recordId,
+    required this.kind,
+    required this.payloadJson,
+    required this.baseHash,
+    required this.opId,
+    required this.createdAt,
+    required this.updatedAt,
+    this.baseUpdated,
+    this.dirtyFields = const [],
+    this.dependsOnOp,
+  });
+
+  factory OutboxOp.fromRow(Map<String, Object?> row) => parseRowModel(
+      'lp_outbox',
+      () => OutboxOp(
+            store: row['store']! as String,
+            recordId: row['record_id']! as String,
+            kind: OutboxKind.values.byName(row['kind']! as String),
+            payloadJson: row['payload_json']! as String,
+            baseUpdated: row['base_updated'] as String?,
+            baseHash: (row['base_hash'] as String?) ?? '',
+            dirtyFields: decodeJsonStringList(row['dirty_fields']),
+            opId: row['op_id']! as String,
+            createdAt: row['created_at']! as int,
+            updatedAt: row['updated_at']! as int,
+            dependsOnOp: row['depends_on_op'] as String?,
+          ));
   final String store;
   final String recordId;
   final OutboxKind kind;
@@ -458,39 +486,40 @@ class OutboxOp {
   final int createdAt;
   final int updatedAt;
   final String? dependsOnOp;
+}
 
-  const OutboxOp({
+class OpQueueRow {
+  const OpQueueRow({
+    required this.seq,
+    required this.opId,
     required this.store,
     required this.recordId,
     required this.kind,
     required this.payloadJson,
-    this.baseUpdated,
-    required this.baseHash,
-    this.dirtyFields = const [],
-    required this.opId,
+    required this.state,
     required this.createdAt,
-    required this.updatedAt,
+    this.attemptCount = 0,
+    this.nextRetryAt = 0,
+    this.lastError,
     this.dependsOnOp,
   });
 
-  factory OutboxOp.fromRow(Map<String, Object?> row) => parseRowModel(
-      'lp_outbox',
-      () => OutboxOp(
-            store: row['store'] as String,
-            recordId: row['record_id'] as String,
-            kind: OutboxKind.values.byName(row['kind'] as String),
-            payloadJson: row['payload_json'] as String,
-            baseUpdated: row['base_updated'] as String?,
-            baseHash: (row['base_hash'] as String?) ?? '',
-            dirtyFields: decodeJsonStringList(row['dirty_fields']),
-            opId: row['op_id'] as String,
-            createdAt: row['created_at'] as int,
-            updatedAt: row['updated_at'] as int,
+  factory OpQueueRow.fromRow(Map<String, Object?> row) => parseRowModel(
+      'lp_op_queue',
+      () => OpQueueRow(
+            seq: row['seq']! as int,
+            opId: row['op_id']! as String,
+            store: row['store']! as String,
+            recordId: row['record_id']! as String,
+            kind: OpQueueKind.values.byName(row['kind']! as String),
+            payloadJson: row['payload_json']! as String,
+            state: row['state']! as String,
+            attemptCount: (row['attempt_count'] as int?) ?? 0,
+            nextRetryAt: (row['next_retry_at'] as int?) ?? 0,
+            lastError: row['last_error'] as String?,
             dependsOnOp: row['depends_on_op'] as String?,
+            createdAt: row['created_at']! as int,
           ));
-}
-
-class OpQueueRow {
   final int seq;
   final String opId;
   final String store;
@@ -503,41 +532,10 @@ class OpQueueRow {
   final String? lastError;
   final String? dependsOnOp;
   final int createdAt;
-
-  const OpQueueRow({
-    required this.seq,
-    required this.opId,
-    required this.store,
-    required this.recordId,
-    required this.kind,
-    required this.payloadJson,
-    required this.state,
-    this.attemptCount = 0,
-    this.nextRetryAt = 0,
-    this.lastError,
-    this.dependsOnOp,
-    required this.createdAt,
-  });
-
-  factory OpQueueRow.fromRow(Map<String, Object?> row) => parseRowModel(
-      'lp_op_queue',
-      () => OpQueueRow(
-            seq: row['seq'] as int,
-            opId: row['op_id'] as String,
-            store: row['store'] as String,
-            recordId: row['record_id'] as String,
-            kind: OpQueueKind.values.byName(row['kind'] as String),
-            payloadJson: row['payload_json'] as String,
-            state: row['state'] as String,
-            attemptCount: (row['attempt_count'] as int?) ?? 0,
-            nextRetryAt: (row['next_retry_at'] as int?) ?? 0,
-            lastError: row['last_error'] as String?,
-            dependsOnOp: row['depends_on_op'] as String?,
-            createdAt: row['created_at'] as int,
-          ));
 }
 
 /// Resolves dependency `op_id`s that are still pending/failed in `lp_outbox` or `lp_op_queue`.
+// ignore_for_file: avoid_dynamic_calls, avoid_annotating_with_dynamic
 Future<Set<String>> queryBlockedDependencyOpIds(
   dynamic db,
   Iterable<String> dependencyIds,
@@ -551,13 +549,13 @@ Future<Set<String>> queryBlockedDependencyOpIds(
       'SELECT op_id FROM lp_outbox WHERE op_id IN ($placeholders)';
   final outboxRows =
       await db.rawQuery(outboxSql, ids) as List<Map<String, Object?>>;
-  blocked.addAll(outboxRows.map((row) => row['op_id'] as String));
+  blocked.addAll(outboxRows.map((row) => row['op_id']! as String));
 
   final queueSql =
       'SELECT op_id FROM lp_op_queue WHERE op_id IN ($placeholders) AND state IN (?, ?)';
   final queueRows = await db.rawQuery(queueSql, [...ids, 'pending', 'failed'])
       as List<Map<String, Object?>>;
-  blocked.addAll(queueRows.map((row) => row['op_id'] as String));
+  blocked.addAll(queueRows.map((row) => row['op_id']! as String));
   return blocked;
 }
 

@@ -10,18 +10,27 @@ import 'auth.dart';
 import 'filter_builder.dart';
 import 'transport.dart';
 
+/// Low-level PocketBase wire client for records, batches, and files.
 class PbClient {
-  final HttpTransport transport;
-  final Uri baseUrl;
-  final AuthManager auth;
-
+  /// Creates a PocketBase client over [transport].
   PbClient(
       {required this.transport, required this.baseUrl, required this.auth});
 
+  /// HTTP transport used for all requests.
+  final HttpTransport transport;
+
+  /// PocketBase server base URL.
+  final Uri baseUrl;
+
+  /// Authentication manager used to inject and refresh bearer tokens.
+  final AuthManager auth;
+
+  /// Returns the currently usable authentication token.
   Future<Token> authToken() => auth.token();
 
   // ------------------------------------------------------------------ list --
 
+  /// Lists records using the supplied incremental or prefix cursor.
   Future<List<RemoteRecord>> listRecords(
     String store, {
     String? fromUpdated,
@@ -57,6 +66,7 @@ class PbClient {
     return items.map((e) => _parseRecord(e)).toList();
   }
 
+  /// Fetches one record by ID.
   Future<RemoteRecord?> getRecord(String id) async {
     final uri = _record(id);
     final res = await _sendAuth('GET', uri);
@@ -65,6 +75,7 @@ class PbClient {
     return _parseRecord(_decode(res));
   }
 
+  /// Creates one record with the supplied stable ID and JSON payload.
   Future<RemoteRecord> createRecord({
     required String id,
     required String store,
@@ -104,6 +115,7 @@ class PbClient {
     return false;
   }
 
+  /// Updates one record with a JSON payload.
   Future<RemoteRecord> updateRecord({
     required String id,
     required String dataJson,
@@ -119,6 +131,7 @@ class PbClient {
     return _parseRecord(_decode(res));
   }
 
+  /// Updates one record's fields and/or file attachments.
   Future<RemoteRecord> updateRecordFiles({
     required String id,
     String? dataJson,
@@ -147,6 +160,7 @@ class PbClient {
     return _parseRecord(_decode(res));
   }
 
+  /// Opens a streamed download for a record attachment.
   Future<Stream<List<int>>> downloadFile({
     required String recordId,
     required String filename,
@@ -254,36 +268,32 @@ class PbClient {
 
   /// Sends with the bearer token; on 401 refreshes once and retries.
   /// Transport failures map to [TransientNetworkError] for the engine.
-  Future<HttpResponse> _sendAuth(String method, Uri uri, {String? body}) {
-    return _withAuthRetry(
-        (token) => _send(method, uri, token: token, body: body),
-        (res) => res.status);
-  }
+  Future<HttpResponse> _sendAuth(String method, Uri uri, {String? body}) =>
+      _withAuthRetry((token) => _send(method, uri, token: token, body: body),
+          (res) => res.status);
 
-  Future<HttpResponse> _sendMultipartAuth(HttpMultipartRequest request) {
-    return _withAuthRetry((token) {
-      final authorized = HttpMultipartRequest(
-        method: request.method,
-        url: request.url,
-        headers: {...request.headers, 'Authorization': 'Bearer $token'},
-        fields: request.fields,
-        files: request.files,
-      );
-      return transport.sendMultipart(authorized);
-    }, (res) => res.status);
-  }
+  Future<HttpResponse> _sendMultipartAuth(HttpMultipartRequest request) =>
+      _withAuthRetry((token) {
+        final authorized = HttpMultipartRequest(
+          method: request.method,
+          url: request.url,
+          headers: {...request.headers, 'Authorization': 'Bearer $token'},
+          fields: request.fields,
+          files: request.files,
+        );
+        return transport.sendMultipart(authorized);
+      }, (res) => res.status);
 
-  Future<StreamedHttpResponse> _openStreamAuth(HttpRequest request) {
-    return _withAuthRetry((token) {
-      final authorized = HttpRequest(
-        method: request.method,
-        url: request.url,
-        headers: {...request.headers, 'Authorization': 'Bearer $token'},
-        body: request.body,
-      );
-      return transport.openStream(authorized);
-    }, (res) => res.status);
-  }
+  Future<StreamedHttpResponse> _openStreamAuth(HttpRequest request) =>
+      _withAuthRetry((token) {
+        final authorized = HttpRequest(
+          method: request.method,
+          url: request.url,
+          headers: {...request.headers, 'Authorization': 'Bearer $token'},
+          body: request.body,
+        );
+        return transport.openStream(authorized);
+      }, (res) => res.status);
 
   Future<T> _withAuthRetry<T>(
     Future<T> Function(String token) sendFn,
@@ -387,7 +397,7 @@ class PbClient {
   }
 
   /// Real PB batch item shape: `{body: <record>, status: <int>}`.
-  PushResult _parsePushResult(Map r, String opId) {
+  PushResult _parsePushResult(Map<Object?, Object?> r, String opId) {
     final status = r['status'];
     final ok = status == 200 || status == 201;
     final body = r['body'];
@@ -400,7 +410,7 @@ class PbClient {
     );
   }
 
-  String? _errorFromItem(Map r) {
+  String? _errorFromItem(Map<Object?, Object?> r) {
     final response = r['response'];
     if (response is Map) {
       final message = response['message'];

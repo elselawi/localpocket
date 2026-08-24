@@ -4,14 +4,15 @@ import 'package:sqlite3_web/sqlite3_web.dart';
 ///
 /// This enforces the single-engine-instance-per-tab architecture from §6.9.
 final class DedicatedOnlyConnector implements WorkerConnector {
-  final String workerUrl;
-
+  /// Creates a connector that spawns workers from [workerUrl].
   const DedicatedOnlyConnector(this.workerUrl);
 
+  /// The URL of the worker script to spawn.
+  final String workerUrl;
+
   @override
-  WorkerHandle? spawnDedicatedWorker() {
-    return WorkerConnector.defaultWorkers(workerUrl).spawnDedicatedWorker();
-  }
+  WorkerHandle? spawnDedicatedWorker() =>
+      WorkerConnector.defaultWorkers(workerUrl).spawnDedicatedWorker();
 
   // Dedicated worker architecture does not use shared workers.
   @override

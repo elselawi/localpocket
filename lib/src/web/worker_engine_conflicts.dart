@@ -31,7 +31,7 @@ mixin WorkerConflictsHandlers on WorkerEngineHost {
     final w = WireArgs(req.args);
     final store = w.requireString('store', op: 'conflicts_resolve');
     final id = w.requireString('id', op: 'conflicts_resolve');
-    final merged = decodeWireValue(req.args['merged']) as Map<String, Object?>;
+    final merged = decodeWireValue(req.args['merged'])! as Map<String, Object?>;
     await pocket.conflicts.resolve(store: store, id: id, merged: merged);
     return {'ok': true};
   }
@@ -68,7 +68,7 @@ mixin WorkerConflictsHandlers on WorkerEngineHost {
           sink, watchId, conflicts.map(encodeConflictRecord).toList());
     });
     _watchers[watchId] = _ActiveWatcher(() async {
-      sub.cancel();
+      await sub.cancel();
     });
     return {'watchId': watchId};
   }

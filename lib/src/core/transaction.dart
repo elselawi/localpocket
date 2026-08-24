@@ -10,6 +10,16 @@ import 'store.dart';
 /// transaction must go through [Tx]; calling `LocalPocket.*` directly inside a
 /// transaction is a programming error and throws.
 class Tx {
+  /// Internal: constructed by [LocalPocket].
+  Tx.internal(
+    this._pocket,
+    this._executor,
+    this._changes, {
+    List<RecordChangeEvent>? recordEvents,
+    this.readOnly = false,
+  })  : _recordEvents = recordEvents ?? [],
+        _sp = _SavepointCounter();
+
   static final Object _zoneKey = Object();
 
   final LocalPocket _pocket;
@@ -21,16 +31,7 @@ class Tx {
   final bool readOnly;
   final _SavepointCounter _sp;
 
-  /// Internal: constructed by [LocalPocket].
-  Tx.internal(
-    this._pocket,
-    this._executor,
-    this._changes, {
-    List<RecordChangeEvent>? recordEvents,
-    this.readOnly = false,
-  })  : _recordEvents = recordEvents ?? [],
-        _sp = _SavepointCounter();
-
+  /// The database executor scoped to this transaction.
   DatabaseExecutor get executor => _executor;
 
   /// Returns the currently active [Tx] for [pocket], or null outside a

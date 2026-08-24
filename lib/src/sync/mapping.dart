@@ -12,21 +12,21 @@ import '../core/hashing.dart';
 import '../core/schema.dart';
 import 'sync_backend.dart';
 
+/// A failure encountered while mapping a remote record.
 class MapFailure implements Exception {
-  final String message;
+  /// Creates a mapping failure with [message].
   MapFailure(this.message);
+
+  /// Description of the mapping failure.
+  final String message;
+
   @override
   String toString() => 'MapFailure: $message';
 }
 
 /// Precomputed normalization outcome for a remote record.
 class NormalizedRemoteRecord {
-  final RemoteRecord remote;
-  final Map<String, Object?>? logical;
-  final String? remotePayloadJson;
-  final String? remoteHash;
-  final String? error;
-
+  /// Creates a normalization outcome.
   const NormalizedRemoteRecord({
     required this.remote,
     this.logical,
@@ -35,6 +35,22 @@ class NormalizedRemoteRecord {
     this.error,
   });
 
+  /// The source remote record.
+  final RemoteRecord remote;
+
+  /// The normalized logical document, when normalization succeeds.
+  final Map<String, Object?>? logical;
+
+  /// Canonical JSON for the normalized remote payload, when successful.
+  final String? remotePayloadJson;
+
+  /// SHA-256 hash of [remotePayloadJson], when successful.
+  final String? remoteHash;
+
+  /// The per-record failure description, when normalization fails.
+  final String? error;
+
+  /// Whether normalization and payload preparation succeeded.
   bool get isSuccess => error == null;
 }
 
@@ -44,7 +60,7 @@ class NormalizedRemoteRecord {
 /// is captured into [NormalizedRemoteRecord.error] so one poison record is
 /// quarantined instead of stalling the whole store.
 NormalizedRemoteRecord normalizeSingleRemote(
-    CollectionSchema schema, RemoteRecord remote) {
+    CollectionSchema<Object?> schema, RemoteRecord remote) {
   try {
     final logical = normalizeRemote(schema, remote);
     final remotePayload = buildPayload(schema, logical);
@@ -73,30 +89,27 @@ NormalizedRemoteRecord normalizeSingleRemote(
 
 /// Normalizes a batch of remote records synchronously.
 List<NormalizedRemoteRecord> normalizeRemoteBatch(
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   List<RemoteRecord> remotes,
-) {
-  return [
-    for (final r in remotes) normalizeSingleRemote(schema, r),
-  ];
-}
+) =>
+    [for (final r in remotes) normalizeSingleRemote(schema, r)];
 
 /// Normalizes a batch of remote records, offloading to an isolate if [remotes]
 /// meets or exceeds [isolateThreshold] (default 20 records) to prevent UI frame drops.
 Future<List<NormalizedRemoteRecord>> normalizeRemoteBatchAsync(
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   List<RemoteRecord> remotes, {
   int isolateThreshold = 20,
-}) async {
-  // Keep the async API for source compatibility, but do not cross a one-shot
-  // dart:isolate boundary. Isolate.run is unsupported by dart2js and the
-  // transfer/spawn cost was slower than inline normalization on native pages.
-  // The threshold remains accepted for compatibility with existing callers.
-  return normalizeRemoteBatch(schema, remotes);
-}
+}) async =>
+    // Keep the async API for source compatibility, but do not cross a one-shot
+    // dart:isolate boundary. Isolate.run is unsupported by dart2js and the
+    // transfer/spawn cost was slower than inline normalization on native pages.
+    // The threshold remains accepted for compatibility with existing callers.
+    normalizeRemoteBatch(schema, remotes);
 
+/// Normalizes a remote record into the domain document shape.
 Map<String, Object?> normalizeRemote(
-    CollectionSchema schema, RemoteRecord remote) {
+    CollectionSchema<Object?> schema, RemoteRecord remote) {
   final data = Map<String, Object?>.from(remote.data);
   final declared = schema.declaredFieldNames;
 
@@ -107,6 +120,12 @@ Map<String, Object?> normalizeRemote(
   } else if (dataId != remote.id) {
     throw MapFailure(
         'data.id "$dataId" does not match record id "${remote.id}"');
+  }
+
+  final archived = data['archived'];
+  if (archived != null && archived is! bool) {
+    throw MapFailure(
+        'Field "archived" must be a boolean, got ${archived.runtimeType}.');
   }
 
   final logical = <String, Object?>{'id': remote.id};
@@ -132,7 +151,7 @@ Map<String, Object?> normalizeRemote(
     }
     logical[e.key] = e.value;
   }
-  logical['archived'] = data['archived'] == true;
+  logical['archived'] = archived == true;
   return logical;
 }
 
@@ -156,7 +175,10 @@ String _remoteKindViolationMessage(
   };
 }
 
-/// Parses a payload JSON string into a Map, returning an empty map on null/empty/invalid payload.
+/// Parses a canonical payload JSON string into a map.
+///
+/// Returns an empty map when [json] is null, empty, invalid, or not a JSON
+/// object.
 Map<String, Object?> parsePayloadJson(String? json) {
   if (json == null || json.isEmpty) return const {};
   try {

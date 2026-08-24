@@ -27,19 +27,20 @@ void terminateWorkerStreams({
     error: error,
   );
   for (final stream in streamsToClose) {
-    if (!stream.isClosed) stream.close();
+    if (!stream.isClosed) unawaited(stream.close());
   }
-  if (!syncStatusController.isClosed) syncStatusController.close();
-  if (!authRequiredController.isClosed) authRequiredController.close();
+  if (!syncStatusController.isClosed) unawaited(syncStatusController.close());
+  if (!authRequiredController.isClosed) {
+    unawaited(authRequiredController.close());
+  }
 }
 
 /// Fails every worker-owned stream with a [DatabaseWorkerClosedException]
-/// WITHOUT closing the controllers.
+/// without closing the controllers.
 ///
-/// This mirrors the facade's `_markWorkerClosed` teardown: the facade's own
-/// graceful `close()` closes the controllers itself, so an unexpected worker
-/// close must not double-close them (which would make a later `close()` throw
-/// on an already-closed controller).
+/// The facade's graceful `close()` owns controller disposal. An unexpected
+/// worker close only reports the terminal error and clears registrations, so
+/// the later graceful teardown can close each controller exactly once.
 void failWorkerStreams({
   required Map<int, StreamController<dynamic>> workerStreams,
   required Map<int, Object? Function(Object?)> workerEventDecoders,
@@ -99,11 +100,20 @@ void handleWorkerEventEnvelope(
   }
   if (event['op'] == WireOp.recordEvent) {
     final rawEvent = event['event'];
-    if (rawEvent is Map) {
-      final decoded = (decodeWireValue(rawEvent) as Map)
-          .map((k, v) => MapEntry(k.toString(), v));
-      final recordEvent = RecordChangeEvent.fromJson(decoded);
+    if (rawEvent is! Map) {
+      return;
+    }
+    final decoded = decodeWireValue(rawEvent);
+    if (decoded is! Map) {
+      return;
+    }
+    final recordMap = decoded.map((k, v) => MapEntry(k.toString(), v));
+    try {
+      final recordEvent = RecordChangeEvent.fromJson(recordMap);
       changeBus.emitEvent(recordEvent);
+    } catch (_) {
+      // Ignore malformed or incompatible unsolicited record events so unrelated
+      // watcher traffic continues unaffected.
     }
     return;
   }
@@ -119,6 +129,9 @@ void handleWorkerEventEnvelope(
       code: 'watch',
       message: event['error'].toString(),
     ));
+    if (!stream.isClosed) {
+      unawaited(stream.close());
+    }
     return;
   }
   final eventValue = decodeWireValue(event['value']);
@@ -169,9 +182,9 @@ Future<T> initializeWebWatch<T>({
   required Future<T> Function() initialize,
   required Future<void> Function() cleanup,
 }) async {
-  start();
-  register();
   try {
+    start();
+    register();
     return await initialize();
   } catch (_) {
     await cleanup();
@@ -216,34 +229,54 @@ class WatchSubscriptionTracker {
     await unregister();
   }
 
+  /// Returns whether [watchId] is still in the middle of registration.
   bool isRegistrationInFlight(int watchId) =>
       _inFlightRegistrations.contains(watchId);
 
+  /// Returns whether an unregistration request is pending for [watchId].
   bool isUnregistrationPending(int watchId) =>
       _inFlightUnregistrations.contains(watchId);
 }
 
 /// Active bounded-chunk upload session (§ file upload).
 class UploadSession {
-  final int uploadId;
-  final String store;
-  final String recordId;
-  final String field;
-  final String name;
-  final int expectedSize;
-  final String? expectedSha256;
-  int receivedBytes = 0;
-  final List<Uint8List> chunks = [];
-
+  /// Creates an upload session for the worker-owned file upload stream.
   UploadSession({
     required this.uploadId,
     required this.store,
     required this.recordId,
+    required this.expectedSize,
     this.field = 'imgs',
     this.name = 'blob.bin',
-    required this.expectedSize,
     this.expectedSha256,
   });
+
+  /// Stable upload id assigned by the engine.
+  final int uploadId;
+
+  /// Store receiving the file payload.
+  final String store;
+
+  /// Record id receiving the file payload.
+  final String recordId;
+
+  /// Field name used for the attachment.
+  final String field;
+
+  /// File name reported to the storage backend.
+  final String name;
+
+  /// Declared upload size in bytes.
+  final int expectedSize;
+
+  /// Optional expected SHA-256 checksum.
+  final String? expectedSha256;
+
+  /// Number of bytes received so far.
+  int receivedBytes = 0;
+
+  /// Chunks accumulated for this upload.
+  final List<Uint8List> chunks = [];
 }
 
 /// Maximum chunk size for bounded file uploads (256 KiB).
@@ -258,28 +291,38 @@ const int defaultMaxUploadFileBytes = 4294967296;
 /// Registry that manages upload sessions and guarantees memory cleanup
 /// on session error, abort, or completion.
 class UploadSessionRegistry {
-  final int maxConcurrentUploads;
-  final int maxFileBytes;
-  final int maxChunkBytes;
-  final Map<int, UploadSession> _sessions = {};
-
+  /// Creates a bounded upload registry for the worker file upload path.
   UploadSessionRegistry({
     this.maxConcurrentUploads = defaultMaxConcurrentUploads,
     this.maxFileBytes = defaultMaxUploadFileBytes,
     this.maxChunkBytes = defaultMaxUploadChunkBytes,
   });
 
+  /// Maximum number of uploads the worker may accept at once.
+  final int maxConcurrentUploads;
+
+  /// Largest accepted file size in bytes.
+  final int maxFileBytes;
+
+  /// Largest accepted chunk size in bytes.
+  final int maxChunkBytes;
+
+  final Map<int, UploadSession> _sessions = {};
+
+  /// Number of active upload sessions currently tracked.
   int get activeSessionCount => _sessions.length;
 
+  /// Returns the active session for [uploadId], if any.
   UploadSession? get(int uploadId) => _sessions[uploadId];
 
+  /// Starts a new upload session for the given file metadata.
   UploadSession begin({
     required int uploadId,
     required String store,
     required String recordId,
+    required int expectedSize,
     String field = 'imgs',
     String name = 'blob.bin',
-    required int expectedSize,
     String? expectedSha256,
   }) {
     if (_sessions.length >= maxConcurrentUploads) {
@@ -302,6 +345,7 @@ class UploadSessionRegistry {
     return session;
   }
 
+  /// Adds a chunk to the tracked upload for [uploadId].
   void addChunk({
     required int uploadId,
     required Uint8List chunk,
@@ -326,6 +370,7 @@ class UploadSessionRegistry {
     session.receivedBytes += chunk.length;
   }
 
+  /// Finalizes the upload and validates that the total payload matches.
   UploadSession takeForFinish(int uploadId) {
     final session = _sessions.remove(uploadId);
     if (session == null) {
@@ -339,10 +384,10 @@ class UploadSessionRegistry {
     return session;
   }
 
-  bool abort(int uploadId) {
-    return _sessions.remove(uploadId) != null;
-  }
+  /// Cancels a pending upload and releases any partial state.
+  bool abort(int uploadId) => _sessions.remove(uploadId) != null;
 
+  /// Removes all tracked upload sessions.
   void clear() {
     _sessions.clear();
   }

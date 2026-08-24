@@ -36,6 +36,23 @@ import 'transport.dart';
 /// PocketBase batch support is probed during [prepare]. Realtime is optional;
 /// polling and anti-entropy sweeps remain the correctness backstop.
 class PocketBaseBackend implements SyncBackend {
+  /// Creates a PocketBase synchronization backend.
+  PocketBaseBackend({
+    required this.baseUrl,
+    required this.tokenProvider,
+    this.stores = const [],
+    this.realtimeDebounce = const Duration(milliseconds: 300),
+    this.maxPage = 200,
+    this.maxBatch = 25,
+    this.identity,
+    this.realtimeCollection = 'data',
+    HttpTransport? transport,
+  }) : transport = transport ?? PackageHttpTransport() {
+    _auth = AuthManager(tokenProvider);
+    _client =
+        PbClient(transport: this.transport, baseUrl: baseUrl, auth: _auth);
+  }
+
   /// PocketBase server base URL.
   final Uri baseUrl;
 
@@ -64,6 +81,7 @@ class PocketBaseBackend implements SyncBackend {
 
   /// HTTP transport used by the adapter.
   final HttpTransport transport;
+
   late final AuthManager _auth;
   late final PbClient _client;
   PbRealtime? _realtime;
@@ -76,23 +94,6 @@ class PocketBaseBackend implements SyncBackend {
       StreamController<BackendHint>.broadcast();
   final Map<String, Timer> _debounceTimers = {};
   final Map<String, BackendHint> _pendingHints = {};
-
-  /// Creates a PocketBase synchronization backend.
-  PocketBaseBackend({
-    required this.baseUrl,
-    required this.tokenProvider,
-    this.stores = const [],
-    this.realtimeDebounce = const Duration(milliseconds: 300),
-    this.maxPage = 200,
-    this.maxBatch = 25,
-    this.identity,
-    this.realtimeCollection = 'data',
-    HttpTransport? transport,
-  }) : transport = transport ?? PackageHttpTransport() {
-    _auth = AuthManager(tokenProvider);
-    _client =
-        PbClient(transport: this.transport, baseUrl: baseUrl, auth: _auth);
-  }
 
   // ---------------------------------------------------------------- probe --
 
@@ -162,8 +163,8 @@ class PocketBaseBackend implements SyncBackend {
 
   /// Stops realtime and closes the HTTP transport.
   void close() {
-    stopRealtime();
-    if (!_hints.isClosed) _hints.close();
+    unawaited(stopRealtime());
+    if (!_hints.isClosed) unawaited(_hints.close());
     transport.close();
   }
 
@@ -238,32 +239,28 @@ class PocketBaseBackend implements SyncBackend {
     String? fromId,
     String? idPrefix,
     int perPage = 200,
-  }) {
-    return _client.listRecords(
-      store,
-      fromUpdated: fromUpdated,
-      fromId: fromId,
-      idPrefix: idPrefix,
-      perPage: perPage,
-      // Sweeps only need the keyset (fields=id,updated projection).
-      fields: idPrefix != null ? const ['id', 'updated'] : null,
-    );
-  }
+  }) =>
+      _client.listRecords(
+        store,
+        fromUpdated: fromUpdated,
+        fromId: fromId,
+        idPrefix: idPrefix,
+        perPage: perPage,
+        // Sweeps only need the keyset (fields=id,updated projection).
+        fields: idPrefix != null ? const ['id', 'updated'] : null,
+      );
 
   /// Fetches one remote record by ID.
   @override
-  Future<RemoteRecord?> getRecord(String id) {
-    return _client.getRecord(id);
-  }
+  Future<RemoteRecord?> getRecord(String id) => _client.getRecord(id);
 
   @override
   Future<RemoteRecord> createRecord({
     required String id,
     required String store,
     required String dataJson,
-  }) {
-    return _client.createRecord(id: id, store: store, dataJson: dataJson);
-  }
+  }) =>
+      _client.createRecord(id: id, store: store, dataJson: dataJson);
 
   @override
   Future<RemoteRecord> updateRecordFiles({
@@ -326,13 +323,12 @@ class PocketBaseBackend implements SyncBackend {
     required String recordId,
     required String filename,
     String? thumb,
-  }) {
-    return _client.downloadFile(
-      recordId: recordId,
-      filename: filename,
-      thumb: thumb,
-    );
-  }
+  }) =>
+      _client.downloadFile(
+        recordId: recordId,
+        filename: filename,
+        thumb: thumb,
+      );
 
   /// Updates one remote record with a canonical JSON document.
   @override
@@ -340,14 +336,12 @@ class PocketBaseBackend implements SyncBackend {
     required String id,
     required String dataJson,
     String? baseUpdated,
-  }) {
-    return _client.updateRecord(
-        id: id, dataJson: dataJson, baseUpdated: baseUpdated);
-  }
+  }) =>
+      _client.updateRecord(
+          id: id, dataJson: dataJson, baseUpdated: baseUpdated);
 
   /// Sends a transactional PocketBase batch of record upserts.
   @override
-  Future<List<PushResult>> pushBatch(List<PushOp> ops) {
-    return _client.pushBatch(ops);
-  }
+  Future<List<PushResult>> pushBatch(List<PushOp> ops) =>
+      _client.pushBatch(ops);
 }

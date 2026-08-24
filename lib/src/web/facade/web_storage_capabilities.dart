@@ -3,12 +3,6 @@
 /// Dispatches public-API requests (`WebRequest`) to the dedicated engine worker
 /// over `Database.customRequest`.
 class WebStorageCapabilities {
-  final String storage;
-  final bool durable;
-  final bool persistent;
-  final bool multiTabStorage;
-  final bool multiTabSync;
-  final bool worker;
 
   const WebStorageCapabilities({
     required this.storage,
@@ -18,6 +12,12 @@ class WebStorageCapabilities {
     required this.multiTabSync,
     required this.worker,
   });
+  final String storage;
+  final bool durable;
+  final bool persistent;
+  final bool multiTabStorage;
+  final bool multiTabSync;
+  final bool worker;
 
   Map<String, Object?> toJson() => {
         'storage': storage,

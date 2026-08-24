@@ -21,12 +21,25 @@ import 'schema.dart';
 /// place so a new [FieldKind] cannot be added to one path and forgotten in the
 /// other.
 enum KindViolation {
+  /// Text is required but a non-string value was provided.
   textExpected,
+
+  /// An integer is required for this field type.
   intExpected,
+
+  /// A numeric value is required for this field type.
   numberExpected,
+
+  /// A boolean is required for this field type.
   boolExpected,
+
+  /// A JSON object or array is required for this field type.
   jsonExpected,
+
+  /// A JSON list is required for this field type.
   jsonListExpected,
+
+  /// The provided enum value is not in the schema’s accepted set.
   enumValueRejected,
 }
 
@@ -65,7 +78,7 @@ KindViolation? fieldKindViolation(Field f, Object? value) {
 
 /// Encodes a logical record into a DB row map (including system columns).
 Map<String, Object?> encodeDbRow(
-  CollectionSchema schema, {
+  CollectionSchema<Object?> schema, {
   required String id,
   required Map<String, Object?> logical,
   required bool archived,
@@ -95,7 +108,7 @@ Map<String, Object?> encodeDbRow(
 /// store it (same cipher resolution and kind rules), for targeted
 /// single-column UPDATEs on the dirty-patch fast path.
 Object? encodeFieldValue(
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   Field field,
   Object? value, {
   FieldCipher? cipher,
@@ -111,7 +124,7 @@ Object? encodeFieldValue(
 /// row map entirely.
 void appendDomainValues(
   List<Object?> target,
-  CollectionSchema schema, {
+  CollectionSchema<Object?> schema, {
   required String id,
   required Map<String, Object?> logical,
   required bool archived,
@@ -139,44 +152,43 @@ void appendDomainValues(
 
 /// Encodes a batch of logical records synchronously.
 List<Map<String, Object?>> encodeDbRows(
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   List<Map<String, Object?>> logicalRecords, {
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
-}) {
-  return [
-    for (final l in logicalRecords)
-      encodeDbRow(
-        schema,
-        id: (l['id'] as String?) ?? '',
-        logical: l,
-        archived: l['archived'] == true,
-        cipher: cipher,
-        cryptoProvider: cryptoProvider,
-      ),
-  ];
-}
+}) =>
+    [
+      for (final l in logicalRecords)
+        encodeDbRow(
+          schema,
+          id: (l['id'] as String?) ?? '',
+          logical: l,
+          archived: l['archived'] == true,
+          cipher: cipher,
+          cryptoProvider: cryptoProvider,
+        ),
+    ];
 
 /// Encodes a batch of logical records, offloading to an isolate if batch is large
 /// or contains encrypted fields to avoid UI jank.
 Future<List<Map<String, Object?>>> encodeDbRowsAsync(
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   List<Map<String, Object?>> logicalRecords, {
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
   int isolateThreshold = 50,
-}) async {
-  // Preserve the async API but execute inline. One-shot Isolate.run is not
-  // available on dart2js and is slower than the synchronous codec for the
-  // tested batch sizes because rows and schema maps must be copied.
-  return encodeDbRows(schema, logicalRecords,
-      cipher: cipher, cryptoProvider: cryptoProvider);
-}
+}) async =>
+    encodeDbRows(
+      schema,
+      logicalRecords,
+      cipher: cipher,
+      cryptoProvider: cryptoProvider,
+    );
 
 /// Decodes a DB row into the logical record the app sees (declared fields plus
 /// `extra` keys merged at the top level, plus `id` and `archived`).
 Map<String, Object?> decodeDbRow(
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   Map<String, Object?> dbRow, {
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
@@ -199,16 +211,20 @@ Map<String, Object?> decodeDbRow(
 
 /// Decodes a batch of DB rows synchronously.
 List<Map<String, Object?>> decodeDbRows(
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   List<Map<String, Object?>> dbRows, {
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
-}) {
-  return [
-    for (final r in dbRows)
-      decodeDbRow(schema, r, cipher: cipher, cryptoProvider: cryptoProvider),
-  ];
-}
+}) =>
+    [
+      for (final r in dbRows)
+        decodeDbRow(
+          schema,
+          r,
+          cipher: cipher,
+          cryptoProvider: cryptoProvider,
+        ),
+    ];
 
 /// Projection-aware batch decode: only the requested
 /// [columns] are unpacked; all other declared fields and `extra` are left
@@ -218,7 +234,7 @@ List<Map<String, Object?>> decodeDbRows(
 /// of the synthetic `id`/`archived` keys — otherwise [decodeDbRows] should be
 /// used so undeclared `extra` keys are merged as today.
 List<Map<String, Object?>> decodeDbRowsProjected(
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   List<Map<String, Object?>> dbRows, {
   required List<String> columns,
   FieldCipher? cipher,
@@ -239,8 +255,14 @@ List<Map<String, Object?>> decodeDbRowsProjected(
   }
   return [
     for (final r in dbRows)
-      _decodeDbRowProjectedResolved(r, resolved, wantArchived,
-          cipher: cipher, cryptoProvider: cryptoProvider, store: schema.name),
+      _decodeDbRowProjectedResolved(
+        r,
+        resolved,
+        wantArchived,
+        store: schema.name,
+        cipher: cipher,
+        cryptoProvider: cryptoProvider,
+      ),
   ];
 }
 
@@ -248,9 +270,9 @@ Map<String, Object?> _decodeDbRowProjectedResolved(
   Map<String, Object?> dbRow,
   List<(String, Field?)> resolved,
   bool wantArchived, {
+  required String store,
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
-  required String store,
 }) {
   final logical = <String, Object?>{'id': dbRow['id']};
   for (final (name, f) in resolved) {
@@ -267,17 +289,18 @@ Map<String, Object?> _decodeDbRowProjectedResolved(
 /// Decodes a batch of DB rows, offloading to an isolate if batch is large
 /// or contains encrypted fields to avoid UI frame drops.
 Future<List<Map<String, Object?>>> decodeDbRowsAsync(
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   List<Map<String, Object?>> dbRows, {
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
   int isolateThreshold = 50,
-}) async {
-  // Preserve the async API but execute inline. This is web-safe and avoids
-  // one-shot isolate transfer overhead for ordinary query pages.
-  return decodeDbRows(schema, dbRows,
-      cipher: cipher, cryptoProvider: cryptoProvider);
-}
+}) async =>
+    decodeDbRows(
+      schema,
+      dbRows,
+      cipher: cipher,
+      cryptoProvider: cryptoProvider,
+    );
 
 /// Decodes a single stored value (plaintext typed column or base64 ciphertext)
 /// into its logical form for [f]. [store] is the owning store name, used to
@@ -289,9 +312,9 @@ Future<List<Map<String, Object?>>> decodeDbRowsAsync(
 Object? _decodeStoredValue(
   Field f,
   Object? stored, {
+  required String store,
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
-  required String store,
 }) {
   if (stored == null) return null;
   if (f.encrypted) {
@@ -359,7 +382,7 @@ Object? _encodeValue(Field f, Object? v, {FieldCipher? cipher}) {
 /// spread-copy of the logical map (bulk-insert fast path passes the record
 /// id directly).
 Map<String, Object?> buildPayload(
-    CollectionSchema schema, Map<String, Object?> logical,
+    CollectionSchema<Object?> schema, Map<String, Object?> logical,
     {Object? idOverride}) {
   final declared = schema.declaredFieldNames;
   final data = <String, Object?>{'id': idOverride ?? logical['id']};
@@ -387,7 +410,7 @@ Map<String, Object?> buildPayload(
 /// length written.
 int canonicalizePayloadInto(
   StringBuffer out,
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   Map<String, Object?> logical, {
   Object? idOverride,
 }) {
@@ -429,9 +452,12 @@ int canonicalizePayloadInto(
   return bytes + 1;
 }
 
+/// Serializes the logical record into the canonical remote payload JSON.
 String canonicalPayload(
-        CollectionSchema schema, Map<String, Object?> logical) =>
+        CollectionSchema<Object?> schema, Map<String, Object?> logical) =>
     canonicalize(buildPayload(schema, logical));
 
-String payloadHash(CollectionSchema schema, Map<String, Object?> logical) =>
+/// Returns the hash of the canonical remote payload for this record.
+String payloadHash(
+        CollectionSchema<Object?> schema, Map<String, Object?> logical) =>
     sha256Hex(canonicalPayload(schema, logical));

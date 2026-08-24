@@ -12,6 +12,11 @@ const int queryCompilerVersion = 2;
 /// plans compiled for the web it is the page limit + 1; the transport passes
 /// the page limit separately).
 final class QueryPlan {
+
+  const QueryPlan({
+    required this.operation, required this.compilerVersion, required this.store, required this.schemaVersion, required this.schemaFingerprint, required this.sql, required this.args, required this.limit, required this.projection, required this.shape, this.typeName = type,
+    this.decodeColumns,
+  });
   /// Stable discriminator for this wire artifact.
   static const String type = 'query_plan';
 
@@ -33,19 +38,4 @@ final class QueryPlan {
   final String shape;
 
   int get argumentCount => args.length;
-
-  const QueryPlan({
-    this.typeName = type,
-    required this.operation,
-    required this.compilerVersion,
-    required this.store,
-    required this.schemaVersion,
-    required this.schemaFingerprint,
-    required this.sql,
-    required this.args,
-    required this.limit,
-    required this.projection,
-    this.decodeColumns,
-    required this.shape,
-  });
 }

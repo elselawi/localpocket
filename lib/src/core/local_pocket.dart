@@ -34,11 +34,26 @@ int _defaultNow() => DateTime.now().millisecondsSinceEpoch;
 /// - [normal]: `synchronous=NORMAL` (default, app-crash-safe under WAL).
 /// - [full]: `synchronous=FULL` for the local-first invariant — transactions
 ///   that write domain rows + outbox intent must not lose the tail commit.
-enum DurabilityClass { normal, full }
+enum DurabilityClass {
+  /// Use `synchronous=NORMAL`, which is app-crash-safe under WAL.
+  normal,
+
+  /// Use `synchronous=FULL` for commits that must survive power loss.
+  full,
+}
 
 /// Test-only hooks for crash injection and statement tracing.
 @visibleForTesting
 class TestHooks {
+  /// Creates a collection of optional test hooks.
+  TestHooks({
+    this.migrationCrashPoint,
+    this.mutationCrashPoint,
+    this.applyRemoteCrashPoint,
+    this.onExecute,
+    this.onQuery,
+  });
+
   /// Called after each migration backfill chunk commit; throw to simulate a
   /// crash.
   void Function(String marker)? migrationCrashPoint;
@@ -58,25 +73,26 @@ class TestHooks {
   /// Called for every `rawQuery` routed through [LocalPocket.traceQuery]
   /// (requery counting).
   void Function(String sql)? onQuery;
-
-  TestHooks({
-    this.migrationCrashPoint,
-    this.mutationCrashPoint,
-    this.applyRemoteCrashPoint,
-    this.onExecute,
-    this.onQuery,
-  });
 }
 
 /// The compiled per-store table descriptor.
 class StoreTable {
-  final CollectionSchema schema;
-  final CompiledSchema compiled;
-  final List<String> warnings;
-  final PointReadCache readCache = PointReadCache();
-
+  /// Creates a table descriptor from a schema and its compiled SQL.
   StoreTable(this.schema, this.compiled) : warnings = compiled.warnings;
 
+  /// The collection schema represented by this table.
+  final CollectionSchema<Object?> schema;
+
+  /// The compiled SQL representation of the schema.
+  final CompiledSchema compiled;
+
+  /// Warnings produced while compiling the schema.
+  final List<String> warnings;
+
+  /// Cache for point reads from this collection.
+  final PointReadCache readCache = PointReadCache();
+
+  /// The SQLite table name.
   String get tableName => schema.name;
 }
 
@@ -85,8 +101,10 @@ class PointReadCache {
   static const int _maxSize = 256;
   final Map<String, Map<String, Object?>?> _cache = {};
 
+  /// Whether [id] has an entry, including a cached miss.
   bool containsKey(String id) => _cache.containsKey(id);
 
+  /// Returns the cached record for [id], or null for a miss.
   Map<String, Object?>? get(String id) {
     if (!_cache.containsKey(id)) return null;
     // Refresh LRU order
@@ -95,6 +113,7 @@ class PointReadCache {
     return val == null ? null : _deepClone(val);
   }
 
+  /// Stores [value] for [id], defensively copying nested values.
   void set(String id, Map<String, Object?>? value) {
     if (_cache.length >= _maxSize) {
       _cache.remove(_cache.keys.first);
@@ -105,6 +124,8 @@ class PointReadCache {
     _cache[id] = value == null ? null : _deepClone(value);
   }
 
+  /// Removes the entries identified by [ids], or clears all entries when
+  /// [ids] is empty.
   void invalidate(Iterable<String> ids) {
     if (ids.isEmpty) {
       _cache.clear();
@@ -123,11 +144,11 @@ class PointReadCache {
     }
   }
 
+  /// Removes every cached entry.
   void clear() => _cache.clear();
 
-  Map<String, Object?> _deepClone(Map<String, Object?> map) {
-    return _copyValue(map) as Map<String, Object?>;
-  }
+  Map<String, Object?> _deepClone(Map<String, Object?> map) =>
+      _copyValue(map)! as Map<String, Object?>;
 }
 
 /// Deep structural copy for cache isolation: plain maps and Lists are
@@ -172,6 +193,26 @@ Object? _copyValue(Object? v) {
 /// [LocalPocket] owns the SQLite connection and serializes writes. Always call
 /// [close] when the application or test no longer needs the database.
 class LocalPocket with ChangeBusAwareLP {
+  LocalPocket._({
+    required this.path,
+    required this.db,
+    required this.capabilities,
+    required this.maxDocBytes,
+    required this.destructiveBackup,
+    required this.now,
+    this.testHooks,
+    this.blobStore,
+    this.fieldCipher,
+    this.cryptoProvider,
+    this.groupCommitWindow = Duration.zero,
+  }) : perf = PerfCounters() {
+    writeQueue = WriteQueue(onQueueDepthChanged: perf.queueChanged);
+    outbox = Outbox.internal(this);
+    opQueue = OpQueue.internal(this);
+    conflicts = Conflicts.internal(this);
+    files = LocalPocketFiles.internal(this, blobStore: blobStore);
+  }
+
   /// The database path supplied to [open].
   final String path;
 
@@ -180,7 +221,11 @@ class LocalPocket with ChangeBusAwareLP {
 
   /// Capabilities detected for the active SQLite connection.
   final SqliteCapabilities capabilities;
+
+  /// Serializes all operations that use the owned SQLite connection.
   late final WriteQueue writeQueue;
+
+  /// Performance counters for this database handle.
   final PerfCounters perf;
 
   /// Maximum canonical document size accepted by local writes.
@@ -229,6 +274,7 @@ class LocalPocket with ChangeBusAwareLP {
   /// this state is authoritative for all write transactions.
   String _synchronous = 'NORMAL';
 
+  /// Whether `PRAGMA optimize` completed during [close].
   @visibleForTesting
   bool optimizeRanOnClose = false;
 
@@ -242,26 +288,6 @@ class LocalPocket with ChangeBusAwareLP {
   /// window; set it to the maximum fsync latency you are willing to trade
   /// for batch throughput.
   final Duration groupCommitWindow;
-
-  LocalPocket._({
-    required this.path,
-    required this.db,
-    required this.capabilities,
-    required this.maxDocBytes,
-    required this.destructiveBackup,
-    required this.now,
-    this.testHooks,
-    this.blobStore,
-    this.fieldCipher,
-    this.cryptoProvider,
-    this.groupCommitWindow = Duration.zero,
-  }) : perf = PerfCounters() {
-    writeQueue = WriteQueue(onQueueDepthChanged: perf.queueChanged);
-    outbox = Outbox.internal(this);
-    opQueue = OpQueue.internal(this);
-    conflicts = Conflicts.internal(this);
-    files = LocalPocketFiles.internal(this, blobStore: blobStore);
-  }
 
   /// Opens or creates a database and registers the supplied collections.
   ///
@@ -288,8 +314,8 @@ class LocalPocket with ChangeBusAwareLP {
   ///
   static Future<LocalPocket> open({
     required String path,
+    required List<CollectionSchema<Object?>> stores,
     Database? database,
-    required List<CollectionSchema> stores,
     PlatformProfile platform = PlatformProfile.native,
     bool encrypted = false,
     FieldCipher? fieldCipher,
@@ -384,7 +410,8 @@ class LocalPocket with ChangeBusAwareLP {
     });
   }
 
-  Future<void> registerStore(CollectionSchema schema) async {
+  /// Registers [schema], creating or migrating its SQLite table.
+  Future<void> registerStore(CollectionSchema<Object?> schema) async {
     final compiled = DdlCompiler(capabilities).compile(schema);
     final existing = await db.query('lp_stores',
         where: 'store = ?', whereArgs: [schema.name], limit: 1);
@@ -406,7 +433,7 @@ class LocalPocket with ChangeBusAwareLP {
       await Migrator.recordMigration(db,
           name: 'create:${schema.name}', from: 0, to: schema.version);
     } else {
-      final current = existing.first['schema_ver'] as int;
+      final current = existing.first['schema_ver']! as int;
       if (current > schema.version) {
         throw SchemaTooNewError(
             'Store "${schema.name}" on disk is schema v$current, but this package supports v${schema.version}.');
@@ -426,6 +453,7 @@ class LocalPocket with ChangeBusAwareLP {
     _tables[schema.name] = StoreTable(schema, compiled);
   }
 
+  /// Returns the registered table for [name], or throws if it is unknown.
   StoreTable requireTable(String name) {
     final t = _tables[name];
     if (t == null) {
@@ -622,8 +650,8 @@ class LocalPocket with ChangeBusAwareLP {
         "WHERE s.record_id IS NULL OR s.sync_state = 'clean'",
       );
       for (final r in orphaned) {
-        final st = r['store'] as String;
-        final id = r['record_id'] as String;
+        final st = r['store']! as String;
+        final id = r['record_id']! as String;
         await exec.delete('lp_outbox',
             where: 'store = ? AND record_id = ?', whereArgs: [st, id]);
         pruned++;
@@ -642,8 +670,8 @@ class LocalPocket with ChangeBusAwareLP {
           [excess],
         );
         for (final r in oldest) {
-          final st = r['store'] as String;
-          final id = r['record_id'] as String;
+          final st = r['store']! as String;
+          final id = r['record_id']! as String;
           await exec.delete('lp_outbox',
               where: 'store = ? AND record_id = ?', whereArgs: [st, id]);
           pruned++;
@@ -692,7 +720,7 @@ class LocalPocket with ChangeBusAwareLP {
       await transaction((tx) async {
         final exec = tx.executor;
         for (final r in rows) {
-          final id = r['id'] as String;
+          final id = r['id']! as String;
           // Revalidate eligibility INSIDE the transaction, immediately before
           // the delete: a concurrent write between the candidate SELECT and
           // here (unarchive, unhide, dirty/conflict transition) must prevent a
@@ -736,6 +764,7 @@ class LocalPocket with ChangeBusAwareLP {
     return count;
   }
 
+  /// Throws when a handle-level operation is attempted inside a transaction.
   void _guardOutsideTx() {
     if (Tx.current(this) != null) {
       throw StateError(
@@ -798,6 +827,7 @@ class LocalPocket with ChangeBusAwareLP {
 /// group-level Tx; in a multi-member group each member additionally runs
 /// inside a SAVEPOINT so one failing member rolls back only itself.
 class _CommitGroup {
+  _CommitGroup(this.pocket, this.durability);
   final LocalPocket pocket;
   final DurabilityClass durability;
   final members = <_CommitMember>[];
@@ -807,8 +837,6 @@ class _CommitGroup {
 
   Completer<void>? _barrier;
   bool _barrierDone = false;
-
-  _CommitGroup(this.pocket, this.durability);
 
   /// Takes the single-writer slot immediately (preserving submission-order
   /// FIFO for reads and later writes) and waits for the end-of-turn barrier
@@ -954,7 +982,7 @@ class _CommitGroup {
 }
 
 class _CommitMember {
+  _CommitMember(this.action);
   final Future<dynamic> Function(Tx tx) action;
   final completer = Completer<dynamic>();
-  _CommitMember(this.action);
 }

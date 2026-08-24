@@ -96,6 +96,8 @@ abstract class Database extends DatabaseExecutor {
 /// work to a background isolate. Large scans or heavy maintenance should be
 /// run from a dedicated isolate to avoid blocking the UI isolate.
 class DirectSqliteDatabase implements Database {
+
+  DirectSqliteDatabase(this._db);
   final Map<String, CommonPreparedStatement> _statementCache = {};
   final CommonDatabase _db;
   bool _isOpen = true;
@@ -105,8 +107,6 @@ class DirectSqliteDatabase implements Database {
 
   /// Hook for tracing queries (e.g. TestHooks / profilers).
   void Function(String sql, List<Object?> params)? onQuery;
-
-  DirectSqliteDatabase(this._db);
 
   CommonDatabase get rawDb => _db;
 
@@ -177,9 +177,7 @@ class DirectSqliteDatabase implements Database {
 
   @override
   Future<List<Map<String, Object?>>> rawQuery(String sql,
-      [List<Object?> parameters = const []]) async {
-    return selectSync(sql, parameters);
-  }
+      [List<Object?> parameters = const []]) async => selectSync(sql, parameters);
 
   @override
   Future<List<Map<String, Object?>>> query(

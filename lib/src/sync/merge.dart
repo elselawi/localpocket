@@ -80,6 +80,18 @@ Map<String, Object?> conservativeReviewMerge({
 
 /// Context passed to a [ConflictResolver].
 class MergeContext {
+  /// Creates the context supplied to a conflict resolver.
+  MergeContext({
+    required this.store,
+    required this.recordId,
+    required this.base,
+    required this.local,
+    required this.remote,
+    Set<String>? dirtyLocal,
+    Set<String>? dirtyRemote,
+  })  : dirtyLocal = dirtyLocal ?? computeDirtyFields(base, local),
+        dirtyRemote = dirtyRemote ?? computeDirtyFields(base, remote);
+
   /// Collection being merged.
   final String store;
 
@@ -100,21 +112,19 @@ class MergeContext {
 
   /// Remote fields changed from [base].
   final Set<String> dirtyRemote;
-
-  MergeContext({
-    required this.store,
-    required this.recordId,
-    required this.base,
-    required this.local,
-    required this.remote,
-    Set<String>? dirtyLocal,
-    Set<String>? dirtyRemote,
-  })  : dirtyLocal = dirtyLocal ?? computeDirtyFields(base, local),
-        dirtyRemote = dirtyRemote ?? computeDirtyFields(base, remote);
 }
 
 /// Result of a resolver or 3-way merge operation.
 class MergeResult {
+  /// Creates the result of a resolver or 3-way merge operation.
+  const MergeResult({
+    required this.merged,
+    this.needsReview = false,
+    this.note,
+    this.dirtyLocal = const {},
+    this.dirtyRemote = const {},
+  });
+
   /// Resulting document after resolution.
   final Map<String, Object?> merged;
 
@@ -129,14 +139,6 @@ class MergeResult {
 
   /// Remote dirty fields used during detection.
   final Set<String> dirtyRemote;
-
-  const MergeResult({
-    required this.merged,
-    this.needsReview = false,
-    this.note,
-    this.dirtyLocal = const {},
-    this.dirtyRemote = const {},
-  });
 }
 
 /// Alias for backwards compatibility.
@@ -144,6 +146,7 @@ typedef MergeOutcome = MergeResult;
 
 /// Abstract interface for whole-record or field-level conflict resolution.
 abstract class ConflictResolver {
+  /// Creates a conflict resolver.
   const ConflictResolver();
 
   /// Given the shared base and both sides' divergence, produces the merged record or field.
@@ -152,6 +155,7 @@ abstract class ConflictResolver {
 
 /// Remote wins (default): for concurrently modified fields, take remote.
 class RemoteWinsResolver extends ConflictResolver {
+  /// Creates a remote-wins resolver.
   const RemoteWinsResolver();
 
   @override
@@ -167,6 +171,7 @@ class RemoteWinsResolver extends ConflictResolver {
 
 /// Local wins: for concurrently modified fields, take local.
 class LocalWinsResolver extends ConflictResolver {
+  /// Creates a local-wins resolver.
   const LocalWinsResolver();
 
   @override
@@ -192,13 +197,12 @@ class LocalWinsResolver extends ConflictResolver {
 /// engine itself compares with deep equality; this resolver deliberately
 /// does not — see the pinned tests.)
 class SetUnionWithDeletionWinsResolver extends ConflictResolver {
+  /// Creates a deletion-wins set-union resolver.
   const SetUnionWithDeletionWinsResolver();
 
   @override
-  MergeResult resolve(MergeContext ctx) {
-    // Default whole-record pass delegates to field-level merge
-    return const RemoteWinsResolver().resolve(ctx);
-  }
+  MergeResult resolve(MergeContext ctx) =>
+      const RemoteWinsResolver().resolve(ctx);
 
   /// Field-level set union resolution.
   Object? resolveField(Object? baseVal, Object? localVal, Object? remoteVal) {
@@ -244,19 +248,18 @@ typedef SetUnionResolver = SetUnionWithDeletionWinsResolver;
 /// [min]/[max] bounds clamp the result into a valid range; without them the
 /// result is unconstrained (default behavior).
 class CounterResolver extends ConflictResolver {
+  /// Creates a counter resolver with optional [min]/[max] clamps.
+  const CounterResolver({this.min, this.max});
+
   /// Lower bound for the resolved value, when provided.
   final num? min;
 
   /// Upper bound for the resolved value, when provided.
   final num? max;
 
-  /// Creates a counter resolver with optional [min]/[max] clamps.
-  const CounterResolver({this.min, this.max});
-
   @override
-  MergeResult resolve(MergeContext ctx) {
-    return const RemoteWinsResolver().resolve(ctx);
-  }
+  MergeResult resolve(MergeContext ctx) =>
+      const RemoteWinsResolver().resolve(ctx);
 
   /// Field-level counter resolution.
   num resolveField(Object? baseVal, Object? localVal, Object? remoteVal) {
@@ -281,17 +284,17 @@ class CounterResolver extends ConflictResolver {
 /// identical-looking entries are distinct events and must both survive, or
 /// when equal content with different keys must stay distinct.
 class AppendOnlyListResolver extends ConflictResolver {
+  /// Creates an append-only list resolver.
+  const AppendOnlyListResolver({this.identity});
+
   /// Optional per-item identity key: two items sharing a key are duplicates
   /// even when their content differs, and equal content with different keys
   /// stays distinct.
   final String Function(Object? value)? identity;
 
-  const AppendOnlyListResolver({this.identity});
-
   @override
-  MergeResult resolve(MergeContext ctx) {
-    return const RemoteWinsResolver().resolve(ctx);
-  }
+  MergeResult resolve(MergeContext ctx) =>
+      const RemoteWinsResolver().resolve(ctx);
 
   /// Field-level append-only resolution.
   Object? resolveField(Object? baseVal, Object? localVal, Object? remoteVal) {
@@ -323,12 +326,12 @@ class AppendOnlyListResolver extends ConflictResolver {
 /// are deduplicated; the result joins with `\n`. This is NOT a generic text
 /// append — it normalizes whitespace and drops duplicate lines by design.
 class AppendOnlyLinesResolver extends ConflictResolver {
+  /// Creates an append-only lines resolver.
   const AppendOnlyLinesResolver();
 
   @override
-  MergeResult resolve(MergeContext ctx) {
-    return const RemoteWinsResolver().resolve(ctx);
-  }
+  MergeResult resolve(MergeContext ctx) =>
+      const RemoteWinsResolver().resolve(ctx);
 
   /// Field-level line-append resolution.
   Object? resolveField(Object? baseVal, Object? localVal, Object? remoteVal) {
@@ -369,11 +372,11 @@ typedef AppendOnlyResolver = AppendOnlyListResolver;
 
 /// Custom resolver wrapping a user-supplied function.
 class CustomResolver extends ConflictResolver {
-  /// User callback used to resolve a merge context.
-  final FutureOr<MergeResult?> Function(MergeContext ctx) fn;
-
   /// Creates a resolver backed by [fn].
   const CustomResolver(this.fn);
+
+  /// User callback used to resolve a merge context.
+  final FutureOr<MergeResult?> Function(MergeContext ctx) fn;
 
   @override
   FutureOr<MergeResult?> resolve(MergeContext ctx) => fn(ctx);
@@ -382,6 +385,13 @@ class CustomResolver extends ConflictResolver {
 /// MergePolicy holding resolver overrides at collection and field levels.
 /// Resolver precedence and archive behavior for a three-way merge.
 class MergePolicy {
+  /// Creates a merge policy.
+  const MergePolicy({
+    this.collectionResolver,
+    this.fieldOverrides = const {},
+    this.editsUnarchive = false,
+  });
+
   /// Optional whole-record resolver.
   final ConflictResolver? collectionResolver;
 
@@ -395,13 +405,6 @@ class MergePolicy {
 
   /// Whether local content edits should unarchive records.
   final bool editsUnarchive;
-
-  /// Creates a merge policy.
-  const MergePolicy({
-    this.collectionResolver,
-    this.fieldOverrides = const {},
-    this.editsUnarchive = false,
-  });
 }
 
 /// Resolves a single field value given base, local, remote, and an optional field-level resolver.
@@ -499,17 +502,16 @@ class MergeEngine {
     String store = '',
     String recordId = '',
     MergePolicy? policy,
-  }) async {
-    return await _runWithAdapter(
-      base: base,
-      local: local,
-      remote: remote,
-      store: store,
-      recordId: recordId,
-      policy: policy,
-      adapter: const _AsyncResolverAdapter(),
-    );
-  }
+  }) async =>
+      _runWithAdapter(
+        base: base,
+        local: local,
+        remote: remote,
+        store: store,
+        recordId: recordId,
+        policy: policy,
+        adapter: const _AsyncResolverAdapter(),
+      );
 
   /// Runs the same core merge logic with sync-only custom resolvers.
   static MergeResult runSync({
@@ -598,7 +600,8 @@ class MergeEngine {
       return handleCustomResult(customResOrFuture);
     }
 
-    final keys = [...local.keys, ...remote.keys, ...base.keys];
+    // A set preserves insertion order while ensuring each field is merged once.
+    final keys = <String>{...local.keys, ...remote.keys, ...base.keys}.toList();
     return _mergeKeyRange(
       keys: keys,
       index: 0,
@@ -867,16 +870,15 @@ FutureOr<MergeResult> merge3WayAsync({
   String store = '',
   String recordId = '',
   MergePolicy? policy,
-}) {
-  return MergeEngine.runAsync(
-    base: base,
-    local: local,
-    remote: remote,
-    store: store,
-    recordId: recordId,
-    policy: policy,
-  );
-}
+}) =>
+    MergeEngine.runAsync(
+      base: base,
+      local: local,
+      remote: remote,
+      store: store,
+      recordId: recordId,
+      policy: policy,
+    );
 
 /// Synchronous 3-way merge wrapper (for non-async resolver chains or legacy calls).
 MergeResult merge3Way({
@@ -886,13 +888,12 @@ MergeResult merge3Way({
   String store = '',
   String recordId = '',
   MergePolicy? policy,
-}) {
-  return MergeEngine.runSync(
-    base: base,
-    local: local,
-    remote: remote,
-    store: store,
-    recordId: recordId,
-    policy: policy,
-  );
-}
+}) =>
+    MergeEngine.runSync(
+      base: base,
+      local: local,
+      remote: remote,
+      store: store,
+      recordId: recordId,
+      policy: policy,
+    );

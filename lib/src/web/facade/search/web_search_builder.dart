@@ -10,14 +10,17 @@ class WebSearchBuilder
     with
         SearchForwarder<WebSearchBuilder>,
         WebCompiledSearchForwarder<WebSearchBuilder> {
+  /// Creates a web search builder bound to [pocket], [schema], and [term].
+  WebSearchBuilder(this._pocket, this.schema, this.term)
+      : _core = SearchBuilder.compileOnly(schema, term);
+
   final WebFacadeHost _pocket;
-  final CollectionSchema schema;
+
+  /// Schema backing this search builder.
+  final CollectionSchema<Object?> schema;
   @override
   final String term;
   final SearchBuilder _core;
-
-  WebSearchBuilder(this._pocket, this.schema, this.term)
-      : _core = SearchBuilder.compileOnly(schema, term);
 
   @override
   WebFacadeHost get pocket => _pocket;

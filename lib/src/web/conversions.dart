@@ -105,9 +105,7 @@ Object? decodeWireValue(Object? value) {
 }
 
 /// Decodes a wire [BigInt] field, always re-coercing from its string form.
-BigInt decodeBigInt(Object? value) {
-  return BigInt.parse(value.toString());
-}
+BigInt decodeBigInt(Object? value) => BigInt.parse(value.toString());
 
 /// Encodes a [BigInt] as a tagged wire value.
 Object? encodeBigInt(BigInt value) => {_bigIntTag: value.toString()};

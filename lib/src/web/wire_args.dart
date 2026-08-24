@@ -15,9 +15,10 @@ import 'protocol.dart';
 /// protocol error), never a raw cast error. The worker's `_stableErrorType`
 /// maps `ProtocolEnvelopeException` to a fixed, minification-stable category.
 final class WireArgs {
-  final Map<String, Object?> _map;
-
+  /// Creates a validated view over wire arguments.
   const WireArgs(this._map);
+
+  final Map<String, Object?> _map;
 
   /// Returns [key] as [T], throwing [ProtocolEnvelopeException] when the
   /// value is absent or not exactly a [T].
@@ -64,14 +65,16 @@ final class WireArgs {
   /// An optional [key] that must be a bool when present.
   bool? optionalBool(String key) => optional<bool>(key);
 
-  /// A required [key] that must be a non-null List.
-  List requireList(String key, {String? op}) => require<List>(key, op: op);
+  /// A required [key] that must be a non-null list.
+  List<Object?> requireList(String key, {String? op}) =>
+      require<List<Object?>>(key, op: op);
 
-  /// An optional [key] that must be a List when present.
-  List? optionalList(String key) => optional<List>(key);
+  /// An optional [key] that must be a list when present.
+  List<Object?>? optionalList(String key) => optional<List<Object?>>(key);
 
-  /// A required [key] that must be a non-null Map.
-  Map requireMap(String key, {String? op}) => require<Map>(key, op: op);
+  /// A required [key] that must be a non-null map.
+  Map<Object?, Object?> requireMap(String key, {String? op}) =>
+      require<Map<Object?, Object?>>(key, op: op);
 
   static String _describe<T>() => T.toString();
 

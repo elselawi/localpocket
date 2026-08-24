@@ -15,11 +15,11 @@ const int pbMaxPage = 500;
 
 /// Base class for typed synchronization failures.
 sealed class SyncError implements Exception {
-  /// Human-readable failure description.
-  final String message;
 
   /// Creates a synchronization failure.
   SyncError([this.message = 'sync error']);
+  /// Human-readable failure description.
+  final String message;
   @override
   String toString() => '$runtimeType: $message';
 }
@@ -31,9 +31,9 @@ class TransientNetworkError extends SyncError {
 
 /// 408 / 429 — honor Retry-After; 429 throttles the whole lane.
 class ServerBusyError extends SyncError {
+  ServerBusyError([this.retryAfter, super.message = 'server busy']);
   /// Retry-After seconds, when provided by the server.
   final String? retryAfter;
-  ServerBusyError([this.retryAfter, super.message = 'server busy']);
 }
 
 /// 5xx — retry with backoff, escalate after N attempts.
@@ -81,12 +81,12 @@ class BatchFailedError extends SyncError {
 /// preflight GET). The pusher re-fetches, re-merges against [current] and
 /// retries instead of blindly overwriting the concurrent edit.
 class RemoteVersionConflict extends SyncError {
-  /// The remote record at the version that caused the rejection, when the
-  /// backend can provide it.
-  final RemoteRecord? current;
 
   RemoteVersionConflict({String message = 'version conflict', this.current})
       : super(message);
+  /// The remote record at the version that caused the rejection, when the
+  /// backend can provide it.
+  final RemoteRecord? current;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +95,13 @@ class RemoteVersionConflict extends SyncError {
 
 /// Capabilities negotiated with a synchronization backend.
 class BackendCapabilities {
+
+  /// Creates a backend capability snapshot.
+  const BackendCapabilities({
+    this.batchEnabled = false,
+    this.maxBatch = 25,
+    this.maxPage = 200,
+  });
   /// Whether transactional remote batch writes are available.
   final bool batchEnabled;
 
@@ -103,17 +110,17 @@ class BackendCapabilities {
 
   /// Maximum remote page size.
   final int maxPage;
-
-  /// Creates a backend capability snapshot.
-  const BackendCapabilities({
-    this.batchEnabled = false,
-    this.maxBatch = 25,
-    this.maxPage = 200,
-  });
 }
 
 /// Replayable file source for streamed backend uploads.
 class StreamFileUpload {
+
+  /// Creates a streamed upload description.
+  const StreamFileUpload({
+    required this.filename,
+    required this.length,
+    required this.streamFactory,
+  });
   /// Filename sent to the remote service.
   final String filename;
 
@@ -122,17 +129,19 @@ class StreamFileUpload {
 
   /// Creates a fresh stream for each upload attempt.
   final Future<Stream<List<int>>> Function() streamFactory;
-
-  /// Creates a streamed upload description.
-  const StreamFileUpload({
-    required this.filename,
-    required this.length,
-    required this.streamFactory,
-  });
 }
 
 /// A record received from or sent to a synchronization backend.
 class RemoteRecord {
+
+  /// Creates a remote record value.
+  const RemoteRecord({
+    required this.id,
+    required this.store,
+    required this.updated,
+    required this.data,
+    this.imgs = const [],
+  });
   /// Remote record ID.
   final String id;
 
@@ -148,15 +157,6 @@ class RemoteRecord {
   /// Remote attachment filenames.
   final List<String> imgs;
 
-  /// Creates a remote record value.
-  const RemoteRecord({
-    required this.id,
-    required this.store,
-    required this.updated,
-    required this.data,
-    this.imgs = const [],
-  });
-
   /// Copies this record while replacing selected fields.
   RemoteRecord copyWith({String? updated, Map<String, Object?>? data}) =>
       RemoteRecord(
@@ -171,6 +171,15 @@ class RemoteRecord {
 /// An outbox op encoded for a single push (create vs update by [baseUpdated]).
 /// One desired record state prepared for a backend push.
 class PushOp {
+
+  const PushOp({
+    required this.opId,
+    required this.store,
+    required this.id,
+    required this.dataJson,
+    this.baseUpdated,
+    this.upsert = false,
+  });
   /// Stable local operation ID — the server-side idempotency key for batch
   /// pushes (see [SyncBackend.pushBatch]).
   final String opId;
@@ -189,19 +198,18 @@ class PushOp {
 
   /// Batch mode: encode as PUT upsert (create-or-update by existence).
   final bool upsert;
-
-  const PushOp({
-    required this.opId,
-    required this.store,
-    required this.id,
-    required this.dataJson,
-    this.baseUpdated,
-    this.upsert = false,
-  });
 }
 
 /// Result of one remote push operation.
 class PushResult {
+
+  const PushResult({
+    required this.opId,
+    required this.ok,
+    this.record,
+    this.error,
+    this.pushedJson,
+  });
   /// Operation ID supplied in the corresponding [PushOp].
   final String opId;
 
@@ -216,14 +224,6 @@ class PushResult {
 
   /// When a concurrent change forced a merge, the payload actually pushed.
   final String? pushedJson;
-
-  const PushResult({
-    required this.opId,
-    required this.ok,
-    this.record,
-    this.error,
-    this.pushedJson,
-  });
 }
 
 /// Kind of event signaled by a backend realtime hint.
@@ -231,6 +231,9 @@ enum BackendHintKind { changed, deleted, authChanged }
 
 /// Backend event hint that triggers pull or fast-path processing.
 class BackendHint {
+
+  const BackendHint(this.store,
+      [this.kind = BackendHintKind.changed, this.record]);
   /// Affected collection.
   final String store;
 
@@ -242,9 +245,6 @@ class BackendHint {
   /// is clean and the event is newer — without a pull and without advancing
   /// the cursor. Null => a plain doorbell (the engine pulls).
   final RemoteRecord? record;
-
-  const BackendHint(this.store,
-      [this.kind = BackendHintKind.changed, this.record]);
 }
 
 // ---------------------------------------------------------------------------

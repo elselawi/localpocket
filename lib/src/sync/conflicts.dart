@@ -17,6 +17,19 @@ const String remoteDeletedKey = '__lp_deleted__';
 
 /// Representation of a conflict row in `lp_conflicts`.
 class ConflictRecord {
+  /// Creates a conflict row representation.
+  ConflictRecord({
+    required this.store,
+    required this.recordId,
+    required this.base,
+    required this.local,
+    required this.remote,
+    required this.dirtyLocal,
+    required this.dirtyRemote,
+    required this.detectedAt,
+    this.resolved,
+  });
+
   /// Collection containing the conflicted record.
   final String store;
 
@@ -50,23 +63,12 @@ class ConflictRecord {
   bool get remoteDeleted =>
       remote.length == 1 && remote[remoteDeletedKey] == true;
 
-  ConflictRecord({
-    required this.store,
-    required this.recordId,
-    required this.base,
-    required this.local,
-    required this.remote,
-    required this.dirtyLocal,
-    required this.dirtyRemote,
-    required this.detectedAt,
-    this.resolved,
-  });
-
+  /// Parses a conflict row from the `lp_conflicts` table.
   static ConflictRecord fromRow(Map<String, Object?> row) => parseRowModel(
         'lp_conflicts',
         () => ConflictRecord(
-          store: row['store'] as String,
-          recordId: row['record_id'] as String,
+          store: row['store']! as String,
+          recordId: row['record_id']! as String,
           base: decodeJsonMap(row['base_json'],
               table: 'lp_conflicts', column: 'base_json'),
           local: decodeJsonMap(row['local_json'],
@@ -77,7 +79,7 @@ class ConflictRecord {
               table: 'lp_conflicts', column: 'dirty_local'),
           dirtyRemote: decodeJsonStringSet(row['dirty_remote'],
               table: 'lp_conflicts', column: 'dirty_remote'),
-          detectedAt: row['detected_at'] as int,
+          detectedAt: row['detected_at']! as int,
           resolved: row['resolved_json'] != null
               ? decodeJsonMap(row['resolved_json'],
                   table: 'lp_conflicts', column: 'resolved_json')
@@ -88,10 +90,10 @@ class ConflictRecord {
 
 /// Conflicts management and watch API.
 class Conflicts {
-  final LocalPocket _pocket;
-
   /// Internal constructor used by [LocalPocket].
   Conflicts.internal(this._pocket);
+
+  final LocalPocket _pocket;
 
   /// Lists all currently open / unresolved conflicts in the database.
   Future<List<ConflictRecord>> listOpen({String? store}) async {
@@ -135,18 +137,19 @@ class Conflicts {
     }
 
     controller = StreamController<List<ConflictRecord>>.broadcast(
-      onListen: () {
+      onListen: () async {
         sub = _pocket.changes.listen((cs) {
           if (store == null ||
               cs.store == store ||
               cs.store == 'lp_conflicts') {
-            emit();
+            unawaited(emit());
           }
         });
-        emit();
+        await emit();
       },
-      onCancel: () {
-        sub?.cancel();
+      onCancel: () async {
+        await sub?.cancel();
+        await controller.close();
       },
     );
 

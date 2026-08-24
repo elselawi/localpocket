@@ -12,6 +12,7 @@ abstract class BlobStore {
   /// Creates a blob-store implementation.
   const BlobStore();
 
+  /// Pattern matching lowercase hexadecimal SHA-256 digests.
   static final RegExp validHashPattern = RegExp(r'^[0-9a-f]{64}$');
 
   /// Validates that [hash] is a 64-character lowercase hex SHA-256 digest.
@@ -52,10 +53,14 @@ abstract class BlobStore {
 
 /// Result of streaming validation containing the verified hash and byte count.
 class StreamValidationResult {
-  final String hash;
-  final int totalBytes;
-
+  /// Creates a stream-validation result.
   const StreamValidationResult({required this.hash, required this.totalBytes});
+
+  /// Verified SHA-256 hash, or the supplied storage key.
+  final String hash;
+
+  /// Number of bytes consumed from the input stream.
+  final int totalBytes;
 }
 
 /// Consumes a byte stream while computing its SHA-256 digest, verifying size
@@ -100,6 +105,9 @@ Future<StreamValidationResult> processAndValidateBlobStream(
 
 /// In-memory implementation of BlobStore, useful for hermetic testing and web mock.
 class MemoryBlobStore extends BlobStore {
+  /// Creates an empty in-memory blob store.
+  MemoryBlobStore();
+
   final Map<String, Uint8List> _blobs = {};
   final Map<String, int> _lastModified = {};
   final List<String> _tmpFiles = [];
@@ -170,11 +178,6 @@ class MemoryBlobStore extends BlobStore {
 /// so dedup, refcount, and remote-name logic are untouched.
 /// Decorates a [BlobStore] with encryption at rest.
 class EncryptingBlobStore extends BlobStore {
-  final BlobStore _inner;
-  final List<int> Function(List<int> plaintext) _encrypt;
-  final List<int> Function(List<int> ciphertext) _decrypt;
-  final FieldCipher? _cipher;
-
   /// Creates an encrypting store from explicit byte transformation callbacks.
   EncryptingBlobStore(
     this._inner, {
@@ -191,6 +194,11 @@ class EncryptingBlobStore extends BlobStore {
   )   : _encrypt = cipher.encrypt,
         _decrypt = cipher.decrypt,
         _cipher = cipher;
+
+  final BlobStore _inner;
+  final List<int> Function(List<int> plaintext) _encrypt;
+  final List<int> Function(List<int> ciphertext) _decrypt;
+  final FieldCipher? _cipher;
 
   @override
   Future<String> put(
@@ -218,7 +226,8 @@ class EncryptingBlobStore extends BlobStore {
     final ciphertext = _cipher != null
         ? await _cipher!.encryptAsync(plaintext)
         : _encrypt(plaintext);
-    // Put ciphertext into inner store under the plaintext hash
+    // The decorator deliberately ignores [key] so encrypted blobs retain the
+    // plaintext-derived identity used for deduplication and references.
     await _inner.put(Stream.value(ciphertext),
         expectedSha256: null, expectedSize: null, key: hash);
     return hash;
@@ -226,6 +235,7 @@ class EncryptingBlobStore extends BlobStore {
 
   @override
   Future<Stream<List<int>>> open(String hash) async {
+    BlobStore.validateHash(hash);
     final cipherStream = await _inner.open(hash);
     final builder = BytesBuilder(copy: false);
     await for (final chunk in cipherStream) {
@@ -245,7 +255,17 @@ class EncryptingBlobStore extends BlobStore {
   Future<bool> exists(String hash) => _inner.exists(hash);
 
   @override
-  Future<int?> size(String hash) => _inner.size(hash);
+  Future<int?> size(String hash) async {
+    BlobStore.validateHash(hash);
+    if (!await _inner.exists(hash)) return null;
+
+    final stream = await open(hash);
+    var plaintextSize = 0;
+    await for (final chunk in stream) {
+      plaintextSize += chunk.length;
+    }
+    return plaintextSize;
+  }
 
   @override
   Future<int> cleanTmp({Duration olderThan = const Duration(hours: 24)}) =>

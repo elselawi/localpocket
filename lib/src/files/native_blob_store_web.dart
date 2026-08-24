@@ -4,10 +4,11 @@ import 'blob_store.dart';
 /// should inject a browser BlobStore (for example an OPFS-backed one); this
 /// type prevents accidental dart:io imports from breaking web compilation.
 class NativeBlobStore extends BlobStore {
+  /// Creates a placeholder that reports native filesystem operations as unsupported.
   NativeBlobStore(String rootDir);
 
-  UnsupportedError _unsupported() =>
-      UnsupportedError('NativeBlobStore requires dart:io; inject a web BlobStore.');
+  UnsupportedError _unsupported() => UnsupportedError(
+      'NativeBlobStore requires dart:io; inject a web BlobStore.');
 
   @override
   Future<String> put(Stream<List<int>> bytes,

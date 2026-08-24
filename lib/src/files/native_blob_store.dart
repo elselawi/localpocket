@@ -11,12 +11,14 @@ import 'blob_store.dart';
 /// `{rootDir}/blobs/{h[0:2]}/{sha256}`
 /// `{rootDir}/tmp/{uuid}`
 class NativeBlobStore extends BlobStore {
-  final String rootDir;
-
+  /// Creates a native blob store rooted at [rootDir].
   NativeBlobStore(this.rootDir) {
     Directory(_blobsDir).createSync(recursive: true);
     Directory(_tmpDir).createSync(recursive: true);
   }
+
+  /// Root directory containing the blob and temporary-file directories.
+  final String rootDir;
 
   String get _blobsDir => p.join(rootDir, 'blobs');
   String get _tmpDir => p.join(rootDir, 'tmp');
@@ -55,8 +57,8 @@ class NativeBlobStore extends BlobStore {
 
       final computedHash = result.hash;
       final targetDir = Directory(_shardDir(computedHash));
-      if (!await targetDir.exists()) {
-        await targetDir.create(recursive: true);
+      if (!targetDir.existsSync()) {
+        targetDir.createSync(recursive: true);
       }
 
       final targetPath = _blobPath(computedHash);
@@ -66,17 +68,17 @@ class NativeBlobStore extends BlobStore {
       // cannot overwrite an existing file (Windows), a concurrent put that
       // published the same hash first makes the loser's rename fail; that is
       // a dedup win, not an error.
-      if (await targetFile.exists()) {
+      if (targetFile.existsSync()) {
         // Dedup: already exists, remove tmp file
-        await tmpFile.delete();
+        tmpFile.deleteSync();
       } else {
         try {
           await tmpFile.rename(targetPath);
         } on FileSystemException {
-          if (await targetFile.exists()) {
+          if (targetFile.existsSync()) {
             // A concurrent writer published the same hash first.
-            if (await tmpFile.exists()) {
-              await tmpFile.delete();
+            if (tmpFile.existsSync()) {
+              tmpFile.deleteSync();
             }
           } else {
             rethrow;
@@ -91,8 +93,8 @@ class NativeBlobStore extends BlobStore {
         await sink.close();
       } catch (_) {}
       try {
-        if (await tmpFile.exists()) {
-          await tmpFile.delete();
+        if (tmpFile.existsSync()) {
+          tmpFile.deleteSync();
         }
       } catch (_) {}
       rethrow;
@@ -104,7 +106,7 @@ class NativeBlobStore extends BlobStore {
     BlobStore.validateHash(hash);
     final path = _blobPath(hash);
     final file = File(path);
-    if (!await file.exists()) {
+    if (!file.existsSync()) {
       throw StateError('Blob not found: $hash');
     }
     return file.openRead();
@@ -115,37 +117,37 @@ class NativeBlobStore extends BlobStore {
     BlobStore.validateHash(hash);
     final path = _blobPath(hash);
     final file = File(path);
-    if (await file.exists()) {
-      await file.delete();
+    if (file.existsSync()) {
+      file.deleteSync();
     }
   }
 
   @override
   Future<bool> exists(String hash) async {
     BlobStore.validateHash(hash);
-    return File(_blobPath(hash)).exists();
+    return File(_blobPath(hash)).existsSync();
   }
 
   @override
   Future<int?> size(String hash) async {
     BlobStore.validateHash(hash);
     final file = File(_blobPath(hash));
-    if (!await file.exists()) return null;
-    return file.length();
+    if (!file.existsSync()) return null;
+    return file.lengthSync();
   }
 
   @override
   Future<int> cleanTmp({Duration olderThan = const Duration(hours: 24)}) async {
     final tmpDir = Directory(_tmpDir);
-    if (!await tmpDir.exists()) return 0;
+    if (!tmpDir.existsSync()) return 0;
     final now = DateTime.now();
     var cleaned = 0;
     await for (final entity in tmpDir.list()) {
       if (entity is File) {
-        final stat = await entity.stat();
+        final stat = entity.statSync();
         if (now.difference(stat.modified) > olderThan) {
           try {
-            await entity.delete();
+            entity.deleteSync();
             cleaned++;
           } catch (_) {}
         }
@@ -157,7 +159,7 @@ class NativeBlobStore extends BlobStore {
   @override
   Future<List<String>> listHashes() async {
     final blobsDir = Directory(_blobsDir);
-    if (!await blobsDir.exists()) return [];
+    if (!blobsDir.existsSync()) return [];
     final hashes = <String>[];
     await for (final shard in blobsDir.list()) {
       if (shard is Directory) {

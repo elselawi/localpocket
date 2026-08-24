@@ -8,6 +8,10 @@ library;
 /// A bearer token with an optional expiry. [expiresAt] may be null when the
 /// token has no server-declared lifetime.
 class Token {
+  /// Creates a bearer token value with optional lifetime metadata.
+  Token(this.value, {this.expiresAt, DateTime? issuedAt})
+      : issuedAt = issuedAt ?? DateTime.now();
+
   /// Bearer token value.
   final String value;
 
@@ -17,10 +21,6 @@ class Token {
   /// When the token was issued (defaults to now); used to compute the
   /// remaining-fraction for proactive refresh.
   final DateTime issuedAt;
-
-  /// Creates a bearer token value with optional lifetime metadata.
-  Token(this.value, {this.expiresAt, DateTime? issuedAt})
-      : issuedAt = issuedAt ?? DateTime.now();
 
   /// Whether the token has passed its expiration time.
   bool get isExpired => expiresAt != null && DateTime.now().isAfter(expiresAt!);
@@ -75,6 +75,12 @@ abstract class TokenProvider {
 /// Wraps [TokenProvider] with single-flight refresh + proactive refresh.
 /// Manages cached tokens and single-flight refresh operations.
 class AuthManager {
+  /// Creates an authentication manager around [provider].
+  ///
+  /// Reuse one manager for the lifetime of a backend so concurrent requests
+  /// share the same single-flight refresh operation.
+  AuthManager(this.provider);
+
   /// Application token provider.
   final TokenProvider provider;
   Token? _token;
@@ -84,31 +90,19 @@ class AuthManager {
   /// Number of refresh operations performed; useful for diagnostics.
   int refreshCount = 0;
 
-  /// Creates an authentication manager around [provider].
-  ///
-  /// Reuse one manager for the lifetime of a backend so concurrent requests
-  /// share the same single-flight refresh operation.
-  AuthManager(this.provider);
-
   /// The token to use for the next request, refreshing proactively when
   /// needed. The initial load is single-flight: a burst of concurrent callers
   /// before any token is cached share one `currentToken()` call.
   Future<Token> token() async {
     final cached = _token;
     if (cached == null) {
-      final inflight = _initialLoad ??= provider.currentToken();
-      try {
-        final t = await inflight;
-        _token = t;
-        // A freshly loaded token may already be near expiry.
-        if (t.needsProactiveRefresh) await _refresh();
-        return _token!;
-      } finally {
-        _initialLoad = null;
-      }
+      final loaded = await _loadToken();
+      // A freshly loaded token may already be near expiry.
+      if (loaded.needsProactiveRefresh) await _refresh(loaded);
+      return _token!;
     }
     if (cached.needsProactiveRefresh) {
-      await _refresh();
+      await _refresh(cached);
     }
     return _token!;
   }
@@ -117,22 +111,45 @@ class AuthManager {
   /// one refresh. When no token is cached yet, the current token is loaded
   /// first so the provider always receives a non-null token to refresh.
   Future<Token> refreshNow() async {
-    _token ??= await provider.currentToken();
-    return _refresh();
+    // Keep the token returned by the load. This prevents invalidate() from
+    // clearing the source between the await and starting the refresh.
+    final current = await _loadToken();
+    return _refresh(current);
   }
 
-  Future<Token> _refresh() {
+  Future<Token> _loadToken() async {
+    final cached = _token;
+    if (cached != null) return cached;
+
+    final inflight = _initialLoad ??= provider.currentToken();
+    try {
+      final loaded = await inflight;
+      _token = loaded;
+      return loaded;
+    } finally {
+      if (identical(_initialLoad, inflight)) _initialLoad = null;
+    }
+  }
+
+  Future<Token> _refresh([Token? source]) {
     final inflight = _inflight;
     if (inflight != null) return inflight;
-    final future = _doRefresh();
+    final future = _doRefresh(source ?? _token);
     _inflight = future;
     return future;
   }
 
-  Future<Token> _doRefresh() async {
+  Future<Token> _doRefresh(Token? source) async {
     refreshCount++;
+    // Capture the source before awaiting: invalidate() may be called while
+    // the provider is refreshing, but the in-flight operation must still
+    // refresh the token it started with.
+    final current = source;
+    if (current == null) {
+      throw StateError('Cannot refresh without a cached token');
+    }
     try {
-      final fresh = await provider.refreshToken(_token!);
+      final fresh = await provider.refreshToken(current);
       _token = fresh;
       return fresh;
     } finally {

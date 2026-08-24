@@ -28,8 +28,11 @@ const String cipherEnvelopeTypeAesGcm = 'aes-gcm';
 /// web-only typed error (like the protocol exceptions in `protocol.dart`),
 /// not part of the native [LocalPocketError] hierarchy.
 final class WebCipherUnsupportedError implements Exception {
+  /// Creates an error for an unsupported web cipher configuration.
+  const WebCipherUnsupportedError(this.message);
+
+  /// Human-readable explanation of why the web cipher configuration is unsupported.
   final String message;
-  WebCipherUnsupportedError(this.message);
 
   @override
   String toString() => 'WebCipherUnsupportedError: $message';
@@ -49,19 +52,19 @@ final class WebCipherUnsupportedError implements Exception {
 ///
 /// Returns `null` when no cipher is configured (and none is required).
 Map<String, Object?>? buildFieldCipherEnvelope({
+  required List<CollectionSchema<Object?>> stores,
   Object? fieldCipher,
   Object? cryptoProvider,
-  required List<CollectionSchema> stores,
 }) {
   if (cryptoProvider != null) {
-    throw WebCipherUnsupportedError(
+    throw const WebCipherUnsupportedError(
         'CryptoProvider is not supported on web: it is an app-supplied '
         'interface with no serializable form. Pass an AesGcmFieldCipher via '
         'fieldCipher instead.');
   }
   if (fieldCipher == null) {
     if (_hasEncryptedFields(stores)) {
-      throw WebCipherUnsupportedError(
+      throw const WebCipherUnsupportedError(
           'Store declares encrypted fields but no fieldCipher was provided. '
           'Open with an AesGcmFieldCipher to use field-level encryption on '
           'web.');
@@ -86,16 +89,17 @@ Map<String, Object?>? buildFieldCipherEnvelope({
 /// malformed envelope — a bad envelope must never be silently ignored.
 AesGcmFieldCipher? parseFieldCipherEnvelope(Object? raw) {
   if (raw == null) return null;
-  if (raw is! Map) {
-    throw FormatException('fieldCipher envelope must be a map.');
+  if (raw is! Map<Object?, Object?>) {
+    throw const FormatException('fieldCipher envelope must be a map.');
   }
   final type = raw['type'];
   if (type != cipherEnvelopeTypeAesGcm) {
     throw FormatException('Unsupported fieldCipher type: $type');
   }
   final key = raw['key'];
-  if (key is! List || key.length != 32) {
-    throw FormatException('AES-256-GCM fieldCipher key must be 32 bytes.');
+  if (key is! List<Object?> || key.length != 32) {
+    throw const FormatException(
+        'AES-256-GCM fieldCipher key must be 32 bytes.');
   }
   final bytes = Uint8List(32);
   for (var i = 0; i < 32; i++) {
@@ -108,5 +112,5 @@ AesGcmFieldCipher? parseFieldCipherEnvelope(Object? raw) {
   return AesGcmFieldCipher(bytes);
 }
 
-bool _hasEncryptedFields(List<CollectionSchema> stores) =>
+bool _hasEncryptedFields(List<CollectionSchema<Object?>> stores) =>
     stores.any((s) => s.fields.any((f) => f.encrypted));

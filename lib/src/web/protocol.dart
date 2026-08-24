@@ -8,6 +8,10 @@
 /// fail open with a typed [ProtocolMismatchException], never a generic error.
 library;
 
+// Wire constants and envelope fields are documented by their protocol
+// comments above; documenting every individual constant would add noise.
+// ignore_for_file: public_member_api_docs
+
 import '../core/errors.dart';
 import '../sync/sync_backend.dart';
 
@@ -232,17 +236,17 @@ String stableWireErrorType(Object error) {
 
 /// A request envelope sent from the facade to the worker.
 class WebRequest {
-  final int version;
-  final int requestId;
-  final String op;
-  final Map<String, Object?> args;
-
   const WebRequest({
     required this.version,
     required this.requestId,
     required this.op,
     this.args = const {},
   });
+
+  final int version;
+  final int requestId;
+  final String op;
+  final Map<String, Object?> args;
 
   Map<String, Object?> toJson() => {
         'v': version,
@@ -282,15 +286,6 @@ class WebRequest {
 
 /// A response envelope sent from the worker back to the facade.
 class WebResponse {
-  final int version;
-  final int requestId;
-
-  /// The structured-clone-safe result on success, or null.
-  final Object? result;
-
-  /// Non-null when this response carries an error.
-  final WebError? error;
-
   const WebResponse.success({
     required this.version,
     required this.requestId,
@@ -302,6 +297,15 @@ class WebResponse {
     required this.requestId,
     required this.error,
   }) : result = null;
+
+  final int version;
+  final int requestId;
+
+  /// The structured-clone-safe result on success, or null.
+  final Object? result;
+
+  /// Non-null when this response carries an error.
+  final WebError? error;
 
   bool get isError => error != null;
 
@@ -354,15 +358,15 @@ class WebResponse {
 
 /// Structured error payload carried inside a [WebResponse].
 class WebError {
-  final String code;
-  final String message;
-  final Map<String, Object?>? details;
-
   const WebError({
     required this.code,
     required this.message,
     this.details,
   });
+
+  final String code;
+  final String message;
+  final Map<String, Object?>? details;
 
   Map<String, Object?> toJson() => {
         'c': code,
@@ -380,8 +384,16 @@ class WebError {
       throw ProtocolEnvelopeException('Error "m" must be a string.');
     }
     final d = json['d'];
-    final details =
-        d is Map ? d.map((k, v) => MapEntry(k.toString(), v)) : null;
+    Map<String, Object?>? details;
+    if (d != null) {
+      if (d is! Map) {
+        throw ProtocolEnvelopeException('Error "d" must be a map.');
+      }
+      final rawDetails = d as Map<Object?, Object?>;
+      details = rawDetails.map(
+        (key, value) => MapEntry(key.toString(), value),
+      );
+    }
     return WebError(code: code, message: message, details: details);
   }
 }
@@ -389,9 +401,10 @@ class WebError {
 /// The worker or tab hosting the database is gone. Maps to the upstream
 /// `Channel to database worker is closed` condition.
 final class DatabaseWorkerClosedException implements Exception {
-  final String message;
   DatabaseWorkerClosedException(
       [this.message = 'The database worker is closed.']);
+
+  final String message;
 
   @override
   String toString() => 'DatabaseWorkerClosedException: $message';
@@ -399,9 +412,10 @@ final class DatabaseWorkerClosedException implements Exception {
 
 /// The other end speaks a different protocol version.
 final class ProtocolMismatchException implements Exception {
+  ProtocolMismatchException({required this.expected, required this.actual});
+
   final int expected;
   final int actual;
-  ProtocolMismatchException({required this.expected, required this.actual});
 
   @override
   String toString() =>
@@ -410,8 +424,9 @@ final class ProtocolMismatchException implements Exception {
 
 /// A malformed envelope, an unknown operation, or an invalid field.
 final class ProtocolEnvelopeException implements Exception {
-  final String message;
   ProtocolEnvelopeException(this.message);
+
+  final String message;
 
   @override
   String toString() => 'ProtocolEnvelopeException: $message';
@@ -419,14 +434,15 @@ final class ProtocolEnvelopeException implements Exception {
 
 /// A typed LocalPocket error that crossed the wire from the worker.
 final class RemoteLocalPocketException implements Exception {
-  final String code;
-  final String message;
-  final Map<String, Object?>? details;
   RemoteLocalPocketException({
     required this.code,
     required this.message,
     this.details,
   });
+
+  final String code;
+  final String message;
+  final Map<String, Object?>? details;
 
   @override
   String toString() => 'RemoteLocalPocketException[$code]: $message';
@@ -437,17 +453,20 @@ Object decodeError(WebError error) {
   switch (error.code) {
     case WireErrorCode.protocolMismatch:
       final details = error.details;
+      final expected = details?['expected'];
+      final actual = details?['actual'];
       return ProtocolMismatchException(
-        expected: (details?['expected'] as int?) ?? webProtocolVersion,
-        actual: (details?['actual'] as int?) ?? -1,
+        expected: expected is int ? expected : webProtocolVersion,
+        actual: actual is int ? actual : -1,
       );
     case WireErrorCode.workerClosed:
       return DatabaseWorkerClosedException(error.message);
     case WireErrorCode.aborted:
       return ProtocolEnvelopeException('Operation aborted.');
     case WireErrorCode.localpocket:
+      final type = error.details?['type'];
       return RemoteLocalPocketException(
-        code: (error.details?['type'] as String?) ?? 'unknown',
+        code: type is String ? type : 'unknown',
         message: error.message,
         details: error.details,
       );

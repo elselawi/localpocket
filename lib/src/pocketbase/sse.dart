@@ -20,24 +20,43 @@ import 'transport.dart';
 
 /// A parsed realtime event carrying the full embedded record.
 class PbRealtimeEvent {
-  final String action; // create | update | delete
-  final RemoteRecord record;
+  /// Creates a realtime event with an [action] and its associated [record].
   const PbRealtimeEvent(this.action, this.record);
+
+  /// The event action (`create`, `update`, or `delete`).
+  final String action; // create | update | delete
+
+  /// The remote record payload carried by the event.
+  final RemoteRecord record;
 }
 
 /// Raw SSE text events decoded from the byte stream.
 class _SseFrame {
+  _SseFrame({this.clientId, this.data});
+
   final String? clientId; // PB_CONNECT handshake
   final Map<String, Object?>? data; // parsed event data
-  _SseFrame({this.clientId, this.data});
 }
 
+/// Realtime SSE connection manager to PocketBase.
 class PbRealtime {
+  /// Creates a new realtime SSE client.
+  PbRealtime({
+    required this.client,
+    required this.collectionNames,
+    required this.onGapClosed,
+    required this.onEvent,
+    this.reconnectDelay = const Duration(seconds: 1),
+  });
+
+  /// PocketBase HTTP client for auth token resolution and transport.
   final PbClient client;
 
   /// Remote collection names to subscribe to (PB realtime is per-collection,
   /// e.g. ['data'] — NOT the local store names).
   final List<String> collectionNames;
+
+  /// Reconnect delay backoff between connection attempts.
   final Duration reconnectDelay;
 
   /// Called after every successful handshake (including the first connect) —
@@ -53,22 +72,17 @@ class PbRealtime {
   Future<void> _frameTail = Future.value();
   int _connectCount = 0;
 
-  PbRealtime({
-    required this.client,
-    required this.collectionNames,
-    required this.onGapClosed,
-    required this.onEvent,
-    this.reconnectDelay = const Duration(seconds: 1),
-  });
-
+  /// Total number of successful stream connections established.
   int get connectCount => _connectCount;
 
+  /// Starts the realtime connection loop.
   Future<void> start() async {
     if (_running) return;
     _running = true;
-    _runLoop();
+    unawaited(_runLoop());
   }
 
+  /// Stops the realtime connection loop and cancels any active subscription.
   Future<void> stop() async {
     _running = false;
     await _sub?.cancel();
@@ -169,7 +183,7 @@ class PbRealtime {
     final action = data['action'];
     if (action is! String) return;
     final record = data['record'];
-    if (record is! Map) return;
+    if (record is! Map<dynamic, dynamic>) return;
     try {
       final parsed = _parseRecord(record);
       onEvent(PbRealtimeEvent(action, parsed));
@@ -178,7 +192,7 @@ class PbRealtime {
     }
   }
 
-  RemoteRecord _parseRecord(Map raw) {
+  RemoteRecord _parseRecord(Map<dynamic, dynamic> raw) {
     final id = raw['id'];
     final store = raw['store'];
     final updated = raw['updated'];
@@ -258,7 +272,7 @@ class _SseParser {
 
     try {
       final decoded = jsonDecode(payload);
-      if (decoded is Map) {
+      if (decoded is Map<dynamic, dynamic>) {
         final map = Map<String, Object?>.from(decoded);
         final clientId = map['clientId'];
         if (event == 'PB_CONNECT' && clientId is String) {

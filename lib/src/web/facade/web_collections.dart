@@ -11,10 +11,13 @@ import 'package:localpocket/src/web/protocol.dart';
 
 /// Main-thread collection proxy.
 class WebCollection with ChangeBusAwareStore, WireCollectionMixin {
-  final WebFacadeHost _pocket;
-  final CollectionSchema schema;
-
+  /// Creates a collection facade bound to [pocket] for [schema].
   WebCollection.ins(this._pocket, this.schema);
+
+  final WebFacadeHost _pocket;
+
+  /// Runtime schema for the collection exposed by this facade.
+  final CollectionSchema<Object?> schema;
 
   @override
   WebFacadeHost get pocket => _pocket;
@@ -42,12 +45,21 @@ class WebCollection with ChangeBusAwareStore, WireCollectionMixin {
         register: () async {
           _pocket.workerStreams[watchId] = controller;
           try {
-            final res = (await _pocket.send(WireOp.watchOne, {
+            final raw = await _pocket.send(WireOp.watchOne, {
               'watchId': watchId,
               'store': name,
               'id': id,
-            })) as Map;
-            final item = decodeWireValue(res['item']) as Map<String, Object?>?;
+            });
+            if (raw is! Map) {
+              if (!controller.isClosed) {
+                controller.add(null);
+              }
+              return;
+            }
+            final decoded = decodeWireValue(raw['item']);
+            final item = decoded is Map
+                ? decoded.map((k, v) => MapEntry(k.toString(), v))
+                : null;
             if (!controller.isClosed) {
               controller.add(item);
             }
@@ -57,10 +69,17 @@ class WebCollection with ChangeBusAwareStore, WireCollectionMixin {
         },
         unregister: () => _cancelWatch(watchId),
       ),
-      onCancel: () => _pocket.watchTracker.requestUnregistration(
-        watchId: watchId,
-        unregister: () => _cancelWatch(watchId),
-      ),
+      onCancel: () async {
+        await _pocket.watchTracker.requestUnregistration(
+          watchId: watchId,
+          unregister: () async {
+            await _cancelWatch(watchId);
+            if (!controller.isClosed) {
+              await controller.close();
+            }
+          },
+        );
+      },
     );
     return controller.stream;
   }
@@ -72,6 +91,7 @@ class WebCollection with ChangeBusAwareStore, WireCollectionMixin {
     } catch (_) {}
   }
 
+  /// Builds a query against this collection.
   WebQueryBuilder query() => WebQueryBuilder(_pocket, schema);
 
   /// Starts a full-text search on the collection's configured FTS fields.

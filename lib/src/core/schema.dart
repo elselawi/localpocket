@@ -21,34 +21,37 @@ T _parseSchemaJson<T>(T Function() build) {
 }
 
 /// Supported logical field types.
-enum FieldKind { text, int, real, bool, date, enumValue, json, jsonList, ref }
+enum FieldKind {
+  /// A UTF-8 text value.
+  text,
+
+  /// An integer value.
+  int,
+
+  /// A floating-point value.
+  real,
+
+  /// A boolean value stored as `0` or `1`.
+  bool,
+
+  /// A date/time value stored as epoch milliseconds.
+  date,
+
+  /// A string restricted to a declared set of values.
+  enumValue,
+
+  /// A JSON object or array.
+  json,
+
+  /// A JSON array.
+  jsonList,
+
+  /// A reference to another collection.
+  ref,
+}
 
 /// Declares one typed field in a [CollectionSchema].
 class Field {
-  /// Column name exposed to queries and records.
-  final String name;
-
-  /// Logical type of the field.
-  final FieldKind kind;
-
-  /// Whether writes must provide a non-null value.
-  final bool required;
-
-  /// Whether non-archived records must have unique values.
-  final bool uniqueWhenActive;
-
-  /// Whether the value is encrypted at rest.
-  final bool encrypted;
-
-  /// Allowed values for an enum field.
-  final List<String>? enumValues;
-
-  /// Referenced collection name for a reference field.
-  final String? refTo;
-
-  /// Whether SQLite should enforce the reference as a foreign key.
-  final bool enforceFk;
-
   const Field._({
     required this.name,
     required this.kind,
@@ -120,6 +123,30 @@ class Field {
           {required String to, bool enforceFk = false}) =>
       Field._(name: name, kind: FieldKind.ref, refTo: to, enforceFk: enforceFk);
 
+  /// Column name exposed to queries and records.
+  final String name;
+
+  /// Logical type of the field.
+  final FieldKind kind;
+
+  /// Whether writes must provide a non-null value.
+  final bool required;
+
+  /// Whether non-archived records must have unique values.
+  final bool uniqueWhenActive;
+
+  /// Whether the value is encrypted at rest.
+  final bool encrypted;
+
+  /// Allowed values for an enum field.
+  final List<String>? enumValues;
+
+  /// Referenced collection name for a reference field.
+  final String? refTo;
+
+  /// Whether SQLite should enforce the reference as a foreign key.
+  final bool enforceFk;
+
   /// SQLite affinity for this field.
   ///
   /// Encrypted fields always store base64 ciphertext as TEXT: a STRICT
@@ -139,6 +166,7 @@ class Field {
     };
   }
 
+  /// Serializes this field to a JSON-compatible map.
   Map<String, Object?> toJson() => {
         'name': name,
         'kind': kind.name,
@@ -150,9 +178,10 @@ class Field {
         'enforceFk': enforceFk,
       };
 
+  /// Reconstructs a field from a JSON-compatible map.
   static Field fromJson(Map<String, Object?> j) => _parseSchemaJson(() {
-        final kind = FieldKind.values.byName(j['kind'] as String);
-        final name = j['name'] as String;
+        final kind = FieldKind.values.byName(j['kind']! as String);
+        final name = j['name']! as String;
         final required = j['required'] == true;
         final encrypted = j['encrypted'] == true;
         switch (kind) {
@@ -171,7 +200,7 @@ class Field {
             return Field.date(name, required: required);
           case FieldKind.enumValue:
             return Field.enumValue(
-                name, (j['enumValues'] as List).cast<String>(),
+                name, (j['enumValues']! as List).cast<String>(),
                 required: required);
           case FieldKind.json:
             return Field.json(name, encrypted: encrypted);
@@ -179,16 +208,26 @@ class Field {
             return Field.jsonList(name, encrypted: encrypted);
           case FieldKind.ref:
             return Field.ref(name,
-                to: j['refTo'] as String, enforceFk: j['enforceFk'] == true);
+                to: j['refTo']! as String, enforceFk: j['enforceFk'] == true);
         }
       });
 }
 
 /// Controls which records are included in an index.
-enum IndexScope { live, notArchived }
+enum IndexScope {
+  /// Includes records that are not archived.
+  live,
+
+  /// Includes records regardless of their archived state.
+  notArchived,
+}
 
 /// Declares a SQLite index for one or more fields.
 class IndexSpec {
+  /// Creates an index declaration.
+  const IndexSpec(this.columns,
+      {this.unique = false, this.scope = IndexScope.live});
+
   /// Ordered indexed column names.
   final List<String> columns;
 
@@ -198,38 +237,36 @@ class IndexSpec {
   /// Record visibility scope covered by this index.
   final IndexScope scope;
 
-  /// Creates an index declaration.
-  const IndexSpec(this.columns,
-      {this.unique = false, this.scope = IndexScope.live});
-
+  /// Serializes this index declaration to a JSON-compatible map.
   Map<String, Object?> toJson() => {
         'columns': columns,
         'unique': unique,
         'scope': scope.name,
       };
 
+  /// Reconstructs an index declaration from a JSON-compatible map.
   static IndexSpec fromJson(Map<String, Object?> j) =>
       _parseSchemaJson(() => IndexSpec(
-            (j['columns'] as List).cast<String>(),
+            (j['columns']! as List).cast<String>(),
             unique: j['unique'] == true,
-            scope: IndexScope.values.byName(j['scope'] as String),
+            scope: IndexScope.values.byName(j['scope']! as String),
           ));
 }
 
 /// Enables FTS5 over the declared text fields in [fields].
 class FtsSpec {
-  /// Declared fields indexed for full-text search.
-  final List<String> fields;
-
   /// Creates an FTS5 configuration.
   const FtsSpec(this.fields);
+
+  /// Declared fields indexed for full-text search.
+  final List<String> fields;
 
   /// Serializes this FTS config to a JSON-compatible map.
   Map<String, Object?> toJson() => {'fields': fields};
 
   /// Reconstructs an FTS config from a JSON-compatible map.
   static FtsSpec fromJson(Map<String, Object?> j) =>
-      _parseSchemaJson(() => FtsSpec((j['fields'] as List).cast<String>()));
+      _parseSchemaJson(() => FtsSpec((j['fields']! as List).cast<String>()));
 }
 
 /// A store schema migration step.
@@ -239,6 +276,14 @@ class FtsSpec {
 /// - Destructive (`destructive: true`): the 12-step table rebuild. Rows are
 ///   copied through [transform] (old logical row -> new logical row).
 class StoreMigration {
+  /// Creates a forward store migration.
+  const StoreMigration({
+    required this.toVersion,
+    this.destructive = false,
+    this.addedFields = const [],
+    this.transform,
+  });
+
   /// Target store schema version after this step.
   final int toVersion;
 
@@ -251,14 +296,6 @@ class StoreMigration {
   /// Optional row transformation used during backfill or rebuild.
   final Map<String, Object?> Function(Map<String, Object?> oldRow)? transform;
 
-  /// Creates a forward store migration.
-  const StoreMigration({
-    required this.toVersion,
-    this.destructive = false,
-    this.addedFields = const [],
-    this.transform,
-  });
-
   /// Serializes migration metadata that can cross the web worker boundary.
   /// Function transforms are intentionally omitted: closures are not
   /// structured-clone-safe and cannot be reconstructed in the worker.
@@ -268,9 +305,10 @@ class StoreMigration {
         'addedFields': [for (final field in addedFields) field.toJson()],
       };
 
+  /// Reconstructs migration metadata from a JSON-compatible map.
   static StoreMigration fromJson(Map<String, Object?> json) =>
       _parseSchemaJson(() => StoreMigration(
-            toVersion: json['toVersion'] as int,
+            toVersion: json['toVersion']! as int,
             destructive: json['destructive'] == true,
             addedFields: [
               for (final field in (json['addedFields'] as List? ?? const []))
@@ -308,18 +346,6 @@ enum MissingRemotePolicy {
 /// Conflict resolution policy. Resolver implementations are provided by the
 /// sync layer; this type exists now so `CollectionSchema` can carry it.
 class ConflictPolicy {
-  /// Optional resolver for whole-record conflicts.
-  final Object? collectionResolver;
-
-  /// Resolver overrides keyed by field name.
-  final Map<String, Object> fieldOverrides;
-
-  /// Whether local content edits should unarchive a record.
-  final bool editsUnarchive;
-
-  /// How a pushed update reacts when its target no longer exists remotely.
-  final MissingRemotePolicy missingRemote;
-
   /// Creates a conflict policy.
   const ConflictPolicy({
     this.collectionResolver,
@@ -341,10 +367,61 @@ class ConflictPolicy {
         editsUnarchive: editsUnarchive,
         missingRemote: missingRemote,
       );
+
+  /// Optional resolver for whole-record conflicts.
+  final Object? collectionResolver;
+
+  /// Resolver overrides keyed by field name.
+  final Map<String, Object> fieldOverrides;
+
+  /// Whether local content edits should unarchive a record.
+  final bool editsUnarchive;
+
+  /// How a pushed update reacts when its target no longer exists remotely.
+  final MissingRemotePolicy missingRemote;
 }
 
 /// Runtime schema for one LocalPocket collection.
 class CollectionSchema<T> {
+  /// Creates a collection schema.
+  const CollectionSchema({
+    required this.name,
+    required this.version,
+    required this.fields,
+    this.indexes = const [],
+    this.conflictPolicy = const ConflictPolicy(),
+    this.prefetchFiles = false,
+    this.keepUnsyncedArchives = false,
+    this.fts,
+    this.migrations = const [],
+    this.documentMigrations = const {},
+    this.validator,
+  });
+
+  /// Reconstructs a schema from a JSON-compatible map.
+  factory CollectionSchema.fromJson(Map<String, Object?> j) =>
+      _parseSchemaJson(() => CollectionSchema<T>(
+            name: j['name']! as String,
+            version: j['version']! as int,
+            fields: [
+              for (final f in (j['fields']! as List))
+                Field.fromJson(f as Map<String, Object?>)
+            ],
+            indexes: [
+              for (final ix in (j['indexes']! as List))
+                IndexSpec.fromJson(ix as Map<String, Object?>)
+            ],
+            keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
+            prefetchFiles: j['prefetchFiles'] == true,
+            fts: j['fts'] is Map
+                ? FtsSpec.fromJson(j['fts']! as Map<String, Object?>)
+                : null,
+            migrations: [
+              for (final migration in (j['migrations'] as List? ?? const []))
+                StoreMigration.fromJson(migration as Map<String, Object?>),
+            ],
+          ));
+
   /// Collection and SQLite table name.
   final String name;
 
@@ -378,27 +455,13 @@ class CollectionSchema<T> {
   /// Optional application-level validation callback.
   final List<String> Function(Map<String, Object?> record)? validator;
 
-  /// Creates a collection schema.
-  const CollectionSchema({
-    required this.name,
-    required this.version,
-    required this.fields,
-    this.indexes = const [],
-    this.conflictPolicy = const ConflictPolicy(),
-    this.prefetchFiles = false,
-    this.keepUnsyncedArchives = false,
-    this.fts,
-    this.migrations = const [],
-    this.documentMigrations = const {},
-    this.validator,
-  });
-
   /// Cached declared-name set. The identity-keyed Expando preserves the const
   /// constructor while avoiding rebuilding the Set on every encode/payload
   /// pass (cache immutable schema metadata).
   static final Expando<Set<String>> _declaredNamesCache =
       Expando<Set<String>>('declaredNames');
 
+  /// Returns the names of all fields declared by this schema.
   Set<String> get declaredFieldNames =>
       _declaredNamesCache[this] ??= {for (final f in fields) f.name};
 
@@ -422,35 +485,12 @@ class CollectionSchema<T> {
         if (fts != null) 'fts': fts!.toJson(),
         'migrations': [for (final migration in migrations) migration.toJson()],
       };
-
-  factory CollectionSchema.fromJson(Map<String, Object?> j) =>
-      _parseSchemaJson(() => CollectionSchema(
-            name: j['name'] as String,
-            version: j['version'] as int,
-            fields: [
-              for (final f in (j['fields'] as List))
-                Field.fromJson(f as Map<String, Object?>)
-            ],
-            indexes: [
-              for (final ix in (j['indexes'] as List))
-                IndexSpec.fromJson(ix as Map<String, Object?>)
-            ],
-            keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
-            prefetchFiles: j['prefetchFiles'] == true,
-            fts: j['fts'] is Map
-                ? FtsSpec.fromJson(j['fts'] as Map<String, Object?>)
-                : null,
-            migrations: [
-              for (final migration in (j['migrations'] as List? ?? const []))
-                StoreMigration.fromJson(migration as Map<String, Object?>),
-            ],
-          ));
 }
 
 /// Applies document migrations `from+1 .. to` to a logical document.
 /// Pure, deterministic, idempotent — never pushes anything.
 Map<String, Object?> applyDocumentMigrations(
-  CollectionSchema schema,
+  CollectionSchema<Object?> schema,
   Map<String, Object?> doc, {
   required int from,
   required int to,

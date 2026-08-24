@@ -14,40 +14,39 @@ import 'package:localpocket/src/core/store.dart';
 import 'package:localpocket/src/core/watch.dart';
 import 'package:collection/collection.dart';
 
+/// A SQL predicate and its bound arguments.
 class WhereClause {
-  final String sql;
-  final List<Object?> args;
+  /// Creates a clause with parameterized SQL and its arguments.
   const WhereClause(this.sql, this.args);
+
+  /// The parameterized SQL fragment.
+  final String sql;
+
+  /// Values bound to the SQL placeholders.
+  final List<Object?> args;
 }
 
+/// A field ordering term.
 class OrderClause {
-  final String field;
-  final bool desc;
+  /// Creates an ordering term.
   const OrderClause(this.field, {this.desc = false});
+
+  /// The field to order by.
+  final String field;
+
+  /// Whether to sort in descending order.
+  final bool desc;
 }
 
 class _CursorData {
-  final List<Object?> values;
   const _CursorData(this.values);
+
+  final List<Object?> values;
 }
 
 /// Parameterized query builder. No user input is ever string
 /// interpolated into SQL; values travel as bound parameters.
 class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
-  final LocalPocket? _pocket;
-  final CollectionSchema _schema;
-
-  final List<WhereClause> _where;
-  final List<WhereClause> _orGroups;
-  final List<OrderClause> _order;
-  final int? _limit;
-  final bool _all;
-  final List<String>? _select;
-  final bool _includeArchived;
-  final bool _includeHidden;
-  final String? _cursor;
-  final bool _suppressIdTiebreak;
-
   /// Internal: constructed by [Collection].
   /// Internal constructor used by [Collection.query].
   QueryBuilder.internal(this._pocket, StoreTable table)
@@ -64,7 +63,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         _suppressIdTiebreak = false;
 
   /// Compile-only constructor used by the web query-plan spike.
-  QueryBuilder.compileOnly(CollectionSchema schema)
+  QueryBuilder.compileOnly(CollectionSchema<Object?> schema)
       : _pocket = null,
         _schema = schema,
         _where = [],
@@ -93,6 +92,20 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     this._suppressIdTiebreak,
   );
 
+  final LocalPocket? _pocket;
+  final CollectionSchema<Object?> _schema;
+
+  final List<WhereClause> _where;
+  final List<WhereClause> _orGroups;
+  final List<OrderClause> _order;
+  final int? _limit;
+  final bool _all;
+  final List<String>? _select;
+  final bool _includeArchived;
+  final bool _includeHidden;
+  final String? _cursor;
+  final bool _suppressIdTiebreak;
+
   QueryBuilder _copyWith({
     List<WhereClause>? where,
     List<WhereClause>? orGroups,
@@ -104,28 +117,29 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     bool? includeHidden,
     String? cursor,
     bool? suppressIdTiebreak,
-  }) {
-    return QueryBuilder._(
-      _pocket,
-      _schema,
-      where ?? List<WhereClause>.from(_where),
-      orGroups ?? List<WhereClause>.from(_orGroups),
-      order ?? List<OrderClause>.from(_order),
-      limit ?? _limit,
-      all ?? _all,
-      select ?? (_select == null ? null : List<String>.from(_select!)),
-      includeArchived ?? _includeArchived,
-      includeHidden ?? _includeHidden,
-      cursor ?? _cursor,
-      suppressIdTiebreak ?? _suppressIdTiebreak,
-    );
-  }
+  }) =>
+      QueryBuilder._(
+        _pocket,
+        _schema,
+        where ?? List<WhereClause>.from(_where),
+        orGroups ?? List<WhereClause>.from(_orGroups),
+        order ?? List<OrderClause>.from(_order),
+        limit ?? _limit,
+        all ?? _all,
+        select ?? (_select == null ? null : List<String>.from(_select!)),
+        includeArchived ?? _includeArchived,
+        includeHidden ?? _includeHidden,
+        cursor ?? _cursor,
+        suppressIdTiebreak ?? _suppressIdTiebreak,
+      );
 
   /// Name of the collection being queried.
   String get store => _schema.name;
 
+  /// Whether the query has an explicit ordering term.
   bool get hasExplicitOrder => _order.isNotEmpty;
 
+  /// Whether the query has an explicit result limit.
   bool get hasLimit => _limit != null;
 
   /// Internal: validates that a field is queryable.
@@ -261,9 +275,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// Use with care for large collections because all matching rows are
   /// materialized in memory.
   @override
-  QueryBuilder all() {
-    return _copyWith(all: true);
-  }
+  QueryBuilder all() => _copyWith(all: true);
 
   /// Selects only [fields] from each record.
   ///
@@ -277,21 +289,16 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   ///
   /// Projection of undeclared overflow keys falls back to full decoding.
   @override
-  QueryBuilder select(List<String> fields) {
-    return _copyWith(select: List<String>.from(fields));
-  }
+  QueryBuilder select(List<String> fields) =>
+      _copyWith(select: List<String>.from(fields));
 
   /// Includes records marked as archived.
   @override
-  QueryBuilder includeArchived() {
-    return _copyWith(includeArchived: true);
-  }
+  QueryBuilder includeArchived() => _copyWith(includeArchived: true);
 
   /// Includes records hidden by synchronization visibility state.
   @override
-  QueryBuilder includeHidden() {
-    return _copyWith(includeHidden: true);
-  }
+  QueryBuilder includeHidden() => _copyWith(includeHidden: true);
 
   List<OrderClause> get _effectiveOrder {
     final o = [..._order];
@@ -312,6 +319,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     return _limit;
   }
 
+  /// Name of the collection being queried.
   String get name => _schema.name;
 
   LocalPocket get _requirePocket =>
@@ -320,7 +328,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// Exposes internals needed by the watch layer (public because watches live
   /// in a separate library).
   int? get limitValue => _limit;
+
+  /// Whether the query explicitly opts out of a result limit.
   bool get allMode => _all;
+
+  /// Whether the query has a projection.
   bool get isProjection => _select != null;
 
   // ------------------------------------------------------------- compiling --
@@ -665,9 +677,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// Use the `nextCursor` from a previous [fetch] call with the same filters,
   /// projection, and ordering. A cursor from another query shape throws
   /// [StaleCursorError].
-  Future<Page> keysetAfter(String cursor) {
-    return _copyWith(cursor: cursor).fetch();
-  }
+  Future<Page> keysetAfter(String cursor) => _copyWith(cursor: cursor).fetch();
 
   /// Counts records matching the current filters.
   Future<int> count() async {
@@ -754,7 +764,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     final copy = _copyWith(select: ['id']);
     final (sql, args) = copy._compile();
     final rows = await copy._requirePocket.traceQuery(sql, args);
-    return [for (final r in rows) r['id'] as String];
+    return [for (final r in rows) r['id']! as String];
   }
 
   /// Returns SQLite's `EXPLAIN QUERY PLAN` output for this query.

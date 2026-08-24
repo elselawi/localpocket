@@ -10,10 +10,12 @@ import 'package:localpocket/src/web/facade/facade_host.dart';
 /// Object-URL materialization is intentionally NOT here: `URL.createObjectURL`
 /// is window-only work (see `web_blob_object_url.dart`).
 class WebLocalPocketFiles {
-  final WebFacadeHost _pocket;
-
+  /// Creates the web files facade over [_pocket].
   WebLocalPocketFiles.ins(this._pocket);
 
+  final WebFacadeHost _pocket;
+
+  /// Lists file references attached to [recordId] in [field].
   Future<List<Map<String, Object?>>> list({
     required String store,
     required String recordId,
@@ -56,6 +58,7 @@ class WebLocalPocketFiles {
     );
   }
 
+  /// Opens the bytes for the selected file reference.
   Future<Uint8List> open({
     required String store,
     required String recordId,
@@ -70,6 +73,7 @@ class WebLocalPocketFiles {
           index: index,
           refId: refId);
 
+  /// Removes the selected file reference from a record.
   Future<void> remove({
     required String store,
     required String recordId,
@@ -84,12 +88,14 @@ class WebLocalPocketFiles {
           index: index,
           refId: refId);
 
+  /// Garbage-collects unreferenced blobs and stale temporary uploads.
   Future<int> gc({
     Duration blobGrace = const Duration(days: 7),
     Duration tmpGrace = const Duration(hours: 24),
   }) =>
       _pocket.filesGc(blobGrace: blobGrace, tmpGrace: tmpGrace);
 
+  /// Evicts synced blobs until storage usage is at most [maxBytes].
   Future<int> enforceStorageCap({required int maxBytes}) =>
       _pocket.filesEnforceStorageCap(maxBytes: maxBytes);
 }

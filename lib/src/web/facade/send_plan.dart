@@ -31,5 +31,5 @@ Future<Map<String, Object?>> sendCompiledPlan(
     if (pageLimit != null) 'pageLimit': pageLimit,
     if (watchId != null) 'watchId': watchId,
   });
-  return (res as Map).map((k, v) => MapEntry(k.toString(), v));
+  return (res! as Map).map((k, v) => MapEntry(k.toString(), v));
 }

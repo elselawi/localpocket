@@ -14,16 +14,15 @@ part of 'worker_engine.dart';
 
 /// Active interactive transaction session state in the worker (§7.1).
 class _TxSession {
-  final int sessionId;
-  final Completer<void> completer;
-  final Tx tx;
-  final List<String> savepoints = [];
-
   _TxSession({
     required this.sessionId,
     required this.completer,
     required this.tx,
   });
+  final int sessionId;
+  final Completer<void> completer;
+  final Tx tx;
+  final List<String> savepoints = [];
 }
 
 /// Interactive-transaction handlers (see the file doc above).
@@ -67,8 +66,9 @@ mixin WorkerTxHandlers on WorkerEngineHost {
     final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
     final w = WireArgs(req.args);
     final store = w.requireString('store', op: 'tx_mutate_batch');
-    final mutations =
-        w.requireList('mutations', op: 'tx_mutate_batch').cast<Map>();
+    final mutations = w
+        .requireList('mutations', op: 'tx_mutate_batch')
+        .cast<Map<String, Object?>>();
     final txCol = sess.tx.collection(store);
     for (final m in mutations) {
       await _applyMutation(txCol, m);

@@ -19,13 +19,35 @@ import '../sync/outbox.dart';
 import '../sync/sync_tables.dart';
 
 /// What kind of local mutation is being applied.
-enum MutationAction { createOrUpdate, create, update, archive, restore }
+enum MutationAction {
+  /// Creates a record when absent, or replaces it when present.
+  createOrUpdate,
+
+  /// Inserts a new record.
+  create,
+
+  /// Updates an existing record.
+  update,
+
+  /// Marks a record as archived.
+  archive,
+
+  /// Removes the archive flag from a record.
+  restore,
+}
 
 /// The result of a paginated query.
 ///
 /// Use [nextCursor] with [QueryBuilder.keysetAfter] to fetch the next page.
 /// When [hasMore] is false, [nextCursor] is normally `null`.
 class Page {
+  /// Creates a query page.
+  const Page({
+    required this.items,
+    required this.hasMore,
+    this.nextCursor,
+  });
+
   /// Records in this page, in the requested order.
   final List<Map<String, Object?>> items;
 
@@ -34,9 +56,6 @@ class Page {
 
   /// Whether another page is available.
   final bool hasMore;
-
-  /// Creates a query page.
-  const Page({required this.items, this.nextCursor, required this.hasMore});
 }
 
 /// Typed CRUD access to one store.
@@ -46,19 +65,22 @@ class Page {
 /// `archived` is a boolean. Mutations are atomic with their outbox intent
 /// (the local-first invariant).
 class Collection with ChangeBusAwareStore {
+  /// Internal constructor used by [LocalPocket.collection] and [Tx.collection].
+  Collection.internal(
+    this._pocket,
+    this._table, {
+    DatabaseExecutor? exec,
+    Tx? tx,
+  })  : _exec = exec,
+        _tx = tx;
+
   final LocalPocket _pocket;
   final StoreTable _table;
   final DatabaseExecutor? _exec;
   final Tx? _tx;
 
-  /// Internal constructor used by [LocalPocket.collection] and [Tx.collection].
-  Collection.internal(this._pocket, this._table,
-      {DatabaseExecutor? exec, Tx? tx})
-      : _exec = exec,
-        _tx = tx;
-
   DatabaseExecutor get _ex => _exec ?? _pocket.db;
-  CollectionSchema get _schema => _table.schema;
+  CollectionSchema<Object?> get _schema => _table.schema;
 
   /// The schema name used to access this collection.
   @override
@@ -667,7 +689,7 @@ class Collection with ChangeBusAwareStore {
       final rows =
           await exec.query(tableName, where: 'id IN ($ph)', whereArgs: ids);
       for (final r in rows) {
-        final id = r['id'] as String;
+        final id = r['id']! as String;
         existingById[id] = decodeDbRow(_schema, r,
             cipher: _pocket.fieldCipher,
             cryptoProvider: _pocket.cryptoProvider);
@@ -687,12 +709,12 @@ class Collection with ChangeBusAwareStore {
       final srRows = await exec.query('lp_sync_row',
           where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
       for (final r in srRows) {
-        srById[r['record_id'] as String] = SyncRowState.fromRow(r);
+        srById[r['record_id']! as String] = SyncRowState.fromRow(r);
       }
       final opRows = await exec.query('lp_outbox',
           where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
       for (final r in opRows) {
-        opById[r['record_id'] as String] = OutboxOp.fromRow(r);
+        opById[r['record_id']! as String] = OutboxOp.fromRow(r);
       }
     }
 

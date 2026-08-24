@@ -9,14 +9,7 @@ import 'package:localpocket/src/core/watch.dart';
 /// Watches a compiled SQL query by subscribing to [ChangeBus] and re-running
 /// the compiled plan whenever matching stores are mutated.
 class CompiledWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
-  final CollectionSchema _schema;
-  final String _sql;
-  final List<Object?> _params;
-  final List<String>? _projection;
-  final List<String>? _decodeColumns;
-  final void Function(List<Map<String, Object?>> items) _emit;
-  final void Function(Object error, StackTrace stackTrace)? _onError;
-
+  /// Creates a watcher for a compiled SQL query plan.
   CompiledWatcher(
     super.pocket,
     this._schema,
@@ -28,6 +21,14 @@ class CompiledWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
     void Function(Object error, StackTrace stackTrace)? onError,
     super.coalesceWindow,
   }) : _onError = onError;
+
+  final CollectionSchema<Object?> _schema;
+  final String _sql;
+  final List<Object?> _params;
+  final List<String>? _projection;
+  final List<String>? _decodeColumns;
+  final void Function(List<Map<String, Object?>> items) _emit;
+  final void Function(Object error, StackTrace stackTrace)? _onError;
 
   @override
   bool shouldInvalidate(ChangeSet cs) => cs.store == _schema.name;

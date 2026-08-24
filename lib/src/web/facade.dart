@@ -25,14 +25,46 @@ import 'lifecycle.dart';
 import 'protocol.dart';
 import 'web_sender.dart';
 
+/// Web facade for a worker-owned LocalPocket database on the browser.
 class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
+  /// Creates a web facade around an already connected worker database.
+  LocalPocket._({
+    required this.path,
+    required Database remoteDb,
+    required WebSqlite webSqlite,
+    required List<String> blobUrlsToRevoke,
+    required this.capabilities,
+    required this.storageCapabilities,
+    required List<CollectionSchema<Object?>> stores,
+  })  : _remoteDb = remoteDb,
+        _webSqlite = webSqlite,
+        _blobUrlsToRevoke = blobUrlsToRevoke {
+    for (final s in stores) {
+      _storeMap[s.name] = s;
+    }
+    _sender = WebSender(
+      transport: (req) async {
+        final raw = await _remoteDb.customRequest(req.toJson().jsify());
+        return raw?.dartify();
+      },
+      onWorkerClosed: _failWorkerStreams,
+    );
+  }
+
+  /// Filesystem path identifying the worker-owned database.
   final String path;
   final Database _remoteDb;
   final WebSqlite _webSqlite;
   final List<String> _blobUrlsToRevoke;
+
+  /// Capabilities reported by the active SQLite implementation.
   SqliteCapabilities capabilities;
+
+  /// Browser storage capabilities available to this facade.
   WebStorageCapabilities storageCapabilities;
-  final Map<String, CollectionSchema> _storeMap = {};
+  final Map<String, CollectionSchema<Object?>> _storeMap = {};
+
+  /// Performance counters for this facade.
   final PerfCounters perf = PerfCounters();
   @override
   final Map<int, StreamController<dynamic>> workerStreams = {};
@@ -53,33 +85,10 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   /// Pure-Dart request/response core over the worker transport.
   late final WebSender _sender;
 
-  LocalPocket._({
-    required this.path,
-    required Database remoteDb,
-    required WebSqlite webSqlite,
-    required List<String> blobUrlsToRevoke,
-    required this.capabilities,
-    required this.storageCapabilities,
-    required List<CollectionSchema> stores,
-  })  : _remoteDb = remoteDb,
-        _webSqlite = webSqlite,
-        _blobUrlsToRevoke = blobUrlsToRevoke {
-    for (final s in stores) {
-      _storeMap[s.name] = s;
-    }
-    _sender = WebSender(
-      transport: (req) async {
-        final raw = await _remoteDb.customRequest(req.toJson().jsify());
-        return raw?.dartify();
-      },
-      onWorkerClosed: _failWorkerStreams,
-    );
-  }
-
   /// Opens or creates a database on web by spawning the dedicated engine worker.
   static Future<LocalPocket> open({
     required String path,
-    required List<CollectionSchema> stores,
+    required List<CollectionSchema<Object?>> stores,
     Object? database,
     PlatformProfile platform = PlatformProfile.web,
     bool encrypted = false,
@@ -171,7 +180,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
       multiTabSync: false,
       worker: true,
     );
-    final caps = SqliteCapabilities(
+    const caps = SqliteCapabilities(
       sqliteVersion: '3.53.3',
       hasStrict: true,
       walSupported: false,
@@ -228,6 +237,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
             (await web.window.navigator.storage.persist().toDart).toDart,
       );
 
+  /// Names of the stores registered with this facade.
   Iterable<String> get storeNames => _storeMap.keys;
 
   @override
@@ -243,9 +253,8 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   /// there and are unit-tested on the VM.
   @override
   Future<Object?> send(String op,
-      [Map<String, Object?> args = const {}]) async {
-    return _sender.send(op, args);
-  }
+          [Map<String, Object?> args = const {}]) async =>
+      _sender.send(op, args);
 
   void _markWorkerClosed() => _sender.markWorkerClosed();
 
@@ -280,17 +289,13 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   }
 
   @override
-  CollectionSchema schemaFor(String store) {
-    final s = _storeMap[store];
-    if (s == null) {
-      throw StateError('No store "$store" registered in this LocalPocket.');
-    }
-    return s;
-  }
+  CollectionSchema<Object?> schemaFor(String store) =>
+      _storeMap[store] ??
+      (throw StateError('No store "$store" registered in this LocalPocket.'));
 
-  WebCollection collection(String name) {
-    return WebCollection.ins(this, schemaFor(name));
-  }
+  /// Returns a collection proxy for the registered store [name].
+  WebCollection collection(String name) =>
+      WebCollection.ins(this, schemaFor(name));
 
   WebLocalPocketFiles? _files;
 
@@ -307,8 +312,8 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
 
   /// Runs [action] in an interactive transaction session (§7.1).
   Future<T> transaction<T>(Future<T> Function(WebTx tx) action) async {
-    final beginRes = (await send(WireOp.txBegin)) as Map;
-    final sessionId = beginRes['sessionId'] as int;
+    final beginRes = (await send(WireOp.txBegin))! as Map<String, Object?>;
+    final sessionId = beginRes['sessionId']! as int;
     final tx = WebTx.ins(this, sessionId);
 
     try {
@@ -323,34 +328,40 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     }
   }
 
+  /// Updates query statistics for [store], or for all stores when omitted.
   Future<void> analyze([String? store]) async {
     await send(WireOp.analyze, {'store': store});
   }
 
+  /// Runs a passive WAL checkpoint in the worker.
   Future<void> walCheckpoint() async {
     await send(WireOp.walCheckpoint);
   }
 
+  /// Reclaims unused database pages, optionally limiting the number of [pages].
   Future<void> vacuum({int? pages}) async {
     await send(WireOp.vacuum, {'pages': pages});
   }
 
+  /// Removes up to [maxEntries] acknowledged entries from the sync outbox.
   Future<int> pruneOutbox({int maxEntries = 10000}) async {
-    final res =
-        (await send(WireOp.pruneOutbox, {'maxEntries': maxEntries})) as Map;
+    final res = (await send(WireOp.pruneOutbox, {'maxEntries': maxEntries}))!
+        as Map<String, Object?>;
     return (res['pruned'] as int?) ?? 0;
   }
 
+  /// Compacts archived records in [store] older than [olderThan].
   Future<int> compact(String store,
       {required Duration olderThan, int? nowMs}) async {
     final res = (await send(WireOp.compact, {
       'store': store,
       'olderThanMs': olderThan.inMilliseconds,
       if (nowMs != null) 'nowMs': nowMs,
-    })) as Map;
+    }))! as Map<String, Object?>;
     return (res['compacted'] as int?) ?? 0;
   }
 
+  /// Runs maintenance tasks for the worker-owned database.
   Future<void> runMaintenance(
       {Duration compactOlderThan = const Duration(days: 90)}) async {
     await send(WireOp.runMaintenance, {
@@ -430,8 +441,8 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
       'name': name,
       'size': bytes.length,
       if (expectedSha256 != null) 'expectedSha256': expectedSha256,
-    })) as Map;
-    final uploadId = beginRes['uploadId'] as int;
+    }))! as Map<String, Object?>;
+    final uploadId = beginRes['uploadId']! as int;
 
     try {
       for (var offset = 0; offset < bytes.length; offset += _fileChunkBytes) {
@@ -446,11 +457,14 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
       }
       final res = (await send(WireOp.fileUploadFinish, {
         'uploadId': uploadId,
-      })) as Map;
+      }))! as Map;
       return res.map((k, v) => MapEntry(k.toString(), v));
-    } catch (e) {
-      // Best-effort abort: a partial upload session is discarded by the worker
-      // once it fails; no durable state is left behind.
+    } catch (_) {
+      // Best-effort abort prevents the worker's in-memory upload registry from
+      // retaining a partial session after a chunk or finish failure.
+      try {
+        await send(WireOp.fileUploadAbort, {'uploadId': uploadId});
+      } catch (_) {}
       rethrow;
     }
   }
@@ -466,9 +480,11 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
       'store': store,
       'recordId': recordId,
       'field': field,
-    })) as Map;
-    return ((res['refs'] as List).cast<Map>())
-        .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+    }))! as Map<String, Object?>;
+    final refs = res['refs']! as List<Object?>;
+    return refs
+        .map((item) => (item! as Map<Object?, Object?>)
+            .map((k, v) => MapEntry(k.toString(), v)))
         .toList();
   }
 
@@ -487,7 +503,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
       'field': field,
       'index': index,
       if (refId != null) 'refId': refId,
-    })) as Map;
+    }))! as Map<String, Object?>;
     final bytes = decodeWireValue(res['bytes']);
     if (bytes is! List) throw StateError('Malformed file bytes response');
     return Uint8List.fromList(bytes.cast<int>());
@@ -520,7 +536,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     final res = (await send(WireOp.fileGc, {
       'blobGraceMs': blobGrace.inMilliseconds,
       'tmpGraceMs': tmpGrace.inMilliseconds,
-    })) as Map;
+    }))! as Map;
     return (res['cleaned'] as int?) ?? 0;
   }
 
@@ -529,7 +545,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   Future<int> filesEnforceStorageCap({required int maxBytes}) async {
     final res = (await send(WireOp.fileEnforceStorageCap, {
       'maxBytes': maxBytes,
-    })) as Map;
+    }))! as Map;
     return (res['evicted'] as int?) ?? 0;
   }
 
@@ -539,15 +555,16 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   /// Emits when the worker cannot refresh a rejected sync token.
   Stream<void> get authRequired => _authRequiredController.stream;
 
+  /// Closes the worker connection and releases browser resources.
   Future<void> close() async {
     if (_sender.isClosed) return;
+    try {
+      await send(WireOp.close);
+    } catch (_) {}
     _sender.markClosedLocal();
     changeBus.close();
     await _syncStatusController.close();
     await _authRequiredController.close();
-    try {
-      await send(WireOp.close);
-    } catch (_) {}
     for (final url in _blobUrlsToRevoke) {
       try {
         web.URL.revokeObjectURL(url);

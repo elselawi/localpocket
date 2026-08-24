@@ -14,9 +14,9 @@ part of 'worker_engine.dart';
 
 /// Active watcher registration in the worker (§7.2).
 class _ActiveWatcher {
-  final Future<void> Function() cancel;
 
   _ActiveWatcher(this.cancel);
+  final Future<void> Function() cancel;
 }
 
 /// Reactive-watcher handlers (see the file doc above).

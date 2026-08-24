@@ -18,8 +18,23 @@ import 'sync_store.dart';
 import 'sync_tables.dart';
 
 class PushReport {
+
+  /// Creates a push result with zero counts by default.
+  const PushReport({
+    this.pushed = 0,
+    this.deadLettered = 0,
+    this.conflicted = 0,
+    this.blocked = 0,
+    this.discarded = 0,
+    this.hadError = false,
+  });
+  /// Number of operations successfully pushed.
   final int pushed;
+
+  /// Number of operations moved to the dead-letter state.
   final int deadLettered;
+
+  /// Number of operations escalated to a conflict.
   final int conflicted;
 
   /// Operations parked in the recoverable `blocked` state (a 403 that may be
@@ -30,15 +45,8 @@ class PushReport {
   /// (`MissingRemotePolicy.discardLocal`).
   final int discarded;
 
+  /// Whether a transient or authentication error occurred.
   final bool hadError;
-  const PushReport({
-    this.pushed = 0,
-    this.deadLettered = 0,
-    this.conflicted = 0,
-    this.blocked = 0,
-    this.discarded = 0,
-    this.hadError = false,
-  });
 }
 
 /// The pusher: GET-before-write optimistic concurrency, 3-way merge
@@ -46,17 +54,7 @@ class PushReport {
 /// backoff, and dead letters. The outbox op is re-read at push time so the
 /// latest coalesced state is always pushed.
 class Pusher {
-  final LocalPocket pocket;
-  final SyncBackend backend;
-  final SyncConfig config;
-  final SyncStore syncStore;
-
-  /// Called when the backend reports an auth failure (401).
-  final void Function() onAuthError;
-
-  /// Session-scoped batch capability (probed at start; disabled on 403).
-  bool batchEnabled;
-
+  /// Creates a pusher for [pocket] and its remote [backend].
   Pusher(
     this.pocket,
     this.backend,
@@ -65,8 +63,27 @@ class Pusher {
     required this.onAuthError,
   }) : batchEnabled = backend.capabilities.batchEnabled;
 
+  /// Local database and outbox used by the pusher.
+  final LocalPocket pocket;
+
+  /// Remote synchronization backend.
+  final SyncBackend backend;
+
+  /// Synchronization and retry configuration.
+  final SyncConfig config;
+
+  /// Store containing synchronization metadata.
+  final SyncStore syncStore;
+
+  /// Called when the backend reports an auth failure (401).
+  final void Function() onAuthError;
+
+  /// Session-scoped batch capability (probed at start; disabled on 403).
+  bool batchEnabled;
+
   int _nowMs() => config.now();
 
+  /// Pushes pending outbox operations to the remote backend.
   Future<PushReport> pushPending() async {
     // `now` comes from config so persisted backoff deadlines (written in the
     // same clock) compare consistently even under an injected test clock.
@@ -144,8 +161,7 @@ class Pusher {
   }
 
   Future<PushReport> _pushCreate(OutboxOp op, SyncRowState sr,
-      {bool recreateInProgress = false}) async {
-    return _handlePushExceptions(op, sr, () async {
+      {bool recreateInProgress = false}) async => _handlePushExceptions(op, sr, () async {
       try {
         final rec = await backend.createRecord(
             id: op.recordId, store: op.store, dataJson: op.payloadJson);
@@ -157,7 +173,6 @@ class Pusher {
             recreateInProgress: recreateInProgress);
       }
     }, catchPayloadError: true, recreateInProgress: recreateInProgress);
-  }
 
   Future<PushReport> _recoverDuplicateCreate(OutboxOp op, SyncRowState sr,
       {bool recreateInProgress = false}) async {
@@ -176,13 +191,12 @@ class Pusher {
         return const PushReport(pushed: 1);
       }
       // Same id, different content: fall through to the update path.
-      return await _pushUpdateWithBase(op, sr, fetched,
+      return _pushUpdateWithBase(op, sr, fetched,
           recreateInProgress: recreateInProgress);
     }, recreateInProgress: recreateInProgress);
   }
 
-  Future<PushReport> _pushUpdate(OutboxOp op, SyncRowState sr) async {
-    return _handlePushExceptions(op, sr, () async {
+  Future<PushReport> _pushUpdate(OutboxOp op, SyncRowState sr) async => _handlePushExceptions(op, sr, () async {
       final fetched = await backend.getRecord(op.recordId);
       if (fetched == null) {
         // The record no longer exists remotely (a vanished target): apply the
@@ -219,7 +233,6 @@ class Pusher {
       // Concurrent change: verify / merge.
       return _pushUpdateWithBase(op, sr, fetched);
     });
-  }
 
   Future<PushReport> _pushUpdateWithBase(
       OutboxOp op, SyncRowState sr, RemoteRecord fetched,
@@ -299,7 +312,7 @@ class Pusher {
         fetched = null;
       } on AuthError {
         onAuthError();
-        return PushReport(hadError: true);
+        return const PushReport(hadError: true);
       } on ForbiddenError {
         await pocket.outbox.markBlocked(
             store: op.store, id: op.recordId, error: 'forbidden_push');
@@ -313,6 +326,7 @@ class Pusher {
       }
 
       if (fetched != null) {
+        _assertFetchedMatches(op, fetched);
         final fetchedHash =
             payloadHash(schema, normalizeRemote(schema, fetched));
         final pushedHash = sha256Hex(op.payloadJson);
@@ -398,12 +412,12 @@ class Pusher {
   }
 
   Future<MergeOutcome?> _mergeForBatch(OutboxOp op, SyncRowState sr,
-      RemoteRecord fetched, CollectionSchema schema) async {
+      RemoteRecord fetched, CollectionSchema<Object?> schema) async {
     final fetchedLogical = normalizeRemote(schema, fetched);
     final policy = MergePolicy(
       collectionResolver:
           schema.conflictPolicy.collectionResolver is ConflictResolver
-              ? schema.conflictPolicy.collectionResolver as ConflictResolver
+              ? schema.conflictPolicy.collectionResolver! as ConflictResolver
               : null,
       fieldOverrides: schema.conflictPolicy.fieldOverrides,
       editsUnarchive: schema.conflictPolicy.editsUnarchive,
@@ -513,12 +527,26 @@ class Pusher {
     } on ForbiddenError {
       // Server disabled batch: fall back to per-record for this session.
       batchEnabled = false;
+      var conflicted = 0;
+      var blocked = 0;
+      var discarded = 0;
+      var hadError = false;
       for (final op in toSend) {
         final r = await _pushOp(_makeOutboxOp(op));
         pushed += r.pushed;
         dead += r.deadLettered;
+        conflicted += r.conflicted;
+        blocked += r.blocked;
+        discarded += r.discarded;
+        hadError = hadError || r.hadError;
       }
-      return PushReport(pushed: pushed, deadLettered: dead);
+      return PushReport(
+          pushed: pushed,
+          deadLettered: dead,
+          conflicted: conflicted,
+          blocked: blocked,
+          discarded: discarded,
+          hadError: hadError);
     } on AuthError {
       onAuthError();
       return const PushReport(hadError: true);

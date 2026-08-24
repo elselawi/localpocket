@@ -24,7 +24,7 @@ Map<String, Object?> parseOpenOptions(Object? data) {
       final result = <String, Object?>{};
       if (stringMap['stores'] is List) {
         result['stores'] =
-            (stringMap['stores'] as List).map((s) => parseSchema(s)).toList();
+            (stringMap['stores']! as List).map((s) => parseSchema(s)).toList();
       }
       if (stringMap['maxDocBytes'] is int) {
         result['maxDocBytes'] = stringMap['maxDocBytes'];
@@ -57,7 +57,7 @@ Object? rawOpenOption(Object? data, String key) {
 /// stores that cannot be written, so the worker's `openDatabase` rejects this
 /// with a [ValidationException].
 bool hasEncryptedFieldsWithoutCipher(
-    List<CollectionSchema> stores, Object? fieldCipher) {
+    Iterable<CollectionSchema<Object?>> stores, Object? fieldCipher) {
   if (fieldCipher != null) return false;
   return stores.any((s) => s.fields.any((f) => f.encrypted));
 }
