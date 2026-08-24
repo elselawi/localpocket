@@ -308,18 +308,18 @@ void main() {
           .where('name', eq: 'banana')
           .limit(50)
           .compilePlan();
-      final result =
-          (await h.sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
-              as Map<String, Object?>;
+      final result = (await h
+              .sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
+          as Map<String, Object?>;
       final items = (result['items']! as List).cast<Map>();
       expect(items, hasLength(1));
       expect(items.first['name'], 'banana');
     });
 
     test('count / ids / sum aggregate ops', () async {
-      Future<Map<String, Object?>> run(QueryPlan plan) async =>
-          (await h.sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
-              as Map<String, Object?>;
+      Future<Map<String, Object?>> run(QueryPlan plan) async => (await h
+              .sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
+          as Map<String, Object?>;
 
       final count = await run(
           h.pocket.collection('widgets').query().limit(50).compileCountPlan());
@@ -340,9 +340,9 @@ void main() {
     test('explain op wraps the validated SELECT', () async {
       final plan =
           h.pocket.collection('widgets').query().limit(50).compileExplainPlan();
-      final result =
-          (await h.sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
-              as Map<String, Object?>;
+      final result = (await h
+              .sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
+          as Map<String, Object?>;
       expect(result['plan'], isA<String>());
       expect(result['plan'], isNotEmpty);
     });
@@ -498,8 +498,8 @@ void main() {
         ],
       }));
 
-      final sp = (await h
-              .sendOk(h.req(WireOp.txSavepoint, args: {'sessionId': sessionId})))!
+      final sp = (await h.sendOk(
+              h.req(WireOp.txSavepoint, args: {'sessionId': sessionId})))!
           as Map<String, Object?>;
       final spName = sp['savepoint']! as String;
 
@@ -530,8 +530,8 @@ void main() {
 
       // Bookkeeping: the savepoint was removed, so a new savepoint reuses the
       // name (no unbounded growth / collision).
-      final sp2 = (await h
-              .sendOk(h.req(WireOp.txSavepoint, args: {'sessionId': sessionId})))!
+      final sp2 = (await h.sendOk(
+              h.req(WireOp.txSavepoint, args: {'sessionId': sessionId})))!
           as Map<String, Object?>;
       expect(sp2['savepoint'], spName);
 
@@ -607,8 +607,8 @@ void main() {
       final commitFault = StateError('simulated COMMIT failure (disk full)');
       hooks.commitCrashPoint = () => throw commitFault;
 
-      final err = await h.sendError(
-          h.req(WireOp.txCommit, args: {'sessionId': sessionId}));
+      final err = await h
+          .sendError(h.req(WireOp.txCommit, args: {'sessionId': sessionId}));
       expect(err.code, WireErrorCode.localpocket);
       expect(err.message, contains('simulated COMMIT failure'));
 
@@ -618,8 +618,8 @@ void main() {
       // The session was released: a fresh tx_begin (and rollback) works.
       final begin2 =
           (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
-      await h.sendOk(h.req(WireOp.txRollback,
-          args: {'sessionId': begin2['sessionId']}));
+      await h.sendOk(
+          h.req(WireOp.txRollback, args: {'sessionId': begin2['sessionId']}));
 
       // The failed COMMIT rolled back the session's write.
       expect(await h.get('widgets', id), isNull);
@@ -652,8 +652,8 @@ void main() {
       final rollbackFault = StateError('simulated ROLLBACK failure (I/O)');
       hooks.rollbackCrashPoint = () => throw rollbackFault;
 
-      final err = await h.sendError(
-          h.req(WireOp.txRollback, args: {'sessionId': sessionId}));
+      final err = await h
+          .sendError(h.req(WireOp.txRollback, args: {'sessionId': sessionId}));
       expect(err.code, WireErrorCode.localpocket);
       expect(err.message, contains('simulated ROLLBACK failure'));
 
@@ -663,8 +663,8 @@ void main() {
       // The session was released and the rollback ran: the write is gone.
       final begin2 =
           (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
-      await h.sendOk(h.req(WireOp.txRollback,
-          args: {'sessionId': begin2['sessionId']}));
+      await h.sendOk(
+          h.req(WireOp.txRollback, args: {'sessionId': begin2['sessionId']}));
       expect(await h.get('widgets', id), isNull);
     });
 
