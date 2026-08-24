@@ -108,7 +108,9 @@ Future<void> main() async {
     await subscription.cancel();
     await errorSubscription.cancel();
     server.kill();
-    if (Platform.isWindows) Process.runSync('taskkill', ['/F', '/T', '/PID', '${server.pid}']);
+    if (Platform.isWindows) {
+      Process.runSync('taskkill', ['/F', '/T', '/PID', '${server.pid}']);
+    }
     await server.exitCode
         .timeout(const Duration(seconds: 5), onTimeout: () => -1);
   }
