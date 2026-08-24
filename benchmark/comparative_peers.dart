@@ -865,7 +865,7 @@ class SembastPeer extends BenchmarkPeer {
       final chunk = records.sublist(i, min(i + batchSize, records.length));
       await _db.transaction((txn) async {
         for (final r in chunk) {
-          await _store.record(r['id'] as String).put(txn, r);
+          await _store.record(r['id']! as String).put(txn, r);
         }
       });
     }
@@ -876,7 +876,7 @@ class SembastPeer extends BenchmarkPeer {
       List<Map<String, Object?>> records, List<int> latenciesUs) async {
     for (final r in records) {
       await timedAsync(
-          () => _store.record(r['id'] as String).put(_db, r), latenciesUs);
+          () => _store.record(r['id']! as String).put(_db, r), latenciesUs);
     }
   }
 
@@ -939,7 +939,7 @@ class SembastPeer extends BenchmarkPeer {
       await timedAsync(() async {
         await _db.transaction((txn) async {
           for (final r in chunk) {
-            await _store.record(r['id'] as String).put(txn, r);
+            await _store.record(r['id']! as String).put(txn, r);
           }
         });
       }, latenciesUs);
@@ -1077,7 +1077,7 @@ class HivePeer extends BenchmarkPeer {
     const batchSize = 1000;
     for (var i = 0; i < records.length; i += batchSize) {
       final chunk = records.sublist(i, min(i + batchSize, records.length));
-      final map = {for (final r in chunk) r['id'] as String: r};
+      final map = {for (final r in chunk) r['id']! as String: r};
       await _box.putAll(map);
     }
   }
@@ -1086,7 +1086,7 @@ class HivePeer extends BenchmarkPeer {
   Future<void> singleInsert(
       List<Map<String, Object?>> records, List<int> latenciesUs) async {
     for (final r in records) {
-      await timedAsync(() => _box.put(r['id'] as String, r), latenciesUs);
+      await timedAsync(() => _box.put(r['id']! as String, r), latenciesUs);
     }
   }
 
@@ -1272,9 +1272,9 @@ class IsarPeer extends BenchmarkPeer {
   late Directory _dir;
 
   IsarWidget _item(Map<String, Object?> r) => IsarWidget()
-    ..recordId = r['id'] as String
-    ..name = r['name'] as String
-    ..qty = r['qty'] as int;
+    ..recordId = (r['id']! as String)
+    ..name = (r['name']! as String)
+    ..qty = (r['qty']! as int);
 
   @override
   Future<void> setup() async {

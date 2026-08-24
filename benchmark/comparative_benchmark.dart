@@ -169,11 +169,6 @@ Map<String, Object?> buildSamples(int scale) => {
 
 // ----------------------------------------------------------------- stats ----
 class LatencyStats {
-  final int count;
-  final int p50Us;
-  final int p95Us;
-  final int p99Us;
-  final double meanUs;
 
   const LatencyStats({
     required this.count,
@@ -182,6 +177,11 @@ class LatencyStats {
     required this.p99Us,
     required this.meanUs,
   });
+  final int count;
+  final int p50Us;
+  final int p95Us;
+  final int p99Us;
+  final double meanUs;
 
   static LatencyStats fromMicros(List<int> samples) {
     if (samples.isEmpty) {
@@ -221,6 +221,40 @@ class LatencyStats {
 }
 
 class BenchmarkResult {
+
+  const BenchmarkResult({
+    required this.peer,
+    required this.scale,
+    required this.insertMs,
+    required this.pointRead,
+    required this.rangeQuery,
+    required this.pointUpdate,
+    this.singleInsert,
+    this.delete,
+    this.transactions,
+    this.pagination,
+    this.topK,
+    this.countFiltered,
+    this.concurrentRead,
+    this.concurrentWrite,
+    this.maxRows,
+    this.notes = const [],
+    this.error,
+  });
+
+  factory BenchmarkResult.error(String peer, int scale, Object error) => BenchmarkResult(
+      peer: peer,
+      scale: scale,
+      insertMs: 0,
+      pointRead:
+          const LatencyStats(count: 0, p50Us: 0, p95Us: 0, p99Us: 0, meanUs: 0),
+      rangeQuery:
+          const LatencyStats(count: 0, p50Us: 0, p95Us: 0, p99Us: 0, meanUs: 0),
+      pointUpdate:
+          const LatencyStats(count: 0, p50Us: 0, p95Us: 0, p99Us: 0, meanUs: 0),
+      notes: const ['run failed'],
+      error: error.toString(),
+    );
   final String peer;
   final int scale;
 
@@ -243,42 +277,6 @@ class BenchmarkResult {
   final int? maxRows;
   final List<String> notes;
   final String? error;
-
-  const BenchmarkResult({
-    required this.peer,
-    required this.scale,
-    required this.insertMs,
-    required this.pointRead,
-    required this.rangeQuery,
-    required this.pointUpdate,
-    this.singleInsert,
-    this.delete,
-    this.transactions,
-    this.pagination,
-    this.topK,
-    this.countFiltered,
-    this.concurrentRead,
-    this.concurrentWrite,
-    this.maxRows,
-    this.notes = const [],
-    this.error,
-  });
-
-  factory BenchmarkResult.error(String peer, int scale, Object error) {
-    return BenchmarkResult(
-      peer: peer,
-      scale: scale,
-      insertMs: 0,
-      pointRead:
-          const LatencyStats(count: 0, p50Us: 0, p95Us: 0, p99Us: 0, meanUs: 0),
-      rangeQuery:
-          const LatencyStats(count: 0, p50Us: 0, p95Us: 0, p99Us: 0, meanUs: 0),
-      pointUpdate:
-          const LatencyStats(count: 0, p50Us: 0, p95Us: 0, p99Us: 0, meanUs: 0),
-      notes: const ['run failed'],
-      error: error.toString(),
-    );
-  }
 
   Map<String, Object?> toJson() => {
         'peer': peer,
@@ -303,11 +301,11 @@ class BenchmarkResult {
 
 /// A run skipped because the scale exceeds the peer's [maxRows] cap.
 class SkippedRun {
+
+  const SkippedRun(this.peer, this.scale, this.maxRows);
   final String peer;
   final int scale;
   final int maxRows;
-
-  const SkippedRun(this.peer, this.scale, this.maxRows);
 
   Map<String, Object?> toJson() => {
         'peer': peer,
@@ -349,7 +347,7 @@ List<Map<String, Object?>> makeDataset(int n, int qtyBase) =>
     List.generate(n, (i) => makeRecord(generateRecordId(), qtyBase + i));
 
 List<String> idsOf(List<Map<String, Object?>> records) =>
-    [for (final r in records) r['id'] as String];
+    [for (final r in records) r['id']! as String];
 
 // -------------------------------------------------------------- runner -----
 Future<BenchmarkResult> runBenchmarkForPeer(
@@ -378,7 +376,7 @@ Future<BenchmarkResult> runBenchmarkForPeer(
     final rnd = Random(42);
     final readIds = List.generate(
       readSamples(scale),
-      (_) => records[rnd.nextInt(scale)]['id'] as String,
+      (_) => records[rnd.nextInt(scale)]['id']! as String,
     );
 
     // -- 2. single-row insert: warmup kept in place (deleted in the delete
@@ -423,7 +421,7 @@ Future<BenchmarkResult> runBenchmarkForPeer(
     // -- 8. point update (warmup overwritten by the measured pass).
     final updateIds = List.generate(
       updateSamples(scale),
-      (_) => records[rnd.nextInt(scale)]['id'] as String,
+      (_) => records[rnd.nextInt(scale)]['id']! as String,
     );
     await peer.pointUpdate(
         updateIds.take(warmupConfig['pointUpdateOps']!).toList(),
@@ -472,13 +470,13 @@ Future<BenchmarkResult> runBenchmarkForPeer(
         warmupConfig['concurrentRounds']! + concurrentRounds;
     final cReadIds = List.generate(
       totalConcurrentRounds * concurrentReadsPerRound,
-      (_) => records[rnd.nextInt(scale)]['id'] as String,
+      (_) => records[rnd.nextInt(scale)]['id']! as String,
     );
     final cWriteIds = <String>[];
     for (var r = 0; r < totalConcurrentRounds; r++) {
       final roundIds = <String>{};
       while (roundIds.length < concurrentWritesPerRound) {
-        roundIds.add(records[rnd.nextInt(scale)]['id'] as String);
+        roundIds.add(records[rnd.nextInt(scale)]['id']! as String);
       }
       cWriteIds.addAll(roundIds);
     }
@@ -566,8 +564,8 @@ Future<BenchmarkResult> runBenchmarkForPeer(
 // -------------------------------------------------------------- console -----
 /// ANSI escape helper; disabled for non-TTY output or `--no-color`.
 class Color {
-  final bool enabled;
   const Color(this.enabled);
+  final bool enabled;
 
   String _wrap(String s, int code) => enabled ? '\x1B[${code}m$s\x1B[0m' : s;
   String green(String s) => _wrap(s, 32);

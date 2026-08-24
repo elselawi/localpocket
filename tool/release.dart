@@ -19,11 +19,6 @@ import 'find_repo_root.dart';
 ///   dart run tool/release.dart --no-coverage
 ///   dart run tool/release.dart --list
 class ReleaseStep {
-  final String id;
-  final String label;
-  final List<String> argv;
-  final Map<String, String>? env;
-  final void Function(Directory root)? setup;
 
   const ReleaseStep({
     required this.id,
@@ -32,6 +27,11 @@ class ReleaseStep {
     this.env,
     this.setup,
   });
+  final String id;
+  final String label;
+  final List<String> argv;
+  final Map<String, String>? env;
+  final void Function(Directory root)? setup;
 }
 
 void printHelp() {
@@ -59,8 +59,7 @@ List<ReleaseStep> buildReleaseSteps({
   bool withReal = false,
   bool withPublish = true,
   bool noCoverage = false,
-}) {
-  return [
+}) => [
     const ReleaseStep(
       id: 'analyze',
       label: 'Static analysis',
@@ -221,7 +220,6 @@ List<ReleaseStep> buildReleaseSteps({
         argv: ['pub', 'publish', '--dry-run'],
       ),
   ];
-}
 
 Future<void> main(List<String> args) async {
   if (args.contains('--help') || args.contains('-h')) {

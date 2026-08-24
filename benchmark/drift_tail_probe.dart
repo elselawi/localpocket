@@ -42,7 +42,7 @@ Future<Stats> runWorkload(Directory tmp, String name,
           'phone': 'p$i',
         },
     ];
-    ids.addAll(recs.map((r) => r['id'] as String));
+    ids.addAll(recs.map((r) => r['id']! as String));
     await db.transaction((tx) => tx.collection('widgets').putAll(recs));
   }
 

@@ -1,0 +1,13 @@
+include: ../analysis_options.yaml
+
+analyzer:
+  exclude:
+    - benchmark_models.g.dart
+
+linter:
+  rules:
+    avoid_print: false
+    avoid_slow_async_io: false
+    cast_nullable_to_non_nullable: false
+    no_adjacent_strings_in_list: false
+    prefer_const_constructors: false

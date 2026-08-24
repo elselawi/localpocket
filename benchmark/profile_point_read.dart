@@ -36,7 +36,7 @@ Future<void> main() async {
     ];
     await db.transaction((tx) async {
       await tx.collection('widgets').putAll(recs);
-      ids.addAll(recs.map((r) => r['id'] as String));
+      ids.addAll(recs.map((r) => r['id']! as String));
     });
   }
 

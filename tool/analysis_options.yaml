@@ -1,0 +1,7 @@
+include: ../analysis_options.yaml
+
+linter:
+  rules:
+    avoid_print: false
+    cast_nullable_to_non_nullable: false
+    unnecessary_nullable_for_final_variable_declarations: false

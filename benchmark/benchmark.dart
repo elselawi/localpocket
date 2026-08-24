@@ -178,7 +178,7 @@ Future<void> main() async {
 
   // ---------------------------------------------------------------- B5 ----
   {
-    final targetQty = 50000;
+    const targetQty = 50000;
     final swKs = Stopwatch()..start();
     await col
         .query()
@@ -324,7 +324,7 @@ Future<void> main() async {
     final tmpDir = await Directory.systemTemp.createTemp('lp_b9_');
     final blobStore = NativeBlobStore(tmpDir.path);
 
-    final tenMb = 10 * 1024 * 1024;
+    const tenMb = 10 * 1024 * 1024;
     final chunk = Uint8List.fromList(List.generate(256 * 1024, (i) => i % 251));
     Stream<List<int>> tenMbStream() async* {
       var sent = 0;

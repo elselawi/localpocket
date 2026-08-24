@@ -20,7 +20,7 @@ void main() {
   final parsed = pbTimestampToDateTime(ts);
 
   // Ignore-the-result sink (web builds have no dart:io to print to).
-  Object? sink = <Object?>[
+  final Object? sink = <Object?>[
     schema.name,
     FieldKind.text.name,
     hash.length,
