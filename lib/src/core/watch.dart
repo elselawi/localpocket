@@ -12,11 +12,16 @@ import 'local_pocket.dart';
 /// Emissions only ever happen after commit; identical snapshots do not emit;
 /// bursts coalesce on a 16 ms latest-wins window.
 
+/// A [Stream] of query results that emits whenever the query results change.
 class QueryWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
-  final QueryBuilder _query;
-  StreamController<List<Map<String, Object?>>>? _controller;
-
+  /// Creates a watcher for a query.
   QueryWatcher(super.pocket, this._query, {super.coalesceWindow});
+
+  /// Query being tracked by this watcher.
+  final QueryBuilder _query;
+
+  /// Controller for the produced stream, initialized when the stream starts.
+  StreamController<List<Map<String, Object?>>>? _controller;
 
   @override
   bool shouldInvalidate(ChangeSet cs) => cs.store == _query.store;
@@ -41,11 +46,12 @@ class QueryWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
   void onError(Object error, StackTrace stackTrace) =>
       _controller?.addError(error, stackTrace);
 
+  /// Starts the query stream and subscribes it to the change bus.
   Stream<List<Map<String, Object?>>> startStream() {
     _controller = StreamController<List<Map<String, Object?>>>(
-      onListen: () {
+      onListen: () async {
         start();
-        _refresh();
+        await _refresh();
       },
       onCancel: dispose,
     );
@@ -55,18 +61,24 @@ class QueryWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
   @override
   void dispose() {
     super.dispose();
-    _controller?.close();
+    unawaited(_controller?.close());
   }
 }
 
 /// `watchOne` fast path: re-fetches only when the ChangeSet mentions the id
 /// (or is an unknown/external change).
 class OneWatcher extends CoalescedWatcher<Map<String, Object?>?> {
-  final StoreTable _table;
-  final String id;
-  StreamController<Map<String, Object?>?>? _controller;
-
+  /// Creates a watcher for a single record by id.
   OneWatcher(super.pocket, this._table, this.id, {super.coalesceWindow});
+
+  /// Store table being watched.
+  final StoreTable _table;
+
+  /// Record id being watched.
+  final String id;
+
+  /// Controller for the produced stream, initialized when the stream starts.
+  StreamController<Map<String, Object?>?>? _controller;
 
   @override
   bool shouldInvalidate(ChangeSet cs) {
@@ -99,11 +111,12 @@ class OneWatcher extends CoalescedWatcher<Map<String, Object?>?> {
   void onError(Object error, StackTrace stackTrace) =>
       _controller?.addError(error, stackTrace);
 
+  /// Starts the single-record stream and subscribes it to the change bus.
   Stream<Map<String, Object?>?> startStream() {
     _controller = StreamController<Map<String, Object?>?>(
-      onListen: () {
+      onListen: () async {
         start();
-        _refresh();
+        await _refresh();
       },
       onCancel: dispose,
     );
@@ -113,10 +126,15 @@ class OneWatcher extends CoalescedWatcher<Map<String, Object?>?> {
   @override
   void dispose() {
     super.dispose();
-    _controller?.close();
+    unawaited(_controller?.close());
   }
 }
 
+/// Computes a deterministic digest for a snapshot of record rows.
+///
+/// [items] contains the current materialized snapshot. When [ordered] is false,
+/// the rows are sorted before hashing so the digest is stable regardless of the
+/// original iteration order.
 String computeSnapshotDigest(
   List<Map<String, Object?>> items, {
   bool ordered = false,
@@ -133,8 +151,21 @@ String computeSnapshotDigest(
   return sha256Hex(joined);
 }
 
+/// Base implementation for watchers that coalesce repeated invalidations.
+///
+/// Subclasses fetch a fresh snapshot after relevant change notifications and
+/// emit only when the computed digest differs from the previous snapshot.
 abstract class CoalescedWatcher<T> {
+  /// Creates a watcher with the provided pocket and coalescing window.
+  CoalescedWatcher(
+    this.pocket, {
+    this.coalesceWindow = const Duration(milliseconds: 16),
+  });
+
+  /// Pocket instance backing this watcher.
   final LocalPocket pocket;
+
+  /// Delay used to coalesce bursty invalidations before reloading.
   final Duration coalesceWindow;
 
   StreamSubscription<ChangeSet>? _sub;
@@ -142,11 +173,6 @@ abstract class CoalescedWatcher<T> {
   bool _running = false;
   bool _dirty = false;
   String? _digest;
-
-  CoalescedWatcher(
-    this.pocket, {
-    this.coalesceWindow = const Duration(milliseconds: 16),
-  });
 
   /// Decides if this change affects this watcher.
   bool shouldInvalidate(ChangeSet cs);
@@ -163,10 +189,12 @@ abstract class CoalescedWatcher<T> {
   /// Optional error handler.
   void onError(Object error, StackTrace stackTrace) {}
 
+  /// Subscribes this watcher to the change bus so it can react to invalidations.
   void start() {
     _sub = pocket.changes.listen(_onChange);
   }
 
+  /// Fetches and caches the initial snapshot used for future change detection.
   Future<T> initial() async {
     final data = await fetchSnapshot();
     _digest = computeDigest(data);
@@ -206,8 +234,9 @@ abstract class CoalescedWatcher<T> {
     }
   }
 
+  /// Stops the watcher and cancels any queued refresh timers.
   void dispose() {
     _timer?.cancel();
-    _sub?.cancel();
+    unawaited(_sub?.cancel());
   }
 }
