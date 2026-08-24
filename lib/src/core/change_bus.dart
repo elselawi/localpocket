@@ -40,6 +40,45 @@ const Object _sentinelUnset = Object();
 
 /// A post-commit notification of a specific record state transition.
 class RecordChangeEvent {
+  /// Creates a record change event.
+  const RecordChangeEvent({
+    required this.store,
+    required this.id,
+    required this.origin,
+    required this.action,
+    required this.changedFields,
+    this.oldRecord,
+    this.newRecord,
+  });
+
+  /// Constructs a [RecordChangeEvent] from a JSON map.
+  factory RecordChangeEvent.fromJson(Map<String, Object?> json) =>
+      RecordChangeEvent(
+        store: json['store']! as String,
+        id: json['id']! as String,
+        origin: ChangeOrigin.values.byName(json['origin']! as String),
+        action: ChangeAction.values.byName(json['action']! as String),
+        oldRecord: (json['oldRecord'] as Map?)
+            ?.map((k, v) => MapEntry(k.toString(), v)),
+        newRecord: (json['newRecord'] as Map?)
+            ?.map((k, v) => MapEntry(k.toString(), v)),
+        changedFields: (json['changedFields'] as List?)
+                ?.map((e) => e.toString())
+                .toSet() ??
+            const {},
+      );
+
+  /// Converts this event to a JSON map.
+  Map<String, Object?> toJson() => {
+        'store': store,
+        'id': id,
+        'origin': origin.name,
+        'action': action.name,
+        if (oldRecord != null) 'oldRecord': oldRecord,
+        if (newRecord != null) 'newRecord': newRecord,
+        'changedFields': changedFields.toList()..sort(),
+      };
+
   /// Store whose committed state changed.
   final String store;
 
@@ -60,17 +99,6 @@ class RecordChangeEvent {
 
   /// Set of field names that were modified.
   final Set<String> changedFields;
-
-  /// Creates a record change event.
-  const RecordChangeEvent({
-    required this.store,
-    required this.id,
-    required this.origin,
-    required this.action,
-    this.oldRecord,
-    this.newRecord,
-    required this.changedFields,
-  });
 
   /// Whether the change was initiated locally by application code.
   bool get isLocal => origin == ChangeOrigin.local;
@@ -138,34 +166,6 @@ class RecordChangeEvent {
     return true;
   }
 
-  /// Converts this event to a JSON map.
-  Map<String, Object?> toJson() => {
-        'store': store,
-        'id': id,
-        'origin': origin.name,
-        'action': action.name,
-        if (oldRecord != null) 'oldRecord': oldRecord,
-        if (newRecord != null) 'newRecord': newRecord,
-        'changedFields': changedFields.toList()..sort(),
-      };
-
-  /// Constructs a [RecordChangeEvent] from a JSON map.
-  factory RecordChangeEvent.fromJson(Map<String, Object?> json) {
-    return RecordChangeEvent(
-      store: json['store'] as String,
-      id: json['id'] as String,
-      origin: ChangeOrigin.values.byName(json['origin'] as String),
-      action: ChangeAction.values.byName(json['action'] as String),
-      oldRecord:
-          (json['oldRecord'] as Map?)?.map((k, v) => MapEntry(k.toString(), v)),
-      newRecord:
-          (json['newRecord'] as Map?)?.map((k, v) => MapEntry(k.toString(), v)),
-      changedFields:
-          (json['changedFields'] as List?)?.map((e) => e.toString()).toSet() ??
-              const {},
-    );
-  }
-
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -200,6 +200,9 @@ class RecordChangeEvent {
 }
 
 /// Extension methods for filtering streams of [RecordChangeEvent].
+///
+/// These helpers make it easier to subscribe to specific origin/action/field
+/// combinations without manually writing repeated predicate logic.
 extension RecordChangeEventStreamExtension on Stream<RecordChangeEvent> {
   /// Filters for local changes.
   Stream<RecordChangeEvent> whereLocal() => where((e) => e.isLocal);
@@ -262,6 +265,9 @@ extension RecordChangeEventStreamExtension on Stream<RecordChangeEvent> {
 /// `ids` is the set of affected record ids; an empty set means "unknown /
 /// external change — be conservative".
 class ChangeSet {
+  /// Creates a committed change notification for a store.
+  const ChangeSet(this.store, this.ids);
+
   /// Store whose committed state changed.
   final String store;
 
@@ -269,17 +275,18 @@ class ChangeSet {
   final Set<String> ids;
 
   /// Creates a committed-change notification.
-  const ChangeSet(this.store, this.ids);
 }
 
 /// Broadcast bus of post-commit [ChangeSet]s and [RecordChangeEvent]s.
 /// Broadcasts committed change notifications to local watchers and hooks.
 class ChangeBus {
-  static const int maxPendingEvents = 10000;
   final StreamController<ChangeSet> _controller =
       StreamController<ChangeSet>.broadcast();
   final StreamController<RecordChangeEvent> _eventController =
       StreamController<RecordChangeEvent>.broadcast();
+
+  /// number of pending events to buffer before dropping them
+  static const int maxPendingEvents = 10000;
 
   /// Stream of committed change notifications (coarse, store+ids).
   Stream<ChangeSet> get stream => _controller.stream;
@@ -312,14 +319,20 @@ class ChangeBus {
 
   /// Closes the notification streams.
   void close() {
-    _controller.close();
-    _eventController.close();
+    unawaited(_controller.close());
+    unawaited(_eventController.close());
   }
 }
 
+/// Mixin that exposes change-bus subscriptions for a broader application scope.
+///
+/// This is useful when an object needs to observe record mutations across all
+/// stores without configuring each store individually.
 mixin ChangeBusAwareLP {
+  /// change bus for listening to record changes.
   final ChangeBus changeBus = ChangeBus();
 
+  /// stream of committed record changes.
   Stream<ChangeSet> get changes => changeBus.stream;
 
   /// Emits detailed committed record change events (old vs new, origin, action, changedFields).
@@ -352,11 +365,18 @@ mixin ChangeBusAwareLP {
       );
 }
 
+/// Mixin that exposes record-change subscriptions for a single store.
+///
+/// Implementors provide the store name and the underlying event stream for that
+/// store's change feed.
 mixin ChangeBusAwareStore {
+  /// Name of the store represented by this mixin.
   String get name;
 
+  /// Stream of all record events emitted for this store.
   Stream<RecordChangeEvent> get recordEvents;
 
+  /// Stream of record events filtered to this store.
   Stream<RecordChangeEvent> get events =>
       recordEvents.where((e) => e.store == name);
 
