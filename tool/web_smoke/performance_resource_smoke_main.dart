@@ -14,6 +14,13 @@ Future<void> main() async {
     }
   }
 
+  /// Progress marker reported to the runner on timeout, matching the other
+  /// smoke pages so a stall pinpoints its stage (`__performance_resource_smoke_progress`).
+  void mark(String stage) {
+    globalContext.setProperty(
+        '__performance_resource_smoke_progress'.toJS, stage.toJS);
+  }
+
   int elapsedUs(Stopwatch sw) => sw.elapsedMicroseconds;
 
   try {
@@ -23,14 +30,17 @@ Future<void> main() async {
       fields: [Field.text('value', required: true), Field.int('batch')],
     );
     final startup = Stopwatch()..start();
+    mark('open');
     final pocket = await LocalPocket.open(
       path: 'performance_${DateTime.now().microsecondsSinceEpoch}',
       stores: [schema],
     );
     startup.stop();
+    mark('opened');
     try {
       final collection = pocket.collection('performance');
       final requestTimes = <int>[];
+      mark('counts');
       for (var i = 0; i < 20; i++) {
         final sw = Stopwatch()..start();
         await collection.query().limit(1).count();
@@ -38,6 +48,7 @@ Future<void> main() async {
         requestTimes.add(elapsedUs(sw));
       }
 
+      mark('batches');
       final batchTimes = <String, int>{};
       for (final size in [500, 5000]) {
         final records = [
@@ -53,8 +64,10 @@ Future<void> main() async {
         await collection.putAll(records);
         sw.stop();
         batchTimes['$size'] = elapsedUs(sw);
+        mark('batch_$size');
       }
 
+      mark('tx');
       final txTimes = <int>[];
       for (var i = 0; i < 5; i++) {
         final sw = Stopwatch()..start();
@@ -70,21 +83,27 @@ Future<void> main() async {
         txTimes.add(elapsedUs(sw));
       }
 
+      mark('fetch');
       final page = await collection.query().limit(10).fetch();
+      mark('watch');
       final watchEvents = <List<Map<String, Object?>>>[];
       final watchSub =
           collection.query().limit(10).watch().listen(watchEvents.add);
       await Future<void>.delayed(const Duration(milliseconds: 200));
       await watchSub.cancel();
+      mark('watch_done');
       if (watchEvents.isEmpty) {
         throw StateError('Performance watch did not initialize.');
       }
 
+      mark('cycles');
       for (var cycle = 0; cycle < 3; cycle++) {
         final sw = Stopwatch()..start();
         await collection.query().limit(10).fetch();
         sw.stop();
       }
+
+      mark('reporting');
 
       report(
           'passed',

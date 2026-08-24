@@ -162,7 +162,12 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     try {
       final d = payload.dartify();
       if (d is Map) {
-        return d.map((k, v) => MapEntry(k.toString(), v));
+        // Recursively stringify ALL map keys (nested maps and lists of maps
+        // included). dartify() preserves JS object key types as Object?, so
+        // without this the worker's `Map<String, Object?>` casts (e.g. the
+        // `mutations` list in mutate_batch) throw on dart2js. Mirrors the
+        // deepStringMap used by parseSchema/open_options.
+        return deepStringMap(d);
       }
     } catch (_) {}
     return null;

@@ -3,6 +3,7 @@ import 'package:localpocket/src/core/query/query_builder/query_forwarder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_forwarder.dart';
 import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/query/web_query_forwarder.dart';
 import 'package:localpocket/src/web/facade/search/web_search_forwarder.dart';
@@ -34,8 +35,8 @@ class WebTx {
 
   /// Runs [action] in a nested transaction implemented as a savepoint.
   Future<T> transaction<T>(Future<T> Function(WebTx tx) action) async {
-    final spRes =
-        await _pocket.send(WireOp.txSavepoint, {'sessionId': sessionId});
+    final spRes = decodeWireValue(
+        await _pocket.send(WireOp.txSavepoint, {'sessionId': sessionId}));
     if (spRes is! Map) {
       throw StateError('Transaction savepoint response was malformed.');
     }

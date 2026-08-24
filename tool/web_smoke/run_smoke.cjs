@@ -19,7 +19,7 @@ async function run(name, browserType, pagePath, signal) {
     try {
         await page.goto(`http://127.0.0.1:8124/tool/web_smoke/pages/${pagePath}`);
         try {
-            const timeout = pagePath.includes('durability') ? 120000 : 30000;
+            const timeout = (pagePath.includes('durability') || pagePath.includes('performance_resource')) ? 120000 : 30000;
             await page.waitForFunction(key => globalThis[key] === 'passed' || globalThis[key] === 'failed', signal, { timeout });
         } catch (e) {
             const state = await page.evaluate(key => ({

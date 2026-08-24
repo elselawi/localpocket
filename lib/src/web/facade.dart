@@ -312,7 +312,8 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
 
   /// Runs [action] in an interactive transaction session (§7.1).
   Future<T> transaction<T>(Future<T> Function(WebTx tx) action) async {
-    final beginRes = (await send(WireOp.txBegin))! as Map<String, Object?>;
+    final beginRes = (decodeWireValue((await send(WireOp.txBegin))!))!
+        as Map<String, Object?>;
     final sessionId = beginRes['sessionId']! as int;
     final tx = WebTx.ins(this, sessionId);
 
@@ -345,7 +346,8 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
 
   /// Removes up to [maxEntries] acknowledged entries from the sync outbox.
   Future<int> pruneOutbox({int maxEntries = 10000}) async {
-    final res = (await send(WireOp.pruneOutbox, {'maxEntries': maxEntries}))!
+    final res = (decodeWireValue(
+            (await send(WireOp.pruneOutbox, {'maxEntries': maxEntries}))!))!
         as Map<String, Object?>;
     return (res['pruned'] as int?) ?? 0;
   }
@@ -353,11 +355,11 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   /// Compacts archived records in [store] older than [olderThan].
   Future<int> compact(String store,
       {required Duration olderThan, int? nowMs}) async {
-    final res = (await send(WireOp.compact, {
+    final res = (decodeWireValue((await send(WireOp.compact, {
       'store': store,
       'olderThanMs': olderThan.inMilliseconds,
       if (nowMs != null) 'nowMs': nowMs,
-    }))! as Map<String, Object?>;
+    }))!))! as Map<String, Object?>;
     return (res['compacted'] as int?) ?? 0;
   }
 
@@ -434,14 +436,14 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
       throw StateError(
           'Size mismatch: expected $expectedSize but got ${bytes.length}');
     }
-    final beginRes = (await send(WireOp.fileUploadBegin, {
+    final beginRes = (decodeWireValue((await send(WireOp.fileUploadBegin, {
       'store': store,
       'recordId': recordId,
       'field': field,
       'name': name,
       'size': bytes.length,
       if (expectedSha256 != null) 'expectedSha256': expectedSha256,
-    }))! as Map<String, Object?>;
+    }))!))! as Map<String, Object?>;
     final uploadId = beginRes['uploadId']! as int;
 
     try {
@@ -476,11 +478,11 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     required String recordId,
     String field = 'imgs',
   }) async {
-    final res = (await send(WireOp.fileList, {
+    final res = (decodeWireValue((await send(WireOp.fileList, {
       'store': store,
       'recordId': recordId,
       'field': field,
-    }))! as Map<String, Object?>;
+    }))!))! as Map<String, Object?>;
     final refs = res['refs']! as List<Object?>;
     return refs
         .map((item) => (item! as Map<Object?, Object?>)
@@ -497,13 +499,13 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     int index = 0,
     String? refId,
   }) async {
-    final res = (await send(WireOp.fileOpen, {
+    final res = (decodeWireValue((await send(WireOp.fileOpen, {
       'store': store,
       'recordId': recordId,
       'field': field,
       'index': index,
       if (refId != null) 'refId': refId,
-    }))! as Map<String, Object?>;
+    }))!))! as Map<String, Object?>;
     final bytes = decodeWireValue(res['bytes']);
     if (bytes is! List) throw StateError('Malformed file bytes response');
     return Uint8List.fromList(bytes.cast<int>());
