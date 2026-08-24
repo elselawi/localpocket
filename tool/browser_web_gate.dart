@@ -81,20 +81,20 @@ Future<void> main() async {
     const browserCount = 3;
     stdout.writeln(
         'BROWSER MATRIX Chromium Firefox WebKit × $browserPageCount smoke pages ($browserCount browsers, ${browserPageCount * browserCount} scenarios)');
-    final result = await Process.run(
+    final runExitCode = await _runStreamed(
       'npm',
       ['run', 'web-smoke'],
       environment: {
         ...Platform.environment,
         'SMOKE_EXPECTED_PAGES': '$browserPageCount',
         'SMOKE_EXPECTED_SCENARIOS': '${browserPageCount * browserCount}',
+        // sync_lifecycle needs its own fixture server (port 8125) and is run
+        // separately by sync_web_gate.dart; keep it out of the shared matrix.
+        'SMOKE_EXCLUDE_PAGE': 'sync_lifecycle',
       },
       workingDirectory: root.path,
-      runInShell: Platform.isWindows,
     );
-    stdout.write(result.stdout);
-    stderr.write(result.stderr);
-    if (result.exitCode != 0) {
+    if (runExitCode != 0) {
       stderr.writeln('browser matrix failed. Server output: $serverOutput');
       exitCode = 1;
     } else {
@@ -112,6 +112,36 @@ Future<void> main() async {
     await server.exitCode
         .timeout(const Duration(seconds: 5), onTimeout: () => -1);
   }
+}
+
+/// Streams a child process's stdout/stderr straight to the console (raw
+/// chunks, so the smoke runner's per-scenario `Chromium web_*.html: PASS`
+/// lines print live, one by one, per browser) and returns its exit code.
+Future<int> _runStreamed(
+  String executable,
+  List<String> args, {
+  required String workingDirectory,
+  required Map<String, String> environment,
+}) async {
+  final process = await Process.start(
+    executable,
+    args,
+    workingDirectory: workingDirectory,
+    environment: environment,
+    runInShell: Platform.isWindows,
+  );
+  await Future.wait([
+    _pump(process.stdout, stdout),
+    _pump(process.stderr, stderr),
+  ]);
+  return process.exitCode;
+}
+
+Future<void> _pump(Stream<List<int>> source, IOSink sink) async {
+  await for (final chunk in source) {
+    sink.add(chunk);
+  }
+  await sink.flush();
 }
 
 void _writeFailure(String name, ProcessResult result) {

@@ -51,7 +51,7 @@ Future<void> main() async {
       .listen((line) => outputLines.add(line));
   try {
     await ready.future.timeout(const Duration(seconds: 10));
-    final result = await Process.run(
+    final runExitCode = await _runStreamed(
       'node',
       ['tool/web_smoke/run_smoke.cjs'],
       workingDirectory: root.path,
@@ -59,11 +59,8 @@ Future<void> main() async {
         ...Platform.environment,
         'SMOKE_PAGE': 'sync_lifecycle',
       },
-      runInShell: Platform.isWindows,
     );
-    stdout.write(result.stdout);
-    stderr.write(result.stderr);
-    if (result.exitCode != 0) {
+    if (runExitCode != 0) {
       stderr.writeln('sync browser gate failed: $outputLines');
       exitCode = 1;
     } else {
@@ -83,4 +80,34 @@ Future<void> main() async {
     await syncServer.exitCode
         .timeout(const Duration(seconds: 5), onTimeout: () => -1);
   }
+}
+
+/// Streams a child process's stdout/stderr straight to the console (raw
+/// chunks, so the smoke runner's per-scenario `Chromium web_*.html: PASS`
+/// lines print live, one by one, per browser) and returns its exit code.
+Future<int> _runStreamed(
+  String executable,
+  List<String> args, {
+  required String workingDirectory,
+  required Map<String, String> environment,
+}) async {
+  final process = await Process.start(
+    executable,
+    args,
+    workingDirectory: workingDirectory,
+    environment: environment,
+    runInShell: Platform.isWindows,
+  );
+  await Future.wait([
+    _pump(process.stdout, stdout),
+    _pump(process.stderr, stderr),
+  ]);
+  return process.exitCode;
+}
+
+Future<void> _pump(Stream<List<int>> source, IOSink sink) async {
+  await for (final chunk in source) {
+    sink.add(chunk);
+  }
+  await sink.flush();
 }

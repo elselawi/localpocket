@@ -1,5 +1,14 @@
 const { chromium, firefox, webkit } = require('playwright');
 
+const ANSI = {
+    reset: '\x1b[0m',
+    cyan: '\x1b[36m',
+    green: '\x1b[32m',
+    red: '\x1b[31m',
+    bold: '\x1b[1m',
+    dim: '\x1b[2m',
+};
+
 let browser = null;
 
 async function run(name, browserType, pagePath, signal) {
@@ -33,7 +42,7 @@ async function run(name, browserType, pagePath, signal) {
         }
         const result = await page.evaluate(key => ({ status: globalThis[key], detail: globalThis[`${key}_detail`] }), signal);
         if (errors.length || result.status !== 'passed') throw new Error(`${name} ${pagePath} failed: ${JSON.stringify({ result, errors })}`);
-        console.log(`${name} ${pagePath}: PASS`);
+        console.log(`${ANSI.cyan}${name}${ANSI.reset} ${pagePath}: ${ANSI.green}${ANSI.bold}PASS${ANSI.reset}`);
     } finally {
         await b.close().catch(() => { });
         if (b.contexts().length !== 0) {
@@ -46,6 +55,7 @@ async function run(name, browserType, pagePath, signal) {
 (async () => {
     const browserFilter = process.env.SMOKE_BROWSER;
     const pageFilter = process.env.SMOKE_PAGE;
+    const pageExclude = process.env.SMOKE_EXCLUDE_PAGE;
     const browsers = [['Chromium', chromium], ['Firefox', firefox], ['WebKit', webkit]]
         .filter(([name]) => !browserFilter || name.toLowerCase() === browserFilter.toLowerCase());
     const pages = [['web_facade_smoke.html', '__facade_smoke'],
@@ -61,9 +71,11 @@ async function run(name, browserType, pagePath, signal) {
     ['web_transaction_watch_lifecycle_smoke.html', '__transaction_watch_lifecycle_smoke'],
     ['web_durability_reopen_smoke.html', '__durability_reopen_smoke'],
     ['web_file_lifecycle_smoke.html', '__file_lifecycle_smoke'],
+    ['web_sync_lifecycle_smoke.html', '__sync_lifecycle_smoke'],
     ['web_compatibility_environment_smoke.html', '__compatibility_environment_smoke'],
     ['web_performance_resource_smoke.html', '__performance_resource_smoke']]
-        .filter(([p]) => !pageFilter || p.includes(pageFilter));
+        .filter(([p]) => !pageFilter || p.includes(pageFilter))
+        .filter(([p]) => !pageExclude || !p.includes(pageExclude));
     const filtered = Boolean(pageFilter || browserFilter);
     const expectedScenarios = filtered
         ? pages.length * browsers.length
