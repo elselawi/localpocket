@@ -50,7 +50,69 @@ Flags:
   --publish        Add `dart pub publish --dry-run`.
   --no-publish     Skip package publish dry-run (fast local mode).
   --no-coverage    Skip coverage collection and the coverage threshold gate.
+  --color          Force ANSI colors even when output is piped.
+  --no-color       Disable ANSI colors.
 ''');
+}
+
+/// Minimal ANSI palette. Colors are stripped when the output is not a
+/// terminal (or `NO_COLOR` is set / `--no-color` passed), so piping the
+/// runner to a file stays clean.
+class _Palette {
+  _Palette(this.enabled);
+  final bool enabled;
+
+  String _wrap(String code, String s) => enabled ? '$code$s\x1B[0m' : s;
+
+  String red(String s) => _wrap('\x1B[31m', s);
+  String green(String s) => _wrap('\x1B[32m', s);
+  String yellow(String s) => _wrap('\x1B[33m', s);
+  String cyan(String s) => _wrap('\x1B[36m', s);
+  String magenta(String s) => _wrap('\x1B[35m', s);
+  String bold(String s) => _wrap('\x1B[1m', s);
+  String dim(String s) => _wrap('\x1B[2m', s);
+}
+
+/// Human-friendly duration: `421ms`, `12.4s`, `3m05s`.
+String _fmtDuration(Duration d) {
+  final ms = d.inMilliseconds;
+  if (ms < 1000) return '${ms}ms';
+  if (d.inSeconds < 60) return '${d.inSeconds}.${(d.inMilliseconds % 1000) ~/ 100}s';
+  final m = d.inMinutes;
+  final s = d.inSeconds % 60;
+  return '${m}m${s.toString().padLeft(2, '0')}s';
+}
+
+/// Streams a step's stdout/stderr straight to the console (raw chunks, so the
+/// child's own `\r` progress updates and ANSI colors survive) and returns its
+/// exit code. This is what makes long steps feel alive — `dart test`'s
+/// `+1987 ~76` counter and the browser matrix's per-scenario PASS lines print
+/// as they happen instead of after 45 silent minutes.
+Future<int> _runStep(
+  String executable,
+  List<String> args, {
+  required String workingDirectory,
+  required Map<String, String> environment,
+}) async {
+  final process = await Process.start(
+    executable,
+    args,
+    workingDirectory: workingDirectory,
+    environment: environment,
+    runInShell: Platform.isWindows,
+  );
+  await Future.wait([
+    _pump(process.stdout, stdout),
+    _pump(process.stderr, stderr),
+  ]);
+  return process.exitCode;
+}
+
+Future<void> _pump(Stream<List<int>> source, IOSink sink) async {
+  await for (final chunk in source) {
+    sink.add(chunk);
+  }
+  await sink.flush();
 }
 
 List<ReleaseStep> buildReleaseSteps({
@@ -244,51 +306,80 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  stdout.writeln('Running LocalPocket release checks in ${root.path}');
+  final forceColor = args.contains('--color')
+      ? true
+      : args.contains('--no-color')
+          ? false
+          : null;
+  final c = _Palette(
+    forceColor ??
+        (stdout.supportsAnsiEscapes &&
+            !Platform.environment.containsKey('NO_COLOR')),
+  );
+
+  final total = Stopwatch()..start();
+  stdout.writeln();
+  stdout.writeln(c.bold(c.cyan('LocalPocket release checks')));
+  stdout.writeln(c.dim('  ${steps.length} steps · ${root.path}'));
+  stdout.writeln();
+
   var failures = 0;
   for (var i = 0; i < steps.length; i++) {
     final step = steps[i];
-    stdout.writeln('[${i + 1}/${steps.length}] ${step.label}...');
+    final sw = Stopwatch()..start();
+    final num = (i + 1).toString().padLeft(2, '0');
+    stdout.writeln('${c.dim('[$num/${steps.length}]')} ${c.bold(step.label)}');
     try {
       step.setup?.call(root);
     } catch (e) {
-      stderr.writeln('FAIL  ${step.id}: setup error: $e');
-      exitCode = 1;
-      return;
+      sw.stop();
+      failures++;
+      stdout.writeln(
+          '${c.red('  ✗ FAIL')} ${c.bold(step.label)} ${c.dim('(${_fmtDuration(sw.elapsed)})')}');
+      stdout.writeln(c.red('    setup error: $e'));
+      break;
     }
 
     final environment = <String, String>{
       ...Platform.environment,
       if (step.env != null) ...step.env!,
     };
-    final executable = step.argv.first == 'git' ? 'git' : 'dart';
-    final command =
-        step.argv.first == 'git' ? step.argv.skip(1).toList() : step.argv;
-    final result = await Process.run(
+    final command = List<String>.of(step.argv);
+    // The child runs through a pipe (not a TTY), so `dart test` would
+    // disable its own colors; force them when our palette is on so the
+    // progress counters stay readable.
+    if (c.enabled && command.isNotEmpty && command.first == 'test') {
+      command.insert(1, '--color');
+    }
+    final executable = command.first == 'git' ? 'git' : 'dart';
+    final cmd = command.first == 'git' ? command.skip(1).toList() : command;
+
+    final exitCode = await _runStep(
       executable,
-      command,
+      cmd,
       workingDirectory: root.path,
       environment: environment,
-      runInShell: Platform.isWindows,
     );
-    if (result.exitCode != 0) {
+    sw.stop();
+
+    if (exitCode != 0) {
       failures++;
-      stdout.writeln('FAIL  ${step.id}');
-      final output = '${result.stdout}\n${result.stderr}'.trim();
-      final lines = output.split(RegExp(r'\r?\n'));
-      final tail = lines.length > 30 ? lines.sublist(lines.length - 30) : lines;
-      for (final line in tail) {
-        stdout.writeln('  | $line');
-      }
+      stdout.writeln(
+          '${c.red('  ✗ FAIL')} ${c.bold(step.label)} ${c.dim('(${_fmtDuration(sw.elapsed)})')}');
       break;
     }
-    stdout.writeln('PASS  ${step.id}');
+    stdout.writeln(
+        '${c.green('  ✓ PASS')} ${c.bold(step.label)} ${c.dim('(${_fmtDuration(sw.elapsed)})')}');
   }
 
+  total.stop();
+  stdout.writeln();
   if (failures > 0) {
-    stderr.writeln('RELEASE BLOCKED: $failures check failed.');
+    stdout.writeln(c.red(c.bold(
+        '✗ RELEASE BLOCKED: $failures check failed. (${_fmtDuration(total.elapsed)})')));
     exitCode = 1;
   } else {
-    stdout.writeln('RELEASE READY: all ${steps.length} checks passed.');
+    stdout.writeln(c.green(c.bold(
+        '✓ RELEASE READY: all ${steps.length} checks passed. (${_fmtDuration(total.elapsed)})')));
   }
 }
