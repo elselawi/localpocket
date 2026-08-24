@@ -87,9 +87,16 @@ Future<void> main() async {
       final page = await collection.query().limit(10).fetch();
       mark('watch');
       final watchEvents = <List<Map<String, Object?>>>[];
-      final watchSub =
-          collection.query().limit(10).watch().listen(watchEvents.add);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      final watchReady = Completer<void>();
+      final watchSub = collection.query().limit(10).watch().listen((e) {
+        watchEvents.add(e);
+        if (!watchReady.isCompleted) watchReady.complete();
+      });
+      // The initial snapshot is emitted asynchronously from the worker. Wait
+      // for the first event with a generous timeout instead of a fixed sleep,
+      // which flakes on slow browsers (Firefox/WebKit under load) where the
+      // snapshot can arrive later than 200ms.
+      await watchReady.future.timeout(const Duration(seconds: 10));
       await watchSub.cancel();
       mark('watch_done');
       if (watchEvents.isEmpty) {
