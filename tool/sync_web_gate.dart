@@ -34,7 +34,10 @@ Future<void> main() async {
     'node',
     ['tool/web_smoke/sync_fixture_server.cjs', '8125'],
     workingDirectory: root.path,
-    runInShell: Platform.isWindows,
+    // No runInShell: on Windows that wraps the process in `cmd /c`, making
+    // `syncServer.pid` the cmd PID — kill()/taskkill then leave the child
+    // node (fixture server) running and leaked on port 8125. Spawning node
+    // directly keeps the PID on the actual process so kill() works.
   );
   final ready = Completer<void>();
   final outputLines = <String>[];

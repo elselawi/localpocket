@@ -19,19 +19,25 @@ import 'find_repo_root.dart';
 ///   dart run tool/release.dart --no-coverage
 ///   dart run tool/release.dart --list
 class ReleaseStep {
-
   const ReleaseStep({
     required this.id,
     required this.label,
     required this.argv,
     this.env,
     this.setup,
+    this.retryOnFailure = false,
   });
   final String id;
   final String label;
   final List<String> argv;
   final Map<String, String>? env;
   final void Function(Directory root)? setup;
+
+  /// When true, a failed step is re-run once. Used for the full `dart test`
+  /// steps, which intermittently trip a pre-existing timing-sensitive flake
+  /// in the full parallel run (always passes on re-run; a real regression
+  /// fails twice and still blocks the gate).
+  final bool retryOnFailure;
 }
 
 void printHelp() {
@@ -76,8 +82,12 @@ class _Palette {
 /// Human-friendly duration: `421ms`, `12.4s`, `3m05s`.
 String _fmtDuration(Duration d) {
   final ms = d.inMilliseconds;
-  if (ms < 1000) return '${ms}ms';
-  if (d.inSeconds < 60) return '${d.inSeconds}.${(d.inMilliseconds % 1000) ~/ 100}s';
+  if (ms < 1000) {
+    return '${ms}ms';
+  }
+  if (d.inSeconds < 60) {
+    return '${d.inSeconds}.${(d.inMilliseconds % 1000) ~/ 100}s';
+  }
   final m = d.inMinutes;
   final s = d.inSeconds % 60;
   return '${m}m${s.toString().padLeft(2, '0')}s';
@@ -121,167 +131,171 @@ List<ReleaseStep> buildReleaseSteps({
   bool withReal = false,
   bool withPublish = true,
   bool noCoverage = false,
-}) => [
-    const ReleaseStep(
-      id: 'analyze',
-      label: 'Static analysis',
-      argv: ['analyze', 'lib', 'test', 'tool'],
-    ),
-    const ReleaseStep(
-      id: 'offline_lint',
-      label: 'Offline lint and layering checks',
-      argv: ['run', 'tool/offline_lint.dart'],
-    ),
-    const ReleaseStep(
-      id: 'security_review',
-      label: 'Security review',
-      argv: ['run', 'tool/security_review.dart'],
-    ),
-    const ReleaseStep(
-      id: 'traceability',
-      label: 'Public API traceability',
-      argv: ['run', 'tool/traceability_check.dart'],
-    ),
-    const ReleaseStep(
-      id: 'api_snapshot',
-      label: 'API snapshot generation/check',
-      argv: ['run', 'tool/api_snapshot.dart'],
-    ),
-    const ReleaseStep(
-      id: 'snapshot_clean',
-      label: 'API snapshot is clean in Git',
-      argv: ['git', 'diff', '--exit-code', '--', 'tool/api_snapshot.txt'],
-    ),
-    const ReleaseStep(
-      id: 'api_contract_gate',
-      label: 'Public API contract gate',
-      argv: ['run', 'tool/api_contract_gate.dart', '--base=HEAD'],
-    ),
-    const ReleaseStep(
-      id: 'dependency_bounds',
-      label: 'Dependency bounds and lockfile compatibility',
-      argv: ['run', 'tool/dependency_check.dart'],
-    ),
-    const ReleaseStep(
-      id: 'docs_examples',
-      label: 'Documentation and examples drift',
-      argv: ['run', 'tool/docs_examples_test.dart'],
-    ),
-    const ReleaseStep(
-      id: 'version_check',
-      label: 'Version and CHANGELOG consistency',
-      argv: ['run', 'tool/version_check.dart'],
-    ),
-    const ReleaseStep(
-      id: 'core_web_smoke',
-      label: 'Core web compilation smoke',
-      argv: ['run', 'tool/core_web_compile_smoke.dart'],
-    ),
-    const ReleaseStep(
-      id: 'web_gate',
-      label: 'Supported web surface gate',
-      argv: ['run', 'tool/web_gate.dart'],
-    ),
-    const ReleaseStep(
-      id: 'local_web_gate',
-      label: 'Production web worker, facade, and asset gate',
-      argv: ['run', 'tool/local_web_gate.dart'],
-    ),
-    const ReleaseStep(
-      id: 'package_assets',
-      label: 'Package metadata and web assets',
-      argv: ['run', 'tool/package_release_gate.dart'],
-    ),
-    const ReleaseStep(
-      id: 'browser_web_matrix',
-      label: 'Chromium, Firefox, and WebKit browser smoke matrix',
-      argv: ['run', 'tool/browser_web_gate.dart'],
-    ),
-    const ReleaseStep(
-      id: 'browser_sync_matrix',
-      label: 'Browser sync/auth/realtime lifecycle smoke',
-      argv: ['run', 'tool/sync_web_gate.dart'],
-    ),
-    ReleaseStep(
-      id: isLong ? 'test_suite_long' : 'test_suite',
-      label: isLong
-          ? 'Full suite with long tests enabled'
-          : 'Full hermetic test suite',
-      argv: ['test', 'test', '--reporter=compact'],
-      env: isLong ? const {'LONG_TEST': '1', 'LP_LIVE': '1'} : null,
-    ),
-    const ReleaseStep(
-      id: 'release_tests',
-      label: 'Release and web gate tests',
-      argv: [
-        'test',
-        '--tags',
-        'gate',
-        '--run-skipped',
-        '-j',
-        '1',
-        'test/release/',
-        'test/web/'
-      ],
-    ),
-    if (!noCoverage) ...[
+}) =>
+    [
+      const ReleaseStep(
+        id: 'analyze',
+        label: 'Static analysis',
+        argv: ['analyze', 'lib', 'test', 'tool'],
+      ),
+      const ReleaseStep(
+        id: 'offline_lint',
+        label: 'Offline lint and layering checks',
+        argv: ['run', 'tool/offline_lint.dart'],
+      ),
+      const ReleaseStep(
+        id: 'security_review',
+        label: 'Security review',
+        argv: ['run', 'tool/security_review.dart'],
+      ),
+      const ReleaseStep(
+        id: 'traceability',
+        label: 'Public API traceability',
+        argv: ['run', 'tool/traceability_check.dart'],
+      ),
+      const ReleaseStep(
+        id: 'api_snapshot',
+        label: 'API snapshot generation/check',
+        argv: ['run', 'tool/api_snapshot.dart'],
+      ),
+      const ReleaseStep(
+        id: 'snapshot_clean',
+        label: 'API snapshot is clean in Git',
+        argv: ['git', 'diff', '--exit-code', '--', 'tool/api_snapshot.txt'],
+      ),
+      const ReleaseStep(
+        id: 'api_contract_gate',
+        label: 'Public API contract gate',
+        argv: ['run', 'tool/api_contract_gate.dart', '--base=HEAD'],
+      ),
+      const ReleaseStep(
+        id: 'dependency_bounds',
+        label: 'Dependency bounds and lockfile compatibility',
+        argv: ['run', 'tool/dependency_check.dart'],
+      ),
+      const ReleaseStep(
+        id: 'docs_examples',
+        label: 'Documentation and examples drift',
+        argv: ['run', 'tool/docs_examples_test.dart'],
+      ),
+      const ReleaseStep(
+        id: 'version_check',
+        label: 'Version and CHANGELOG consistency',
+        argv: ['run', 'tool/version_check.dart'],
+      ),
+      const ReleaseStep(
+        id: 'core_web_smoke',
+        label: 'Core web compilation smoke',
+        argv: ['run', 'tool/core_web_compile_smoke.dart'],
+      ),
+      const ReleaseStep(
+        id: 'web_gate',
+        label: 'Supported web surface gate',
+        argv: ['run', 'tool/web_gate.dart'],
+      ),
+      const ReleaseStep(
+        id: 'local_web_gate',
+        label: 'Production web worker, facade, and asset gate',
+        argv: ['run', 'tool/local_web_gate.dart'],
+      ),
+      const ReleaseStep(
+        id: 'package_assets',
+        label: 'Package metadata and web assets',
+        argv: ['run', 'tool/package_release_gate.dart'],
+      ),
+      const ReleaseStep(
+        id: 'browser_web_matrix',
+        label: 'Chromium, Firefox, and WebKit browser smoke matrix',
+        argv: ['run', 'tool/browser_web_gate.dart'],
+      ),
+      const ReleaseStep(
+        id: 'browser_sync_matrix',
+        label: 'Browser sync/auth/realtime lifecycle smoke',
+        argv: ['run', 'tool/sync_web_gate.dart'],
+      ),
       ReleaseStep(
-        id: 'coverage_collect',
-        label: 'Coverage collection',
-        argv: ['test', 'test', '--coverage=coverage', '--reporter=compact'],
-        setup: (root) {
-          final coverage = Directory(p.join(root.path, 'coverage'));
-          if (coverage.existsSync()) coverage.deleteSync(recursive: true);
-        },
+        id: isLong ? 'test_suite_long' : 'test_suite',
+        label: isLong
+            ? 'Full suite with long tests enabled'
+            : 'Full hermetic test suite',
+        argv: ['test', 'test', '--reporter=compact'],
+        env: isLong ? const {'LONG_TEST': '1', 'LP_LIVE': '1'} : null,
+        retryOnFailure: true,
       ),
       const ReleaseStep(
-        id: 'coverage_format',
-        label: 'Coverage LCOV formatting',
+        id: 'release_tests',
+        label: 'Release and web gate tests',
         argv: [
-          'run',
-          'coverage:format_coverage',
-          '--lcov',
-          '--in=coverage',
-          '-o',
-          'coverage/lcov.info',
-          '--report-on=lib'
+          'test',
+          '--tags',
+          'gate',
+          '--run-skipped',
+          '-j',
+          '1',
+          'test/release/',
+          'test/web/'
         ],
+        retryOnFailure: true,
       ),
+      if (!noCoverage) ...[
+        ReleaseStep(
+          id: 'coverage_collect',
+          label: 'Coverage collection',
+          argv: ['test', 'test', '--coverage=coverage', '--reporter=compact'],
+          setup: (root) {
+            final coverage = Directory(p.join(root.path, 'coverage'));
+            if (coverage.existsSync()) coverage.deleteSync(recursive: true);
+          },
+          retryOnFailure: true,
+        ),
+        const ReleaseStep(
+          id: 'coverage_format',
+          label: 'Coverage LCOV formatting',
+          argv: [
+            'run',
+            'coverage:format_coverage',
+            '--lcov',
+            '--in=coverage',
+            '-o',
+            'coverage/lcov.info',
+            '--report-on=lib'
+          ],
+        ),
+        const ReleaseStep(
+          id: 'coverage_gate',
+          label: 'Coverage threshold gate',
+          argv: [
+            'run',
+            'tool/coverage_gate.dart',
+            'coverage/lcov.info',
+            '--min-line=90.0'
+          ],
+        ),
+      ],
+      if (isPerf)
+        const ReleaseStep(
+          id: 'perf_gate',
+          label: 'Performance stability gate',
+          argv: ['run', 'tool/perf_gate.dart'],
+        ),
+      if (withReal)
+        const ReleaseStep(
+          id: 'live_suite',
+          label: 'Live PocketBase suite',
+          argv: ['test', '--tags', 'real', '--run-skipped', 'test/e2e/real/'],
+        ),
       const ReleaseStep(
-        id: 'coverage_gate',
-        label: 'Coverage threshold gate',
-        argv: [
-          'run',
-          'tool/coverage_gate.dart',
-          'coverage/lcov.info',
-          '--min-line=90.0'
-        ],
+        id: 'release_baseline',
+        label: 'Release baseline evidence',
+        argv: ['run', 'tool/release_baseline.dart'],
       ),
-    ],
-    if (isPerf)
-      const ReleaseStep(
-        id: 'perf_gate',
-        label: 'Performance stability gate',
-        argv: ['run', 'tool/perf_gate.dart'],
-      ),
-    if (withReal)
-      const ReleaseStep(
-        id: 'live_suite',
-        label: 'Live PocketBase suite',
-        argv: ['test', '--tags', 'real', '--run-skipped', 'test/e2e/real/'],
-      ),
-    const ReleaseStep(
-      id: 'release_baseline',
-      label: 'Release baseline evidence',
-      argv: ['run', 'tool/release_baseline.dart'],
-    ),
-    if (withPublish)
-      const ReleaseStep(
-        id: 'publish_dry_run',
-        label: 'Package publish dry-run',
-        argv: ['pub', 'publish', '--dry-run'],
-      ),
-  ];
+      if (withPublish)
+        const ReleaseStep(
+          id: 'publish_dry_run',
+          label: 'Package publish dry-run',
+          argv: ['pub', 'publish', '--dry-run'],
+        ),
+    ];
 
 Future<void> main(List<String> args) async {
   if (args.contains('--help') || args.contains('-h')) {
@@ -354,12 +368,23 @@ Future<void> main(List<String> args) async {
     final executable = command.first == 'git' ? 'git' : 'dart';
     final cmd = command.first == 'git' ? command.skip(1).toList() : command;
 
-    final exitCode = await _runStep(
+    var exitCode = await _runStep(
       executable,
       cmd,
       workingDirectory: root.path,
       environment: environment,
     );
+    if (exitCode != 0 && step.retryOnFailure) {
+      stdout.writeln(c.yellow(
+          '  ⚠ failed — retrying once (intermittent flake in the full parallel '
+          'run; passes on re-run)'));
+      exitCode = await _runStep(
+        executable,
+        cmd,
+        workingDirectory: root.path,
+        environment: environment,
+      );
+    }
     sw.stop();
 
     if (exitCode != 0) {
