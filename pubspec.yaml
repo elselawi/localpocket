@@ -1,22 +1,32 @@
 name: localpocket
 description: >-
-  Local-first SQLite database for Dart/Flutter with eventually-consistent
-  PocketBase synchronization. Implements the plan in plan.md (Phases 1-2).
+  Local-first SQLite database for Dart and Flutter with offline-first storage and
+  eventually-consistent PocketBase synchronization.
 version: 0.1.1
+
+repository: https://github.com/elselawi/localpocket
+homepage: https://github.com/elselawi/localpocket
+issue_tracker: https://github.com/elselawi/localpocket/issues
+documentation: https://github.com/elselawi/localpocket#readme
+topics:
+  - database
+  - sqlite
+  - flutter
+  - dart
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
 
 dependencies:
+  collection: ^1.17.0
+  crypto: ^3.0.0
+  cryptography: ^2.9.0
+  http: ^1.6.0
+  meta: ^1.9.0
+  path: ^1.8.0
   sqlite3: ">=2.4.0 <4.0.0"
   sqlite3_web: ^0.9.4
   web: ^1.1.0
-  path: ^1.8.0
-  collection: ^1.17.0
-  crypto: ^3.0.0
-  meta: ^1.9.0
-  http: ^1.6.0
-  cryptography: ^2.9.0
 
 flutter:
   assets:
@@ -26,10 +36,9 @@ flutter:
     - assets/localpocket_worker.js.sha256
 
 dev_dependencies:
-  test: ^1.24.0
+  drift: ^2.34.3
+  hive: ^2.2.3
+  isar: ^3.1.0+1
   lints: ^3.0.0
   sembast: ^3.8.6
-  hive: ^2.2.3
-  drift: ^2.34.3
-  isar: ^3.1.0+1
-  material: ^1.0.1
+  test: ^1.24.0
