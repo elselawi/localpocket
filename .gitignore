@@ -7,6 +7,9 @@ build/
 .vscode/
 *.log
 
+# Cloudflare Pages staging output (see tool/deploy_site.mjs)
+_site/
+
 # playwright
 node_modules
 
@@ -20,7 +23,6 @@ probe/
 # Basename patterns have no slash, so they keep matching even if a result file
 # is moved outside benchmark/results/.
 benchmark/results/
-benchmark/baseline/
 benchmark/*.dll
 
 # auditing and planning documents

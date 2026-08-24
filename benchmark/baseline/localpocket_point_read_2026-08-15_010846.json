@@ -1,0 +1,51 @@
+{
+  "benchmark": "localpocket/profile_point_read",
+  "meta": {
+    "generatedAt": "2026-08-14T22:08:45.518037Z",
+    "dartVersion": "3.10.8",
+    "os": "windows",
+    "osVersion": "\"Windows 11 Home Single Language\" 10.0 (Build 26200)",
+    "vmTarget": "windows_x64",
+    "processors": 32,
+    "sqliteVersion": "3.53.4"
+  },
+  "samples": 10000,
+  "stats": {
+    "get": {
+      "count": 10000,
+      "p50Us": 13,
+      "p95Us": 21,
+      "p99Us": 38,
+      "meanUs": 14.7689
+    },
+    "domainSelect": {
+      "count": 10000,
+      "p50Us": 7,
+      "p95Us": 10,
+      "p99Us": 19,
+      "meanUs": 7.5842
+    },
+    "syncRowSelect": {
+      "count": 10000,
+      "p50Us": 10,
+      "p95Us": 16,
+      "p99Us": 24,
+      "meanUs": 11.2891
+    },
+    "decode": {
+      "count": 10000,
+      "p50Us": 0,
+      "p95Us": 0,
+      "p99Us": 1,
+      "meanUs": 0.0431
+    },
+    "combinedLeftJoin": {
+      "count": 10000,
+      "p50Us": 9,
+      "p95Us": 15,
+      "p99Us": 28,
+      "meanUs": 10.7804
+    }
+  },
+  "statementsPerGet": 1
+}

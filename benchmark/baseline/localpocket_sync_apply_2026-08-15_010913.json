@@ -1,0 +1,19 @@
+{
+  "benchmark": "localpocket/profile_sync_apply",
+  "meta": {
+    "generatedAt": "2026-08-14T22:09:12.875992Z",
+    "dartVersion": "3.10.8",
+    "os": "windows",
+    "osVersion": "\"Windows 11 Home Single Language\" 10.0 (Build 26200)",
+    "vmTarget": "windows_x64",
+    "processors": 32,
+    "sqliteVersion": "3.53.4"
+  },
+  "records": 1000,
+  "currentMs": 65,
+  "prefetchOptMs": 23,
+  "b6StyleMs": 62,
+  "currentStmts": 3004,
+  "prefetchOptStmts": 2004,
+  "b6StyleStmts": 0
+}

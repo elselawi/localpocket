@@ -1,0 +1,25 @@
+{
+  "benchmark": "localpocket/four_mode_harness",
+  "meta": {
+    "generatedAt": "2026-08-14T22:14:20.237538Z",
+    "dartVersion": "3.10.8",
+    "os": "windows",
+    "osVersion": "\"Windows 11 Home Single Language\" 10.0 (Build 26200)",
+    "vmTarget": "windows_x64",
+    "processors": 32,
+    "sqliteVersion": "3.53.4"
+  },
+  "records": 100000,
+  "chunk": 10000,
+  "results": {
+    "A_bare_1table_NORMAL_ms": 351,
+    "B_sync_equiv_3table_NORMAL_ms": 2257,
+    "C_localpocket_NORMAL_ms": 3539,
+    "D_localpocket_FULL_ms": 3570
+  },
+  "ratios": {
+    "B_over_A_contract": 6.43,
+    "D_over_B_impl": 1.58,
+    "D_over_C_durability": 1.01
+  }
+}

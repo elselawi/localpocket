@@ -1,0 +1,36 @@
+{
+  "benchmark": "localpocket/profile_outbox_patch",
+  "meta": {
+    "generatedAt": "2026-08-14T22:08:59.565866Z",
+    "dartVersion": "3.10.8",
+    "os": "windows",
+    "osVersion": "\"Windows 11 Home Single Language\" 10.0 (Build 26200)",
+    "vmTarget": "windows_x64",
+    "processors": 32,
+    "sqliteVersion": "3.53.4"
+  },
+  "firstPatchFull": {
+    "count": 1,
+    "p50Us": 6766,
+    "p95Us": 6766,
+    "p99Us": 6766,
+    "meanUs": 6766.0
+  },
+  "dirtyPatchFull": {
+    "count": 999,
+    "p50Us": 633,
+    "p95Us": 991,
+    "p99Us": 1329,
+    "meanUs": 681.5415415415415
+  },
+  "dirtyPatchNormal": {
+    "count": 1000,
+    "p50Us": 135,
+    "p95Us": 372,
+    "p99Us": 2219,
+    "meanUs": 194.991
+  },
+  "totalFullMs": 689,
+  "totalNormalMs": 195,
+  "statementsPerPatchFull": 8
+}

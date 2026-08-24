@@ -1,0 +1,121 @@
+{
+  "benchmark": "localpocket/benchmark",
+  "meta": {
+    "generatedAt": "2026-08-14T22:41:14.179196Z",
+    "dartVersion": "3.10.8",
+    "os": "windows",
+    "osVersion": "\"Windows 11 Home Single Language\" 10.0 (Build 26200)",
+    "vmTarget": "windows_x64",
+    "processors": 32,
+    "sqliteVersion": "3.53.4"
+  },
+  "summary": {
+    "passed": 12,
+    "failed": 0,
+    "allTargetsMet": true,
+    "failures": []
+  },
+  "results": [
+    {
+      "id": "B1",
+      "label": "bulk insert 10k (1 txn, putAll)",
+      "ms": 287,
+      "targetMs": 2000,
+      "ok": true
+    },
+    {
+      "id": "seed-100k",
+      "label": "seed 100k rows (10K txn chunks, putAll)",
+      "ms": 3794
+    },
+    {
+      "id": "B2",
+      "label": "indexed point query p50 (1000 lookups)",
+      "ms": 0,
+      "targetMs": 1,
+      "ok": true,
+      "note": "(p50 11us)"
+    },
+    {
+      "id": "B3",
+      "label": "indexed range+sort+limit 50 p50 (100k rows)",
+      "ms": 0,
+      "targetMs": 5,
+      "ok": true,
+      "note": "(p50 133us)"
+    },
+    {
+      "id": "B4",
+      "label": "keyset walk 100k (pages of 100)",
+      "ms": 93,
+      "pages": 1000,
+      "rows": 100000,
+      "targetMs": 3000,
+      "ok": true,
+      "note": "target < 1000ms, platform floor ~1150-2200ms"
+    },
+    {
+      "id": "B5",
+      "label": "OFFSET 50k vs keyset continuation",
+      "keysetUs": 316,
+      "offsetUs": 1461,
+      "ratio": 4.6,
+      "ok": true
+    },
+    {
+      "id": "B6",
+      "label": "sync apply 1000 records",
+      "ms": 47,
+      "targetMs": 3000,
+      "ok": true
+    },
+    {
+      "id": "B7",
+      "label": "outbox: 1000 edits -> single outbox row",
+      "ms": 78,
+      "outboxRows": 1,
+      "targetMs": 1000,
+      "ok": true,
+      "note": "target < 100ms, platform floor ~150-700ms"
+    },
+    {
+      "id": "B8",
+      "label": "conflict merge 1 000 disjoint/overlap pairs",
+      "ms": 8,
+      "targetMs": 2000,
+      "ok": true,
+      "note": "(8ms)"
+    },
+    {
+      "id": "B9",
+      "label": "file upload 10 MB (memory profile)",
+      "ms": 97,
+      "rssDeltaMb": -0.87,
+      "sizeOk": true,
+      "ok": true,
+      "note": "target RSS delta < 20MB"
+    },
+    {
+      "id": "B10",
+      "label": "watch 500 writes coalesced",
+      "emits": 1,
+      "targetEmits": 2,
+      "ok": true
+    },
+    {
+      "id": "B11",
+      "label": "web smoke: 1000 docs via wasm/web profile",
+      "ms": 38,
+      "targetMs": 5000,
+      "ok": true
+    },
+    {
+      "id": "B12",
+      "label": "FTS5 search over 100k docs, top-50 query p50",
+      "ms": 0,
+      "targetMs": 10,
+      "ok": true,
+      "note": "(p50 50us)"
+    }
+  ]
+}
