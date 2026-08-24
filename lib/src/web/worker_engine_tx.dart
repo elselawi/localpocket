@@ -18,10 +18,22 @@ class _TxSession {
     required this.sessionId,
     required this.completer,
     required this.tx,
+    required this.done,
   });
   final int sessionId;
+
+  /// Unblocks the held-open transaction body (the `tx_commit`/`tx_rollback`
+  /// signal). Completing it lets the real SQL COMMIT/ROLLBACK run.
   final Completer<void> completer;
   final Tx tx;
+
+  /// Resolves with the transaction's terminal outcome only after the real
+  /// SQL COMMIT/ROLLBACK has executed: success after COMMIT, or the error
+  /// when COMMIT/ROLLBACK failed (OPFS quota, disk I/O, corruption).
+  /// `tx_commit`/`tx_rollback` await this before replying so a failed settle
+  /// surfaces as a [WorkerError] instead of a false success.
+  final Completer<void> done;
+
   final List<String> savepoints = [];
 }
 
@@ -34,22 +46,59 @@ mixin WorkerTxHandlers on WorkerEngineHost {
     }
     final sessId = _nextSessionId++;
     final completer = Completer<void>();
+    final done = Completer<void>();
     final readyCompleter = Completer<void>();
 
-    unawaited(pocket.transaction((tx) async {
-      _activeSession = _TxSession(
-        sessionId: sessId,
-        completer: completer,
-        tx: tx,
-      );
-      readyCompleter.complete();
-      await completer.future;
-    }).catchError((_) {
-      _activeSession = null;
-    }));
+    unawaited(_runTxSession(
+      sessionId: sessId,
+      bodyCompleter: completer,
+      done: done,
+      ready: readyCompleter,
+    ));
 
     await readyCompleter.future;
     return {'sessionId': sessId};
+  }
+
+  /// Drives one interactive transaction session to completion.
+  ///
+  /// Holds a real `pocket.transaction(...)` open on [bodyCompleter] so the
+  /// client can interleave reads and mutations over the wire, then resolves
+  /// [done] with the transaction's terminal outcome: success only after the
+  /// real SQL COMMIT has executed, or the error if COMMIT/ROLLBACK failed.
+  /// `tx_commit`/`tx_rollback` await [done] so they never acknowledge before
+  /// persistence is settled. The session is always released, even when the
+  /// transaction fails. [ready] signals that the session is installed (or
+  /// that begin failed outright, e.g. a BEGIN-level failure).
+  Future<void> _runTxSession({
+    required int sessionId,
+    required Completer<void> bodyCompleter,
+    required Completer<void> done,
+    required Completer<void> ready,
+  }) async {
+    // The outcome is normally awaited by tx_commit/tx_rollback. When the
+    // worker is closed mid-transaction nobody awaits it, so attach a guard
+    // listener to keep a settle failure from surfacing as an unhandled error.
+    unawaited(done.future.then((_) {}, onError: (_) {}));
+    try {
+      await pocket.transaction((tx) async {
+        final session = _TxSession(
+          sessionId: sessionId,
+          completer: bodyCompleter,
+          tx: tx,
+          done: done,
+        );
+        _activeSession = session;
+        ready.complete();
+        await bodyCompleter.future;
+      });
+      if (!done.isCompleted) done.complete();
+    } catch (e, st) {
+      if (!done.isCompleted) done.completeError(e, st);
+      if (!ready.isCompleted) ready.completeError(e, st);
+    } finally {
+      _activeSession = null;
+    }
   }
 
   Future<Object?> _handleTxGet(WorkerEventSink sink, WebRequest req) async {
@@ -113,17 +162,43 @@ mixin WorkerTxHandlers on WorkerEngineHost {
 
   Future<Object?> _handleTxCommit(WorkerEventSink sink, WebRequest req) async {
     final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
-    _activeSession = null;
-    sess.completer.complete();
-    return {'ok': true};
+    try {
+      // Release the session first so no late tx_* request can route to a
+      // closing transaction, then unblock the held-open body and await the
+      // real COMMIT: a failed COMMIT (quota, I/O, corruption) throws here so
+      // the dispatcher replies with a WorkerError instead of a false success.
+      if (identical(_activeSession, sess)) _activeSession = null;
+      sess.completer.complete();
+      await sess.done.future;
+      return {'ok': true};
+    } finally {
+      if (identical(_activeSession, sess)) _activeSession = null;
+    }
   }
 
   Future<Object?> _handleTxRollback(
       WorkerEventSink sink, WebRequest req) async {
     final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
-    _activeSession = null;
-    sess.completer.completeError(RemoteLocalPocketException(
-        code: 'rollback', message: 'Transaction rolled back.'));
-    return {'ok': true};
+    try {
+      // Release the session and fail the held-open body so the transaction
+      // rolls back, then await the rollback's terminal outcome so the reply
+      // is only sent after the rollback has actually executed.
+      if (identical(_activeSession, sess)) _activeSession = null;
+      final signal = RemoteLocalPocketException(
+          code: 'rollback', message: 'Transaction rolled back.');
+      sess.completer.completeError(signal);
+      try {
+        await sess.done.future;
+      } catch (e) {
+        // The transaction rolls back by throwing [signal] out of the body;
+        // that exact object is the successful-rollback signal. Any other
+        // error means the rollback itself failed (I/O, quota, corruption)
+        // and must reach the client as a WorkerError.
+        if (!identical(e, signal)) rethrow;
+      }
+      return {'ok': true};
+    } finally {
+      if (identical(_activeSession, sess)) _activeSession = null;
+    }
   }
 }

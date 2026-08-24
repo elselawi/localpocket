@@ -50,6 +50,8 @@ class TestHooks {
     this.migrationCrashPoint,
     this.mutationCrashPoint,
     this.applyRemoteCrashPoint,
+    this.commitCrashPoint,
+    this.rollbackCrashPoint,
     this.onExecute,
     this.onQuery,
   });
@@ -65,6 +67,17 @@ class TestHooks {
   /// Called at the top of every remote apply; throw to roll back
   /// the page transaction.
   void Function(String store, String id)? applyRemoteCrashPoint;
+
+  /// Called right before COMMIT executes (after a successful transaction
+  /// body); throw to simulate a COMMIT failure (OPFS quota, disk I/O,
+  /// corruption) — the whole transaction rolls back and every caller
+  /// observes the thrown error instead of a false success.
+  void Function()? commitCrashPoint;
+
+  /// Called when a solo transaction body throws, right before the enclosing
+  /// transaction ROLLBACKs; throw to simulate a ROLLBACK failure — the
+  /// caller observes the thrown error instead of a false success.
+  void Function()? rollbackCrashPoint;
 
   /// Called for every `execute` routed through [LocalPocket.traceExecute]
   /// (pragma spy).
@@ -909,6 +922,10 @@ class _CommitGroup {
             outcomes.add((members.single, result, null, null));
           } catch (e, st) {
             outcomes.add((members.single, null, e, st));
+            // Right before the transaction ROLLBACKs: throw to simulate a
+            // ROLLBACK failure (disk I/O, quota) so the caller observes a
+            // failure instead of a false success.
+            pocket.testHooks?.rollbackCrashPoint?.call();
             rethrow;
           }
         } else {
@@ -922,6 +939,10 @@ class _CommitGroup {
             }
           }
         }
+        // Right before COMMIT executes: throw to simulate a COMMIT failure
+        // (OPFS quota, disk I/O, corruption) — the whole transaction rolls
+        // back and every caller observes the thrown error.
+        pocket.testHooks?.commitCrashPoint?.call();
       });
       // COMMIT has executed: now resolve every caller.
       for (final (m, result, err, st) in outcomes) {
@@ -938,15 +959,21 @@ class _CommitGroup {
       for (final event in recordEvents) {
         pocket.changeBus.emitEvent(event);
       }
-    } catch (e) {
-      // The transaction failed at BEGIN/COMMIT/rollback level. Members whose
-      // own body already failed must still receive THEIR error (not a generic
-      // group failure); members with a stashed success keep it — their writes
-      // are rolled back with the transaction and the caller learns via the
-      // rethrown error below.
+    } catch (e, st) {
+      // The transaction failed at BEGIN/COMMIT/rollback level and every
+      // member's writes are rolled back with it. A member whose own body
+      // already failed keeps that error when it IS the settle failure (the
+      // ordinary rethrow); when the settle failed with a different error (a
+      // COMMIT/ROLLBACK failure after a body threw, or a body that succeeded
+      // before a COMMIT failure), the caller must learn the settle error
+      // rather than a false success. The generic fallback in `finally` below
+      // only covers BEGIN failures that unwound before any member ran.
       for (final (m, _, err, mst) in outcomes) {
-        if (err != null && !m.completer.isCompleted) {
+        if (m.completer.isCompleted) continue;
+        if (err != null && identical(e, err)) {
           m.completer.completeError(err, mst);
+        } else {
+          m.completer.completeError(e, st);
         }
       }
       rethrow;

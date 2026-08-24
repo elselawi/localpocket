@@ -575,6 +575,139 @@ void main() {
     });
   });
 
+  group('WorkerEngine — interactive transaction settle failures', () {
+    // The wire contract (E: tx_commit/tx_rollback must not acknowledge
+    // before the real SQL COMMIT/ROLLBACK runs): a failed settle surfaces as
+    // a WorkerError — never a false success — the session is released, and
+    // the rolled-back work is absent from a fresh read.
+    test(
+        'a failed COMMIT surfaces a WorkerError, releases the session, and '
+        'the record is not committed', () async {
+      final hooks = TestHooks();
+      final h = await WorkerHarness.open(testHooks: hooks);
+      addTearDown(h.close);
+
+      final begin =
+          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
+      final sessionId = begin['sessionId']! as int;
+
+      final id = generateRecordId();
+      await h.sendOk(h.req(WireOp.txMutateBatch, args: {
+        'sessionId': sessionId,
+        'store': 'widgets',
+        'mutations': [
+          {
+            'action': 'put',
+            'record': encodeWireValue(record(name: 'doomed', qty: 7, id: id))
+          },
+        ],
+      }));
+
+      // Arm the commit-fault hook: the COMMIT now fails and rolls back.
+      final commitFault = StateError('simulated COMMIT failure (disk full)');
+      hooks.commitCrashPoint = () => throw commitFault;
+
+      final err = await h.sendError(
+          h.req(WireOp.txCommit, args: {'sessionId': sessionId}));
+      expect(err.code, WireErrorCode.localpocket);
+      expect(err.message, contains('simulated COMMIT failure'));
+
+      // Disarm the fault hook so the follow-up session settles cleanly.
+      hooks.commitCrashPoint = null;
+
+      // The session was released: a fresh tx_begin (and rollback) works.
+      final begin2 =
+          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
+      await h.sendOk(h.req(WireOp.txRollback,
+          args: {'sessionId': begin2['sessionId']}));
+
+      // The failed COMMIT rolled back the session's write.
+      expect(await h.get('widgets', id), isNull);
+    });
+
+    test(
+        'a failed ROLLBACK surfaces a WorkerError, releases the session, '
+        'and the record is absent', () async {
+      final hooks = TestHooks();
+      final h = await WorkerHarness.open(testHooks: hooks);
+      addTearDown(h.close);
+
+      final begin =
+          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
+      final sessionId = begin['sessionId']! as int;
+
+      final id = generateRecordId();
+      await h.sendOk(h.req(WireOp.txMutateBatch, args: {
+        'sessionId': sessionId,
+        'store': 'widgets',
+        'mutations': [
+          {
+            'action': 'put',
+            'record': encodeWireValue(record(name: 'doomed', qty: 8, id: id))
+          },
+        ],
+      }));
+
+      // Arm the rollback-fault hook: the ROLLBACK is reported as failed.
+      final rollbackFault = StateError('simulated ROLLBACK failure (I/O)');
+      hooks.rollbackCrashPoint = () => throw rollbackFault;
+
+      final err = await h.sendError(
+          h.req(WireOp.txRollback, args: {'sessionId': sessionId}));
+      expect(err.code, WireErrorCode.localpocket);
+      expect(err.message, contains('simulated ROLLBACK failure'));
+
+      // Disarm the fault hook so the follow-up session rolls back cleanly.
+      hooks.rollbackCrashPoint = null;
+
+      // The session was released and the rollback ran: the write is gone.
+      final begin2 =
+          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
+      await h.sendOk(h.req(WireOp.txRollback,
+          args: {'sessionId': begin2['sessionId']}));
+      expect(await h.get('widgets', id), isNull);
+    });
+
+    test(
+        'an unarmed session still commits and rolls back (no hook = no '
+        'fault)', () async {
+      final hooks = TestHooks();
+      final h = await WorkerHarness.open(testHooks: hooks);
+      addTearDown(h.close);
+
+      final id = generateRecordId();
+      final begin =
+          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
+      final sessionId = begin['sessionId']! as int;
+      await h.sendOk(h.req(WireOp.txMutateBatch, args: {
+        'sessionId': sessionId,
+        'store': 'widgets',
+        'mutations': [
+          {
+            'action': 'put',
+            'record': encodeWireValue(record(name: 'kept', qty: 1, id: id))
+          },
+        ],
+      }));
+      await h.sendOk(h.req(WireOp.txCommit, args: {'sessionId': sessionId}));
+      expect((await h.get('widgets', id))?['qty'], 1);
+    });
+
+    test(
+        'close mid-transaction settles the session without surfacing an '
+        'unhandled error', () async {
+      final h = await WorkerHarness.open();
+      await h.sendOk(h.req(WireOp.txBegin));
+
+      // Closing while the tx is held open fails the body with
+      // DatabaseWorkerClosedException, the transaction rolls back, and the
+      // session's `done` outcome is consumed by the guard listener — no
+      // unhandled-async-error failure.
+      final reply = await h.close();
+      expect(reply, isA<WorkerSuccess>());
+    });
+  });
+
   group('WorkerEngine — reactive watchers', () {
     late WorkerHarness h;
 
