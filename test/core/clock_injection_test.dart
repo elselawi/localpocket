@@ -98,6 +98,43 @@ void main() {
         reason: 'store registration uses the injected clock');
   });
 
+  test('migration ledger applied_at uses the injected clock', () async {
+    final t = await tempDbPath();
+    addTearDown(t.cleanup);
+
+    var clock = 1700000000000;
+    final v1 = await openPocket(path: t.path, now: () => clock);
+    await v1
+        .collection('widgets')
+        .put(record(id: generateRecordId(), name: 'x', qty: 1));
+    await v1.close();
+
+    // Reopen with a one-step additive migration under a new clock value.
+    clock = 1750000000000;
+    final v2 = await openPocket(path: t.path, now: () => clock, stores: [
+      widgetsSchema(
+        version: 2,
+        extraFields: [Field.text('nickname')],
+        migrations: [
+          StoreMigration(toVersion: 2, addedFields: [Field.text('nickname')]),
+        ],
+      ),
+    ]);
+    addTearDown(v2.close);
+
+    final created = (await v2.db.query('lp_migrations',
+            where: 'name = ?', whereArgs: ['create:widgets']))
+        .single;
+    expect(created['applied_at'], 1700000000000,
+        reason: 'store-creation ledger row uses the clock at open time');
+
+    final migrated = (await v2.db.query('lp_migrations',
+            where: 'name = ?', whereArgs: ['migrate:widgets:v2']))
+        .single;
+    expect(migrated['applied_at'], clock,
+        reason: 'migration ledger rows use the injected clock');
+  });
+
   test('compact defaults its cutoff to the injected clock', () async {
     const clock = 1800000000000;
     final pocket = await openPocket(now: () => clock);

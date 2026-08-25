@@ -51,7 +51,8 @@ class Migrator {
           name: 'migrate:${schema.name}:v${m.toVersion}',
           from: ver,
           to: m.toVersion,
-          durationMs: sw.elapsedMilliseconds);
+          durationMs: sw.elapsedMilliseconds,
+          now: pocket.now);
       ver = m.toVersion;
     }
 
@@ -66,12 +67,17 @@ class Migrator {
   }
 
   /// Appends a row to the migration ledger.
+  ///
+  /// [now] is the injectable epoch-ms clock ([LocalPocket.now]); both call
+  /// sites pass it so deterministic-clock tests see exact `applied_at`
+  /// values. Defaults to the wall clock for standalone callers.
   static Future<void> recordMigration(
     Database db, {
     required String name,
     required int from,
     required int to,
     int durationMs = 0,
+    int Function() now = _defaultNowMs,
   }) async {
     final maxRow =
         await db.rawQuery('SELECT MAX(version) AS m FROM lp_migrations');
@@ -79,7 +85,7 @@ class Migrator {
     await db.insert('lp_migrations', {
       'version': next,
       'name': name,
-      'applied_at': DateTime.now().millisecondsSinceEpoch,
+      'applied_at': now(),
       'duration_ms': durationMs,
     });
   }
@@ -462,3 +468,7 @@ class Migrator {
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 }
+
+/// Wall-clock epoch ms; the default [Migrator.recordMigration] clock so
+/// standalone callers stay backward compatible.
+int _defaultNowMs() => DateTime.now().millisecondsSinceEpoch;

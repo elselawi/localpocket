@@ -444,7 +444,7 @@ class LocalPocket with ChangeBusAwareLP {
         'created_at': now(),
       });
       await Migrator.recordMigration(db,
-          name: 'create:${schema.name}', from: 0, to: schema.version);
+          name: 'create:${schema.name}', from: 0, to: schema.version, now: now);
     } else {
       final current = existing.first['schema_ver']! as int;
       if (current > schema.version) {

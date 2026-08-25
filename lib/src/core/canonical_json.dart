@@ -20,7 +20,8 @@ String canonicalize(Object? value) {
 /// byte length of what was written (counted during the write itself — no
 /// second pass over the buffer). Used by maxDocBytes validation on hot write
 /// paths.
-int canonicalizeInto(StringBuffer out, Object? value) => writeCanonicalValue(out, value);
+int canonicalizeInto(StringBuffer out, Object? value) =>
+    writeCanonicalValue(out, value);
 
 /// The EXACT UTF-8 byte length of [s], counted per rune in one pass
 /// (1/2/3/4 by code-point range) — the number `utf8.encode(s).length` would
@@ -47,6 +48,35 @@ int utf8BytesOf(String s) {
 /// value on hot paths (it counts during the write, avoiding this buffer copy).
 int utf8ByteLength(StringBuffer out) => utf8BytesOf(out.toString());
 
+/// Formats a [double] so the canonical form matches how the server echoes
+/// the same JSON value:
+///
+/// - Integral finite values print as full decimal integers (never `N.0`),
+///   matching Go's `encoding/json` and JS number formatting in the range
+///   where they print the full decimal expansion (`|v| < 1e21`). The old
+///   `< 1e15` guard leaked `1000000000000000.0`-style output for larger
+///   integral reals; the server echoes those as `1000000000000000`, so the
+///   payload hash mismatched and every push took the "server transformed
+///   payload" path (a pointless rewrite + change event).
+/// - Non-integral finite values keep the shortest round-trip form, which is
+///   byte-identical to `jsonEncode`. A shortest form never ends in `.0` for
+///   a non-integral value, so stripping the suffix only affects integral
+///   doubles.
+/// - `-0.0` folds to `0`.
+/// - NaN/±Infinity are preserved verbatim (existing behavior).
+///
+/// For integral magnitudes at/above 1e21 `toString()` emits exponent form
+/// (`1e+21`), which matches the exponent form Go/JS servers echo there too.
+/// Note this never uses `round()`: beyond int64 it silently clamps.
+String _canonicalDouble(double value) {
+  if (!value.isFinite) return value.toString();
+  var s = value.toString();
+  if (s.endsWith('.0')) {
+    s = s.substring(0, s.length - 2);
+  }
+  return s == '-0' ? '0' : s;
+}
+
 /// Writes [value] in canonical JSON form into [out] (sorted object keys,
 /// integral-double normalization, no insignificant whitespace) and returns
 /// the EXACT UTF-8 byte length written. Public so composed serializers (e.g.
@@ -67,10 +97,7 @@ int writeCanonicalValue(StringBuffer out, Object? value) {
     return s.length;
   }
   if (value is double) {
-    final s =
-        (value.isFinite && value == value.roundToDouble() && value.abs() < 1e15)
-            ? value.round().toString()
-            : value.toString();
+    final s = _canonicalDouble(value);
     out.write(s);
     return s.length;
   }

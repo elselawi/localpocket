@@ -33,17 +33,55 @@ void main() {
       expect(canonicalize(-0.0), canonicalize(0.0));
     });
 
-    test('integral doubles at and above the 1e15 boundary keep toString', () {
-      // The normalization guard is `abs() < 1e15`; exactly 1e15 and above
-      // fall back to double.toString().
+    test('integral doubles print as full integers at any magnitude', () {
       expect(canonicalize(1e14), '100000000000000');
-      expect(canonicalize(1e15), '1000000000000000.0');
-      expect(canonicalize(1e16), '10000000000000000.0');
-      expect(canonicalize(1234567890123456.0), '1234567890123456.0');
+      expect(canonicalize(1e15), '1000000000000000');
+      expect(canonicalize(1e16), '10000000000000000');
+      expect(canonicalize(1234567890123456.0), '1234567890123456');
       // Doubles at 2^53 lose precision; the canonical form reflects the
       // stored double value.
-      expect(canonicalize(9007199254740993.0), '9007199254740992.0');
-      expect(canonicalize(-1e15), '-1000000000000000.0');
+      expect(canonicalize(9007199254740993.0), '9007199254740992');
+      expect(canonicalize(-1e15), '-1000000000000000');
+      // Integral reals never carry a `.0` suffix: the server echoes the same
+      // number as a full decimal integer.
+      expect(canonicalize(1.5e15), '1500000000000000');
+    });
+
+    test('integral reals at/above 1e15 match the server echo', () {
+      // The server parses the JSON number and echoes its ES6-style string
+      // form (full decimal, no `.0`). The canonical form must agree so the
+      // payload hash matches and pushes do not take the "server transformed
+      // payload" rewrite path.
+      expect(canonicalize(1e15), '1000000000000000');
+      expect(canonicalize(1e15), canonicalize(jsonDecode('1000000000000000')));
+      expect(
+          canonicalize(1.5e15), canonicalize(jsonDecode('1500000000000000')));
+      expect(canonicalize(1e16), canonicalize(jsonDecode('10000000000000000')));
+      expect(
+          canonicalize(-1e15), canonicalize(jsonDecode('-1000000000000000')));
+    });
+
+    test('finite doubles are a fixed point under the server echo round-trip',
+        () {
+      // canonicalize -> jsonDecode (the local form of the server echo) ->
+      // canonicalize must be stable.
+      for (final v in <double>[
+        1e14,
+        1e15,
+        1e16,
+        1.5e15,
+        -1e15,
+        0.1,
+        1e-7,
+        42.0,
+        -0.0,
+        9007199254740993.0,
+        1234567890123456.0,
+      ]) {
+        final first = canonicalize(v);
+        expect(canonicalize(jsonDecode(first)), first,
+            reason: '$v: "$first" is not a fixed point');
+      }
     });
 
     test('non-integral doubles keep toString', () {
