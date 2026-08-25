@@ -115,9 +115,7 @@ mixin WorkerTxHandlers on WorkerEngineHost {
     final sess = _requireSession(WireArgs(req.args).optionalInt('sessionId'));
     final w = WireArgs(req.args);
     final store = w.requireString('store', op: 'tx_mutate_batch');
-    final mutations = w
-        .requireList('mutations', op: 'tx_mutate_batch')
-        .cast<Map<String, Object?>>();
+    final mutations = w.requireList('mutations', op: 'tx_mutate_batch');
     final txCol = sess.tx.collection(store);
     for (final m in mutations) {
       await _applyMutation(txCol, m);

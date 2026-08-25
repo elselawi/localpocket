@@ -290,6 +290,20 @@ void main() {
       expect(() => decodeDbRow(schema, row), returnsNormally);
       expect(decodeDbRow(schema, row)['id'], 'aaaaaaaaaaaaaaa');
     });
+
+    test('non-string json column throws StorageError, not TypeError', () {
+      final row = {
+        'id': 'aaaaaaaaaaaaaaa',
+        'name': 'x',
+        'meta': 123, // INTEGER instead of canonical TEXT JSON
+        'archived': 0,
+      };
+      expect(
+        () => decodeDbRow(schema, row),
+        throwsA(isA<StorageError>()
+            .having((e) => e.message, 'message', contains('Corrupt'))),
+      );
+    });
   });
 
   group('decodeDbRows (batch and async)', () {
@@ -591,7 +605,7 @@ void main() {
       );
     });
 
-    test('non-string json db value throws TypeError (documented)', () {
+    test('non-string json db value throws StorageError, not TypeError', () {
       final row = {
         'id': 'aaaaaaaaaaaaaaa',
         'name': null,
@@ -604,7 +618,27 @@ void main() {
       };
       expect(
         () => decodeDbRow(encSchema, row, cipher: cipher),
-        throwsA(isA<TypeError>()),
+        throwsA(isA<StorageError>()
+            .having((e) => e.message, 'message', contains('Corrupt'))),
+      );
+    });
+
+    test('non-string ciphertext db value throws StorageError, not TypeError',
+        () {
+      final row = {
+        'id': 'aaaaaaaaaaaaaaa',
+        'name': null,
+        'secret': 42, // INTEGER instead of TEXT ciphertext
+        'code': null,
+        'blob': null,
+        'archived': 0,
+        'hidden': 0,
+        'extra': '',
+      };
+      expect(
+        () => decodeDbRow(encSchema, row, cipher: cipher),
+        throwsA(isA<StorageError>().having(
+            (e) => e.message, 'message', contains('Corrupt secrets row'))),
       );
     });
 

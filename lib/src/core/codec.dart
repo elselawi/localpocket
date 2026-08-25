@@ -10,6 +10,7 @@ import 'dart:convert';
 
 import 'canonical_json.dart';
 import 'cipher.dart';
+import 'errors.dart';
 import 'hashing.dart';
 import 'schema.dart';
 
@@ -331,7 +332,12 @@ Object? _decodeStoredValue(
       throw StateError(
           'Field "${f.name}" is encrypted but no FieldCipher was provided.');
     }
-    final plainStr = utf8.decode(fc.decrypt(base64Decode(stored as String)));
+    if (stored is! String) {
+      throw StorageError(
+          'Corrupt $store row: encrypted field "${f.name}" must be TEXT '
+          'ciphertext but is ${stored.runtimeType}.');
+    }
+    final plainStr = utf8.decode(fc.decrypt(base64Decode(stored)));
     return switch (f.kind) {
       FieldKind.bool => plainStr == '1' || plainStr == 'true',
       FieldKind.int || FieldKind.date => int.parse(plainStr),
@@ -340,11 +346,16 @@ Object? _decodeStoredValue(
       _ => plainStr,
     };
   }
-  return switch (f.kind) {
-    FieldKind.bool => stored == 1,
-    FieldKind.json || FieldKind.jsonList => jsonDecode(stored as String),
-    _ => stored,
-  };
+  if (f.kind == FieldKind.bool) return stored == 1;
+  if (f.kind == FieldKind.json || f.kind == FieldKind.jsonList) {
+    if (stored is! String) {
+      throw StorageError(
+          'Corrupt $store row: field "${f.name}" must be TEXT JSON but is '
+          '${stored.runtimeType}.');
+    }
+    return jsonDecode(stored);
+  }
+  return stored;
 }
 
 Object? _encodeValue(Field f, Object? v, {FieldCipher? cipher}) {

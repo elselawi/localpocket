@@ -369,14 +369,31 @@ abstract class WorkerEngineHost {
   /// action's `id`/`record`. Shared by `mutate_batch` (single-op fast path,
   /// multi-op transaction path) and `tx_mutate_batch` so the action
   /// vocabulary stays in exactly one place. Unknown actions fail with a typed
-  /// [ValidationException] — never a silent no-op.
-  Future<void> _applyMutation(Collection col, Map<Object?, Object?> m) async {
-    final action = m['action'];
-    if (action is! String) {
-      throw ValidationException('Mutation action must be a string.');
+  /// [ValidationException] — never a silent no-op. Malformed elements (a
+  /// non-map, a non-string `action`/`id`, or a `record` that does not decode
+  /// to a map) fail with a typed [ProtocolEnvelopeException] — never a raw
+  /// cast error.
+  Future<void> _applyMutation(Collection col, Object? m) async {
+    if (m is! Map) {
+      throw ProtocolEnvelopeException('Mutation element must be a map, got '
+          '${m == null ? 'null' : m.runtimeType}.');
     }
-    final record = decodeWireValue(m['record']) as Map<String, Object?>?;
-    final id = m['id'] as String?;
+    final w = WireArgs(m.map((k, v) => MapEntry(k.toString(), v)));
+    final action = w.requireString('action');
+    final id = w.optionalString('id');
+    final rawRecord = m['record'];
+    final Map<String, Object?>? record;
+    if (rawRecord != null) {
+      final decoded = decodeWireValue(rawRecord);
+      if (decoded is! Map) {
+        throw ProtocolEnvelopeException(
+            'Mutation "record" must decode to a map, got '
+            '${decoded.runtimeType}.');
+      }
+      record = decoded.map((k, v) => MapEntry(k.toString(), v));
+    } else {
+      record = null;
+    }
     switch (action) {
       case 'put':
         await col.put(record!);

@@ -266,6 +266,54 @@ void main() {
       expect(err.details?['type'], 'ProtocolEnvelopeException');
     });
 
+    test('non-string mutation action → typed ProtocolEnvelopeException',
+        () async {
+      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
+        'store': 'widgets',
+        'mutations': [
+          {
+            'action': 42,
+            'record': encodeWireValue({'id': generateRecordId(), 'name': 'x'})
+          }
+        ],
+      }));
+      expect(err.code, WireErrorCode.localpocket);
+      expect(err.details?['type'], 'ProtocolEnvelopeException');
+      expect(err.message, isNot(contains('TypeError')));
+      expect(err.message, contains('action'));
+    });
+
+    test('non-map mutation element → typed ProtocolEnvelopeException',
+        () async {
+      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
+        'store': 'widgets',
+        'mutations': ['not-a-map'],
+      }));
+      expect(err.code, WireErrorCode.localpocket);
+      expect(err.details?['type'], 'ProtocolEnvelopeException');
+      expect(err.message, isNot(contains('TypeError')));
+    });
+
+    test('non-map element in a multi-op batch fails inside the transaction',
+        () async {
+      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
+        'store': 'widgets',
+        'mutations': [
+          {
+            'action': 'put',
+            'record': encodeWireValue({'id': generateRecordId(), 'name': 'x'})
+          },
+          'not-a-map',
+        ],
+      }));
+      expect(err.code, WireErrorCode.localpocket);
+      expect(err.details?['type'], 'ProtocolEnvelopeException');
+      expect(err.message, isNot(contains('TypeError')));
+      // The batch ran atomically: the first put must not have been applied.
+      final page = await h.pocket.collection('widgets').query().all().fetch();
+      expect(page.items, isEmpty);
+    });
+
     test('mutations broadcast recordEvent to the sink (E4)', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'apple'), id: id);
@@ -556,6 +604,23 @@ void main() {
         'id': generateRecordId(),
       }));
       expect(err2.details?['type'], 'StateError');
+    });
+
+    test('non-map mutation element in tx_mutate_batch → typed error', () async {
+      final err = await h.sendError(h.req(WireOp.txMutateBatch, args: {
+        'sessionId': sessionId,
+        'store': 'widgets',
+        'mutations': [
+          {
+            'action': 'put',
+            'record': encodeWireValue({'id': generateRecordId(), 'name': 'x'})
+          },
+          'not-a-map',
+        ],
+      }));
+      expect(err.code, WireErrorCode.localpocket);
+      expect(err.details?['type'], 'ProtocolEnvelopeException');
+      expect(err.message, isNot(contains('TypeError')));
     });
 
     test('a second txBegin while one is active → StateError', () async {

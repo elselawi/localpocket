@@ -25,9 +25,7 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
       WorkerEventSink sink, WebRequest req) async {
     final w = WireArgs(req.args);
     final store = w.requireString('store', op: 'mutate_batch');
-    final mutations = w
-        .requireList('mutations', op: 'mutate_batch')
-        .cast<Map<String, Object?>>();
+    final mutations = w.requireList('mutations', op: 'mutate_batch');
 
     if (mutations.length == 1) {
       await _applyMutation(pocket.collection(store), mutations.first);
