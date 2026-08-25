@@ -59,6 +59,7 @@ void main() {
         recordId: ids[i],
         bytes: Stream.value([i, i * 2, i * 3]),
         name: 'f$i.bin',
+        allowVolatileBlobs: true,
       ));
     }
     // Concurrent reads must never deadlock against the writes.

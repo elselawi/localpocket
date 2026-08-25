@@ -99,6 +99,7 @@ void main() {
         store: 'widgets',
         recordId: ghost,
         bytes: Stream.value(utf8.encode('ghost file')),
+        allowVolatileBlobs: true,
       );
       expect(ref.state, 'pending_upload');
       // The blob exists locally and opens even though the record never did.
@@ -127,6 +128,7 @@ void main() {
         store: 'widgets',
         recordId: rec,
         bytes: Stream.value(utf8.encode('file')),
+        allowVolatileBlobs: true,
       );
 
       await expectLater(
@@ -179,6 +181,7 @@ void main() {
         store: 'widgets',
         recordId: rec,
         bytes: Stream.value(utf8.encode('x')),
+        allowVolatileBlobs: true,
       );
 
       await pocket.files.remove(store: 'widgets', recordId: rec);
@@ -200,10 +203,16 @@ void main() {
       await pocket.collection('widgets').put({'id': rec, 'name': 'w'});
       final bytes = utf8.encode('same content');
 
-      final ref1 = await pocket.files
-          .attach(store: 'widgets', recordId: rec, bytes: Stream.value(bytes));
-      final ref2 = await pocket.files
-          .attach(store: 'widgets', recordId: rec, bytes: Stream.value(bytes));
+      final ref1 = await pocket.files.attach(
+          store: 'widgets',
+          recordId: rec,
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
+      final ref2 = await pocket.files.attach(
+          store: 'widgets',
+          recordId: rec,
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
 
       expect(ref2.refId, ref1.refId,
           reason: 'dedup returns the SAME logical ref');
@@ -236,13 +245,17 @@ void main() {
       await pocket.collection('widgets').put({'id': rec, 'name': 'w'});
       final bytes = utf8.encode('shared bytes');
 
-      await pocket.files
-          .attach(store: 'widgets', recordId: rec, bytes: Stream.value(bytes));
+      await pocket.files.attach(
+          store: 'widgets',
+          recordId: rec,
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
       await pocket.files.attach(
           store: 'widgets',
           recordId: rec,
           field: 'gallery',
-          bytes: Stream.value(bytes));
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
 
       // list() defaults to the `imgs` field; query the raw table for all.
       final all = await pocket.db.query('lp_file_refs',
@@ -264,10 +277,16 @@ void main() {
       await pocket.collection('widgets').put({'id': b, 'name': 'b'});
       final bytes = utf8.encode('shared across records');
 
-      final ra = await pocket.files
-          .attach(store: 'widgets', recordId: a, bytes: Stream.value(bytes));
-      final rb = await pocket.files
-          .attach(store: 'widgets', recordId: b, bytes: Stream.value(bytes));
+      final ra = await pocket.files.attach(
+          store: 'widgets',
+          recordId: a,
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
+      final rb = await pocket.files.attach(
+          store: 'widgets',
+          recordId: b,
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
 
       expect(ra.hash, rb.hash);
       expect((await pocket.db.query('lp_blobs')).single['refcount'], 2);
@@ -295,6 +314,7 @@ void main() {
         store: 'widgets',
         recordId: rec,
         bytes: Stream.value(utf8.encode('never uploaded')),
+        allowVolatileBlobs: true,
       );
 
       await pocket.files.remove(store: 'widgets', recordId: rec);
@@ -324,6 +344,7 @@ void main() {
         store: 'widgets',
         recordId: rec,
         bytes: Stream.value(utf8.encode('purged before upload')),
+        allowVolatileBlobs: true,
       );
 
       await pocket.collection('widgets').purge(rec);
@@ -426,7 +447,8 @@ void main() {
       final ref = await pocket.files.attach(
           store: 'widgets',
           recordId: rec,
-          bytes: Stream.value(utf8.encode('file')));
+          bytes: Stream.value(utf8.encode('file')),
+          allowVolatileBlobs: true);
       expect(
           (await pocket.db
                   .query('lp_blobs', where: 'hash = ?', whereArgs: [ref.hash]))

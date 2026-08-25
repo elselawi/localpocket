@@ -503,6 +503,30 @@ await db.files.gc();
 await db.files.enforceStorageCap(maxBytes: 500 * 1024 * 1024); // 500 MB cap
 ```
 
+### Blob Storage Durability
+
+`attach` refuses to store bytes in a **volatile** blob store (bytes held only
+in memory, which vanish on restart — e.g. on web when OPFS is unavailable and
+`WebBlobStore` falls back to memory) unless you explicitly opt in:
+
+```dart
+// Reports whether the configured store survives restarts (web: OPFS-backed).
+final durable = await db.files.isBlobStorageDurable;
+
+// Attaching to a volatile store throws unless you accept the trade-off:
+final ref = await db.files.attach(
+  store: 'tasks',
+  recordId: taskId,
+  bytes: fileStream,
+  allowVolatileBlobs: true, // bytes may not survive a reload
+);
+```
+
+With a volatile store, the SQLite metadata (`lp_blobs` / `lp_file_refs`)
+survives but the attachment bytes disappear on worker termination or reload —
+check `isBlobStorageDurable` to surface this to users instead of silently
+losing attachments.
+
 ---
 
 ## Storage Maintenance & Compaction

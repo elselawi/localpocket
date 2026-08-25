@@ -56,6 +56,18 @@ abstract class BlobStore {
   /// Used by GC to age orphaned blobs (files on disk without an `lp_blobs`
   /// metadata row) so a crash mid-attach is never raced.
   Future<int?> modifiedAt(String hash) => Future.value(null);
+
+  /// Whether bytes stored here survive process/worker restarts.
+  ///
+  /// `true` for durable backends (native disk, OPFS); `false` for volatile
+  /// in-memory fallbacks whose bytes disappear when the process ends.
+  ///
+  /// Attachments stored in a non-durable store are effectively ephemeral even
+  /// though their SQLite metadata (`lp_blobs` / `lp_file_refs`) persists —
+  /// callers should treat `false` as "these blobs may vanish without notice"
+  /// and refuse (or explicitly opt into) attaching files (see
+  /// `LocalPocketFiles.attach(allowVolatileBlobs: ...)`).
+  Future<bool> get isDurable => Future.value(true);
 }
 
 /// Result of streaming validation containing the verified hash and byte count.
@@ -183,6 +195,9 @@ class MemoryBlobStore extends BlobStore {
     BlobStore.validateHash(hash);
     return _lastModified[hash];
   }
+
+  @override
+  Future<bool> get isDurable => Future.value(false);
 }
 
 /// EncryptingBlobStore decorator.
@@ -286,4 +301,7 @@ class EncryptingBlobStore extends BlobStore {
 
   @override
   Future<List<String>> listHashes() => _inner.listHashes();
+
+  @override
+  Future<bool> get isDurable => _inner.isDurable;
 }

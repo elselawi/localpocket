@@ -84,6 +84,11 @@ class WireOp {
   static const String fileGc = 'file_gc';
   static const String fileEnforceStorageCap = 'file_enforce_storage_cap';
 
+  /// Reports whether the worker-owned blob store is durable (OPFS-backed)
+  /// rather than a volatile in-memory fallback. `db.files.isBlobStorageDurable`
+  /// on the facade.
+  static const String fileStorageStatus = 'file_storage_status';
+
   // Conflicts API (§ conflicts). Delegates to the engine's `pocket.conflicts`.
   static const String conflictsList = 'conflicts_list';
   static const String conflictsGet = 'conflicts_get';
@@ -142,6 +147,7 @@ class WireOp {
     fileRemove,
     fileGc,
     fileEnforceStorageCap,
+    fileStorageStatus,
     conflictsList,
     conflictsGet,
     conflictsResolve,

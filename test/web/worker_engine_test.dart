@@ -959,6 +959,9 @@ void main() {
         'store': 'widgets',
         'recordId': recordId,
         'size': size,
+        // The harness backs the engine with a volatile MemoryBlobStore, so a
+        // real client would have to opt in before attaching.
+        'allowVolatileBlobs': true,
       })))! as Map<String, Object?>;
       return result['uploadId']! as int;
     }

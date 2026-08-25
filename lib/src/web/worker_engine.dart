@@ -560,6 +560,7 @@ final class WorkerEngine extends WorkerEngineHost
     WireOp.fileRemove: _handleFileRemove,
     WireOp.fileGc: _handleFileGc,
     WireOp.fileEnforceStorageCap: _handleFileEnforceStorageCap,
+    WireOp.fileStorageStatus: _handleFileStorageStatus,
     WireOp.conflictsList: _handleConflictsList,
     WireOp.conflictsGet: _handleConflictsGet,
     WireOp.conflictsResolve: _handleConflictsResolve,

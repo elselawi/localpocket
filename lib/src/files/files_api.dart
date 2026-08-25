@@ -93,6 +93,23 @@ class LocalPocketFiles {
     return bs;
   }
 
+  /// Whether the configured blob store persists bytes durably across
+  /// process/worker restarts.
+  ///
+  /// `false` when no [BlobStore] is configured or when blobs are held only in
+  /// volatile memory — for example on web when OPFS is unavailable and
+  /// [WebBlobStore] degrades to its in-memory fallback. In that case SQLite
+  /// metadata survives but the attachment bytes vanish on reload, so
+  /// attachments are effectively ephemeral.
+  ///
+  /// Apps that care about durability should check this before attaching files
+  /// (or rely on [attach]'s refusal unless `allowVolatileBlobs` is set).
+  Future<bool> get isBlobStorageDurable async {
+    final bs = blobStore;
+    if (bs == null) return false;
+    return bs.isDurable;
+  }
+
   /// Lists file references attached to a record field.
   ///
   /// ```dart
@@ -122,6 +139,12 @@ class LocalPocketFiles {
   ///
   /// Streams bytes into BlobStore, records `lp_blobs` and `lp_file_refs` (pending_upload),
   /// and enqueues a `file_upload` op in `lp_op_queue`.
+  ///
+  /// Throws a [StateError] before any bytes are stored when the blob store is
+  /// volatile ([isBlobStorageDurable] is `false`) unless [allowVolatileBlobs]
+  /// is `true`. A volatile store keeps the bytes only in memory — they
+  /// disappear on restart even though the file reference survives — so this
+  /// guard makes the loss an explicit choice instead of a silent surprise.
   Future<FileRef> attach({
     required String store,
     required String recordId,
@@ -130,8 +153,16 @@ class LocalPocketFiles {
     String? name,
     int? expectedSize,
     String? expectedSha256,
+    bool allowVolatileBlobs = false,
   }) async {
     final bs = _requireBlobStore;
+    if (!allowVolatileBlobs && !await bs.isDurable) {
+      throw StateError(
+        'Blob storage is volatile (in-memory fallback): attachment bytes '
+        'would not survive a restart. Pass allowVolatileBlobs: true to '
+        'attach anyway.',
+      );
+    }
     final hash = await bs.put(
       bytes,
       expectedSha256: expectedSha256,

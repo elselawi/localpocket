@@ -47,6 +47,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('image content 1')),
         name: 'img1.png',
+        allowVolatileBlobs: true,
       );
 
       // Verify before sync: record has op in outbox, file op in op_queue
@@ -105,6 +106,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('photo 1')),
         name: 'photo1.jpg',
+        allowVolatileBlobs: true,
       );
       await h.engine.syncNow();
 
@@ -114,6 +116,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('photo 2')),
         name: 'photo2.jpg',
+        allowVolatileBlobs: true,
       );
       await h.engine.syncNow();
 
@@ -148,6 +151,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('content')),
         name: 'myphoto',
+        allowVolatileBlobs: true,
       );
 
       final prevCalls = mock.updateFilesCalls;
@@ -332,6 +336,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('to_delete')),
         name: 'del.jpg',
+        allowVolatileBlobs: true,
       );
       await h.engine.syncNow();
 
@@ -370,6 +375,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('old version')),
         name: 'doc.txt',
+        allowVolatileBlobs: true,
       );
       await h.engine.syncNow();
 
@@ -380,6 +386,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('new version')),
         name: 'doc.txt',
+        allowVolatileBlobs: true,
       );
       await h.engine.syncNow();
 
@@ -392,14 +399,15 @@ void main() {
 
   group('file-op retry persistence', () {
     Future<EngineHarness> harness(
-        MockSyncBackend mock, BlobStore blobStore, TempDb dbPath) => EngineHarness.create(
-        mock: mock,
-        config: testConfig(
-            pushDebounce: const Duration(days: 365),
-            backoffBase: const Duration(minutes: 5)),
-        path: dbPath.path,
-        blobStore: blobStore,
-      );
+            MockSyncBackend mock, BlobStore blobStore, TempDb dbPath) =>
+        EngineHarness.create(
+          mock: mock,
+          config: testConfig(
+              pushDebounce: const Duration(days: 365),
+              backoffBase: const Duration(minutes: 5)),
+          path: dbPath.path,
+          blobStore: blobStore,
+        );
 
     Future<Map<String, Object?>> queueOpRow(
         EngineHarness h, String kind) async {
@@ -426,6 +434,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('retry bytes')),
         name: 'retry.png',
+        allowVolatileBlobs: true,
       );
 
       // Transient failure on the first upload attempt.
@@ -481,6 +490,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('remove me')),
         name: 'del.png',
+        allowVolatileBlobs: true,
       );
       await h.engine.syncNow();
       expect(mock.records[recId]!.imgs.length, 1);
@@ -585,6 +595,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('restart bytes')),
         name: 'restart.png',
+        allowVolatileBlobs: true,
       );
       mock.script('updateRecordFiles', [MockThrow(TransientNetworkError())]);
       await engineA.syncNow();
@@ -617,12 +628,13 @@ void main() {
 
   group('remote file-list shrink reconciliation', () {
     Future<EngineHarness> shrinkHarness(
-        MockSyncBackend mock, BlobStore blobStore, TempDb dbPath) => EngineHarness.create(
-        mock: mock,
-        config: convConfig(),
-        path: dbPath.path,
-        blobStore: blobStore,
-      );
+            MockSyncBackend mock, BlobStore blobStore, TempDb dbPath) =>
+        EngineHarness.create(
+          mock: mock,
+          config: convConfig(),
+          path: dbPath.path,
+          blobStore: blobStore,
+        );
 
     test('synced refs shrink: the gone file is removed with refcount release',
         () async {
@@ -718,6 +730,7 @@ void main() {
         recordId: recId,
         bytes: Stream.value(utf8.encode('local bytes')),
         name: 'local.png',
+        allowVolatileBlobs: true,
       );
       // Block the upload so the ref stays pending_upload.
       mock.script('updateRecordFiles', [MockThrow(TransientNetworkError())]);
@@ -824,7 +837,8 @@ void main() {
           store: 'widgets',
           recordId: recId,
           bytes: Stream.value(utf8.encode('bytes')),
-          name: 'f.bin');
+          name: 'f.bin',
+          allowVolatileBlobs: true);
       // Simulate lost bytes: the blob disappears before the lane runs.
       await store.delete(ref.hash);
 
@@ -853,7 +867,8 @@ void main() {
           store: 'widgets',
           recordId: recId,
           bytes: Stream.value(utf8.encode('data')),
-          name: 'img.png');
+          name: 'img.png',
+          allowVolatileBlobs: true);
       // The adoption GET fails; the upload must still go through.
       mock.script('getRecord', [MockThrow(TransientNetworkError())]);
 
@@ -883,7 +898,8 @@ void main() {
           store: 'widgets',
           recordId: recId,
           bytes: Stream.value(utf8.encode('data')),
-          name: 'img.png');
+          name: 'img.png',
+          allowVolatileBlobs: true);
       // The adoption GET throws a raw Error (not a SyncError): the catch-all
       // in _processUploadOp swallows every exception, not just 404/SyncError.
       mock.script('getRecord', [MockThrow(StateError('backend wedged'))]);
@@ -914,7 +930,8 @@ void main() {
           store: 'widgets',
           recordId: recId,
           bytes: Stream.value(utf8.encode('data')),
-          name: 'fallback.png');
+          name: 'fallback.png',
+          allowVolatileBlobs: true);
       mock.script('updateRecordFiles', [
         MockReturn(RemoteRecord(
             id: recId,
@@ -994,7 +1011,8 @@ void main() {
           store: 'widgets',
           recordId: ghost,
           bytes: Stream.value(utf8.encode('data')),
-          name: 'x.bin');
+          name: 'x.bin',
+          allowVolatileBlobs: true);
       mock.script('getRecord', [MockThrow(NotFoundError())]);
 
       final report = await h.engine.fileLane.syncFiles();
@@ -1213,7 +1231,8 @@ void main() {
           store: 'widgets',
           recordId: recId,
           bytes: Stream.value(utf8.encode('content')),
-          name: 'photo.png');
+          name: 'photo.png',
+          allowVolatileBlobs: true);
 
       final report = await h.engine.fileLane.syncFiles();
       expect(report.uploaded, 1);

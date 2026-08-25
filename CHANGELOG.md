@@ -1,5 +1,17 @@
 ## Unreleased
 
+- **BREAKING (files): volatile blob storage must now be opted into.** A blob
+  store whose bytes do not survive restarts (e.g. the web in-memory fallback
+  when OPFS is unavailable, or `MemoryBlobStore`) no longer accepts
+  attachments silently: `LocalPocketFiles.attach` (and the web
+  `WebLocalPocketFiles.attach`) throw a `StateError` before storing any bytes
+  unless `allowVolatileBlobs: true` is passed. The new
+  `db.files.isBlobStorageDurable` flag reports whether the configured store is
+  durable (web: OPFS-backed) so apps can surface the limitation or gate their
+  UI. Previously the web worker kept blob bytes only in memory while the
+  SQLite metadata survived — the attachment appeared stored but vanished on
+  reload with nothing in the API indicating it.
+
 - **Web uploads now enforce an aggregate memory quota and a session TTL.** The
   worker's `UploadSessionRegistry` previously buffered every upload chunk in memory with a
   4 GiB per-file cap, no aggregate quota, and no expiry — concurrent or wedged uploads could

@@ -173,6 +173,7 @@ void main() {
         store: 'widgets',
         recordId: id,
         bytes: Stream.value(utf8.encode('attachment bytes')),
+        allowVolatileBlobs: true,
       );
 
       // Sanity: ref and blob exist before purge.

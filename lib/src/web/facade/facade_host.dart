@@ -53,6 +53,7 @@ abstract interface class WebFacadeHost {
     String name = 'blob.bin',
     int? expectedSize,
     String? expectedSha256,
+    bool allowVolatileBlobs = false,
   });
 
   /// Lists file attachments on a record.

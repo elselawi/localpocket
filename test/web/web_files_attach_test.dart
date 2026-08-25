@@ -1,4 +1,5 @@
 import 'package:localpocket/src/web/facade/web_files.dart';
+import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
 
 import 'support/fake_facade_host.dart';
@@ -76,5 +77,43 @@ void main() {
       ]),
     );
     expect(fake.filesUploadCalls.single.bytes, [9, 8]);
+  });
+
+  test('attach forwards allowVolatileBlobs to the host', () async {
+    // Default: the flag stays false (the worker refuses volatile stores).
+    await files.attach(store: 'widgets', recordId: 'rec5', byteArray: [1]);
+    expect(fake.filesUploadCalls.single.allowVolatileBlobs, isFalse);
+
+    // Explicit opt-in is forwarded so the worker's attach accepts the
+    // volatile in-memory fallback.
+    await files.attach(
+      store: 'widgets',
+      recordId: 'rec6',
+      byteArray: [1],
+      allowVolatileBlobs: true,
+    );
+    expect(fake.filesUploadCalls.last.allowVolatileBlobs, isTrue);
+  });
+
+  test('isBlobStorageDurable reports the worker-owned store durability',
+      () async {
+    // The worker replies that its WebBlobStore is OPFS-backed.
+    fake.responses[WireOp.fileStorageStatus] = {'durable': true};
+    expect(await files.isBlobStorageDurable, isTrue);
+    expect(fake.sentOps, contains(WireOp.fileStorageStatus));
+
+    // Volatile in-memory fallback reports non-durable.
+    fake.sent.clear();
+    fake.responses[WireOp.fileStorageStatus] = {'durable': false};
+    expect(await files.isBlobStorageDurable, isFalse);
+    expect(fake.sentOps, contains(WireOp.fileStorageStatus));
+  });
+
+  test('isBlobStorageDurable degrades to false on a malformed reply',
+      () async {
+    fake.responses[WireOp.fileStorageStatus] = {'durable': 'yes'};
+    expect(await files.isBlobStorageDurable, isFalse);
+    fake.responses[WireOp.fileStorageStatus] = null;
+    expect(await files.isBlobStorageDurable, isFalse);
   });
 }

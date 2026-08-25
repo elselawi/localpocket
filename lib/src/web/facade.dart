@@ -438,6 +438,10 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   /// Splits the payload into <=256 KiB chunks so no single custom request
   /// carries a large byte list, then finishes and returns the created
   /// `FileRef` fields from the worker-owned store.
+  ///
+  /// [allowVolatileBlobs] is forwarded to the worker's `pocket.files.attach`:
+  /// when the blob store is a volatile in-memory fallback (OPFS unavailable),
+  /// the finish step refuses the attachment unless this is `true`.
   static const int _fileChunkBytes = 262144;
 
   @override
@@ -449,6 +453,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     String name = 'blob.bin',
     int? expectedSize,
     String? expectedSha256,
+    bool allowVolatileBlobs = false,
   }) async {
     if (expectedSize != null && expectedSize != bytes.length) {
       throw StateError(
@@ -461,6 +466,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
       'name': name,
       'size': bytes.length,
       if (expectedSha256 != null) 'expectedSha256': expectedSha256,
+      if (allowVolatileBlobs) 'allowVolatileBlobs': true,
     }))!))! as Map<String, Object?>;
     final uploadId = beginRes['uploadId']! as int;
 

@@ -250,6 +250,7 @@ class UploadSession {
     this.field = 'imgs',
     this.name = 'blob.bin',
     this.expectedSha256,
+    this.allowVolatileBlobs = false,
   });
 
   /// Stable upload id assigned by the engine.
@@ -272,6 +273,10 @@ class UploadSession {
 
   /// Optional expected SHA-256 checksum.
   final String? expectedSha256;
+
+  /// Whether the caller accepted a volatile blob store for this attachment
+  /// (forwarded to `LocalPocketFiles.attach` at finish time).
+  final bool allowVolatileBlobs;
 
   /// Number of bytes received so far.
   int receivedBytes = 0;
@@ -365,6 +370,7 @@ class UploadSessionRegistry {
     String field = 'imgs',
     String name = 'blob.bin',
     String? expectedSha256,
+    bool allowVolatileBlobs = false,
   }) {
     // Reclaim abandoned sessions first so they stop reserving aggregate
     // quota and concurrency slots.
@@ -388,6 +394,7 @@ class UploadSessionRegistry {
       name: name,
       expectedSize: expectedSize,
       expectedSha256: expectedSha256,
+      allowVolatileBlobs: allowVolatileBlobs,
       expiresAt: now().add(sessionTtl),
     );
     _sessions[uploadId] = session;

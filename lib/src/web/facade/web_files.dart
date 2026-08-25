@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:localpocket/src/web/facade/facade_host.dart';
+import 'package:localpocket/src/web/protocol.dart';
 
 /// Page-facing file attachment and blob lifecycle API over the worker-owned
 /// store. Mirrors the native `LocalPocketFiles` public surface; every method
@@ -15,6 +16,16 @@ class WebLocalPocketFiles {
 
   final WebFacadeHost _pocket;
 
+  /// Whether the worker-owned blob store is durable (OPFS-backed). `false`
+  /// when OPFS is unavailable in the worker and blobs fall back to volatile
+  /// memory that does not survive a worker reload.
+  Future<bool> get isBlobStorageDurable async {
+    final res = await _pocket.send(WireOp.fileStorageStatus);
+    if (res is! Map) return false;
+    final durable = res['durable'];
+    return durable is bool && durable;
+  }
+
   /// Lists file references attached to [recordId] in [field].
   Future<List<Map<String, Object?>>> list({
     required String store,
@@ -25,6 +36,10 @@ class WebLocalPocketFiles {
 
   /// Attaches [byteArray] (or [bytes]) to a record, streaming via bounded
   /// chunks so no single custom request carries a large byte list.
+  ///
+  /// When the worker's blob store is volatile (OPFS unavailable), the upload
+  /// fails with a typed error unless [allowVolatileBlobs] is `true` — see
+  /// [isBlobStorageDurable].
   Future<Map<String, Object?>> attach({
     required String store,
     required String recordId,
@@ -34,6 +49,7 @@ class WebLocalPocketFiles {
     String? name,
     int? expectedSize,
     String? expectedSha256,
+    bool allowVolatileBlobs = false,
   }) async {
     final List<int> payload;
     if (byteArray != null) {
@@ -55,6 +71,7 @@ class WebLocalPocketFiles {
       name: name ?? 'blob.bin',
       expectedSize: expectedSize,
       expectedSha256: expectedSha256,
+      allowVolatileBlobs: allowVolatileBlobs,
     );
   }
 

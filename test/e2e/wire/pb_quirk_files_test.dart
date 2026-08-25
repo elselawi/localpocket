@@ -201,12 +201,14 @@ void main() {
           store: s.store,
           recordId: id2,
           bytes: Stream.value(bytes),
-          name: 'same.bin');
+          name: 'same.bin',
+          allowVolatileBlobs: true);
       final ref2 = await a.pocket.files.attach(
           store: s.store,
           recordId: id2,
           bytes: Stream.value(bytes),
-          name: 'same.bin');
+          name: 'same.bin',
+          allowVolatileBlobs: true);
       expect(ref2.refId, ref1.refId,
           reason: 'identical bytes dedupe to the SAME local ref (by hash, '
               'never by name)');
@@ -229,7 +231,8 @@ void main() {
           store: s.store,
           recordId: id,
           bytes: Stream.value(bytes),
-          name: 'orig.bin');
+          name: 'orig.bin',
+          allowVolatileBlobs: true);
       await a.engine.syncNow();
       final serverName = (await remoteImgs(s, id)).single! as String;
       expect(serverName, isNot('orig.bin'),
@@ -268,12 +271,14 @@ void main() {
           store: s.store,
           recordId: id,
           bytes: Stream.value(b1),
-          name: 'one.bin');
+          name: 'one.bin',
+          allowVolatileBlobs: true);
       await a.pocket.files.attach(
           store: s.store,
           recordId: id,
           bytes: Stream.value(b2),
-          name: 'two.bin');
+          name: 'two.bin',
+          allowVolatileBlobs: true);
       await a.engine.syncNow();
       final names = (await remoteImgs(s, id)).cast<String>();
       expect(names, hasLength(2));
@@ -343,7 +348,8 @@ void main() {
           store: s.store,
           recordId: id,
           bytes: Stream.value(bytes),
-          name: 'dl.bin');
+          name: 'dl.bin',
+          allowVolatileBlobs: true);
       await a.engine.syncNow();
       final serverName = (await remoteImgs(s, id)).single! as String;
 

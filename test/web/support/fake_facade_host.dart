@@ -18,6 +18,7 @@ class RecordedFileUpload {
     required this.name,
     this.expectedSize,
     this.expectedSha256,
+    this.allowVolatileBlobs = false,
   });
   final String store;
   final String recordId;
@@ -26,6 +27,7 @@ class RecordedFileUpload {
   final String name;
   final int? expectedSize;
   final String? expectedSha256;
+  final bool allowVolatileBlobs;
 }
 
 /// In-memory [WebFacadeHost] for driving the facade proxy classes on the VM.
@@ -134,6 +136,7 @@ class FakeFacadeHost implements WebFacadeHost {
     String name = 'blob.bin',
     int? expectedSize,
     String? expectedSha256,
+    bool allowVolatileBlobs = false,
   }) async {
     filesUploadCalls.add(RecordedFileUpload(
       store: store,
@@ -143,6 +146,7 @@ class FakeFacadeHost implements WebFacadeHost {
       name: name,
       expectedSize: expectedSize,
       expectedSha256: expectedSha256,
+      allowVolatileBlobs: allowVolatileBlobs,
     ));
     return filesUploadResult;
   }

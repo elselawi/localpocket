@@ -27,10 +27,34 @@ class WebBlobStore extends BlobStore {
   final String _rootPrefix;
   final Map<String, Uint8List> _memoryFallback = {};
 
+  /// Cached OPFS availability probe. `null` until the first probe; then the
+  /// outcome for this worker's lifetime. A store that loses OPFS mid-session
+  /// cannot regain it (storage availability is decided by the context), so a
+  /// cached `false` is both conservative and stable.
+  bool? _opfsAvailable;
+
+  /// Probes whether the OPFS root for this store's blobs is reachable.
+  Future<bool> _probeOpfs() async {
+    try {
+      final storage = storageManager;
+      if (storage == null) return false;
+      final root = await storage.directory;
+      await root.getDirectory(_rootPrefix, create: true);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Returns the cached OPFS availability, probing on first use.
+  Future<bool> _isOpfsAvailable() async =>
+      _opfsAvailable ??= await _probeOpfs();
+
   /// The OPFS root directory for this store's blobs, or `null` when OPFS is
   /// unavailable (for example in a worker without storage, or non-secure
   /// context). Callers fall back to [_memoryFallback] in that case.
   Future<FileSystemDirectoryHandle?> _getOpfsDir() async {
+    if (!await _isOpfsAvailable()) return null;
     try {
       final storage = storageManager;
       if (storage == null) return null;
@@ -40,6 +64,16 @@ class WebBlobStore extends BlobStore {
       return null;
     }
   }
+
+  /// Whether blob bytes are persisted to OPFS. `false` when OPFS is
+  /// unavailable and bytes are kept only in the volatile in-memory fallback,
+  /// which disappears when the worker terminates or reloads.
+  ///
+  /// Note: `false` does not guarantee the fallback was actually used — it
+  /// reports the backend's durability, which the app can surface to users or
+  /// gate `attach` behind `allowVolatileBlobs`.
+  @override
+  Future<bool> get isDurable => _isOpfsAvailable();
 
   @override
   Future<String> put(

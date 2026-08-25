@@ -114,7 +114,8 @@ void main() {
       final ref = await pocket.files.attach(
           store: 'widgets',
           recordId: recId,
-          bytes: Stream.value(const [1, 2, 3]));
+          bytes: Stream.value(const [1, 2, 3]),
+          allowVolatileBlobs: true);
       await pocket.collection('widgets').purge(recId);
 
       expect(await pocket.collection('widgets').get(recId), isNull,

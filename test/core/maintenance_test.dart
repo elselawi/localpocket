@@ -49,7 +49,8 @@ void main() {
       await pocket.walCheckpoint();
     });
 
-    test('walCheckpoint is a no-op when the engine lacks WAL support', () async {
+    test('walCheckpoint is a no-op when the engine lacks WAL support',
+        () async {
       final t = await tempDbPath();
       addTearDown(t.cleanup);
       final executed = <String>[];
@@ -57,8 +58,8 @@ void main() {
       db.onExecute = (sql, _) => executed.add(sql);
       // A web-profile open never applies WAL, so the probe reports
       // walSupported == false — the guard branch is reachable.
-      final pocket =
-          await openPocket(path: t.path, database: db, platform: PlatformProfile.web);
+      final pocket = await openPocket(
+          path: t.path, database: db, platform: PlatformProfile.web);
       addTearDown(pocket.close);
       expect(pocket.capabilities.walSupported, isFalse,
           reason: 'web profile reports no WAL');
@@ -158,6 +159,7 @@ void main() {
         store: 'widgets',
         recordId: id,
         bytes: Stream.value(utf8.encode('compactable bytes')),
+        allowVolatileBlobs: true,
       );
       // Open conflict + queued file op for the record.
       await pocket.db.execute(
@@ -298,12 +300,14 @@ void main() {
           store: 'widgets',
           recordId: id,
           bytes: Stream.value(utf8.encode('dead blob bytes')),
-          name: 'a.txt');
+          name: 'a.txt',
+          allowVolatileBlobs: true);
       await pocket.files.attach(
           store: 'widgets',
           recordId: id,
           bytes: Stream.value(utf8.encode('live blob bytes')),
-          name: 'b.txt');
+          name: 'b.txt',
+          allowVolatileBlobs: true);
 
       // Make the first blob unreferenced and old; keep the second referenced.
       final blobs = await pocket.db
@@ -344,17 +348,20 @@ void main() {
           store: 'widgets',
           recordId: recA,
           bytes: Stream.value(utf8.encode('a' * 1000)),
-          name: 'a');
+          name: 'a',
+          allowVolatileBlobs: true);
       await pocket.files.attach(
           store: 'widgets',
           recordId: recB,
           bytes: Stream.value(utf8.encode('b' * 2000)),
-          name: 'b');
+          name: 'b',
+          allowVolatileBlobs: true);
       await pocket.files.attach(
           store: 'widgets',
           recordId: recC,
           bytes: Stream.value(utf8.encode('c' * 3000)),
-          name: 'c');
+          name: 'c',
+          allowVolatileBlobs: true);
 
       // Mark A and C synced (LRU: A oldest, C newest). B stays pending_upload.
       await pocket.db.execute(

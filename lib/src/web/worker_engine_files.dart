@@ -38,6 +38,7 @@ mixin WorkerFilesHandlers on WorkerEngineHost {
       name: w.optionalString('name') ?? 'blob.bin',
       expectedSize: w.requireInt('size', op: 'file_upload_begin'),
       expectedSha256: w.optionalString('expectedSha256'),
+      allowVolatileBlobs: w.optionalBool('allowVolatileBlobs') ?? false,
     );
     return {'uploadId': uploadId};
   }
@@ -77,6 +78,7 @@ mixin WorkerFilesHandlers on WorkerEngineHost {
       name: session.name,
       expectedSize: session.expectedSize,
       expectedSha256: session.expectedSha256,
+      allowVolatileBlobs: session.allowVolatileBlobs,
     );
 
     return {
@@ -157,6 +159,12 @@ mixin WorkerFilesHandlers on WorkerEngineHost {
         maxBytes: w.requireInt('maxBytes', op: 'file_enforce_storage_cap'));
     return {'evicted': evicted};
   }
+
+  /// Reports whether the worker-owned blob store is durable (OPFS-backed)
+  /// rather than a volatile in-memory fallback.
+  Future<Object?> _handleFileStorageStatus(
+          WorkerEventSink sink, WebRequest req) async =>
+      {'durable': await pocket.files.isBlobStorageDurable};
 
   static Map<String, Object?> _encodeFileRef(FileRef ref) => {
         'refId': ref.refId,

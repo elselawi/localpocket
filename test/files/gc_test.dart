@@ -60,6 +60,7 @@ void main() {
         store: 'widgets',
         recordId: recId,
         bytes: Stream.value(utf8.encode('short-lived content')),
+        allowVolatileBlobs: true,
       );
 
       expect(await blobStore.exists(ref.hash), isTrue);
@@ -98,6 +99,7 @@ void main() {
         store: 'widgets',
         recordId: recId,
         bytes: Stream.value(utf8.encode('pending upload data')),
+        allowVolatileBlobs: true,
       );
 
       // Even if storage cap is 0, pending_upload blobs are never evicted
@@ -151,6 +153,7 @@ void main() {
         store: 'widgets',
         recordId: recId,
         bytes: Stream.value(utf8.encode('purgeable content')),
+        allowVolatileBlobs: true,
       );
 
       // Hard delete / purge the record
@@ -201,11 +204,13 @@ void main() {
         store: 'widgets',
         recordId: rec1,
         bytes: Stream.value(bytes1),
+        allowVolatileBlobs: true,
       );
       final ref2 = await pocket.files.attach(
         store: 'widgets',
         recordId: rec2,
         bytes: Stream.value(bytes2),
+        allowVolatileBlobs: true,
       );
 
       expect(ref1.hash, isNot(ref2.hash),
@@ -263,6 +268,7 @@ void main() {
         store: 'widgets',
         recordId: recId,
         bytes: Stream.value(utf8.encode('pending upload content')),
+        allowVolatileBlobs: true,
       );
       expect(
           (await pocket.db.query('lp_op_queue',
@@ -306,6 +312,7 @@ void main() {
         store: 'widgets',
         recordId: recId,
         bytes: Stream.value(utf8.encode('doomed upload')),
+        allowVolatileBlobs: true,
       );
       final filesCallsBefore = mock.updateFilesCalls;
 
@@ -449,10 +456,16 @@ void main() {
       await pocket.collection('widgets').put({'id': rec1, 'name': 'w1'});
       await pocket.collection('widgets').put({'id': rec2, 'name': 'w2'});
       final bytes = Uint8List.fromList(List.generate(800, (i) => i % 251));
-      final ref1 = await pocket.files
-          .attach(store: 'widgets', recordId: rec1, bytes: Stream.value(bytes));
-      final ref2 = await pocket.files
-          .attach(store: 'widgets', recordId: rec2, bytes: Stream.value(bytes));
+      final ref1 = await pocket.files.attach(
+          store: 'widgets',
+          recordId: rec1,
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
+      final ref2 = await pocket.files.attach(
+          store: 'widgets',
+          recordId: rec2,
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
       expect(ref1.hash, ref2.hash);
       expect(
           (await pocket.db
@@ -501,7 +514,8 @@ void main() {
           store: 'widgets',
           recordId: rec1,
           bytes: Stream.value(utf8.encode('remote content')),
-          name: 'r.bin');
+          name: 'r.bin',
+          allowVolatileBlobs: true);
       // A remote_only ref shares the record but references the remote file.
       await pocket.db.insert('lp_file_refs', {
         'ref_id': generateRecordId(),
@@ -555,11 +569,13 @@ void main() {
       final refA = await pocket.files.attach(
           store: 'widgets',
           recordId: recA,
-          bytes: Stream.value(utf8.encode('alpha content')));
+          bytes: Stream.value(utf8.encode('alpha content')),
+          allowVolatileBlobs: true);
       final refB = await pocket.files.attach(
           store: 'widgets',
           recordId: recB,
-          bytes: Stream.value(utf8.encode('beta content')));
+          bytes: Stream.value(utf8.encode('beta content')),
+          allowVolatileBlobs: true);
       await pocket.files.remove(store: 'widgets', recordId: recA);
       await pocket.files.remove(store: 'widgets', recordId: recB);
 
@@ -632,10 +648,16 @@ void main() {
       await pocket.collection('widgets').put({'id': rec1, 'name': 'w1'});
       await pocket.collection('widgets').put({'id': rec2, 'name': 'w2'});
       final bytes = Uint8List.fromList(List.generate(900, (i) => i % 251));
-      final ref1 = await pocket.files
-          .attach(store: 'widgets', recordId: rec1, bytes: Stream.value(bytes));
-      await pocket.files
-          .attach(store: 'widgets', recordId: rec2, bytes: Stream.value(bytes));
+      final ref1 = await pocket.files.attach(
+          store: 'widgets',
+          recordId: rec1,
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
+      await pocket.files.attach(
+          store: 'widgets',
+          recordId: rec2,
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
       await pocket.db.update('lp_file_refs', {'state': 'synced'});
 
       final evicted = await pocket.files.enforceStorageCap(maxBytes: 0);
@@ -678,7 +700,10 @@ void main() {
       await pocket.collection('widgets').put({'id': recId, 'name': 'w'});
       final bytes = Uint8List.fromList(List.generate(640, (i) => i % 251));
       await pocket.files.attach(
-          store: 'widgets', recordId: recId, bytes: Stream.value(bytes));
+          store: 'widgets',
+          recordId: recId,
+          bytes: Stream.value(bytes),
+          allowVolatileBlobs: true);
       await pocket.db.update('lp_file_refs', {'state': 'synced'});
       final total =
           (await pocket.db.rawQuery('SELECT SUM(size) as t FROM lp_blobs'))
@@ -715,11 +740,13 @@ void main() {
       final pending = await pocket.files.attach(
           store: 'widgets',
           recordId: recA,
-          bytes: Stream.value(utf8.encode('pending bytes')));
+          bytes: Stream.value(utf8.encode('pending bytes')),
+          allowVolatileBlobs: true);
       final synced = await pocket.files.attach(
           store: 'widgets',
           recordId: recB,
-          bytes: Stream.value(utf8.encode('synced bytes')));
+          bytes: Stream.value(utf8.encode('synced bytes')),
+          allowVolatileBlobs: true);
       await pocket.db.update('lp_file_refs', {'state': 'synced'});
       await pocket.db.update('lp_file_refs', {'state': 'pending_upload'},
           where: 'record_id = ?', whereArgs: [recA]);
@@ -755,7 +782,8 @@ void main() {
       final ref = await pocket.files.attach(
           store: 'widgets',
           recordId: recId,
-          bytes: Stream.value(utf8.encode('doomed content')));
+          bytes: Stream.value(utf8.encode('doomed content')),
+          allowVolatileBlobs: true);
       await pocket.files.remove(store: 'widgets', recordId: recId);
 
       await expectLater(
@@ -770,7 +798,8 @@ void main() {
       await pocket.files.attach(
           store: 'widgets',
           recordId: recId,
-          bytes: Stream.value(utf8.encode('content again')));
+          bytes: Stream.value(utf8.encode('content again')),
+          allowVolatileBlobs: true);
       await pocket.db.update('lp_file_refs', {'state': 'synced'});
       await expectLater(
           pocket.files.enforceStorageCap(maxBytes: 0), throwsStateError);
@@ -805,7 +834,8 @@ void main() {
       final ref = await pocket.files.attach(
           store: 'widgets',
           recordId: recId,
-          bytes: Stream.value(utf8.encode('pending remove bytes')));
+          bytes: Stream.value(utf8.encode('pending remove bytes')),
+          allowVolatileBlobs: true);
       await pocket.db.update('lp_file_refs', {'state': 'synced'});
       await pocket.db.update('lp_file_refs', {'state': 'pending_remove'});
 
@@ -864,6 +894,7 @@ void main() {
           store: 'widgets',
           recordId: recId,
           bytes: Stream.value(utf8.encode('referenced content')),
+          allowVolatileBlobs: true,
         );
 
         final cleaned = await pocket.files.gc(blobGrace: Duration.zero);

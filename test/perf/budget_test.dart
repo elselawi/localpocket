@@ -182,6 +182,7 @@ void main() {
         recordId: targetId,
         bytes: Stream.value([1, 2, 3, 4, 5]),
         name: 'target.bin',
+        allowVolatileBlobs: true,
       );
 
       // 3. Archived, clean, visible, RECENT seen (10d < 90d) -> PRESERVE

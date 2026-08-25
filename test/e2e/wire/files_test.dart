@@ -77,7 +77,8 @@ void main() {
           store: s.store,
           recordId: id,
           bytes: Stream.value(bytes),
-          name: 'probe.bin');
+          name: 'probe.bin',
+          allowVolatileBlobs: true);
       expect(ref.state, 'pending_upload');
 
       // A's cycle uploads via multipart; the server renames + stores bytes.
@@ -121,7 +122,8 @@ void main() {
           store: s.store,
           recordId: id,
           bytes: Stream.value([1, 2, 3, 4, 5]),
-          name: 'a.bin');
+          name: 'a.bin',
+          allowVolatileBlobs: true);
       expect(ref.state, 'pending_upload');
 
       final outbox = await a.pocket.db.query('lp_outbox',
@@ -153,7 +155,8 @@ void main() {
       expect(
           after.singleWhere((r) => r['kind'] == 'fileUpload')['state'], 'done',
           reason: 'the file op settled in the same cycle as the create');
-      expect((await s.readRecord(s.store, id))!['data']! as Map<String, Object?>,
+      expect(
+          (await s.readRecord(s.store, id))!['data']! as Map<String, Object?>,
           containsPair('name', 'pending'),
           reason: 'the record create landed');
       expect(await remoteImgs(s, id), hasLength(1),
@@ -174,12 +177,14 @@ void main() {
           store: s.store,
           recordId: id,
           bytes: Stream.value(List<int>.filled(64, 1)),
-          name: 'one.bin');
+          name: 'one.bin',
+          allowVolatileBlobs: true);
       await a.pocket.files.attach(
           store: s.store,
           recordId: id,
           bytes: Stream.value(List<int>.filled(64, 2)),
-          name: 'two.bin');
+          name: 'two.bin',
+          allowVolatileBlobs: true);
       await a.engine.syncNow();
       expect(await remoteImgs(s, id), hasLength(2));
       final keptName = (await remoteImgs(s, id)).last;
@@ -234,7 +239,8 @@ void main() {
           store: s.store,
           recordId: id,
           bytes: Stream.value(bytes),
-          name: 'only.bin');
+          name: 'only.bin',
+          allowVolatileBlobs: true);
       await a.engine.syncNow();
       expect(await remoteImgs(s, id), hasLength(1));
 
