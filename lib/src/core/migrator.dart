@@ -3,7 +3,6 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/common.dart' show SqliteException;
 import 'database_adapter.dart';
 
-import 'canonical_json.dart';
 import 'codec.dart';
 import 'ddl_compiler.dart';
 import 'errors.dart';
@@ -134,7 +133,9 @@ class Migrator {
       var lastRowid = cursor;
       for (final r in rows) {
         lastRowid = r['rowid']! as int;
-        final logical = decodeDbRow(schema, r);
+        final logical = decodeDbRow(schema, r,
+            cipher: pocket.fieldCipher,
+            cryptoProvider: pocket.cryptoProvider);
         final values = m.transform!(logical);
         if (values.isNotEmpty) updates.add((lastRowid, values));
       }
@@ -149,7 +150,13 @@ class Migrator {
                 throw SchemaRegistrationError(
                     'Backfill on "${schema.name}" produced unknown field "${e.key}".');
               }
-              set[e.key] = _encodeForField(field, e.value);
+              // Validate the transformed value against the target field's
+              // kind / required / enum rules before encoding (item 12) so a
+              // transform cannot write data the normal CRUD path would reject.
+              _validateTransformValue(field, e.value);
+              set[e.key] = encodeFieldValue(schema, field, e.value,
+                  cipher: pocket.fieldCipher,
+                  cryptoProvider: pocket.cryptoProvider);
             }
             await txn.update(schema.name, set,
                 where: 'rowid = ?', whereArgs: [rowid]);
@@ -264,12 +271,20 @@ class Migrator {
         if (rows.isEmpty) break;
         await db.transaction((txn) async {
           for (final r in rows) {
-            final logical = decodeDbRow(schema, r);
+            final logical = decodeDbRow(schema, r,
+                cipher: pocket.fieldCipher,
+                cryptoProvider: pocket.cryptoProvider);
             final newLogical = m.transform?.call(logical) ?? logical;
+            // Validate transformed values against the target schema's kind /
+            // required / enum rules (item 12) before encoding, mirroring the
+            // normal CRUD validation.
+            _validateLogical(schema, newLogical);
             final row = encodeDbRow(schema,
                 id: logical['id']! as String,
                 logical: newLogical,
-                archived: newLogical['archived'] == true);
+                archived: newLogical['archived'] == true,
+                cipher: pocket.fieldCipher,
+                cryptoProvider: pocket.cryptoProvider);
             await txn.insert(newTable, row);
           }
         });
@@ -383,13 +398,58 @@ class Migrator {
     return null;
   }
 
-  static Object? _encodeForField(Field f, Object? v) {
-    if (v == null) return null;
-    if (f.kind == FieldKind.bool) return v == true ? 1 : 0;
-    if (f.kind == FieldKind.json || f.kind == FieldKind.jsonList) {
-      return canonicalize(v);
+  /// Validates a single transformed value against [f]'s kind, required, and
+  /// enum rules — the same rules the normal write path enforces via
+  /// [fieldKindViolation] — so a transform cannot write data the CRUD path
+  /// would reject, silently corrupting the store relative to its own schema.
+  /// Throws a typed [ValidationException] naming the offending field and value
+  /// (the migration aborts cleanly, leaving the ledger untouched).
+  static void _validateTransformValue(Field f, Object? v) {
+    if (f.required && v == null) {
+      throw ValidationException('Field "${f.name}" is required.',
+          field: f.name);
     }
-    return v;
+    if (v == null) return;
+    final violation = fieldKindViolation(f, v);
+    if (violation != null) {
+      throw ValidationException(_kindViolationMessage(f, v, violation),
+          field: f.name);
+    }
+  }
+
+  /// Validates every declared field of [logical] against the target schema
+  /// (used by the destructive rebuild, where the transform emits a full row).
+  /// Extra keys are not schema-validated, mirroring the normal write path.
+  static void _validateLogical(
+      CollectionSchema<Object?> schema, Map<String, Object?> logical) {
+    for (final f in schema.fields) {
+      _validateTransformValue(f, logical[f.name]);
+    }
+  }
+
+  /// Renders a [KindViolation] naming the field, the offending runtime type,
+  /// and (for enums) the rejected value, mirroring `mapping.dart`'s wire
+  /// wording so the reason is recognizable in logs.
+  static String _kindViolationMessage(
+      Field f, Object? value, KindViolation violation) {
+    final name = f.name;
+    final got = value.runtimeType;
+    return switch (violation) {
+      KindViolation.textExpected =>
+        'Field "$name" must be a string, got $got.',
+      KindViolation.intExpected =>
+        'Field "$name" must be an integer, got $got.',
+      KindViolation.numberExpected =>
+        'Field "$name" must be a number, got $got.',
+      KindViolation.boolExpected =>
+        'Field "$name" must be a boolean, got $got.',
+      KindViolation.jsonExpected =>
+        'Field "$name" must be JSON, got $got.',
+      KindViolation.jsonListExpected =>
+        'Field "$name" must be a JSON array, got $got.',
+      KindViolation.enumValueRejected =>
+        'Field "$name" has unknown enum value "$value".',
+    };
   }
 
   static Future<String?> _kvGet(DatabaseExecutor exec, String key) async {

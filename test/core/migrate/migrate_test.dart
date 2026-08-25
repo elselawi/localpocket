@@ -529,6 +529,230 @@ void main() {
     });
 
     test(
+        'additive migration transform backfills encrypted rows (cipher '
+        'threaded through decode/encode)', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+      final cipher =
+          AesGcmFieldCipher(List<int>.generate(32, (i) => (i * 3 + 5) % 256));
+
+      // v1 already has an encrypted column holding ciphertext.
+      final v1Schema = widgetsSchema(
+          version: 1, extraFields: [Field.text('secret', encrypted: true)]);
+      final v1 = await openPocket(
+          path: t.path, stores: [v1Schema], fieldCipher: cipher);
+      final id = generateRecordId();
+      await v1.collection('widgets').put(
+          record(id: id, name: 'x', extra: {'secret': 'classified'}));
+      await v1.close();
+
+      // v2 adds a plaintext column whose backfill transform reads every row —
+      // decoding the encrypted `secret` column. Before the cipher was threaded
+      // into the migrator this threw
+      // `StateError('Field "secret" is encrypted but no FieldCipher...')`.
+      final v2Schema = widgetsSchema(
+        version: 2,
+        extraFields: [
+          Field.text('secret', encrypted: true),
+          Field.text('nickname'),
+        ],
+        migrations: [
+          StoreMigration(
+            toVersion: 2,
+            addedFields: [Field.text('nickname')],
+            transform: (oldRow) => {'nickname': 'nick-${oldRow['name']}'},
+          ),
+        ],
+      );
+      final migrated = await openPocket(
+          path: t.path, stores: [v2Schema], fieldCipher: cipher);
+      addTearDown(migrated.close);
+
+      // The backfill completed and decoded the encrypted column: the plaintext
+      // round-trips and the store still holds ciphertext, never the plaintext.
+      final doc = await migrated.collection('widgets').get(id);
+      expect(doc!['nickname'], 'nick-x',
+          reason: 'backfill transform ran over the encrypted row');
+      expect(doc['secret'], 'classified');
+      final raw = await migrated.db
+          .rawQuery('SELECT secret FROM widgets WHERE id = ?', [id]);
+      expect(raw.single['secret'], isNot(contains('classified')),
+          reason: 'encrypted column stores ciphertext, never the plaintext');
+    });
+
+    test(
+        'destructive rebuild propagates the cipher: encrypted store survives '
+        'the rebuild and round-trips after reopen', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+      final backup = Migrator.backupPath(t.path, 'widgets', 2);
+      addTearDown(() {
+        final f = File(backup);
+        if (f.existsSync()) f.deleteSync();
+      });
+      final cipher =
+          AesGcmFieldCipher(List<int>.generate(32, (i) => (i * 3 + 5) % 256));
+
+      final v1Schema = widgetsSchema(
+          version: 1, extraFields: [Field.text('secret', encrypted: true)]);
+      final v1 = await openPocket(
+          path: t.path, stores: [v1Schema], fieldCipher: cipher);
+      final id = generateRecordId();
+      await v1.collection('widgets').put(
+          record(id: id, name: 'x', extra: {'secret': 'classified'}));
+      await v1.close();
+
+      final v2Schema = widgetsSchema(
+        version: 2,
+        extraFields: [
+          Field.text('secret', encrypted: true),
+          Field.text('nickname'),
+        ],
+        migrations: [
+          StoreMigration(
+            toVersion: 2,
+            destructive: true,
+            transform: (oldRow) =>
+                {...oldRow, 'nickname': 'nick-${oldRow['name']}'},
+          ),
+        ],
+      );
+      final migrated = await openPocket(
+          path: t.path, stores: [v2Schema], fieldCipher: cipher);
+      addTearDown(migrated.close);
+
+      final doc = await migrated.collection('widgets').get(id);
+      expect(doc!['nickname'], 'nick-x');
+      expect(doc['secret'], 'classified');
+      final raw = await migrated.db
+          .rawQuery('SELECT secret FROM widgets WHERE id = ?', [id]);
+      expect(raw.single['secret'], isNot(contains('classified')),
+          reason: 'the rebuilt column stores ciphertext, never the plaintext');
+
+      // Round-trips after reopen with the same cipher.
+      await migrated.close();
+      final reopened = await openPocket(
+          path: t.path, stores: [v2Schema], fieldCipher: cipher);
+      addTearDown(reopened.close);
+      expect((await reopened.collection('widgets').get(id))!['secret'],
+          'classified');
+    });
+
+    test(
+        'a transform emitting a wrong-typed value throws ValidationException '
+        'and leaves the ledger untouched; the corrected transform completes '
+        'exactly once', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+
+      final v1 = await openPocket(path: t.path);
+      await v1.transaction((tx) async {
+        for (var i = 0; i < 3; i++) {
+          final id = generateRecordId();
+          await tx
+              .collection('widgets')
+              .put(record(id: id, name: 'n$i', qty: i));
+        }
+      });
+      await v1.close();
+
+      StoreMigration migration({bool wrongType = false}) => StoreMigration(
+            toVersion: 2,
+            addedFields: [Field.text('nickname')],
+            transform: (oldRow) => {
+              'nickname': 'nick-${oldRow['name']}',
+              if (wrongType) 'qty': 'not-an-int',
+            },
+          );
+
+      // The transform writes a String into the int `qty` column — the normal
+      // CRUD path rejects that, so the backfill must too (typed, not silent).
+      await expectLater(
+        openPocket(path: t.path, stores: [
+          v2Schema(migrations: [migration(wrongType: true)])
+        ]),
+        throwsA(isA<ValidationException>().having(
+            (e) => e.message, 'message', contains('"qty"'))),
+      );
+
+      // Ledger-consistent failure: schema_ver unchanged, no migration row.
+      final probe = await openPocket(path: t.path);
+      var stores = await probe.db
+          .query('lp_stores', where: 'store = ?', whereArgs: ['widgets']);
+      expect(stores.first['schema_ver'], 1,
+          reason: 'the failed attempt did not advance schema_ver');
+      expect(
+          await probe.db.rawQuery(
+              "SELECT name FROM lp_migrations WHERE name = 'migrate:widgets:v2'"),
+          isEmpty,
+          reason: 'no half-applied ledger row for the failed step');
+      await probe.close();
+
+      // Corrected transform completes exactly once.
+      final v2 = await openPocket(path: t.path, stores: [
+        v2Schema(migrations: [migration(wrongType: false)])
+      ]);
+      addTearDown(v2.close);
+      stores = await v2.db
+          .query('lp_stores', where: 'store = ?', whereArgs: ['widgets']);
+      expect(stores.first['schema_ver'], 2);
+      final ledger = await v2.db.rawQuery(
+          "SELECT name FROM lp_migrations WHERE name = 'migrate:widgets:v2'");
+      expect(ledger, hasLength(1),
+          reason: 'the retry recorded exactly once — no duplicate ledger row');
+      final all = await v2.collection('widgets').query().all().fetch();
+      for (final r in all.items) {
+        expect(r['nickname'], 'nick-${r['name']}');
+      }
+    });
+
+    test(
+        'a destructive rebuild transform emitting a wrong-typed value throws '
+        'ValidationException; corrected retry completes', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+      final backup = Migrator.backupPath(t.path, 'widgets', 2);
+      addTearDown(() {
+        final f = File(backup);
+        if (f.existsSync()) f.deleteSync();
+      });
+
+      final v1 = await openPocket(path: t.path);
+      final id = generateRecordId();
+      await v1.collection('widgets').put(record(id: id, name: 'x', qty: 1));
+      await v1.close();
+
+      StoreMigration migration(Object nickname) => StoreMigration(
+            toVersion: 2,
+            destructive: true,
+            transform: (oldRow) => {...oldRow, 'nickname': nickname},
+          );
+
+      // nickname is a text field; an int from the transform is rejected.
+      await expectLater(
+        openPocket(path: t.path, stores: [
+          v2Schema(migrations: [migration(42)])
+        ]),
+        throwsA(isA<ValidationException>().having(
+            (e) => e.message, 'message', contains('"nickname"'))),
+      );
+
+      // schema_ver untouched by the failed rebuild.
+      final probe = await openPocket(path: t.path);
+      final stores = await probe.db
+          .query('lp_stores', where: 'store = ?', whereArgs: ['widgets']);
+      expect(stores.first['schema_ver'], 1);
+      await probe.close();
+
+      // The resume marker lets the corrected retry rebuild cleanly.
+      final v2 = await openPocket(path: t.path, stores: [
+        v2Schema(migrations: [migration('nick-x')])
+      ]);
+      addTearDown(v2.close);
+      expect((await v2.collection('widgets').get(id))!['nickname'], 'nick-x');
+    });
+
+    test(
         'additive migration refuses a required (NOT NULL) column on a '
         'populated table', () async {
       final t = await tempDbPath();
