@@ -49,6 +49,13 @@ abstract class BlobStore {
 
   /// Lists all stored blob hashes.
   Future<List<String>> listHashes();
+
+  /// Returns the last-modified timestamp of the stored [hash] in epoch
+  /// milliseconds, or `null` if unknown/unsupported.
+  ///
+  /// Used by GC to age orphaned blobs (files on disk without an `lp_blobs`
+  /// metadata row) so a crash mid-attach is never raced.
+  Future<int?> modifiedAt(String hash) => Future.value(null);
 }
 
 /// Result of streaming validation containing the verified hash and byte count.
@@ -170,6 +177,12 @@ class MemoryBlobStore extends BlobStore {
 
   @override
   Future<List<String>> listHashes() async => _blobs.keys.toList();
+
+  @override
+  Future<int?> modifiedAt(String hash) async {
+    BlobStore.validateHash(hash);
+    return _lastModified[hash];
+  }
 }
 
 /// EncryptingBlobStore decorator.

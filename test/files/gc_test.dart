@@ -820,5 +820,75 @@ void main() {
               .state,
           'pending_remove');
     });
+
+    group('orphan reconciliation (crash between bs.put and metadata tx)', () {
+      late Directory tempDir;
+      late NativeBlobStore blobStore;
+
+      setUp(() async {
+        tempDir = await Directory.systemTemp.createTemp('lp_orphan_test_');
+        blobStore = NativeBlobStore(p.join(tempDir.path, 'blobs'));
+      });
+      tearDown(() async {
+        if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      });
+
+      Future<LocalPocket> openWithBlobs() async {
+        final dbPath = await tempDbPath();
+        final pocket = await openPocket(
+          path: dbPath.path,
+          blobStore: blobStore,
+          stores: [
+            CollectionSchema(
+              name: 'widgets',
+              version: 1,
+              fields: [Field.text('name')],
+            ),
+          ],
+        );
+        return pocket;
+      }
+
+      test('gc deletes orphaned blob with no lp_blobs row', () async {
+        // Simulate a crash: bytes written directly to the store, no metadata.
+        final orphanBytes = utf8.encode('orphaned crash bytes');
+        final orphanHash = await blobStore.put(Stream.value(orphanBytes));
+        expect(await blobStore.exists(orphanHash), isTrue);
+
+        // A referenced blob that MUST survive GC.
+        final pocket = await openWithBlobs();
+        addTearDown(() async => await pocket.close());
+        final recId = generateRecordId();
+        await pocket.collection('widgets').put({'id': recId, 'name': 'w'});
+        final ref = await pocket.files.attach(
+          store: 'widgets',
+          recordId: recId,
+          bytes: Stream.value(utf8.encode('referenced content')),
+        );
+
+        final cleaned = await pocket.files.gc(blobGrace: Duration.zero);
+
+        // Orphan is deleted from disk; referenced blob survives.
+        expect(await blobStore.exists(orphanHash), isFalse);
+        expect(await blobStore.listHashes(), isNot(contains(orphanHash)));
+        expect(await blobStore.exists(ref.hash), isTrue);
+        // Only the orphan was collected (refcount-0 loop found nothing).
+        expect(cleaned, 1);
+      });
+
+      test('fresh orphan within grace period survives gc', () async {
+        final orphanHash = await blobStore.put(
+          Stream.value(utf8.encode('just written before crash')),
+        );
+        final pocket = await openWithBlobs();
+        addTearDown(() async => await pocket.close());
+
+        // Grace of one day: the just-written orphan must NOT be collected.
+        final cleaned =
+            await pocket.files.gc(blobGrace: const Duration(days: 1));
+        expect(cleaned, 0);
+        expect(await blobStore.exists(orphanHash), isTrue);
+      });
+    });
   });
 }

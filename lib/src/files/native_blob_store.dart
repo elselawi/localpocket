@@ -137,6 +137,18 @@ class NativeBlobStore extends BlobStore {
   }
 
   @override
+  Future<int?> modifiedAt(String hash) async {
+    BlobStore.validateHash(hash);
+    final file = File(_blobPath(hash));
+    if (!file.existsSync()) return null;
+    try {
+      return file.lastModifiedSync().millisecondsSinceEpoch;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<int> cleanTmp({Duration olderThan = const Duration(hours: 24)}) async {
     final tmpDir = Directory(_tmpDir);
     if (!tmpDir.existsSync()) return 0;

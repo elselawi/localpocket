@@ -347,9 +347,13 @@ class LocalPocketFiles {
 
   /// Garbage collection.
   ///
-  /// - Blobs with `refcount == 0` and `last_access > grace` -> delete from BlobStore and SQLite.
-  /// - Temp files in BlobStore > 24h -> delete.
+  /// - Temp files in BlobStore > [tmpGrace] -> delete.
   /// - Orphaned file refs whose record disappeared -> clean up.
+  /// - Orphaned blobs (on disk, NO `lp_blobs` row — crash between `attach`'s
+  ///   blob write and the metadata transaction) older than [blobGrace], aged
+  ///   by the stored file's mtime -> delete from disk.
+  /// - Blobs with `refcount == 0` and `last_access <= cutoff` -> delete from
+  ///   BlobStore and SQLite.
   Future<int> gc({
     Duration blobGrace = const Duration(days: 7),
     Duration tmpGrace = const Duration(hours: 24),
@@ -362,7 +366,9 @@ class LocalPocketFiles {
       count += await bs.cleanTmp(olderThan: tmpGrace);
     }
 
-    // 3. Remove refs whose owning record no longer exists. This must happen
+    final cutoff = _pocket.now() - blobGrace.inMilliseconds;
+
+    // 2. Remove refs whose owning record no longer exists. This must happen
     // before blob collection so their references cannot keep blobs alive.
     await _pocket.transaction((tx) async {
       final exec = tx.executor;
@@ -394,9 +400,51 @@ class LocalPocketFiles {
       }
     });
 
-    // 3. Clean blobs with refcount = 0 and last_access older than grace
-    final cutoff = _pocket.now() - blobGrace.inMilliseconds;
-    const pageSize = 250;
+    // 3. Reconcile disk against metadata (orphan healing): delete blobs that
+    // exist in the BlobStore with NO `lp_blobs` metadata row (left behind by a
+    // crash between `attach`'s `bs.put` and the metadata transaction). Only
+    // orphans older than the grace cutoff are collected so an in-flight attach
+    // is never raced.
+    if (bs != null) {
+      try {
+        final onDisk = await bs.listHashes();
+        if (onDisk.isNotEmpty) {
+          const pageSize = 250;
+          var offset = 0;
+          final known = <String>{};
+          while (true) {
+            final rows = await _pocket.db.query(
+              'lp_blobs',
+              columns: ['hash'],
+              orderBy: 'hash ASC',
+              limit: pageSize,
+              offset: offset,
+            );
+            for (final r in rows) {
+              known.add(r['hash']! as String);
+            }
+            if (rows.length < pageSize) break;
+            offset += pageSize;
+          }
+          for (final hash in onDisk) {
+            if (known.contains(hash)) continue;
+            try {
+              // Age by the store's own mtime so a blob written moments before
+              // a crash survives at least one grace period.
+              final mtime = await bs.modifiedAt(hash);
+              if (mtime == null || mtime > cutoff) continue;
+              await bs.delete(hash);
+              count++;
+            } catch (_) {}
+          }
+        }
+      } catch (_) {
+        // listHashes unsupported or failed -> skip reconciliation this run.
+      }
+    }
+
+    // 4. Clean blobs with refcount = 0 and last_access older than grace
+    const pageSize2 = 250;
     while (true) {
       final deadBlobs = await _pocket.db.query(
         'lp_blobs',
@@ -404,7 +452,7 @@ class LocalPocketFiles {
         where: 'refcount <= 0 AND last_access <= ?',
         whereArgs: [cutoff],
         orderBy: 'hash ASC',
-        limit: pageSize,
+        limit: pageSize2,
       );
       if (deadBlobs.isEmpty) break;
       for (final b in deadBlobs) {
