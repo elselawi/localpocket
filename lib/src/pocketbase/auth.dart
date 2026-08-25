@@ -67,9 +67,16 @@ abstract class TokenProvider {
   Future<Token> refreshToken(Token current);
 
   /// The stable identity the token belongs to (used for the sync scope id).
-  /// Defaults to a stable fingerprint of the token value so the DB file is
-  /// per-login even when the provider does not expose an identity.
-  String get identity => 'token-identity';
+  ///
+  /// Must be stable across refreshes and account switches. Token values
+  /// rotate on refresh, so a fingerprint of the current token value is NOT
+  /// stable — return a stable account/user id instead (e.g. `'user-123'`).
+  ///
+  /// Defaults to `null` when the provider cannot expose a stable identity.
+  /// When both this and the backend's `identity` are null, accessing
+  /// `PocketBaseBackend.scopeId` throws instead of silently sharing one sync
+  /// scope across all accounts on the same server.
+  String? get identity => null;
 }
 
 /// Wraps [TokenProvider] with single-flight refresh + proactive refresh.

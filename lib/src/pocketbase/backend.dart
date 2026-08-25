@@ -80,7 +80,8 @@ class PocketBaseBackend implements SyncBackend {
   final int maxBatch;
 
   /// Stable login identity (used for scope file naming). When null, derived
-  /// from [TokenProvider.identity].
+  /// from [TokenProvider.identity]; when both are null, accessing [scopeId]
+  /// throws so sync state is never shared across accounts.
   final String? identity;
 
   /// The remote collection the realtime client subscribes to (every
@@ -133,9 +134,20 @@ class PocketBaseBackend implements SyncBackend {
 
   /// Identity fingerprint: a change of (baseUrl, identity) switches the DB
   /// scope and therefore invalidates every cursor.
+  ///
+  /// Throws when neither this backend nor its [tokenProvider] exposes an
+  /// identity: without one, every account on the same server would collapse
+  /// into a single scope and bleed cursors/watermarks across users.
   @override
   String get scopeId {
     final id = identity ?? tokenProvider.identity;
+    if (id == null) {
+      throw StateError(
+          'No sync identity: pass `identity:` to PocketBaseBackend or '
+          'override TokenProvider.identity with a stable per-account id. '
+          'Without one, sync state would be shared across all accounts on '
+          'this server.');
+    }
     return sha256Hex('$baseUrl|$id').substring(0, 12);
   }
 

@@ -1,5 +1,16 @@
 ## Unreleased
 
+- **`TokenProvider.identity` no longer has a shared constant default.** The
+  old default `'token-identity'` silently collapsed every provider that did
+  not override `identity` into one sync scope per server — cursors,
+  watermarks, and sync state could bleed across accounts (and account
+  switching could apply one user's sync state to another). `identity` now
+  defaults to `null`; when neither the provider nor `PocketBaseBackend.identity`
+  provides one, accessing `scopeId` throws a clear `StateError` instead of
+  sharing a scope. Pass a stable per-account id (`identity: 'user-123'` on
+  the backend, or override `TokenProvider.identity`). Note: token values
+  rotate on refresh, so a fingerprint of the current token value is NOT a
+  stable identity.
 - **BREAKING: `between` is now inclusive on both ends.**
   `where(field, between: (start, end))` compiles to `>= start AND <= end`
   (SQL `BETWEEN` semantics). Previously it was half-open `[start, end)`,

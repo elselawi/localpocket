@@ -344,6 +344,10 @@ Create a single **Base** collection named **`data`** in your PocketBase Admin UI
 
 Set API rules on the `data` collection (e.g. `@request.auth.id != ""` or user ownership checks) to restrict read/write access to authenticated users.
 
+### Concurrent Edits on PocketBase Are Last-Write-Wins
+
+PocketBase offers no conditional (compare-and-swap) writes, so **concurrent edits to the same record from two clients resolve last-write-wins on the server**: the final stored value is the one whose write arrived last, whichever client that was. The client-side 3-way merge only protects pushes that are time-serialized; apps needing strict optimistic concurrency must enforce it server-side (a record hook or custom endpoint) — the client's `RemoteVersionConflict` re-merge machinery exists for backends that *can* throw it.
+
 ---
 
 ## Conflict Resolution & 3-Way Merge

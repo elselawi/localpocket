@@ -334,11 +334,27 @@ void main() {
       expect(provider.currentCalls, 2, reason: 'invalidated -> reloaded');
     });
 
-    test('default identity is stable; scopeId derives from it', () async {
+    test('no shared default identity; scope construction throws without one',
+        () async {
       expect(TestTokenProvider(identityValue: 'alice').identity, 'alice');
+
+      // A provider that does not expose a stable identity reports null —
+      // token values rotate on refresh, so there is no stable fingerprint to
+      // fall back to. The old shared 'token-identity' constant silently merged
+      // every account on one server into a single sync scope.
       final defaulted = _DefaultIdentityProvider();
-      expect(defaulted.identity, 'token-identity',
-          reason: 'TokenProvider.identity defaults to a stable fingerprint');
+      expect(defaulted.identity, isNull,
+          reason: 'no shared default identity (cross-account scope collision)');
+
+      // Without any identity, building a sync scope must fail loudly instead
+      // of sharing a scope across accounts.
+      final unset = PocketBaseBackend(
+          baseUrl: Uri.parse('https://pb.test'),
+          tokenProvider: _DefaultIdentityProvider(),
+          stores: const []);
+      addTearDown(() => unset.close());
+      expect(() => unset.scopeId, throwsStateError,
+          reason: 'a missing identity is a loud error, not a shared scope');
 
       final a = PocketBaseBackend(
           baseUrl: Uri.parse('https://pb.test'),
