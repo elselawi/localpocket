@@ -70,9 +70,9 @@ abstract class CryptoProvider {
 
 /// Simple [CryptoProvider] wrapping a single default [FieldCipher].
 class SingleKeyCryptoProvider implements CryptoProvider {
-
   /// Creates a provider backed by one cipher.
   SingleKeyCryptoProvider(this.cipher);
+
   /// Cipher returned for every requested field.
   final FieldCipher cipher;
 
@@ -82,11 +82,11 @@ class SingleKeyCryptoProvider implements CryptoProvider {
 
 /// Standard AES-256-GCM cipher with a fresh 12-byte random IV per value.
 class AesGcmFieldCipher implements FieldCipher {
-
   AesGcmFieldCipher(List<int> keyBytes, {Random? random})
       : _key = _validatedKey(keyBytes),
         _random = random ?? Random.secure(),
         _context = _AesContext(_validatedKey(keyBytes));
+
   /// Creates an AES-256-GCM field cipher from a 32-byte key.
   final Uint8List _key;
   final _AesContext _context;
@@ -337,7 +337,8 @@ class _AesGcmEngine {
   }
 }
 
-class _AesContext { // 15 round keys for AES-256
+class _AesContext {
+  // 15 round keys for AES-256
 
   _AesContext(Uint8List key) {
     _keyExpansion(key);

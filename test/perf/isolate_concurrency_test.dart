@@ -10,7 +10,8 @@ import '../sync/engine/engine_helpers.dart';
 import '../sync/engine/mock_backend.dart';
 
 void main() {
-  group('Isolates — Delta Pull Normalization & Document Batch Decrypt/Encrypt', () {
+  group('Isolates — Delta Pull Normalization & Document Batch Decrypt/Encrypt',
+      () {
     final keyBytes = List<int>.generate(32, (i) => (i * 11 + 19) % 256);
     final cipher = AesGcmFieldCipher(keyBytes);
 
@@ -64,7 +65,8 @@ void main() {
       // 2. Synchronous normalization vs async (inline — no isolate offload;
       // see normalizeRemoteBatchAsync body comment)
       final syncBatch = normalizeRemoteBatch(schema, remotes);
-      final asyncBatch = await normalizeRemoteBatchAsync(schema, remotes, isolateThreshold: 10);
+      final asyncBatch = await normalizeRemoteBatchAsync(schema, remotes,
+          isolateThreshold: 10);
 
       expect(asyncBatch.length, syncBatch.length);
       for (var i = 0; i < syncBatch.length; i++) {
@@ -78,7 +80,8 @@ void main() {
       }
 
       expect(asyncBatch[13].isSuccess, isFalse);
-      expect(asyncBatch[13].error, contains('Required field "full_name" is missing'));
+      expect(asyncBatch[13].error,
+          contains('Required field "full_name" is missing'));
 
       expect(asyncBatch[27].isSuccess, isFalse);
       expect(asyncBatch[27].error, contains('must be an integer'));
@@ -135,7 +138,11 @@ void main() {
           'full_name': 'Encrypted Person $i',
           'birth_year': 1990 + (i % 10),
           'notes': 'Confidential diagnostic records $i' * 5,
-          'vitals': {'heartRate': 70, 'bloodPressure': '125/82', 'details': 'Record $i'},
+          'vitals': {
+            'heartRate': 70,
+            'bloodPressure': '125/82',
+            'details': 'Record $i'
+          },
         });
       }
 
@@ -217,19 +224,25 @@ void main() {
       // offload exists; see FieldCipher docs) — this pins threshold-ignoring
       // parity above 64 KiB.
       final largePlaintext = utf8.encode('A' * (128 * 1024));
-      final ciphertext = await cipher.encryptAsync(largePlaintext, isolateThresholdBytes: 32 * 1024);
-      final decrypted = await cipher.decryptAsync(ciphertext, isolateThresholdBytes: 32 * 1024);
+      final ciphertext = await cipher.encryptAsync(largePlaintext,
+          isolateThresholdBytes: 32 * 1024);
+      final decrypted = await cipher.decryptAsync(ciphertext,
+          isolateThresholdBytes: 32 * 1024);
       expect(decrypted, equals(largePlaintext));
 
       // 2. Batch encrypt & decrypt
-      final plaintexts = List.generate(20, (i) => utf8.encode('Batch message $i with some padding content'));
-      final batchCiphertexts = await cipher.batchEncrypt(plaintexts, isolateThreshold: 5);
+      final plaintexts = List.generate(
+          20, (i) => utf8.encode('Batch message $i with some padding content'));
+      final batchCiphertexts =
+          await cipher.batchEncrypt(plaintexts, isolateThreshold: 5);
       expect(batchCiphertexts.length, 20);
 
-      final batchDecrypted = await cipher.batchDecrypt(batchCiphertexts, isolateThreshold: 5);
+      final batchDecrypted =
+          await cipher.batchDecrypt(batchCiphertexts, isolateThreshold: 5);
       expect(batchDecrypted.length, 20);
       for (var i = 0; i < 20; i++) {
-        expect(utf8.decode(batchDecrypted[i]), 'Batch message $i with some padding content');
+        expect(utf8.decode(batchDecrypted[i]),
+            'Batch message $i with some padding content');
       }
     });
 
@@ -238,17 +251,22 @@ void main() {
       final encStore = EncryptingBlobStore.withCipher(mem, cipher);
 
       // 128 KB binary blob
-      final payload = Uint8List.fromList(List.generate(128 * 1024, (i) => (i * 13) % 256));
+      final payload =
+          Uint8List.fromList(List.generate(128 * 1024, (i) => (i * 13) % 256));
       final hash = await encStore.put(Stream.value(payload));
 
       // Blob on inner store is encrypted
       final innerStream = await mem.open(hash);
-      final innerBytes = await innerStream.fold<BytesBuilder>(BytesBuilder(), (b, chunk) => b..add(chunk)).then((b) => b.takeBytes());
+      final innerBytes = await innerStream
+          .fold<BytesBuilder>(BytesBuilder(), (b, chunk) => b..add(chunk))
+          .then((b) => b.takeBytes());
       expect(innerBytes, isNot(equals(payload)));
 
       // Opening through encStore decrypts back to original payload
       final openStream = await encStore.open(hash);
-      final decryptedBytes = await openStream.fold<BytesBuilder>(BytesBuilder(), (b, chunk) => b..add(chunk)).then((b) => b.takeBytes());
+      final decryptedBytes = await openStream
+          .fold<BytesBuilder>(BytesBuilder(), (b, chunk) => b..add(chunk))
+          .then((b) => b.takeBytes());
       expect(decryptedBytes, equals(payload));
     });
   });

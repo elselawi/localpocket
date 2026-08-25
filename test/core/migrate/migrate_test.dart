@@ -542,8 +542,9 @@ void main() {
       final v1 = await openPocket(
           path: t.path, stores: [v1Schema], fieldCipher: cipher);
       final id = generateRecordId();
-      await v1.collection('widgets').put(
-          record(id: id, name: 'x', extra: {'secret': 'classified'}));
+      await v1
+          .collection('widgets')
+          .put(record(id: id, name: 'x', extra: {'secret': 'classified'}));
       await v1.close();
 
       // v2 adds a plaintext column whose backfill transform reads every row —
@@ -598,8 +599,9 @@ void main() {
       final v1 = await openPocket(
           path: t.path, stores: [v1Schema], fieldCipher: cipher);
       final id = generateRecordId();
-      await v1.collection('widgets').put(
-          record(id: id, name: 'x', extra: {'secret': 'classified'}));
+      await v1
+          .collection('widgets')
+          .put(record(id: id, name: 'x', extra: {'secret': 'classified'}));
       await v1.close();
 
       final v2Schema = widgetsSchema(
@@ -671,8 +673,8 @@ void main() {
         openPocket(path: t.path, stores: [
           v2Schema(migrations: [migration(wrongType: true)])
         ]),
-        throwsA(isA<ValidationException>().having(
-            (e) => e.message, 'message', contains('"qty"'))),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.message, 'message', contains('"qty"'))),
       );
 
       // Ledger-consistent failure: schema_ver unchanged, no migration row.
@@ -733,8 +735,8 @@ void main() {
         openPocket(path: t.path, stores: [
           v2Schema(migrations: [migration(42)])
         ]),
-        throwsA(isA<ValidationException>().having(
-            (e) => e.message, 'message', contains('"nickname"'))),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.message, 'message', contains('"nickname"'))),
       );
 
       // schema_ver untouched by the failed rebuild.

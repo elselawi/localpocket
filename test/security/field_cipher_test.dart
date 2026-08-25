@@ -598,7 +598,8 @@ void main() {
       expect(utf8.decode(await cipher.decryptAsync(asyncCt)), utf8.decode(pt));
     });
 
-    test('async APIs are pinned inline: byte-identical to sync under a fixed nonce',
+    test(
+        'async APIs are pinned inline: byte-identical to sync under a fixed nonce',
         () async {
       // Contract pin — the async cipher APIs deliberately run INLINE on the
       // calling isolate: `encryptAsync`/`batchEncrypt`/`batchDecrypt` are
@@ -612,10 +613,10 @@ void main() {
       // offload or duplicated code path would consume nonces differently).
       final fixedKey = List<int>.generate(32, (i) => (i * 3 + 1) % 256);
       final nonceBytes = List<int>.generate(24, (i) => (i * 5 + 7) % 256);
-      final syncCipher = AesGcmFieldCipher(fixedKey,
-          random: _FixedRandom(nonceBytes));
-      final asyncCipher = AesGcmFieldCipher(fixedKey,
-          random: _FixedRandom(nonceBytes));
+      final syncCipher =
+          AesGcmFieldCipher(fixedKey, random: _FixedRandom(nonceBytes));
+      final asyncCipher =
+          AesGcmFieldCipher(fixedKey, random: _FixedRandom(nonceBytes));
 
       final pt = utf8.encode('pin the inline async contract');
 
@@ -631,7 +632,9 @@ void main() {
           equals(syncCipher.decrypt(syncCt)));
 
       // batchEncrypt / batchDecrypt are encrypt/decrypt per element.
-      final batchSync = [for (final p in [pt, pt]) syncCipher.encrypt(p)];
+      final batchSync = [
+        for (final p in [pt, pt]) syncCipher.encrypt(p)
+      ];
       final batchAsync = await asyncCipher.batchEncrypt([pt, pt]);
       expect(batchAsync, equals(batchSync),
           reason: 'batchEncrypt must be encrypt-per-element (byte-for-byte)');
