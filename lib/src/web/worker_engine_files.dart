@@ -1,7 +1,8 @@
 /// Part of `worker_engine.dart` — bounded chunked upload + file metadata.
 ///
 /// Wire handlers for `file_upload_begin/chunk/finish/abort` (bounded chunk
-/// reassembly via `UploadSessionRegistry`, then `pocket.files.attach`) and
+/// reassembly via `UploadSessionRegistry` — per-file and aggregate quotas
+/// plus a sliding TTL — then `pocket.files.attach`) and
 /// the metadata RPCs `file_list/open/remove/gc/enforce_storage_cap`.
 ///
 /// No catalog row exists until `finish`, so a crash mid-upload leaves no
@@ -10,8 +11,23 @@ part of 'worker_engine.dart';
 
 /// File upload + metadata handlers (see the file doc above).
 mixin WorkerFilesHandlers on WorkerEngineHost {
+  /// Starts the periodic upload-session expiry sweep on the first upload so
+  /// abandoned sessions are reclaimed even if the client never sends another
+  /// message. [UploadSessionRegistry.begin] already sweeps lazily; this timer
+  /// covers the fully-wedged client that sends nothing further at all.
+  void _ensureUploadExpirySweeper() {
+    if (_uploadExpiryTimer != null) return;
+    final ttl = _uploadSessions.sessionTtl;
+    if (ttl <= Duration.zero) return;
+    _uploadExpiryTimer = Timer.periodic(
+      Duration(microseconds: ttl.inMicroseconds ~/ 2),
+      (_) => _uploadSessions.expireStaleSessions(),
+    );
+  }
+
   Future<Object?> _handleFileUploadBegin(
       WorkerEventSink sink, WebRequest req) async {
+    _ensureUploadExpirySweeper();
     final w = WireArgs(req.args);
     final uploadId = _nextUploadId++;
     _uploadSessions.begin(
@@ -44,7 +60,9 @@ mixin WorkerFilesHandlers on WorkerEngineHost {
         WireArgs(req.args).requireInt('uploadId', op: 'file_upload_finish');
     final session = _uploadSessions.takeForFinish(uploadId);
 
-    // Reassemble the byte stream from the bounded chunks.
+    // Reassemble the byte stream from the bounded chunks. The registry
+    // enforced the aggregate quota and TTL, so the chunks are already
+    // bounded; each chunk is yielded in place (no second full-file copy).
     Stream<List<int>> stream() async* {
       for (final chunk in session.chunks) {
         yield chunk;

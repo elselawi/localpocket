@@ -246,6 +246,7 @@ class UploadSession {
     required this.store,
     required this.recordId,
     required this.expectedSize,
+    required this.expiresAt,
     this.field = 'imgs',
     this.name = 'blob.bin',
     this.expectedSha256,
@@ -277,6 +278,10 @@ class UploadSession {
 
   /// Chunks accumulated for this upload.
   final List<Uint8List> chunks = [];
+
+  /// Deadline after which the session is abandoned and reclaimed. Refreshed
+  /// by the registry on every accepted chunk (sliding TTL).
+  DateTime expiresAt;
 }
 
 /// Maximum chunk size for bounded file uploads (256 KiB).
@@ -285,18 +290,39 @@ const int defaultMaxUploadChunkBytes = 262144;
 /// Maximum concurrent uploads allowed simultaneously in worker.
 const int defaultMaxConcurrentUploads = 16;
 
-/// Maximum upload file size (~4 GiB).
-const int defaultMaxUploadFileBytes = 4294967296;
+/// Maximum upload file size (256 MiB).
+const int defaultMaxUploadFileBytes = 268435456;
+
+/// Maximum total declared bytes across all active upload sessions (512 MiB).
+///
+/// Bounds the worker's worst-case in-memory buffering: 16 concurrent
+/// sessions may not jointly reserve more than this, no matter how large
+/// each individual file is.
+const int defaultMaxTotalUploadBytes = 536870912;
+
+/// Default time an upload session may stay idle (no accepted chunk) before
+/// it is considered abandoned and its buffered bytes are reclaimed.
+const Duration defaultUploadSessionTtl = Duration(minutes: 30);
+
+/// Wall-clock source used by [UploadSessionRegistry] unless a clock is
+/// injected for deterministic tests.
+DateTime _systemClock() => DateTime.now();
 
 /// Registry that manages upload sessions and guarantees memory cleanup
 /// on session error, abort, or completion.
 class UploadSessionRegistry {
   /// Creates a bounded upload registry for the worker file upload path.
+  ///
+  /// Every limit is constructor-injectable so tests and embedders can tune
+  /// the memory envelope without touching the production defaults.
   UploadSessionRegistry({
     this.maxConcurrentUploads = defaultMaxConcurrentUploads,
     this.maxFileBytes = defaultMaxUploadFileBytes,
+    this.maxTotalBytes = defaultMaxTotalUploadBytes,
     this.maxChunkBytes = defaultMaxUploadChunkBytes,
-  });
+    this.sessionTtl = defaultUploadSessionTtl,
+    DateTime Function()? now,
+  }) : now = now ?? _systemClock;
 
   /// Maximum number of uploads the worker may accept at once.
   final int maxConcurrentUploads;
@@ -304,13 +330,28 @@ class UploadSessionRegistry {
   /// Largest accepted file size in bytes.
   final int maxFileBytes;
 
+  /// Aggregate quota across all active sessions in declared bytes.
+  final int maxTotalBytes;
+
   /// Largest accepted chunk size in bytes.
   final int maxChunkBytes;
+
+  /// Time a session may stay alive without receiving an accepted chunk
+  /// before it is considered abandoned and reclaimed.
+  final Duration sessionTtl;
+
+  /// Clock used for expiry decisions (injectable for deterministic tests).
+  final DateTime Function() now;
 
   final Map<int, UploadSession> _sessions = {};
 
   /// Number of active upload sessions currently tracked.
   int get activeSessionCount => _sessions.length;
+
+  /// Sum of the declared [UploadSession.expectedSize] bytes reserved by the
+  /// active sessions against [maxTotalBytes].
+  int get totalDeclaredBytes =>
+      _sessions.values.fold(0, (sum, session) => sum + session.expectedSize);
 
   /// Returns the active session for [uploadId], if any.
   UploadSession? get(int uploadId) => _sessions[uploadId];
@@ -325,12 +366,19 @@ class UploadSessionRegistry {
     String name = 'blob.bin',
     String? expectedSha256,
   }) {
+    // Reclaim abandoned sessions first so they stop reserving aggregate
+    // quota and concurrency slots.
+    expireStaleSessions();
     if (_sessions.length >= maxConcurrentUploads) {
       throw ValidationException(
           'Maximum concurrent uploads exceeded ($maxConcurrentUploads).');
     }
     if (expectedSize < 0 || expectedSize > maxFileBytes) {
       throw ValidationException('Invalid file size: $expectedSize');
+    }
+    if (totalDeclaredBytes + expectedSize > maxTotalBytes) {
+      throw ValidationException('Aggregate upload quota exceeded: '
+          '$totalDeclaredBytes + $expectedSize > $maxTotalBytes');
     }
     final session = UploadSession(
       uploadId: uploadId,
@@ -340,6 +388,7 @@ class UploadSessionRegistry {
       name: name,
       expectedSize: expectedSize,
       expectedSha256: expectedSha256,
+      expiresAt: now().add(sessionTtl),
     );
     _sessions[uploadId] = session;
     return session;
@@ -353,6 +402,11 @@ class UploadSessionRegistry {
     final session = _sessions[uploadId];
     if (session == null) {
       throw ValidationException('Unknown upload session: $uploadId');
+    }
+    if (!session.expiresAt.isAfter(now())) {
+      // Reclaim the abandoned session so its bytes and quota do not leak.
+      _sessions.remove(uploadId);
+      throw ValidationException('Upload session expired: $uploadId');
     }
     if (chunk.length > maxChunkBytes) {
       // Remove the session so partial memory does not leak on invalid chunk.
@@ -368,6 +422,8 @@ class UploadSessionRegistry {
     }
     session.chunks.add(chunk);
     session.receivedBytes += chunk.length;
+    // A session that keeps receiving chunks stays alive (sliding TTL).
+    session.expiresAt = now().add(sessionTtl);
   }
 
   /// Finalizes the upload and validates that the total payload matches.
@@ -376,12 +432,31 @@ class UploadSessionRegistry {
     if (session == null) {
       throw ValidationException('Unknown upload session: $uploadId');
     }
+    if (!session.expiresAt.isAfter(now())) {
+      throw ValidationException('Upload session expired: $uploadId');
+    }
     if (session.receivedBytes != session.expectedSize) {
       throw ValidationException(
           'Upload size mismatch: expected ${session.expectedSize} '
           'but got ${session.receivedBytes}');
     }
     return session;
+  }
+
+  /// Removes every session whose TTL has elapsed, releasing its buffered
+  /// bytes and its reservation against [maxTotalBytes].
+  ///
+  /// Returns the number of sessions removed.
+  int expireStaleSessions() {
+    final cutoff = now();
+    final expiredIds = _sessions.values
+        .where((session) => !session.expiresAt.isAfter(cutoff))
+        .map((session) => session.uploadId)
+        .toList();
+    for (final id in expiredIds) {
+      _sessions.remove(id);
+    }
+    return expiredIds.length;
   }
 
   /// Cancels a pending upload and releases any partial state.

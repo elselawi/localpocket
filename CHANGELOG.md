@@ -1,5 +1,14 @@
 ## Unreleased
 
+- **Web uploads now enforce an aggregate memory quota and a session TTL.** The
+  worker's `UploadSessionRegistry` previously buffered every upload chunk in memory with a
+  4 GiB per-file cap, no aggregate quota, and no expiry — concurrent or wedged uploads could
+  pin the whole file stream in RAM until the worker died. The default per-file cap is lowered
+  to 256 MiB, a new aggregate declared-byte quota (default 512 MiB) rejects `file_upload_begin`
+  requests that would exceed it, and each session expires after an idle TTL (default 30 min,
+  refreshed on every accepted chunk). Expired sessions are reclaimed lazily on access and by a
+  periodic worker sweep. All limits are constructor-injectable on `UploadSessionRegistry`.
+
 - **BREAKING (realtime):** `PbRealtime.reconnectDelay` was replaced by exponential reconnect
   backoff. The SSE reconnect loop now grows the delay across consecutive failed connects
   (`backoffBase`, default 200 ms, doubling up to `backoffCap`, default 5 min) with `0.5..1.5`

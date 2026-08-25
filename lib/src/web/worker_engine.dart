@@ -199,6 +199,7 @@ abstract class WorkerEngineHost {
   int _nextSessionId = 1;
   final Map<int, _ActiveWatcher> _watchers = {};
   final UploadSessionRegistry _uploadSessions = UploadSessionRegistry();
+  Timer? _uploadExpiryTimer;
   int _nextUploadId = 1;
   SyncEngine? _syncEngine;
   _WebTokenProvider? _tokenProvider;
@@ -324,6 +325,8 @@ abstract class WorkerEngineHost {
       await w.cancel();
     }
     _watchers.clear();
+    _uploadExpiryTimer?.cancel();
+    _uploadExpiryTimer = null;
     _uploadSessions.clear();
     if (_activeSession != null && !_activeSession!.completer.isCompleted) {
       _activeSession!.completer

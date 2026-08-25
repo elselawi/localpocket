@@ -219,5 +219,244 @@ void main() {
       registry.clear();
       expect(registry.activeSessionCount, 0);
     });
+
+    test('enforces the aggregate byte quota across sessions', () {
+      final registry = UploadSessionRegistry(
+        maxConcurrentUploads: 4,
+        maxFileBytes: 1000,
+        maxTotalBytes: 1500,
+        maxChunkBytes: 256,
+      );
+
+      registry.begin(
+        uploadId: 1,
+        store: 's',
+        recordId: 'r1',
+        expectedSize: 1000,
+      );
+      registry.begin(
+        uploadId: 2,
+        store: 's',
+        recordId: 'r2',
+        expectedSize: 500,
+      );
+      expect(registry.totalDeclaredBytes, 1500);
+
+      expect(
+        () => registry.begin(
+          uploadId: 3,
+          store: 's',
+          recordId: 'r3',
+          expectedSize: 1,
+        ),
+        throwsA(isA<ValidationException>().having(
+          (e) => e.message,
+          'message',
+          contains('Aggregate upload quota exceeded'),
+        )),
+      );
+
+      // Releasing a session frees its reservation for new uploads.
+      registry.abort(1);
+      expect(registry.totalDeclaredBytes, 500);
+      registry.begin(
+        uploadId: 3,
+        store: 's',
+        recordId: 'r3',
+        expectedSize: 1000,
+      );
+      expect(registry.totalDeclaredBytes, 1500);
+    });
+
+    test('expired sessions stop reserving aggregate quota on next begin', () {
+      var clock = DateTime(2026, 1, 1, 12);
+      final registry = UploadSessionRegistry(
+        maxConcurrentUploads: 2,
+        maxFileBytes: 1500,
+        maxTotalBytes: 1500,
+        sessionTtl: const Duration(minutes: 5),
+        now: () => clock,
+      );
+
+      registry.begin(
+        uploadId: 1,
+        store: 's',
+        recordId: 'r1',
+        expectedSize: 1000,
+      );
+      registry.begin(
+        uploadId: 2,
+        store: 's',
+        recordId: 'r2',
+        expectedSize: 500,
+      );
+
+      // Both sessions are stale by now; begin() sweeps them before checking
+      // the quota, so a fresh full-quota session fits.
+      clock = clock.add(const Duration(minutes: 6));
+      final fresh = registry.begin(
+        uploadId: 3,
+        store: 's',
+        recordId: 'r3',
+        expectedSize: 1500,
+      );
+      expect(fresh.uploadId, 3);
+      expect(registry.activeSessionCount, 1);
+      expect(registry.totalDeclaredBytes, 1500);
+    });
+
+    test('addChunk on an expired session throws and removes the session', () {
+      var clock = DateTime(2026, 1, 1, 12);
+      final registry = UploadSessionRegistry(
+        maxFileBytes: 1000,
+        sessionTtl: const Duration(minutes: 5),
+        now: () => clock,
+      );
+
+      registry.begin(
+        uploadId: 1,
+        store: 's',
+        recordId: 'r1',
+        expectedSize: 10,
+      );
+      clock = clock.add(const Duration(minutes: 5, seconds: 1));
+
+      expect(
+        () => registry.addChunk(uploadId: 1, chunk: Uint8List(1)),
+        throwsA(isA<ValidationException>().having(
+          (e) => e.message,
+          'message',
+          contains('expired'),
+        )),
+      );
+      expect(registry.get(1), isNull);
+      expect(registry.activeSessionCount, 0);
+      expect(registry.totalDeclaredBytes, 0);
+    });
+
+    test('each accepted chunk refreshes the session TTL', () {
+      var clock = DateTime(2026, 1, 1, 12);
+      final registry = UploadSessionRegistry(
+        maxFileBytes: 1000,
+        sessionTtl: const Duration(minutes: 5),
+        now: () => clock,
+      );
+
+      registry.begin(
+        uploadId: 1,
+        store: 's',
+        recordId: 'r1',
+        expectedSize: 10,
+      );
+
+      // Both chunks arrive within a refreshed TTL window and are accepted.
+      clock = clock.add(const Duration(minutes: 4));
+      registry.addChunk(uploadId: 1, chunk: Uint8List(1));
+      clock = clock.add(const Duration(minutes: 4));
+      registry.addChunk(uploadId: 1, chunk: Uint8List(1));
+
+      // t+13:01 exceeds the last refresh (t+8) by more than the TTL → expired.
+      clock = clock.add(const Duration(minutes: 5, seconds: 1));
+      expect(
+        () => registry.addChunk(uploadId: 1, chunk: Uint8List(1)),
+        throwsA(isA<ValidationException>().having(
+          (e) => e.message,
+          'message',
+          contains('expired'),
+        )),
+      );
+    });
+
+    test('takeForFinish on an expired session throws and releases it', () {
+      var clock = DateTime(2026, 1, 1, 12);
+      final registry = UploadSessionRegistry(
+        maxFileBytes: 1000,
+        sessionTtl: const Duration(minutes: 5),
+        now: () => clock,
+      );
+
+      registry.begin(
+        uploadId: 1,
+        store: 's',
+        recordId: 'r1',
+        expectedSize: 10,
+      );
+      registry.addChunk(uploadId: 1, chunk: Uint8List(10));
+      clock = clock.add(const Duration(minutes: 6));
+
+      expect(
+        () => registry.takeForFinish(1),
+        throwsA(isA<ValidationException>().having(
+          (e) => e.message,
+          'message',
+          contains('expired'),
+        )),
+      );
+      expect(registry.activeSessionCount, 0);
+    });
+
+    test('expireStaleSessions removes only expired sessions', () {
+      var clock = DateTime(2026, 1, 1, 12);
+      final registry = UploadSessionRegistry(
+        maxConcurrentUploads: 2,
+        maxFileBytes: 1000,
+        sessionTtl: const Duration(minutes: 5),
+        now: () => clock,
+      );
+
+      registry.begin(
+        uploadId: 1,
+        store: 's',
+        recordId: 'r1',
+        expectedSize: 100,
+      );
+      registry.begin(
+        uploadId: 2,
+        store: 's',
+        recordId: 'r2',
+        expectedSize: 200,
+      );
+      clock = clock.add(const Duration(minutes: 4));
+      registry.addChunk(uploadId: 2, chunk: Uint8List(1)); // refresh 2 only
+
+      clock = clock.add(const Duration(minutes: 2));
+      expect(registry.expireStaleSessions(), 1);
+      expect(registry.get(1), isNull);
+      expect(registry.get(2), isNotNull);
+      expect(registry.activeSessionCount, 1);
+      expect(registry.totalDeclaredBytes, 200);
+
+      // A still-live session finishes normally.
+      registry.addChunk(uploadId: 2, chunk: Uint8List(199));
+      expect(registry.takeForFinish(2).receivedBytes, 200);
+      expect(registry.totalDeclaredBytes, 0);
+    });
+
+    test('normal upload works under quota and TTL', () {
+      var clock = DateTime(2026, 1, 1);
+      final registry = UploadSessionRegistry(
+        maxConcurrentUploads: 2,
+        maxFileBytes: 1000,
+        maxTotalBytes: 1000,
+        sessionTtl: const Duration(minutes: 5),
+        now: () => clock,
+      );
+
+      registry.begin(
+        uploadId: 1,
+        store: 's',
+        recordId: 'r1',
+        expectedSize: 4,
+      );
+      clock = clock.add(const Duration(minutes: 1));
+      registry.addChunk(uploadId: 1, chunk: Uint8List(2));
+      registry.addChunk(uploadId: 1, chunk: Uint8List(2));
+
+      final finished = registry.takeForFinish(1);
+      expect(finished.receivedBytes, 4);
+      expect(finished.chunks.map((c) => c.length), [2, 2]);
+      expect(registry.activeSessionCount, 0);
+      expect(registry.totalDeclaredBytes, 0);
+    });
   });
 }
