@@ -410,6 +410,27 @@ final class DatabaseWorkerClosedException implements Exception {
   String toString() => 'DatabaseWorkerClosedException: $message';
 }
 
+/// A request to the worker did not complete within the sender's configured
+/// per-request timeout.
+///
+/// The sender stays usable: the worker may still eventually respond, but that
+/// response is abandoned and the caller has already failed.
+final class DatabaseWorkerTimeoutException implements Exception {
+  DatabaseWorkerTimeoutException({
+    required this.requestId,
+    required this.op,
+    required this.timeout,
+  });
+
+  final int requestId;
+  final String op;
+  final Duration timeout;
+
+  @override
+  String toString() => 'DatabaseWorkerTimeoutException: "$op" (request '
+      '$requestId) did not complete within ${timeout.inMilliseconds} ms.';
+}
+
 /// The other end speaks a different protocol version.
 final class ProtocolMismatchException implements Exception {
   ProtocolMismatchException({required this.expected, required this.actual});

@@ -36,6 +36,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     required this.capabilities,
     required this.storageCapabilities,
     required List<CollectionSchema<Object?>> stores,
+    Duration? requestTimeout,
   })  : _remoteDb = remoteDb,
         _webSqlite = webSqlite,
         _blobUrlsToRevoke = blobUrlsToRevoke {
@@ -48,6 +49,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
         return raw?.dartify();
       },
       onWorkerClosed: _failWorkerStreams,
+      requestTimeout: requestTimeout,
     );
   }
 
@@ -86,6 +88,12 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   late final WebSender _sender;
 
   /// Opens or creates a database on web by spawning the dedicated engine worker.
+  ///
+  /// [requestTimeout] bounds how long a single request waits for the worker.
+  /// A request that exceeds it throws a [DatabaseWorkerTimeoutException]
+  /// without closing the facade. The worker is never auto-respawned: if it
+  /// crashes, the facade surfaces [DatabaseWorkerClosedException] and stays
+  /// closed — recovery means calling [open] again.
   static Future<LocalPocket> open({
     required String path,
     required List<CollectionSchema<Object?>> stores,
@@ -98,6 +106,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     bool destructiveBackup = true,
     String? wasmAssetPath,
     String? workerAssetPath,
+    Duration? requestTimeout,
   }) async {
     validateWebOpenConfig(path: path, encrypted: encrypted);
 
@@ -199,6 +208,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
       capabilities: caps,
       storageCapabilities: storageCaps,
       stores: stores,
+      requestTimeout: requestTimeout,
     );
 
     unawaited(connectResult.database.closed.then((_) {

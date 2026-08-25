@@ -29,6 +29,9 @@ bool isWorkerClosedMessage(String message) =>
 /// - A transport error whose message matches [isWorkerClosedMessage] marks the
 ///   sender closed (invoking [onWorkerClosed] once) and is rethrown as a typed
 ///   [DatabaseWorkerClosedException].
+/// - When [requestTimeout] is configured, a transport call that does not
+///   complete in time fails the request with a typed
+///   [DatabaseWorkerTimeoutException]; the sender stays usable and open.
 /// - A null transport result and a non-map transport result are both rejected
 ///   with [ProtocolEnvelopeException].
 /// - A response carrying an error is decoded through [decodeError] so wire
@@ -37,11 +40,18 @@ class WebSender {
   WebSender({
     required Future<Object?> Function(WebRequest request) transport,
     void Function()? onWorkerClosed,
+    this.requestTimeout,
   })  : _transport = transport,
         _onWorkerClosed = onWorkerClosed;
 
   final Future<Object?> Function(WebRequest request) _transport;
   final void Function()? _onWorkerClosed;
+
+  /// Optional per-request timeout. A request that exceeds it fails with a
+  /// typed [DatabaseWorkerTimeoutException]; the sender remains open and the
+  /// next request proceeds normally (the wedged response is abandoned). A null
+  /// value disables the timeout entirely.
+  final Duration? requestTimeout;
 
   /// Monotonic id shared by watch registrations and request envelopes.
   int nextRequestId = 1;
@@ -65,7 +75,11 @@ class WebSender {
 
     final Object? rawResponse;
     try {
-      rawResponse = await _transport(req);
+      rawResponse = await _withTimeout(_transport(req), req);
+    } on DatabaseWorkerTimeoutException {
+      // A timeout is not a transport failure: never reclassify it as a
+      // worker-close, and never close the sender.
+      rethrow;
     } on Exception catch (e) {
       final message = e.toString();
       if (isWorkerClosedMessage(message)) {
@@ -91,6 +105,21 @@ class WebSender {
       throw decodeError(resp.error!);
     }
     return resp.result;
+  }
+
+  /// Applies [requestTimeout] to a transport future, converting a timeout
+  /// into a typed [DatabaseWorkerTimeoutException]. A null [requestTimeout]
+  /// returns the future untouched.
+  Future<Object?> _withTimeout(Future<Object?> future, WebRequest req) {
+    final timeout = requestTimeout;
+    if (timeout == null) return future;
+    return future.timeout(timeout, onTimeout: () {
+      throw DatabaseWorkerTimeoutException(
+        requestId: req.requestId,
+        op: req.op,
+        timeout: timeout,
+      );
+    });
   }
 
   /// Marks the sender closed and invokes the worker-closed callback (stream

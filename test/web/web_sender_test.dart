@@ -111,6 +111,60 @@ void main() {
       expect(closedCallback, 0);
     });
 
+    test(
+        'a request exceeding requestTimeout throws the typed timeout, keeps '
+        'the sender open, and the next send succeeds', () async {
+      var calls = 0;
+      final sender = WebSender(
+        requestTimeout: const Duration(milliseconds: 20),
+        transport: (req) {
+          calls++;
+          if (calls == 1) {
+            // A wedged worker: the first request never completes.
+            return Completer<Object?>().future;
+          }
+          return Future<Object?>.value({
+            'v': webProtocolVersion,
+            'i': req.requestId,
+            'r': {'ok': true},
+          });
+        },
+      );
+
+      await expectLater(
+        sender.send(WireOp.health),
+        throwsA(isA<DatabaseWorkerTimeoutException>()
+            .having((e) => e.op, 'op', WireOp.health)
+            .having((e) => e.requestId, 'requestId', 1)
+            .having(
+                (e) => e.timeout, 'timeout', const Duration(milliseconds: 20))),
+      );
+
+      expect(sender.isClosed, isFalse,
+          reason: 'a timeout must not close the sender');
+
+      final result =
+          await sender.send(WireOp.walCheckpoint, {'store': 'widgets'});
+      expect(result, {'ok': true});
+      expect(calls, 2);
+    });
+
+    test('a null requestTimeout leaves an in-flight request to complete',
+        () async {
+      final sender = WebSender(
+        transport: (_) async {
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          return {
+            'v': webProtocolVersion,
+            'i': 1,
+            'r': {'ok': true},
+          };
+        },
+      );
+      final result = await sender.send(WireOp.health);
+      expect(result, {'ok': true});
+    });
+
     test('a null response is rejected as a protocol envelope error', () async {
       final sender = WebSender(transport: (_) async => null);
       await expectLater(
