@@ -141,7 +141,6 @@ class NativeSearchHandle implements SearchHandle {
 }
 
 class CompiledSearchHandle implements SearchHandle {
-
   CompiledSearchHandle(this._pocket, CollectionSchema schema, String term)
       : _builder = SearchBuilder.compileOnly(schema, term);
   final LocalPocket _pocket;
@@ -310,7 +309,6 @@ class NativeQueryHandle implements QueryHandle {
 }
 
 class CompiledQueryHandle implements QueryHandle {
-
   CompiledQueryHandle(this._pocket, CollectionSchema schema)
       : _builder = QueryBuilder.compileOnly(schema);
   final LocalPocket _pocket;
@@ -497,7 +495,6 @@ class CompiledQueryHandle implements QueryHandle {
 }
 
 class NativeQueryHarness extends QueryHarness {
-
   NativeQueryHarness(this.pocket, this.col, this.schema);
   @override
   final LocalPocket pocket;
@@ -514,7 +511,6 @@ class NativeQueryHarness extends QueryHarness {
 }
 
 class CompiledQueryHarness extends QueryHarness {
-
   CompiledQueryHarness(this.pocket, this.col, this.schema);
   @override
   final LocalPocket pocket;
@@ -609,7 +605,7 @@ void runQueryEdgesCorpus(
       expect(empty.items, isEmpty);
     });
 
-    test('between is [start, end)', () async {
+    test('between is inclusive [start, end]', () async {
       for (final d in [0, 9, 10, 19, 20, 29, 30]) {
         await h.col.put(record(id: generateRecordId(), name: 'n$d', qty: d));
       }
@@ -619,7 +615,8 @@ void runQueryEdgesCorpus(
           .orderBy('qty')
           .limit(10)
           .fetch();
-      expect(page.items.map((r) => r['qty']).toList(), [10, 19, 20, 29]);
+      // Both boundaries are matched; only strictly-outside rows are dropped.
+      expect(page.items.map((r) => r['qty']).toList(), [10, 19, 20, 29, 30]);
     });
 
     test('isNull and isNotNull', () async {

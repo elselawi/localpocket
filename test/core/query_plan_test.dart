@@ -47,7 +47,9 @@ void main() {
         .limit(3);
     final plan = query.compilePlan(limitOverride: 4);
     expect(plan.schemaVersion, 2);
-    expect(plan.sql, contains('"qty" >= ? AND "qty" < ?'));
+    // between is INCLUSIVE on both ends — the compiled plan must agree with
+    // the native runner (same QueryBuilder compiler, parity by construction).
+    expect(plan.sql, contains('"qty" >= ? AND "qty" <= ?'));
     expect(plan.sql, contains('LIMIT 4'));
     expect(plan.projection, ['id', 'name']);
   });

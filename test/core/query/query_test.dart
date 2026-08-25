@@ -142,7 +142,8 @@ void main() {
       ], reason: 'keyset order matches full fetch');
     });
 
-    test('all-null DESC keyset cursor compiles to the exhausted false predicate',
+    test(
+        'all-null DESC keyset cursor compiles to the exhausted false predicate',
         () async {
       for (var i = 0; i < 5; i++) {
         await col.put(record(id: generateRecordId(), name: 'n$i', qty: i));
@@ -154,8 +155,9 @@ void main() {
       // Re-encode the page-1 cursor with a NULL sort value at every position:
       // NULLs sort last in DESC, so no row can follow any alternative of the
       // OR-chain and the predicate collapses to the literal false `0`.
-      final decoded = jsonDecode(utf8.decode(base64Url.decode(page1.nextCursor!)))
-          as Map<String, Object?>;
+      final decoded =
+          jsonDecode(utf8.decode(base64Url.decode(page1.nextCursor!)))
+              as Map<String, Object?>;
       decoded['values'] = [null];
       final degenerate = base64UrlEncode(utf8.encode(jsonEncode(decoded)));
 
@@ -372,7 +374,7 @@ void main() {
       expect(one.hasMore, isFalse);
     });
 
-    test('date range millisecond boundary inclusive exclusive', () async {
+    test('date range millisecond boundary is inclusive on both ends', () async {
       for (final d in [100, 199, 200, 201]) {
         await col.put(record(id: generateRecordId(), name: 'n$d', madeOn: d));
       }
@@ -382,8 +384,8 @@ void main() {
           .orderBy('made_on')
           .limit(10)
           .fetch();
-      expect(page.items.map((r) => r['made_on']).toList(), [100, 199],
-          reason: '[start, end) semantics');
+      expect(page.items.map((r) => r['made_on']).toList(), [100, 199, 200],
+          reason: 'inclusive [start, end] semantics');
     });
   });
 }

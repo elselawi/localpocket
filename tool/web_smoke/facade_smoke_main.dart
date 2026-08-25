@@ -187,7 +187,7 @@ Future<void> main() async {
     }
     if (await matching(
             'between', notes.query().where('priority', between: (7, 10))) !=
-        3) {
+        4) {
       throw StateError('matrix between failed');
     }
     if (await matching(
@@ -369,14 +369,16 @@ Future<void> main() async {
       if (txIds.length != 12) {
         throw StateError('Transaction ids mismatch: $txIds');
       }
-      // between is [start, end): priorities 7 (note8), 8 (note9), 9 (note10)
-      // fall in [7, 10); note1's 10 and notes 11/12 (110/120) fall outside.
+      // between is inclusive [start, end]: priorities 7 (note8), 8 (note9),
+      // 9 (note10) and note1's patched 10 all fall inside; notes 11/12
+      // (110/120) fall outside. Note1's priority was set to 10 by the tx
+      // patch above, so the window matches exactly four rows.
       final txBetween = await tx
           .query('notes')
           .where('priority', between: (7, 10))
           .all()
           .count();
-      if (txBetween != 3) {
+      if (txBetween != 4) {
         throw StateError('Transaction between mismatch: $txBetween');
       }
 

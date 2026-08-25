@@ -164,6 +164,12 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   ///
   /// Values are bound as SQL parameters. Multiple supplied operators are
   /// combined with `AND`.
+  ///
+  /// [between] is INCLUSIVE on both ends (`>= start AND <= end`), matching
+  /// SQL `BETWEEN` and most query DSLs. Records whose value equals `end` ARE
+  /// matched. For a half-open `[start, end)` window, use `gte:`/`lt:`
+  /// explicitly. (Breaking change in the unreleased version: previously
+  /// half-open, silently dropping records stamped exactly at `end`.)
   @override
   QueryBuilder where(
     String field, {
@@ -196,8 +202,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
           inValues));
     }
     if (between != null) {
-      clauses
-          .add(WhereClause('$col >= ? AND $col < ?', [between.$1, between.$2]));
+      clauses.add(
+          WhereClause('$col >= ? AND $col <= ?', [between.$1, between.$2]));
     }
     if (startsWith != null) {
       clauses.add(WhereClause(
