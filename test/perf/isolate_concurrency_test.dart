@@ -61,7 +61,8 @@ void main() {
         }
       }
 
-      // 2. Synchronous normalization vs Isolate-offloaded normalization
+      // 2. Synchronous normalization vs async (inline — no isolate offload;
+      // see normalizeRemoteBatchAsync body comment)
       final syncBatch = normalizeRemoteBatch(schema, remotes);
       final asyncBatch = await normalizeRemoteBatchAsync(schema, remotes, isolateThreshold: 10);
 
@@ -113,7 +114,7 @@ void main() {
         seededIds.add(id);
       }
 
-      // Run pull (triggers isolate batch normalization for the 80 records)
+      // Run pull (batch normalization runs inline — no isolate offload)
       final report = await h.engine.puller.pullStore('patients');
       expect(report.applied, 80);
 
@@ -138,7 +139,7 @@ void main() {
         });
       }
 
-      // Batch encode (encrypts in isolate)
+      // Batch encode (runs inline — no isolate offload; see FieldCipher docs)
       final dbRows = await encodeDbRowsAsync(
         schema,
         docs,
@@ -155,7 +156,7 @@ void main() {
         expect(row['vitals'], isNot(contains('heartRate')));
       }
 
-      // Batch decode (decrypts in isolate)
+      // Batch decode (runs inline — no isolate offload; see FieldCipher docs)
       final decodedDocs = await decodeDbRowsAsync(
         schema,
         dbRows,
@@ -212,7 +213,9 @@ void main() {
     });
 
     test('isolate_aes_gcm_async_large_payload_and_batch_methods', () async {
-      // 1. Large single payload (> 64 KB) offloaded to isolate
+      // 1. Large single payload. The async cipher APIs run INLINE (no isolate
+      // offload exists; see FieldCipher docs) — this pins threshold-ignoring
+      // parity above 64 KiB.
       final largePlaintext = utf8.encode('A' * (128 * 1024));
       final ciphertext = await cipher.encryptAsync(largePlaintext, isolateThresholdBytes: 32 * 1024);
       final decrypted = await cipher.decryptAsync(ciphertext, isolateThresholdBytes: 32 * 1024);

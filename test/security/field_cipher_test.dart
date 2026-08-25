@@ -598,6 +598,46 @@ void main() {
       expect(utf8.decode(await cipher.decryptAsync(asyncCt)), utf8.decode(pt));
     });
 
+    test('async APIs are pinned inline: byte-identical to sync under a fixed nonce',
+        () async {
+      // Contract pin — the async cipher APIs deliberately run INLINE on the
+      // calling isolate: `encryptAsync`/`batchEncrypt`/`batchDecrypt` are
+      // literally `encrypt`/`decrypt`, not a parallel offloaded path. One-shot
+      // isolates are unavailable under dart2js (and slower than inline AES on
+      // native), so the async shape exists only for call-site ergonomics and a
+      // future offload; the `isolateThreshold*` parameters are accepted for
+      // interface compatibility and ignored. To prove delegation, two ciphers
+      // share a key AND a fixed nonce sequence: performing the same operations
+      // in the same order must yield byte-for-byte identical output (any real
+      // offload or duplicated code path would consume nonces differently).
+      final fixedKey = List<int>.generate(32, (i) => (i * 3 + 1) % 256);
+      final nonceBytes = List<int>.generate(24, (i) => (i * 5 + 7) % 256);
+      final syncCipher = AesGcmFieldCipher(fixedKey,
+          random: _FixedRandom(nonceBytes));
+      final asyncCipher = AesGcmFieldCipher(fixedKey,
+          random: _FixedRandom(nonceBytes));
+
+      final pt = utf8.encode('pin the inline async contract');
+
+      // Same call order ⇒ same nonce stream ⇒ byte-for-byte equality.
+      final syncCt = syncCipher.encrypt(pt);
+      final asyncCt = await asyncCipher.encryptAsync(pt);
+      expect(asyncCt, equals(syncCt),
+          reason: 'encryptAsync must run inline as encrypt (byte-for-byte)');
+
+      // decryptAsync is inline `decrypt`.
+      expect(await asyncCipher.decryptAsync(syncCt), equals(pt));
+      expect(await asyncCipher.decryptAsync(asyncCt),
+          equals(syncCipher.decrypt(syncCt)));
+
+      // batchEncrypt / batchDecrypt are encrypt/decrypt per element.
+      final batchSync = [for (final p in [pt, pt]) syncCipher.encrypt(p)];
+      final batchAsync = await asyncCipher.batchEncrypt([pt, pt]);
+      expect(batchAsync, equals(batchSync),
+          reason: 'batchEncrypt must be encrypt-per-element (byte-for-byte)');
+      expect(await asyncCipher.batchDecrypt(batchAsync), equals([pt, pt]));
+    });
+
     test('async threshold at and below the 64 KiB boundary', () async {
       // Default isolateThresholdBytes = 64 * 1024. Both paths must produce
       // identical decryptable ciphertexts.

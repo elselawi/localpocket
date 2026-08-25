@@ -169,8 +169,13 @@ List<Map<String, Object?>> encodeDbRows(
         ),
     ];
 
-/// Encodes a batch of logical records, offloading to an isolate if batch is large
-/// or contains encrypted fields to avoid UI jank.
+/// Encodes a batch of logical records asynchronously.
+///
+/// Runs inline on the calling isolate and returns exactly what [encodeDbRows]
+/// returns. [isolateThreshold] is accepted for interface compatibility and
+/// ignored: the [FieldCipher] has no isolate offload today, so this async
+/// wrapper exists for call-site ergonomics and as a hook for a future
+/// offload (see `FieldCipher.encryptAsync`).
 Future<List<Map<String, Object?>>> encodeDbRowsAsync(
   CollectionSchema<Object?> schema,
   List<Map<String, Object?>> logicalRecords, {
@@ -286,8 +291,11 @@ Map<String, Object?> _decodeDbRowProjectedResolved(
   return logical;
 }
 
-/// Decodes a batch of DB rows, offloading to an isolate if batch is large
-/// or contains encrypted fields to avoid UI frame drops.
+/// Decodes a batch of DB rows asynchronously.
+///
+/// Runs inline on the calling isolate and returns exactly what [decodeDbRows]
+/// returns. [isolateThreshold] is accepted for interface compatibility and
+/// ignored; see [encodeDbRowsAsync] for the rationale.
 Future<List<Map<String, Object?>>> decodeDbRowsAsync(
   CollectionSchema<Object?> schema,
   List<Map<String, Object?>> dbRows, {

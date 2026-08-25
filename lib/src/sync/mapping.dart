@@ -94,8 +94,12 @@ List<NormalizedRemoteRecord> normalizeRemoteBatch(
 ) =>
     [for (final r in remotes) normalizeSingleRemote(schema, r)];
 
-/// Normalizes a batch of remote records, offloading to an isolate if [remotes]
-/// meets or exceeds [isolateThreshold] (default 20 records) to prevent UI frame drops.
+/// Normalizes a batch of remote records asynchronously.
+///
+/// Runs inline on the calling isolate and returns exactly what
+/// [normalizeRemoteBatch] returns. [isolateThreshold] is accepted for
+/// interface compatibility and ignored; see the body comment for why the
+/// one-shot isolate offload was deliberately not used.
 Future<List<NormalizedRemoteRecord>> normalizeRemoteBatchAsync(
   CollectionSchema<Object?> schema,
   List<RemoteRecord> remotes, {

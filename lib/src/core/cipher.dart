@@ -14,28 +14,47 @@ abstract class FieldCipher {
   /// Decrypts one ciphertext value and verifies its authentication tag.
   List<int> decrypt(List<int> ciphertext);
 
-  /// Offloads encryption to an isolate if payload size exceeds [isolateThresholdBytes].
+  /// Encrypts [plaintext] asynchronously.
+  ///
+  /// Runs inline on the calling isolate and returns exactly what [encrypt]
+  /// returns. [isolateThresholdBytes] is accepted for interface compatibility
+  /// and deliberately ignored: the async shape exists for call-site
+  /// ergonomics and as a hook for a future isolate offload, which is not
+  /// implemented today (one-shot isolates are unavailable under dart2js, so
+  /// [AesGcmFieldCipher] keeps this inline everywhere).
   Future<List<int>> encryptAsync(
     List<int> plaintext, {
     int isolateThresholdBytes = 64 * 1024,
   }) =>
       Future.value(encrypt(plaintext));
 
-  /// Offloads decryption to an isolate if payload size exceeds [isolateThresholdBytes].
+  /// Decrypts [ciphertext] asynchronously.
+  ///
+  /// Runs inline on the calling isolate and returns exactly what [decrypt]
+  /// returns. [isolateThresholdBytes] is accepted for interface compatibility
+  /// and deliberately ignored; see [encryptAsync] for the rationale.
   Future<List<int>> decryptAsync(
     List<int> ciphertext, {
     int isolateThresholdBytes = 64 * 1024,
   }) =>
       Future.value(decrypt(ciphertext));
 
-  /// Encrypts a batch of plaintexts, offloading to an isolate if count exceeds [isolateThreshold].
+  /// Encrypts a batch of plaintexts asynchronously.
+  ///
+  /// Runs inline on the calling isolate, applying [encrypt] to each element.
+  /// [isolateThreshold] is accepted for interface compatibility and
+  /// deliberately ignored; see [encryptAsync] for the rationale.
   Future<List<List<int>>> batchEncrypt(
     List<List<int>> plaintexts, {
     int isolateThreshold = 10,
   }) =>
       Future.value(plaintexts.map(encrypt).toList());
 
-  /// Decrypts a batch of ciphertexts, offloading to an isolate if count exceeds [isolateThreshold].
+  /// Decrypts a batch of ciphertexts asynchronously.
+  ///
+  /// Runs inline on the calling isolate, applying [decrypt] to each element.
+  /// [isolateThreshold] is accepted for interface compatibility and
+  /// deliberately ignored; see [encryptAsync] for the rationale.
   Future<List<List<int>>> batchDecrypt(
     List<List<int>> ciphertexts, {
     int isolateThreshold = 10,
@@ -122,51 +141,55 @@ class AesGcmFieldCipher implements FieldCipher {
     return plain;
   }
 
+  /// Encrypts [plaintext] asynchronously.
+  ///
+  /// Runs inline on the calling isolate and returns exactly what [encrypt]
+  /// returns. One-shot isolates are unavailable under dart2js and spawning a
+  /// worker isolate per call would be slower than inline AES on native, so no
+  /// isolate offload is implemented; [isolateThresholdBytes] is accepted for
+  /// interface compatibility and ignored (see `FieldCipher.encryptAsync`).
   @override
   Future<List<int>> encryptAsync(
     List<int> plaintext, {
     int isolateThresholdBytes = 64 * 1024,
-  }) async {
-    if (plaintext.length < isolateThresholdBytes) {
-      return encrypt(plaintext);
-    }
-    return encrypt(plaintext);
-  }
+  }) async =>
+      encrypt(plaintext);
 
+  /// Decrypts [ciphertext] asynchronously.
+  ///
+  /// Runs inline on the calling isolate and returns exactly what [decrypt]
+  /// returns; [isolateThresholdBytes] is accepted for interface
+  /// compatibility and ignored (see [encryptAsync]).
   @override
   Future<List<int>> decryptAsync(
     List<int> ciphertext, {
     int isolateThresholdBytes = 64 * 1024,
-  }) async {
-    if (ciphertext.length < isolateThresholdBytes) {
-      return decrypt(ciphertext);
-    }
-    return decrypt(ciphertext);
-  }
+  }) async =>
+      decrypt(ciphertext);
 
+  /// Encrypts a batch of plaintexts asynchronously.
+  ///
+  /// Runs inline on the calling isolate, applying [encrypt] to each element;
+  /// [isolateThreshold] is accepted for interface compatibility and ignored
+  /// (see [encryptAsync]).
   @override
   Future<List<List<int>>> batchEncrypt(
     List<List<int>> plaintexts, {
     int isolateThreshold = 10,
-  }) async {
-    final totalBytes = plaintexts.fold<int>(0, (sum, p) => sum + p.length);
-    if (plaintexts.length < isolateThreshold && totalBytes < 32 * 1024) {
-      return plaintexts.map(encrypt).toList();
-    }
-    return [for (final plaintext in plaintexts) encrypt(plaintext)];
-  }
+  }) async =>
+      [for (final plaintext in plaintexts) encrypt(plaintext)];
 
+  /// Decrypts a batch of ciphertexts asynchronously.
+  ///
+  /// Runs inline on the calling isolate, applying [decrypt] to each element;
+  /// [isolateThreshold] is accepted for interface compatibility and ignored
+  /// (see [encryptAsync]).
   @override
   Future<List<List<int>>> batchDecrypt(
     List<List<int>> ciphertexts, {
     int isolateThreshold = 10,
-  }) async {
-    final totalBytes = ciphertexts.fold<int>(0, (sum, c) => sum + c.length);
-    if (ciphertexts.length < isolateThreshold && totalBytes < 32 * 1024) {
-      return ciphertexts.map(decrypt).toList();
-    }
-    return [for (final ciphertext in ciphertexts) decrypt(ciphertext)];
-  }
+  }) async =>
+      [for (final ciphertext in ciphertexts) decrypt(ciphertext)];
 }
 
 // =============================================================================
