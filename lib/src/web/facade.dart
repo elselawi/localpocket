@@ -161,6 +161,10 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
       'stores': stores.map((s) => s.toJson()).toList(),
       'maxDocBytes': maxDocBytes,
       'destructiveBackup': destructiveBackup,
+      // Lets the worker resolve this database's OPFS directory so it can
+      // remove a stale destructive-migration backup (the worker sees only the
+      // fixed in-VFS path `/database`).
+      'backupDbName': path,
       if (cipherEnvelope != null) 'fieldCipher': cipherEnvelope,
     };
 

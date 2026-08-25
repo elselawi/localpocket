@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:js_interop';
 
+import 'package:path/path.dart' as p;
 import 'package:sqlite3/common.dart';
+// ignore: implementation_imports
+import 'package:sqlite3/src/wasm/js_interop/new_file_system_access.dart';
 // ignore: implementation_imports
 import 'package:sqlite3/src/wasm/sqlite3.dart';
 import 'package:sqlite3_web/sqlite3_web.dart';
+import 'package:web/web.dart' show FileSystemDirectoryHandle;
 
 import '../core/capabilities.dart';
 import '../core/database_adapter.dart';
@@ -40,6 +44,19 @@ final class LocalPocketDatabaseController extends DatabaseController {
     final rawDb = sqlite3.open(path, vfs: vfs);
     final db = DirectSqliteDatabase(rawDb);
     var handedToPocket = false;
+
+    // Wire the destructive-migration backup file hooks to OPFS. sqlite3_web
+    // persists each database under `drift_db/<name>` in OPFS; VACUUM INTO
+    // writes the `.bak` next to the database in that same directory. The
+    // `backupDbName` option carries the original DB name from the facade (the
+    // in-worker path here is the fixed `/database`).
+    final backupDbName =
+        (rawOpenOption(additionalData?.dartify(), 'backupDbName') as String?) ??
+            path;
+    db.backupFileExists =
+        (backupPath) => _opfsFileExists(backupDbName, backupPath);
+    db.backupFileDeleter =
+        (backupPath) => _removeOpfsFile(backupDbName, backupPath);
 
     try {
       // Assert journal mode TRUNCATE immediately after open per §6.8.
@@ -211,5 +228,49 @@ final class _ConnectionSink implements WorkerEventSink {
   @override
   void emit(Map<String, Object?> event) {
     unawaited(connection.customRequest(event.jsify()));
+  }
+}
+
+/// Resolves the OPFS directory that hosts this database's files. sqlite3_web
+/// persists each database under `drift_db/<name>` in the origin-private
+/// storage; the destructive-migration `.bak` (written by `VACUUM INTO`) lives
+/// in that same directory. Returns null when OPFS is unavailable.
+Future<FileSystemDirectoryHandle?> _opfsDatabaseDir(String dbName) async {
+  final storage = storageManager;
+  if (storage == null) return null;
+  try {
+    var dir = await storage.directory;
+    for (final segment in [...p.split('drift_db'), ...p.split(dbName)]) {
+      if (segment.isEmpty) continue;
+      dir = await dir.getDirectory(segment);
+    }
+    return dir;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Reports whether the destructive-migration backup file at [backupPath]
+/// exists in OPFS (best-effort; false when OPFS is unavailable).
+Future<bool> _opfsFileExists(String dbName, String backupPath) async {
+  final dir = await _opfsDatabaseDir(dbName);
+  if (dir == null) return false;
+  try {
+    await dir.openFile(p.basename(backupPath));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Removes the destructive-migration backup file at [backupPath] from OPFS
+/// (best-effort no-op when OPFS is unavailable or the entry is missing).
+Future<void> _removeOpfsFile(String dbName, String backupPath) async {
+  final dir = await _opfsDatabaseDir(dbName);
+  if (dir == null) return;
+  try {
+    await dir.remove(p.basename(backupPath));
+  } catch (_) {
+    // Entry missing or OPFS unavailable — nothing to remove.
   }
 }

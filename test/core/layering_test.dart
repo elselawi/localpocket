@@ -27,6 +27,11 @@ import 'package:test/test.dart';
 /// files API. That coupling is pinned here so it stays an intentional choice,
 /// never an accident — while the reverse (pocketbase pulled into core/sync)
 /// remains forbidden.
+///
+/// The native database factory (`lib/src/core/database_factory_native.dart`)
+/// also imports `../files/native_backup_file.dart` so the destructive-migration
+/// backup file hooks can use `dart:io` from the files layer (core stays
+/// web-clean; the web worker wires its own OPFS hooks instead).
 void main() {
   final core = _filesUnder('lib/src/core');
   final sync = _filesUnder('lib/src/sync');
@@ -102,13 +107,18 @@ void main() {
         reason: 'LocalPocket (the hub) intentionally wires files');
   });
 
-  test('files platform implementation is the only dart:io consumer', () {
-    // dart:io is allowed ONLY in the native platform implementation.
+  test('files platform implementations are the only dart:io consumers', () {
+    // dart:io is allowed ONLY in the native platform implementations.
+    const allowedIoConsumers = {
+      'lib/src/files/native_blob_store.dart',
+      'lib/src/files/native_backup_file.dart',
+    };
     for (final f in allSrc) {
       final hasIo = _imports(f).any((i) => i.startsWith('dart:io'));
       if (hasIo) {
-        expect(f, 'lib/src/files/native_blob_store.dart',
-            reason: 'only the native blob store may import dart:io');
+        expect(allowedIoConsumers.contains(f), isTrue,
+            reason: 'only the native platform implementations may import '
+                'dart:io');
       }
     }
   });

@@ -13,14 +13,15 @@ void main() {
   CollectionSchema<Object?> v2Schema({
     List<StoreMigration> migrations = const [],
     Map<int, DocumentMigration> documentMigrations = const {},
-  }) => CollectionSchema(
-      name: 'widgets',
-      version: 2,
-      fields: [...widgetsSchema().fields, Field.text('nickname')],
-      indexes: widgetsSchema().indexes,
-      migrations: migrations,
-      documentMigrations: documentMigrations,
-    );
+  }) =>
+      CollectionSchema(
+        name: 'widgets',
+        version: 2,
+        fields: [...widgetsSchema().fields, Field.text('nickname')],
+        indexes: widgetsSchema().indexes,
+        migrations: migrations,
+        documentMigrations: documentMigrations,
+      );
 
   Future<void> insertBulk(LocalPocket pocket, int n, {int chunk = 5000}) async {
     for (var start = 0; start < n; start += chunk) {
@@ -271,19 +272,20 @@ void main() {
     });
 
     test(
-        'destructive migration refused when the backup target already '
-        'exists', () async {
+        'destructive migration resumes over a stale backup with no completed '
+        'marker', () async {
       final t = await tempDbPath();
       addTearDown(t.cleanup);
 
       final v1 = await openPocket(path: t.path);
-      await v1
-          .collection('widgets')
-          .put(record(id: generateRecordId(), name: 'x'));
+      final id = generateRecordId();
+      await v1.collection('widgets').put(record(id: id, name: 'x'));
       await v1.close();
 
-      // VACUUM INTO refuses to overwrite an existing file, so a stale backup
-      // from a previous (interrupted) attempt must fail the migration loudly.
+      // A backup with no `done` marker is a stale artifact from an
+      // interrupted (or legacy, marker-less) run. VACUUM INTO refuses to
+      // overwrite an existing target, so the rebuild clears the stale file and
+      // restarts instead of refusing forever.
       final backup = Migrator.backupPath(t.path, 'widgets', 2);
       File(backup).writeAsStringSync('stale backup');
       addTearDown(() {
@@ -291,14 +293,26 @@ void main() {
         if (f.existsSync()) f.deleteSync();
       });
 
-      await expectLater(
-          openPocket(path: t.path, stores: [
-            v2Schema(migrations: [
-              StoreMigration(toVersion: 2, destructive: true),
-            ])
-          ]),
-          throwsA(isA<DestructiveMigrationRefusedError>()
-              .having((e) => e.message, 'message', contains('Backup failed'))));
+      final v2 = await openPocket(path: t.path, stores: [
+        v2Schema(migrations: [
+          StoreMigration(toVersion: 2, destructive: true),
+        ])
+      ]);
+      addTearDown(v2.close);
+
+      final stores = await v2.db
+          .query('lp_stores', where: 'store = ?', whereArgs: ['widgets']);
+      expect(stores.first['schema_ver'], 2,
+          reason: 'the stale backup did not block the migration');
+      expect(await v2.collection('widgets').get(id), isNotNull);
+      // The stale sentinel file was replaced by a fresh backup safety net.
+      expect(File(backup).existsSync(), isTrue);
+      final conn = sqlite.sqlite3.open(backup);
+      final c = conn.select('SELECT COUNT(*) AS c FROM widgets').first['c'];
+      conn.close();
+      expect(c, 1,
+          reason: 'the fresh backup is a real database, not the stale '
+              'sentinel');
     });
 
     test(
@@ -550,6 +564,245 @@ void main() {
       expect(cols.map((c) => c['name']), isNot(contains('must_have')));
     });
 
+    test('destructive rebuild resumes after a crash mid-rebuild', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+      final backup = Migrator.backupPath(t.path, 'widgets', 2);
+      addTearDown(() {
+        final f = File(backup);
+        if (f.existsSync()) f.deleteSync();
+      });
+
+      final v1 = await openPocket(path: t.path);
+      final ids = <String>[];
+      await v1.transaction((tx) async {
+        for (var i = 0; i < 20; i++) {
+          final id = generateRecordId();
+          ids.add(id);
+          await tx
+              .collection('widgets')
+              .put(record(id: id, name: 'n$i', qty: i));
+        }
+      });
+      await v1.close();
+
+      StoreMigration migration() => StoreMigration(
+            toVersion: 2,
+            destructive: true,
+            transform: (oldRow) => {...oldRow, 'nickname': 'r${oldRow['id']}'},
+          );
+
+      // Kill the rebuild after the backup and the __new_ copy, before the
+      // destructive drop/rename: a stale .bak and a half-built __new_ table
+      // now sit on disk, exactly like an app crash mid-migration.
+      final hooks = TestHooks();
+      hooks.migrationCrashPoint = (marker) {
+        if (marker.contains('rebuild:widgets:2')) {
+          throw StateError('simulated crash mid-rebuild');
+        }
+      };
+      await expectLater(
+          openPocket(
+              path: t.path,
+              stores: [
+                v2Schema(migrations: [migration()])
+              ],
+              testHooks: hooks),
+          throwsA(isA<StateError>()));
+
+      // The interrupted run left both stale artifacts; schema_ver stayed 1
+      // and no ledger row was recorded.
+      final probe = await openPocket(path: t.path);
+      var stores = await probe.db
+          .query('lp_stores', where: 'store = ?', whereArgs: ['widgets']);
+      expect(stores.first['schema_ver'], 1,
+          reason: 'the crashed rebuild did not advance schema_ver');
+      expect(File(backup).existsSync(), isTrue,
+          reason: 'stale backup from the interrupted run');
+      final halfBuilt = await probe.db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'widgets__new_%'");
+      expect(halfBuilt, isNotEmpty,
+          reason: 'half-built __new_ table from the interrupted run');
+      await probe.close();
+
+      // Reopen WITHOUT the crash hook: the rebuild resumes, completes exactly
+      // once, and cleans up the stale artifacts.
+      final v2 = await openPocket(path: t.path, stores: [
+        v2Schema(migrations: [migration()])
+      ]);
+      addTearDown(v2.close);
+
+      stores = await v2.db
+          .query('lp_stores', where: 'store = ?', whereArgs: ['widgets']);
+      expect(stores.first['schema_ver'], 2,
+          reason: 'the resumed rebuild completes');
+      final ledger = await v2.db.rawQuery(
+          "SELECT name FROM lp_migrations WHERE name = 'migrate:widgets:v2'");
+      expect(ledger, hasLength(1),
+          reason: 'the resumed migration recorded exactly one ledger row');
+      expect(await v2.collection('widgets').query().count(), 20);
+      final sample = await v2.collection('widgets').query().limit(20).fetch();
+      for (final r in sample.items) {
+        expect(r['nickname'], 'r${r['id']}');
+      }
+      for (final id in ids) {
+        expect(await v2.collection('widgets').get(id), isNotNull);
+      }
+      final leftovers = await v2.db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'widgets__new_%'");
+      expect(leftovers, isEmpty,
+          reason: 'no half-built table remains after the resume');
+      expect(File(backup).existsSync(), isTrue,
+          reason: 'a fresh backup safety net exists after the resume');
+    });
+
+    test(
+        'destructive rebuild resumes in place after a crash between the '
+        'drop and the rename', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+      final backup = Migrator.backupPath(t.path, 'widgets', 2);
+      addTearDown(() {
+        final f = File(backup);
+        if (f.existsSync()) f.deleteSync();
+      });
+
+      final v1 = await openPocket(path: t.path);
+      final ids = <String>[];
+      await v1.transaction((tx) async {
+        for (var i = 0; i < 8; i++) {
+          final id = generateRecordId();
+          ids.add(id);
+          await tx
+              .collection('widgets')
+              .put(record(id: id, name: 'n$i', qty: i));
+        }
+      });
+      await v1.close();
+
+      StoreMigration migration() => StoreMigration(
+            toVersion: 2,
+            destructive: true,
+            transform: (oldRow) => {...oldRow, 'nickname': 'r${oldRow['id']}'},
+          );
+
+      // Crash right before the destructive drop/rename, then simulate the
+      // crash having actually landed BETWEEN the DROP and the RENAME: the old
+      // table is gone and __new_ alone holds the (already transformed) data.
+      final hooks = TestHooks();
+      hooks.migrationCrashPoint = (marker) {
+        if (marker.contains('rebuild:widgets:2')) {
+          throw StateError('simulated crash mid-rebuild');
+        }
+      };
+      await expectLater(
+          openPocket(
+              path: t.path,
+              stores: [
+                v2Schema(migrations: [migration()])
+              ],
+              testHooks: hooks),
+          throwsA(isA<StateError>()));
+      final conn = sqlite.sqlite3.open(t.path);
+      conn.execute('DROP TABLE "widgets"');
+      conn.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+      conn.close();
+
+      // Reopen: the rebuild must finish in place (rename __new_ → widgets,
+      // recreate indexes, verify) instead of restarting against the now
+      // missing source table.
+      final v2 = await openPocket(path: t.path, stores: [
+        v2Schema(migrations: [migration()])
+      ]);
+      addTearDown(v2.close);
+
+      expect(
+          (await v2.db.query('lp_stores',
+                  where: 'store = ?', whereArgs: ['widgets']))
+              .first['schema_ver'],
+          2,
+          reason: 'the in-place resume completes the migration');
+      expect(await v2.collection('widgets').query().count(), 8,
+          reason: 'data survived from the half-built __new_ table');
+      final sample = await v2.collection('widgets').query().limit(8).fetch();
+      for (final r in sample.items) {
+        expect(r['nickname'], 'r${r['id']}',
+            reason: 'the transform result survived the drop/rename crash');
+      }
+      for (final id in ids) {
+        expect(await v2.collection('widgets').get(id), isNotNull);
+      }
+      final indexes = await v2.db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='widgets' AND name LIKE 'ix_%'");
+      expect(indexes, isNotEmpty,
+          reason: 'indexes are recreated on the in-place resume');
+      final leftovers = await v2.db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'widgets__new_%'");
+      expect(leftovers, isEmpty);
+      expect(File(backup).existsSync(), isTrue,
+          reason: 'the completed backup is kept as the safety net');
+    });
+
+    test(
+        'destructive migration refuses a completed backup from a prior run '
+        'until it is removed', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+      final backup = Migrator.backupPath(t.path, 'widgets', 2);
+      addTearDown(() {
+        final f = File(backup);
+        if (f.existsSync()) f.deleteSync();
+      });
+
+      final v1 = await openPocket(path: t.path);
+      final id = generateRecordId();
+      await v1.collection('widgets').put(record(id: id, name: 'x'));
+      await v1.close();
+
+      // Complete the destructive migration normally: marker `done` + backup.
+      final migrated = await openPocket(path: t.path, stores: [
+        v2Schema(migrations: [StoreMigration(toVersion: 2, destructive: true)])
+      ]);
+      expect(File(backup).existsSync(), isTrue);
+      await migrated.close();
+
+      // Simulate a crash between the `done` marker and the schema_ver bump:
+      // the rebuild completed but the bookkeeping did not, so the migration
+      // re-runs on the next open.
+      final conn = sqlite.sqlite3.open(t.path);
+      conn.execute(
+          "UPDATE lp_stores SET schema_ver = 1 WHERE store = 'widgets'");
+      conn.execute(
+          "DELETE FROM lp_migrations WHERE name = 'migrate:widgets:v2'");
+      conn.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+      conn.close();
+
+      // The completed backup (a DIFFERENT run's safety net) is never
+      // overwritten: the re-run refuses loudly instead of destroying it.
+      await expectLater(
+          openPocket(path: t.path, stores: [
+            v2Schema(
+                migrations: [StoreMigration(toVersion: 2, destructive: true)])
+          ]),
+          throwsA(isA<DestructiveMigrationRefusedError>().having(
+              (e) => e.message, 'message', contains('already completed'))));
+
+      // Removing the completed backup makes the migration resumable again.
+      File(backup).deleteSync();
+      final reopened = await openPocket(path: t.path, stores: [
+        v2Schema(migrations: [StoreMigration(toVersion: 2, destructive: true)])
+      ]);
+      addTearDown(reopened.close);
+      expect(
+          (await reopened.db.query('lp_stores',
+                  where: 'store = ?', whereArgs: ['widgets']))
+              .first['schema_ver'],
+          2,
+          reason: 'the migration resumes once the completed backup is removed');
+      expect(await reopened.collection('widgets').query().count(), 1);
+      expect(await reopened.collection('widgets').get(id), isNotNull);
+    });
+
     test(
         'a failing backfill leaves schema_ver and ledger untouched; a retry '
         'completes exactly once', () async {
@@ -676,6 +929,11 @@ void main() {
         'second connection holds the write lock', () async {
       final t = await tempDbPath();
       addTearDown(t.cleanup);
+      final backup = Migrator.backupPath(t.path, 'widgets', 2);
+      addTearDown(() {
+        final f = File(backup);
+        if (f.existsSync()) f.deleteSync();
+      });
 
       final v1 = await openPocket(path: t.path);
       final ids = <String>[];
@@ -693,13 +951,15 @@ void main() {
       // The rebuild needs the write lock: a concurrent writer blocks it at the
       // very first schema write (after the backup), BEFORE any drop/rename —
       // the original table is never half-renamed and no data is lost. The
-      // failure surfaces as the underlying busy error, not a silent half-state.
+      // busy error surfaces as a typed DestructiveMigrationRefusedError (never
+      // a silent half-state, never a leaked SqliteException), and the marker
+      // stays `rebuilding` so the next open resumes.
       await expectLater(
           openPocket(path: t.path, stores: [
             v2Schema(
                 migrations: [StoreMigration(toVersion: 2, destructive: true)])
           ]),
-          throwsA(isA<sqlite.SqliteException>()));
+          throwsA(isA<DestructiveMigrationRefusedError>()));
 
       // Release the writer and confirm the store is untouched.
       conn.execute('ROLLBACK');
@@ -721,15 +981,29 @@ void main() {
         expect(await reopened.collection('widgets').get(id), isNotNull);
       }
 
-      // The interrupted attempt left a backup file; a retry is REFUSED until
-      // that stale backup is cleared (the backup is the safety net and is
-      // never overwritten).
-      await expectLater(
-          openPocket(path: t.path, stores: [
-            v2Schema(
-                migrations: [StoreMigration(toVersion: 2, destructive: true)])
-          ]),
-          throwsA(isA<DestructiveMigrationRefusedError>()));
+      // The interrupted attempt left a stale backup and the `rebuilding`
+      // marker. Under the resumable contract the retry clears the stale
+      // artifacts and restarts the rebuild instead of refusing.
+      final resumed = await openPocket(path: t.path, stores: [
+        v2Schema(migrations: [StoreMigration(toVersion: 2, destructive: true)])
+      ]);
+      addTearDown(resumed.close);
+      expect(
+          (await resumed.db.query('lp_stores',
+                  where: 'store = ?', whereArgs: ['widgets']))
+              .first['schema_ver'],
+          2,
+          reason: 'the resumed rebuild completes after the writer releases');
+      expect(await resumed.collection('widgets').query().count(), 5);
+      final leftovers2 = await resumed.db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'widgets__new_%'");
+      expect(leftovers2, isEmpty,
+          reason: 'the resumed rebuild leaves no half-built table');
+      expect(File(backup).existsSync(), isTrue,
+          reason: 'a fresh backup safety net exists after the resumed rebuild');
+      for (final id in ids) {
+        expect(await resumed.collection('widgets').get(id), isNotNull);
+      }
     });
   });
 }

@@ -96,11 +96,20 @@ abstract class Database extends DatabaseExecutor {
 /// work to a background isolate. Large scans or heavy maintenance should be
 /// run from a dedicated isolate to avoid blocking the UI isolate.
 class DirectSqliteDatabase implements Database {
-
   DirectSqliteDatabase(this._db);
   final Map<String, CommonPreparedStatement> _statementCache = {};
   final CommonDatabase _db;
   bool _isOpen = true;
+
+  /// Platform hook reporting whether the destructive-migration backup file at
+  /// [path] exists. Wired by the native factory (`dart:io`) and the web worker
+  /// (OPFS). When null, callers treat the file as absent.
+  Future<bool> Function(String path)? backupFileExists;
+
+  /// Platform hook removing the destructive-migration backup file at [path] if
+  /// present. Wired by the native factory (`dart:io`) and the web worker
+  /// (OPFS). When null, removal is a no-op.
+  Future<void> Function(String path)? backupFileDeleter;
 
   /// Hook for tracing executions (e.g. TestHooks / profilers).
   void Function(String sql, List<Object?> params)? onExecute;
@@ -177,7 +186,8 @@ class DirectSqliteDatabase implements Database {
 
   @override
   Future<List<Map<String, Object?>>> rawQuery(String sql,
-      [List<Object?> parameters = const []]) async => selectSync(sql, parameters);
+          [List<Object?> parameters = const []]) async =>
+      selectSync(sql, parameters);
 
   @override
   Future<List<Map<String, Object?>>> query(

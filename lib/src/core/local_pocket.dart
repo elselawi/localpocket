@@ -466,6 +466,27 @@ class LocalPocket with ChangeBusAwareLP {
     _tables[schema.name] = StoreTable(schema, compiled);
   }
 
+  /// Reports whether the destructive-migration backup file at [path] exists,
+  /// delegating to the platform database's file hooks (native `dart:io`, web
+  /// OPFS). Returns false when the platform did not wire an existence hook.
+  Future<bool> backupFileExists(String path) async {
+    final d = db;
+    if (d is DirectSqliteDatabase && d.backupFileExists != null) {
+      return await d.backupFileExists!(path);
+    }
+    return false;
+  }
+
+  /// Removes the destructive-migration backup file at [path] if it exists,
+  /// delegating to the platform database's file hooks (native `dart:io`, web
+  /// OPFS). No-op when the platform did not wire a deleter.
+  Future<void> deleteBackupFile(String path) async {
+    final d = db;
+    if (d is DirectSqliteDatabase && d.backupFileDeleter != null) {
+      await d.backupFileDeleter!(path);
+    }
+  }
+
   /// Returns the registered table for [name], or throws if it is unknown.
   StoreTable requireTable(String name) {
     final t = _tables[name];
