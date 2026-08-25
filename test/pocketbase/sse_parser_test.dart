@@ -15,7 +15,7 @@ void main() {
   PbRealtime realtime(FakeTransport fake,
       {required void Function(PbRealtimeEvent) onEvent,
       void Function()? onGapClosed,
-      Duration reconnectDelay = const Duration(seconds: 10)}) {
+      Duration backoffBase = const Duration(seconds: 10)}) {
     final client = PbClient(
       transport: fake,
       baseUrl: Uri.parse('https://pb.test'),
@@ -24,7 +24,7 @@ void main() {
     return PbRealtime(
       client: client,
       collectionNames: const ['data'],
-      reconnectDelay: reconnectDelay,
+      backoffBase: backoffBase,
       onGapClosed: onGapClosed ?? () {},
       onEvent: onEvent,
     );

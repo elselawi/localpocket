@@ -6,11 +6,13 @@
 ///
 /// Missed events are never replayed after a gap (live-verified); every
 /// (re)connect therefore reports a gap so the engine re-pulls all stores.
-/// The connection auto-reconnects with a fixed backoff.
+/// The connection auto-reconnects with exponential backoff + jitter (capped)
+/// that resets to the base delay after a successful connect.
 library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import '../sync/sync_backend.dart';
@@ -46,8 +48,14 @@ class PbRealtime {
     required this.collectionNames,
     required this.onGapClosed,
     required this.onEvent,
-    this.reconnectDelay = const Duration(seconds: 1),
-  });
+    this.backoffBase = const Duration(milliseconds: 200),
+    this.backoffCap = const Duration(minutes: 5),
+    Duration Function(int attempt)? delayFor,
+    double Function(int attempt)? jitter,
+  })  : jitter = jitter ?? _defaultJitter,
+        delayFor = delayFor ??
+            _exponentialBackoff(
+                backoffBase, backoffCap, jitter ?? _defaultJitter);
 
   /// PocketBase HTTP client for auth token resolution and transport.
   final PbClient client;
@@ -56,8 +64,20 @@ class PbRealtime {
   /// e.g. ['data'] — NOT the local store names).
   final List<String> collectionNames;
 
-  /// Reconnect delay backoff between connection attempts.
-  final Duration reconnectDelay;
+  /// Base delay for the first reconnect after a failure (default 200 ms).
+  final Duration backoffBase;
+
+  /// Upper bound for the exponential reconnect backoff (default 5 minutes).
+  final Duration backoffCap;
+
+  /// Jitter source, `0.5..1.5` (default uniform). Inject for determinism.
+  final double Function(int attempt) jitter;
+
+  /// Reconnect delay for the given failed-connect [attempt] (below 1 treated
+  /// as 1). Defaults to exponential backoff mirroring `SyncConfig.delayFor`
+  /// (`min(base * 2^(attempt-1), cap) * jitter`); inject for deterministic
+  /// tests.
+  final Duration Function(int attempt) delayFor;
 
   /// Called after every successful handshake (including the first connect) —
   /// a gap has just closed, so all stores must be re-pulled.
@@ -94,16 +114,42 @@ class PbRealtime {
   }
 
   Future<void> _runLoop() async {
+    // Consecutive failed connect attempts. Any successful connect resets the
+    // backoff to the base delay; failures grow it exponentially (with jitter,
+    // capped) so a down server never triggers a reconnect storm.
+    var attempt = 0;
     while (_running) {
       try {
         await _connectOnce();
+        attempt = 0;
       } catch (_) {
         // Transport or protocol failure: back off and reconnect.
+        attempt++;
       }
       if (!_running) break;
-      await Future<void>.delayed(reconnectDelay);
+      await Future<void>.delayed(delayFor(attempt));
     }
   }
+
+  static double _defaultJitter(int attempt) => 0.5 + Random().nextDouble();
+
+  /// Default reconnect backoff, mirroring `SyncConfig.delayFor`:
+  /// `min(base * 2^(attempt-1), cap) * jitter`, with jitter clamped to
+  /// `0.5..1.5` and attempts below 1 treated as 1. Overflow-safe.
+  static Duration Function(int attempt) _exponentialBackoff(
+          Duration base, Duration cap, double Function(int attempt) jitter) =>
+      (int attempt) {
+        final n = attempt < 1 ? 1 : attempt;
+        final baseUs = base.inMicroseconds < 0 ? 0 : base.inMicroseconds;
+        final capUs = cap.inMicroseconds < 0 ? 0 : cap.inMicroseconds;
+        var exp = baseUs > capUs ? capUs : baseUs;
+        for (var i = 1; i < n && exp < capUs; i++) {
+          final doubled = exp * 2;
+          exp = doubled > capUs ? capUs : doubled;
+        }
+        final j = jitter(n).clamp(0.5, 1.5).toDouble();
+        return Duration(microseconds: (exp * j).round());
+      };
 
   Future<void> _connectOnce() async {
     final token = await client.authToken();
@@ -128,6 +174,7 @@ class PbRealtime {
 
     final parser = _SseParser();
     var handshaken = false;
+    var failed = false;
     _sub = res.stream.listen(
       (chunk) {
         final frames = parser.feed(chunk);
@@ -135,10 +182,22 @@ class PbRealtime {
           // Frame handling is serialized so the subscribe POST always
           // precedes any event processing. A bad frame or a throwing callback
           // must never poison the tail with an unhandled rejection.
-          _frameTail = _frameTail
-              .then((_) => _handleFrame(f, token))
-              .catchError((Object _) {})
-              .then((_) {
+          _frameTail = _frameTail.then((_) async {
+            if (failed) return;
+            try {
+              await _handleFrame(f, token);
+            } catch (_) {
+              // The subscribe POST failed (e.g. 401/5xx): the handshake
+              // never completed, so onGapClosed must NOT fire and no frame
+              // from this session may be trusted. End the session; _runLoop
+              // reconnects with a fresh token.
+              failed = true;
+              await _sub?.cancel();
+              if (!_sessionDone!.isCompleted) _sessionDone!.complete();
+              return;
+            }
+            // Gap-close bookkeeping runs only after a successful handshake;
+            // a failed subscribe never reports a closed gap.
             if (!handshaken && f.clientId != null) {
               handshaken = true;
               onGapClosed();

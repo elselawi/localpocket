@@ -1,5 +1,12 @@
 ## Unreleased
 
+- **BREAKING (realtime):** `PbRealtime.reconnectDelay` was replaced by exponential reconnect
+  backoff. The SSE reconnect loop now grows the delay across consecutive failed connects
+  (`backoffBase`, default 200 ms, doubling up to `backoffCap`, default 5 min) with `0.5..1.5`
+  jitter, and resets to the base delay after any successful connect — a down server no longer
+  triggers a fixed 5×/s reconnect storm. New constructor knobs: `backoffBase`, `backoffCap`,
+  `jitter`, and `delayFor` (injectable for deterministic tests).
+
 - **`TokenProvider.identity` no longer has a shared constant default.** The
   old default `'token-identity'` silently collapsed every provider that did
   not override `identity` into one sync scope per server — cursors,

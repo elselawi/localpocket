@@ -162,7 +162,7 @@ class PocketBaseBackend implements SyncBackend {
     final rt = PbRealtime(
       client: _client,
       collectionNames: [realtimeCollection],
-      reconnectDelay: const Duration(milliseconds: 200),
+      backoffBase: const Duration(milliseconds: 200),
       onGapClosed: _onGapClosed,
       onEvent: _onRealtimeEvent,
     );

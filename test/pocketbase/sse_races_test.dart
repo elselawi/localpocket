@@ -30,7 +30,10 @@ void main() {
   PbRealtime realtime(FakeTransport fake,
       {required void Function(PbRealtimeEvent) onEvent,
       void Function()? onGapClosed,
-      Duration reconnectDelay = const Duration(seconds: 10)}) {
+      Duration backoffBase = const Duration(seconds: 10),
+      Duration backoffCap = const Duration(minutes: 5),
+      Duration Function(int attempt)? delayFor,
+      double Function(int attempt)? jitter}) {
     final client = PbClient(
       transport: fake,
       baseUrl: Uri.parse('https://pb.test'),
@@ -39,21 +42,24 @@ void main() {
     return PbRealtime(
       client: client,
       collectionNames: const ['data'],
-      reconnectDelay: reconnectDelay,
+      backoffBase: backoffBase,
+      backoffCap: backoffCap,
+      delayFor: delayFor,
+      jitter: jitter ?? (_) => 1.0,
       onGapClosed: onGapClosed ?? () {},
       onEvent: onEvent,
     );
   }
 
   group('realtime handshake, auth, and stop races', () {
-    test('subscribe statuses: 204/200 ok; 401/403/500 non-fatal', () async {
-      for (final status in [204, 200, 401, 403, 500]) {
+    test('subscribe 204/200 closes the gap and delivers events', () async {
+      for (final status in [204, 200]) {
         final fake = FakeTransport();
         fake.sendStatus(status, '{"message":"x"}');
         final events = <PbRealtimeEvent>[];
         final gaps = <int>[];
-        final rt =
-            realtime(fake, onEvent: events.add, onGapClosed: () => gaps.add(1));
+        final rt = realtime(fake,
+            onEvent: events.add, onGapClosed: () => gaps.add(1));
         final controller = StreamController<List<int>>();
         fake.streamResponse(
             StreamedHttpResponse(200, const {}, controller.stream));
@@ -65,12 +71,96 @@ void main() {
         await rt.stop();
 
         expect(gaps, hasLength(1), reason: 'subscribe $status: gap closes');
-        // 204/200 -> fully subscribed; 401/403/500 -> the failure is
-        // swallowed (no crash, no double-completer), and events still flow
-        // (the periodic pull remains the backstop).
-        expect(events, hasLength(1), reason: 'subscribe $status: no crash');
+        expect(events, hasLength(1), reason: 'subscribe $status: event flows');
         expect(events.single.record.id, 'r1');
       }
+    });
+
+    test('subscribe 401/403/500 never closes the gap and reconnects',
+        () async {
+      for (final status in [401, 403, 500]) {
+        final fake = FakeTransport();
+        fake.sendStatus(status, '{"message":"x"}');
+        final events = <PbRealtimeEvent>[];
+        final gaps = <int>[];
+        final rt = realtime(fake,
+            onEvent: events.add,
+            onGapClosed: () => gaps.add(1),
+            backoffBase: const Duration(milliseconds: 20));
+        final first = StreamController<List<int>>();
+        fake.streamResponse(StreamedHttpResponse(200, const {}, first.stream));
+        await rt.start();
+        first.add(utf8.encode(handshake + eventFrame('r1')));
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+
+        // A failed subscribe must NOT report a closed gap, and no frame from
+        // the failed session may be trusted (the pull is the backstop).
+        expect(gaps, isEmpty,
+            reason: 'subscribe $status: no false gap-closed signal');
+        expect(events, isEmpty,
+            reason: 'subscribe $status: failed session delivers nothing');
+
+        // The session ended and the loop reconnected (default empty stream).
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+        expect(rt.connectCount, greaterThanOrEqualTo(2),
+            reason: 'subscribe $status: failed session reconnects');
+        await first.close();
+        await rt.stop();
+      }
+    });
+
+    test('subscribe 401 then success: gap closes once, token per attempt',
+        () async {
+      final fake = FakeTransport();
+      final first = StreamController<List<int>>();
+      final second = StreamController<List<int>>();
+      fake.streamResponse(StreamedHttpResponse(200, const {}, first.stream));
+      fake.streamResponse(StreamedHttpResponse(200, const {}, second.stream));
+      fake.sendStatus(401, '{"message":"unauthorized"}'); // first subscribe
+      fake.sendStatus(204); // second subscribe succeeds
+
+      final events = <PbRealtimeEvent>[];
+      final gaps = <int>[];
+      final client = _CountingClient(
+        transport: fake,
+        baseUrl: Uri.parse('https://pb.test'),
+        auth: AuthManager(TestTokenProvider()),
+      );
+      final rt = PbRealtime(
+        client: client,
+        collectionNames: const ['data'],
+        backoffBase: const Duration(milliseconds: 20),
+        jitter: (_) => 1.0,
+        onGapClosed: () => gaps.add(1),
+        onEvent: events.add,
+      );
+      await rt.start();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      // Attempt 1: handshake arrives, the subscribe POST answers 401.
+      first.add(utf8.encode(handshake + eventFrame('r1')));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(gaps, isEmpty,
+          reason: 'a failed subscribe never reports a closed gap');
+      expect(events, isEmpty,
+          reason: 'no events are trusted from a failed session');
+
+      // The session ended and the loop reconnected: two attempts, exactly one
+      // token fetch per attempt — never a session-scoped capture reused
+      // across reconnects.
+      expect(rt.connectCount, 2, reason: 'the failed session reconnects');
+      expect(client.authTokenCalls, 2,
+          reason: 'one fresh token per connect attempt');
+
+      // Attempt 2: fresh token, subscribe succeeds, gap closes exactly once.
+      second.add(utf8.encode(handshake + eventFrame('r2')));
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(gaps, hasLength(1),
+          reason: 'the gap closes exactly once, on the successful handshake');
+      expect(events.single.record.id, 'r2');
+      await first.close();
+      await second.close();
+      await rt.stop();
     });
 
     test('connect 401 is retried until a 200 arrives', () async {
@@ -80,7 +170,7 @@ void main() {
       final events = <PbRealtimeEvent>[];
       final rt = realtime(fake,
           onEvent: events.add,
-          reconnectDelay: const Duration(milliseconds: 20));
+          backoffBase: const Duration(milliseconds: 20));
       final controller = StreamController<List<int>>();
       fake.streamResponse(
           StreamedHttpResponse(200, const {}, controller.stream));
@@ -102,7 +192,7 @@ void main() {
       final events = <PbRealtimeEvent>[];
       final rt = realtime(fake,
           onEvent: events.add,
-          reconnectDelay: const Duration(milliseconds: 20));
+          backoffBase: const Duration(milliseconds: 20));
       final controller = StreamController<List<int>>();
       fake.streamResponse(
           StreamedHttpResponse(200, const {}, controller.stream));
@@ -146,7 +236,7 @@ void main() {
       final events = <PbRealtimeEvent>[];
       final rt = realtime(fake,
           onEvent: events.add,
-          reconnectDelay: const Duration(milliseconds: 20));
+          backoffBase: const Duration(milliseconds: 20));
       final first = StreamController<List<int>>();
       final second = StreamController<List<int>>();
       fake.streamResponse(StreamedHttpResponse(200, const {}, first.stream));
@@ -180,7 +270,7 @@ void main() {
       final rt = PbRealtime(
         client: client,
         collectionNames: const ['data'],
-        reconnectDelay: const Duration(seconds: 10),
+        backoffBase: const Duration(seconds: 10),
         onGapClosed: () {},
         onEvent: (_) {},
       );
@@ -233,7 +323,7 @@ void main() {
       final events = <PbRealtimeEvent>[];
       final rt = realtime(fake,
           onEvent: events.add,
-          reconnectDelay: const Duration(milliseconds: 20));
+          backoffBase: const Duration(milliseconds: 20));
       final first = StreamController<List<int>>();
       final second = StreamController<List<int>>();
       fake.streamResponse(StreamedHttpResponse(200, const {}, first.stream));
@@ -331,7 +421,7 @@ void main() {
       final rt = PbRealtime(
         client: client,
         collectionNames: const ['data'],
-        reconnectDelay: const Duration(seconds: 10),
+        backoffBase: const Duration(seconds: 10),
         onGapClosed: () {},
         onEvent: (_) => log.add('event'),
       );
@@ -368,6 +458,91 @@ void main() {
           reason: 'only the well-formed event was delivered');
     });
   });
+
+  group('realtime reconnect backoff', () {
+    test('delayFor grows exponentially, capped, with jitter in bounds', () {
+      final rt = realtime(FakeTransport(),
+          onEvent: (_) {},
+          backoffBase: const Duration(seconds: 1),
+          backoffCap: const Duration(seconds: 8),
+          jitter: (_) => 1.0);
+      expect(rt.delayFor(1), const Duration(seconds: 1));
+      expect(rt.delayFor(2), const Duration(seconds: 2));
+      expect(rt.delayFor(3), const Duration(seconds: 4));
+      expect(rt.delayFor(4), const Duration(seconds: 8),
+          reason: 'doubling is capped at backoffCap');
+      expect(rt.delayFor(100), const Duration(seconds: 8),
+          reason: 'the cap holds for large attempts');
+      expect(rt.delayFor(0), const Duration(seconds: 1),
+          reason: 'attempts below 1 behave as attempt 1');
+    });
+
+    test('delayFor clamps jitter to 0.5..1.5', () {
+      final low = realtime(FakeTransport(),
+          onEvent: (_) {},
+          backoffBase: const Duration(seconds: 1),
+          jitter: (_) => 0.1).delayFor(1);
+      final high = realtime(FakeTransport(),
+          onEvent: (_) {},
+          backoffBase: const Duration(seconds: 1),
+          jitter: (_) => 9.9).delayFor(1);
+      expect(low, const Duration(milliseconds: 500),
+          reason: 'jitter below 0.5 clamps to 0.5');
+      expect(high, const Duration(milliseconds: 1500),
+          reason: 'jitter above 1.5 clamps to 1.5');
+    });
+
+    test('failed connects grow the backoff; a success resets to the base',
+        () async {
+      final fake = FakeTransport();
+      fake.streamError(HttpTransportException('down'));
+      fake.streamError(HttpTransportException('down'));
+      final recorded = <int>[];
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      final rt = realtime(fake,
+          onEvent: (_) {},
+          delayFor: (attempt) {
+            recorded.add(attempt);
+            return Duration.zero; // no real waiting
+          });
+      await rt.start();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      // Two consecutive failures request delays for attempt 1 then 2
+      // (growing); the third attempt connects (success).
+      expect(recorded, [1, 2],
+          reason: 'backoff grows across consecutive failures');
+      expect(rt.connectCount, 1, reason: 'the third attempt connected');
+
+      // Ending the healthy session reconnects with the RESET (base) delay:
+      // the next attempt is 0, not 3 — no growth after a successful connect.
+      await controller.close();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(recorded.take(3), [1, 2, 0],
+          reason: 'a successful connect resets the backoff to the base');
+      expect(recorded.skip(2).every((attempt) => attempt == 0), isTrue,
+          reason: 'the backoff never grows again after a success');
+      await rt.stop();
+    });
+  });
+}
+
+/// A [PbClient] that counts how many times the realtime layer asks for a
+/// token — one fetch per connection attempt.
+class _CountingClient extends PbClient {
+  _CountingClient(
+      {required super.transport, required super.baseUrl, required super.auth});
+
+  /// Number of [authToken] calls (one per `_connectOnce` attempt).
+  int authTokenCalls = 0;
+
+  @override
+  Future<Token> authToken() {
+    authTokenCalls++;
+    return super.authToken();
+  }
 }
 
 /// Delegates to a [FakeTransport] but records when [send] is invoked.
