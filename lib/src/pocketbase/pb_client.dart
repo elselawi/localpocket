@@ -122,8 +122,18 @@ class PbClient {
     String? baseUpdated,
   }) async {
     // [baseUpdated] is accepted for contract parity with version-aware
-    // backends; PocketBase has no conditional writes, so it is intentionally
-    // ignored here (the server stays authoritative).
+    // backends; PocketBase has no conditional writes (no If-Match / version
+    // predicate on PATCH), so it is intentionally IGNORED here.
+    //
+    // WIRE SEMANTICS — LAST-WRITE-WINS: on a real PocketBase server two
+    // clients that both GET -> merge -> PATCH the same record concurrently
+    // overwrite each other's field edits silently, and BOTH settle clean.
+    // The client-side 3-way merge only protects pushes that are time-
+    // serialized (GET sees a concurrent edit) or served by a backend that
+    // throws [RemoteVersionConflict]. Apps needing strict OCC must enforce
+    // it server-side (e.g. a PB record hook rejecting stale `updated`
+    // values, or a custom check endpoint). See the README section
+    // "Concurrent edits & last-write-wins".
     final uri = _record(id);
     final res = await _sendAuth('PATCH', uri,
         body: jsonEncode({'data': jsonDecode(dataJson)}));

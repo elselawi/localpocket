@@ -146,5 +146,25 @@ void main() {
         throwsA(isA<UnsupportedError>()),
       );
     });
+
+    test(
+        'README warns that concurrent edits on PocketBase are '
+        'last-write-wins', () async {
+      final readme = (await File('README.md').readAsString()).toLowerCase();
+      expect(readme, contains('last-write-wins'),
+          reason: 'the README must name the last-write-wins resolution');
+      expect(readme, contains('concurrent'),
+          reason: 'the README must warn about concurrent edits');
+      expect(readme.toLowerCase(), contains('pocketbase'),
+          reason: 'the warning must call out the PocketBase backend');
+      // The wire-level gap is documented where the write happens.
+      final clientSource =
+          await File('lib/src/pocketbase/pb_client.dart').readAsString();
+      expect(
+        clientSource,
+        contains('LAST-WRITE-WINS'),
+        reason: 'PbClient.updateRecord must document the ignored baseUpdated',
+      );
+    });
   });
 }

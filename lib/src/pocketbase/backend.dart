@@ -35,6 +35,14 @@ import 'transport.dart';
 ///
 /// PocketBase batch support is probed during [prepare]. Realtime is optional;
 /// polling and anti-entropy sweeps remain the correctness backstop.
+///
+/// CONCURRENCY CONTRACT — LAST-WRITE-WINS AT THE WIRE: PocketBase has no
+/// conditional writes, so [updateRecord] cannot reject a stale write. Two
+/// clients editing the same record concurrently resolve last-write-wins on
+/// the server; the client-side 3-way merge only protects pushes that are
+/// time-serialized. Apps needing strict optimistic concurrency must enforce
+/// it server-side (PB record hook / custom endpoint) — the client keeps its
+/// `RemoteVersionConflict` re-merge machinery for backends that CAN throw it.
 class PocketBaseBackend implements SyncBackend {
   /// Creates a PocketBase synchronization backend.
   PocketBaseBackend({

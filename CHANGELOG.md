@@ -1,5 +1,13 @@
 ## Unreleased
 
+- **BREAKING: `between` is now inclusive on both ends.**
+  `where(field, between: (start, end))` compiles to `>= start AND <= end`
+  (SQL `BETWEEN` semantics). Previously it was half-open `[start, end)`,
+  silently dropping every record whose value equaled `end` — e.g. a
+  date-range filter losing records stamped exactly at the range's upper
+  bound. To keep the old behavior, replace
+  `where(f, between: (a, b))` with `where(f, gte: a, lt: b)`. Pinned by the
+  query-edge corpus, the predicate SQL golden, and the compiled-plan tests.
 - `pruneOutbox` no longer evicts non-clean outbox ops under the `maxEntries`
   cap: evicting `error`/`inFlight`/`quarantine` ops silently deleted unsynced
   local edits and left dangling `op_id`s. Pruning is now strictly clean-only
