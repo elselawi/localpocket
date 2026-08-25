@@ -1,4 +1,5 @@
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/sync/mapping.dart' show parsePayloadJson;
 import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
@@ -256,6 +257,33 @@ void main() {
       expect(dl.single['record_id'], bad);
       final sr = await h.pocket.outbox.readSyncRow(h.pocket.db, 'widgets', bad);
       expect(sr!.syncState, SyncState.quarantine);
+    });
+  });
+
+  group('parsePayloadJson corruption handling', () {
+    test('null and empty payloads normalize to an empty map', () {
+      expect(parsePayloadJson(null), isEmpty);
+      expect(parsePayloadJson(''), isEmpty);
+    });
+
+    test('valid JSON objects round-trip', () {
+      expect(parsePayloadJson('{"a":1,"b":"x"}'), {'a': 1, 'b': 'x'});
+      expect(parsePayloadJson('{"a":{"nested":true}}'), {
+        'a': {'nested': true}
+      });
+    });
+
+    test('non-empty corrupt payloads raise MapFailure, never an empty map', () {
+      expect(() => parsePayloadJson('{broken'), throwsA(isA<MapFailure>()));
+      expect(() => parsePayloadJson('   '), throwsA(isA<MapFailure>()));
+    });
+
+    test('valid JSON of the wrong shape is corruption, not an empty map', () {
+      expect(() => parsePayloadJson('[]'), throwsA(isA<MapFailure>()));
+      expect(() => parsePayloadJson('[1,2]'), throwsA(isA<MapFailure>()));
+      expect(() => parsePayloadJson('null'), throwsA(isA<MapFailure>()));
+      expect(() => parsePayloadJson('"str"'), throwsA(isA<MapFailure>()));
+      expect(() => parsePayloadJson('42'), throwsA(isA<MapFailure>()));
     });
   });
 }

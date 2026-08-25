@@ -571,8 +571,17 @@ class Puller {
         tx.addChange(ChangeSet(store, {remote.id}));
         return ApplyResult.applied;
       }
-      // 3-way merge: remote is the trunk; local changes apply on top.
-      final basePayload = parsePayloadJson(sr?.baseJson);
+      // 3-way merge: remote is the trunk; local changes apply on top. A
+      // corrupt base must surface as a quarantine, never as an empty base
+      // ("remote deleted everything").
+      final Map<String, Object?> basePayload;
+      try {
+        basePayload = parsePayloadJson(sr?.baseJson);
+      } on MapFailure catch (e) {
+        await _quarantineMapFailure(exec, schema, store, remote,
+            'Corrupt base payload for record "${remote.id}": ${e.message}');
+        return ApplyResult.quarantined;
+      }
       final resolver = schema.conflictPolicy.collectionResolver;
       final policy = MergePolicy(
         collectionResolver: resolver is ConflictResolver ? resolver : null,
@@ -591,8 +600,8 @@ class Puller {
         // Escalate to lp_conflicts; outbox op is held. The watermark is not
         // advanced: nothing was applied to the domain (the conflicted remote
         // is captured in lp_conflicts for resolution).
-        await _recordPullConflict(
-            exec, store, remote, schema, sr, localPayload, outcome);
+        await _recordPullConflict(exec, store, remote, schema, sr, localPayload,
+            basePayload, outcome);
         await _touchSeen(tx, store, remote.id, remote.updated,
             advanceWatermark: false);
         tx.addChange(ChangeSet(store, {remote.id}));
@@ -643,9 +652,9 @@ class Puller {
     CollectionSchema<Object?> schema,
     SyncRowState? sr,
     Map<String, Object?> localPayload,
+    Map<String, Object?> basePayload,
     MergeResult outcome,
   ) async {
-    final basePayload = parsePayloadJson(sr?.baseJson);
     final remotePayload = buildPayload(schema, normalizeRemote(schema, remote));
     final dirtyLocal = computeDirtyFields(basePayload, localPayload).toList()
       ..sort();

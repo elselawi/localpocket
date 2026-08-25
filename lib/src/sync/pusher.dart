@@ -18,7 +18,6 @@ import 'sync_store.dart';
 import 'sync_tables.dart';
 
 class PushReport {
-
   /// Creates a push result with zero counts by default.
   const PushReport({
     this.pushed = 0,
@@ -28,6 +27,7 @@ class PushReport {
     this.discarded = 0,
     this.hadError = false,
   });
+
   /// Number of operations successfully pushed.
   final int pushed;
 
@@ -161,18 +161,19 @@ class Pusher {
   }
 
   Future<PushReport> _pushCreate(OutboxOp op, SyncRowState sr,
-      {bool recreateInProgress = false}) async => _handlePushExceptions(op, sr, () async {
-      try {
-        final rec = await backend.createRecord(
-            id: op.recordId, store: op.store, dataJson: op.payloadJson);
-        await _settle(op, rec);
-        return const PushReport(pushed: 1);
-      } on DuplicateIdError {
-        // Retry of a lost create: verify, else convert to an update.
-        return _recoverDuplicateCreate(op, sr,
-            recreateInProgress: recreateInProgress);
-      }
-    }, catchPayloadError: true, recreateInProgress: recreateInProgress);
+          {bool recreateInProgress = false}) async =>
+      _handlePushExceptions(op, sr, () async {
+        try {
+          final rec = await backend.createRecord(
+              id: op.recordId, store: op.store, dataJson: op.payloadJson);
+          await _settle(op, rec);
+          return const PushReport(pushed: 1);
+        } on DuplicateIdError {
+          // Retry of a lost create: verify, else convert to an update.
+          return _recoverDuplicateCreate(op, sr,
+              recreateInProgress: recreateInProgress);
+        }
+      }, catchPayloadError: true, recreateInProgress: recreateInProgress);
 
   Future<PushReport> _recoverDuplicateCreate(OutboxOp op, SyncRowState sr,
       {bool recreateInProgress = false}) async {
@@ -196,43 +197,44 @@ class Pusher {
     }, recreateInProgress: recreateInProgress);
   }
 
-  Future<PushReport> _pushUpdate(OutboxOp op, SyncRowState sr) async => _handlePushExceptions(op, sr, () async {
-      final fetched = await backend.getRecord(op.recordId);
-      if (fetched == null) {
-        // The record no longer exists remotely (a vanished target): apply the
-        // collection's missing-remote policy.
-        return _handleMissingRemote(op, sr);
-      }
-      _assertFetchedMatches(op, fetched);
-      if (fetched.updated == op.baseUpdated) {
-        // No concurrent change: a version-checked PATCH. The base version is
-        // sent so a backend that enforces optimistic concurrency can reject
-        // the write if the remote moved between the GET and the PATCH — the
-        // pusher then re-merges against the fresh version instead of losing
-        // the concurrent edit.
-        return _handlePushExceptions(op, sr, () async {
-          try {
-            final rec = await backend.updateRecord(
-                id: op.recordId,
-                dataJson: op.payloadJson,
-                baseUpdated: fetched.updated);
-            await _settle(op, rec);
-            return const PushReport(pushed: 1);
-          } on RemoteVersionConflict {
-            // The remote moved while the PATCH was in flight: re-fetch and
-            // re-merge against the CURRENT version, then retry — never
-            // overwrite blindly.
-            final fresh = await backend.getRecord(op.recordId);
-            if (fresh == null) {
-              return _handleMissingRemote(op, sr);
+  Future<PushReport> _pushUpdate(OutboxOp op, SyncRowState sr) async =>
+      _handlePushExceptions(op, sr, () async {
+        final fetched = await backend.getRecord(op.recordId);
+        if (fetched == null) {
+          // The record no longer exists remotely (a vanished target): apply the
+          // collection's missing-remote policy.
+          return _handleMissingRemote(op, sr);
+        }
+        _assertFetchedMatches(op, fetched);
+        if (fetched.updated == op.baseUpdated) {
+          // No concurrent change: a version-checked PATCH. The base version is
+          // sent so a backend that enforces optimistic concurrency can reject
+          // the write if the remote moved between the GET and the PATCH — the
+          // pusher then re-merges against the fresh version instead of losing
+          // the concurrent edit.
+          return _handlePushExceptions(op, sr, () async {
+            try {
+              final rec = await backend.updateRecord(
+                  id: op.recordId,
+                  dataJson: op.payloadJson,
+                  baseUpdated: fetched.updated);
+              await _settle(op, rec);
+              return const PushReport(pushed: 1);
+            } on RemoteVersionConflict {
+              // The remote moved while the PATCH was in flight: re-fetch and
+              // re-merge against the CURRENT version, then retry — never
+              // overwrite blindly.
+              final fresh = await backend.getRecord(op.recordId);
+              if (fresh == null) {
+                return _handleMissingRemote(op, sr);
+              }
+              return _pushUpdateWithBase(op, sr, fresh);
             }
-            return _pushUpdateWithBase(op, sr, fresh);
-          }
-        }, catchPayloadError: true);
-      }
-      // Concurrent change: verify / merge.
-      return _pushUpdateWithBase(op, sr, fetched);
-    });
+          }, catchPayloadError: true);
+        }
+        // Concurrent change: verify / merge.
+        return _pushUpdateWithBase(op, sr, fetched);
+      });
 
   Future<PushReport> _pushUpdateWithBase(
       OutboxOp op, SyncRowState sr, RemoteRecord fetched,
@@ -249,7 +251,20 @@ class Pusher {
       return const PushReport(pushed: 1);
     }
 
-    final outcome = await _mergeForBatch(op, sr, fetched, schema);
+    // A corrupt persisted base/payload is local row corruption: dead-letter
+    // it (retrying cannot repair the row) instead of merging as an empty
+    // record.
+    final Map<String, Object?> basePayload;
+    final Map<String, Object?> localPayload;
+    try {
+      basePayload = parsePayloadJson(sr.baseJson);
+      localPayload = parsePayloadJson(op.payloadJson);
+    } on MapFailure catch (e) {
+      await _deadLetter(op, 'corrupt_payload', error: e.message);
+      return const PushReport(deadLettered: 1);
+    }
+    final outcome = await _mergeForBatch(op, sr, fetched, schema,
+        basePayload: basePayload, localPayload: localPayload);
     if (outcome == null) {
       return const PushReport(conflicted: 1);
     }
@@ -339,8 +354,25 @@ class Pusher {
         // Concurrent create-vs-update or update: merge. The schema-aware
         // payload builder strips a literal `archived: false` (live records
         // omit the key on the wire) while keeping it in the merged logical
-        // for the local write.
-        final outcome = await _mergeForBatch(op, sr, fetched, schema);
+        // for the local write. A corrupt persisted base/payload is dead-
+        // lettered: retrying cannot repair local row corruption.
+        final Map<String, Object?> basePayload;
+        final Map<String, Object?> localPayload;
+        try {
+          basePayload = parsePayloadJson(sr.baseJson);
+          localPayload = parsePayloadJson(op.payloadJson);
+        } on MapFailure catch (e) {
+          await pocket.outbox.markDeadLetter(
+              store: op.store,
+              id: op.recordId,
+              kind: 'corrupt_payload',
+              error: e.message,
+              payloadJson: op.payloadJson);
+          dead++;
+          continue;
+        }
+        final outcome = await _mergeForBatch(op, sr, fetched, schema,
+            basePayload: basePayload, localPayload: localPayload);
         if (outcome == null) {
           conflicted++;
           continue;
@@ -411,8 +443,15 @@ class Pusher {
     return cap < 1 ? 1 : cap;
   }
 
+  /// Merges a local op against a concurrently-changed remote record.
+  ///
+  /// [basePayload] and [localPayload] are parsed (and corruption-checked) by
+  /// the caller: a corrupt `base_json`/`payload_json` is dead-lettered there
+  /// and never reaches the merge as an empty map.
   Future<MergeOutcome?> _mergeForBatch(OutboxOp op, SyncRowState sr,
-      RemoteRecord fetched, CollectionSchema<Object?> schema) async {
+      RemoteRecord fetched, CollectionSchema<Object?> schema,
+      {required Map<String, Object?> basePayload,
+      required Map<String, Object?> localPayload}) async {
     final fetchedLogical = normalizeRemote(schema, fetched);
     final policy = MergePolicy(
       collectionResolver:
@@ -423,8 +462,8 @@ class Pusher {
       editsUnarchive: schema.conflictPolicy.editsUnarchive,
     );
     final outcome = await merge3WayAsync(
-      base: parsePayloadJson(sr.baseJson),
-      local: parsePayloadJson(op.payloadJson),
+      base: basePayload,
+      local: localPayload,
       remote: buildPayload(schema, fetchedLogical),
       store: op.store,
       recordId: op.recordId,
@@ -432,7 +471,8 @@ class Pusher {
     );
     if (outcome.needsReview) {
       // Escalate to a conflict; the batch op is held.
-      await _recordConflict(op, sr, fetched, outcome);
+      await _recordConflict(op, sr, fetched, outcome,
+          basePayload: basePayload, localPayload: localPayload);
       return null;
     }
     return outcome;
@@ -734,7 +774,19 @@ class Pusher {
         pocket.requireTable(op.store).schema.conflictPolicy.missingRemote;
     switch (policy) {
       case MissingRemotePolicy.conflict:
-        await _escalateDeleteConflict(op, sr);
+        // Corrupt persisted base/payload: dead-letter (local corruption) —
+        // never escalate a bogus delete-vs-edit conflict from an empty base.
+        final Map<String, Object?> basePayload;
+        final Map<String, Object?> localPayload;
+        try {
+          basePayload = parsePayloadJson(sr.baseJson);
+          localPayload = parsePayloadJson(op.payloadJson);
+        } on MapFailure catch (e) {
+          await _deadLetter(op, 'corrupt_payload', error: e.message);
+          return const PushReport(deadLettered: 1);
+        }
+        await _escalateDeleteConflict(op, sr,
+            basePayload: basePayload, localPayload: localPayload);
         return const PushReport(conflicted: 1);
       case MissingRemotePolicy.recreate:
         if (!allowRecreate) {
@@ -753,9 +805,12 @@ class Pusher {
   /// Escalates a push whose target vanished remotely into a delete-vs-edit
   /// conflict: the remote side is recorded as a tombstone so the conflicts UI
   /// offers acceptLocal (recreate) / acceptRemote (discard).
-  Future<void> _escalateDeleteConflict(OutboxOp op, SyncRowState sr) async {
-    final basePayload = parsePayloadJson(sr.baseJson);
-    final localPayload = parsePayloadJson(op.payloadJson);
+  ///
+  /// [basePayload] and [localPayload] are parsed (and corruption-checked) by
+  /// the caller.
+  Future<void> _escalateDeleteConflict(OutboxOp op, SyncRowState sr,
+      {required Map<String, Object?> basePayload,
+      required Map<String, Object?> localPayload}) async {
     final dirtyLocal = computeDirtyFields(basePayload, localPayload).toList()
       ..sort();
     final baseJson = sr.baseJson ?? canonicalize(basePayload);
@@ -792,12 +847,12 @@ class Pusher {
     });
   }
 
-  Future<void> _recordConflict(OutboxOp op, SyncRowState sr,
-      RemoteRecord fetched, MergeOutcome outcome) async {
+  Future<void> _recordConflict(
+      OutboxOp op, SyncRowState sr, RemoteRecord fetched, MergeOutcome outcome,
+      {required Map<String, Object?> basePayload,
+      required Map<String, Object?> localPayload}) async {
     final schema = pocket.requireTable(op.store).schema;
     final fetchedLogical = normalizeRemote(schema, fetched);
-    final basePayload = parsePayloadJson(sr.baseJson);
-    final localPayload = parsePayloadJson(op.payloadJson);
     final remotePayload = buildPayload(schema, fetchedLogical);
     final dirtyLocal = computeDirtyFields(basePayload, localPayload).toList()
       ..sort();

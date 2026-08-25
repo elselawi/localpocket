@@ -181,13 +181,22 @@ String _remoteKindViolationMessage(
 
 /// Parses a canonical payload JSON string into a map.
 ///
-/// Returns an empty map when [json] is null, empty, invalid, or not a JSON
-/// object.
+/// Returns an empty map when [json] is null or empty — a missing base or
+/// payload is a legitimate "nothing yet" state. Non-empty input that fails to
+/// parse, or parses to a non-object, is corruption and raises [MapFailure]: a
+/// corrupt persisted payload must never silently merge as an empty record
+/// ("remote deleted everything").
 Map<String, Object?> parsePayloadJson(String? json) {
   if (json == null || json.isEmpty) return const {};
+  final Object? decoded;
   try {
-    final decoded = jsonDecode(json);
-    if (decoded is Map) return Map<String, Object?>.from(decoded);
-  } catch (_) {}
-  return const {};
+    decoded = jsonDecode(json);
+  } catch (e) {
+    throw MapFailure('Corrupt payload JSON: $e');
+  }
+  if (decoded is! Map) {
+    throw MapFailure(
+        'Corrupt payload JSON: expected an object, got ${decoded.runtimeType}.');
+  }
+  return Map<String, Object?>.from(decoded);
 }
