@@ -92,11 +92,13 @@ void main() {
     });
 
     test('FTS registration failure propagates and leaves no handle', () async {
+      // A duplicate column in the fts5 declaration is only rejected by
+      // SQLite when the DDL executes.
       final schema = CollectionSchema<Object?>(
           name: 't',
           version: 1,
-          fields: [Field.text('a b')], // space breaks the FTS5 declaration
-          fts: const FtsSpec(['a b']));
+          fields: [Field.text('a')],
+          fts: const FtsSpec(['a', 'a']));
       final t = await tempDbPath();
       addTearDown(t.cleanup);
       await expectLater(
@@ -199,7 +201,6 @@ void main() {
 /// A [Database] that fails (throws) once a statement starts with [failOnPrefix],
 /// and records close calls. Wraps a real in-memory SQLite handle.
 class _FailingDb extends DirectSqliteDatabase {
-
   _FailingDb(super.rawDb, {required this.failOnPrefix});
   final String failOnPrefix;
   int closeCount = 0;

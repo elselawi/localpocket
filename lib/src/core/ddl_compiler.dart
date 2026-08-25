@@ -65,6 +65,7 @@ class DdlCompiler {
     final names = <String>{};
 
     for (final f in schema.fields) {
+      Field.validateName(f.name);
       if (reservedColumns.contains(f.name)) {
         throw SchemaRegistrationError(
             'Field "${f.name}" is a reserved column name (id/archived/hidden/extra).');
@@ -214,9 +215,9 @@ class DdlCompiler {
     final out = <String>[];
     final store = schema.name;
     final table = '${store}_fts';
-    final cols = fts.fields;
-    final newRefs = cols.map((c) => 'new.${quote(c)}').join(', ');
-    final oldRefs = cols.map((c) => 'old.${quote(c)}').join(', ');
+    final cols = fts.fields.map(quote).toList();
+    final newRefs = cols.map((c) => 'new.$c').join(', ');
+    final oldRefs = cols.map((c) => 'old.$c').join(', ');
     out.add('CREATE VIRTUAL TABLE ${quote(table)} USING fts5(\n'
         '  ${cols.join(', ')},\n'
         "  content = '$store',\n"
@@ -235,8 +236,7 @@ class DdlCompiler {
         'VALUES (\'delete\', old.rowid, $oldRefs);\n'
         'END;');
 
-    final changed =
-        cols.map((c) => 'new.${quote(c)} IS NOT old.${quote(c)}').join(' OR ');
+    final changed = cols.map((c) => 'new.$c IS NOT old.$c').join(' OR ');
     out.add(
         'CREATE TRIGGER ${quote('${store}_au')} AFTER UPDATE ON ${quote(store)} '
         'WHEN $changed BEGIN\n'

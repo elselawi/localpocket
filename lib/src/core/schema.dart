@@ -147,6 +147,27 @@ class Field {
   /// Whether SQLite should enforce the reference as a foreign key.
   final bool enforceFk;
 
+  /// Strict identifier charset for field names: a letter or underscore
+  /// followed by any number of letters, digits, or underscores. Unicode
+  /// letters are allowed (SQLite identifiers may contain them); whitespace,
+  /// quotes, and punctuation are not.
+  static final RegExp _identifierPattern =
+      RegExp(r'^[\p{L}_][\p{L}\p{N}_]*$', unicode: true);
+
+  /// Validates [name] against the strict identifier policy.
+  ///
+  /// Every field name is quoted in generated SQL, so SQLite keywords such as
+  /// `order`, `group`, or `select` are legal field names. This policy is
+  /// defense-in-depth: it guarantees that no field name can ever produce a
+  /// broken identifier, even in a context that forgot to quote.
+  static void validateName(String name) {
+    if (!_identifierPattern.hasMatch(name)) {
+      throw SchemaRegistrationError(
+          'Field "$name" is not a valid identifier (must start with a letter '
+          'or underscore and contain only letters, digits, or underscores).');
+    }
+  }
+
   /// SQLite affinity for this field.
   ///
   /// Encrypted fields always store base64 ciphertext as TEXT: a STRICT

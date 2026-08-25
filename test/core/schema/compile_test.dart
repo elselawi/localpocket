@@ -339,15 +339,19 @@ void main() {
       }
     });
 
-    test('FTS fields with spaces, quotes, or reserved words fail at open', () {
+    test(
+        'field names with spaces or quotes are rejected by the identifier '
+        'policy', () {
       final withSpace = CollectionSchema<Object?>(
         name: 't',
         version: 1,
         fields: [Field.text('a b')],
         fts: const FtsSpec(['a b']),
       );
-      expect(openPocket(stores: [withSpace]),
-          throwsA(isA<sqlite.SqliteException>()));
+      expect(
+          () => DdlCompiler(caps).compile(withSpace),
+          throwsA(isA<SchemaRegistrationError>()
+              .having((e) => e.message, 'message', contains('a b'))));
 
       final withQuote = CollectionSchema<Object?>(
         name: 't',
@@ -355,17 +359,44 @@ void main() {
         fields: [Field.text('a"b')],
         fts: const FtsSpec(['a"b']),
       );
-      expect(openPocket(stores: [withQuote]),
-          throwsA(isA<sqlite.SqliteException>()));
+      expect(() => DdlCompiler(caps).compile(withQuote),
+          throwsA(isA<SchemaRegistrationError>()));
+    });
 
-      final reserved = CollectionSchema<Object?>(
-        name: 't',
+    test('FTS keyword field names are quoted and searchable end-to-end',
+        () async {
+      final schema = CollectionSchema<Object?>(
+        name: 'notes',
         version: 1,
-        fields: [Field.text('select')],
-        fts: const FtsSpec(['select']),
+        fields: [
+          Field.text('order', required: true),
+          Field.text('body'),
+        ],
+        fts: const FtsSpec(['order', 'body']),
       );
-      expect(openPocket(stores: [reserved]),
-          throwsA(isA<sqlite.SqliteException>()));
+      final compiled = DdlCompiler(caps).compile(schema);
+      final ftsDdl = compiled.ftsDdl.join('\n');
+      // The keyword column is quoted in the fts5 declaration...
+      expect(compiled.ftsDdl.first, contains('"order", "body"'));
+      // ...and in every trigger column list.
+      expect(ftsDdl, contains('(rowid, "order", "body")'));
+      expect(ftsDdl, contains('("notes_fts", rowid, "order", "body")'));
+      // new./old. references remain quoted.
+      expect(ftsDdl, contains('new."order"'));
+      expect(ftsDdl, contains('old."order"'));
+
+      final pocket = await openPocket(stores: [schema]);
+      addTearDown(pocket.close);
+      final id = generateRecordId();
+      await pocket.collection('notes').put({
+        'id': id,
+        'order': 'ship the fts quoting fix',
+        'body': 'quoted column names in triggers',
+      });
+      final results =
+          await pocket.collection('notes').search('quoting').limit(10).fetch();
+      expect(results, hasLength(1));
+      expect(results.first.id, id);
     });
 
     test('FTS unicode field names open successfully', () async {
@@ -501,20 +532,32 @@ void main() {
       expect(ix, isNot(contains('hidden')));
     });
 
-    test('double quotes in identifiers are escaped', () {
+    test(
+        'double quotes in store names are escaped, field names with quotes '
+        'are rejected', () {
       final schema = CollectionSchema<Object?>(
         name: 'we"ird',
         version: 1,
-        fields: [Field.text('co"l')],
+        fields: [Field.text('col')],
         indexes: const [
-          IndexSpec(['co"l'])
+          IndexSpec(['col'])
         ],
       );
       final compiled = DdlCompiler(caps).compile(schema);
       expect(compiled.tableDdl, contains('"we""ird"'));
-      expect(compiled.tableDdl, contains('"co""l" TEXT'));
-      expect(compiled.indexDdl.single, contains('"co""l"'));
+      expect(compiled.tableDdl, contains('"col" TEXT'));
+      expect(compiled.indexDdl.single, contains('"col"'));
       expect(compiled.tableDdl, isNot(contains('"we"ird"')));
+
+      // Field names no longer smuggle quotes: the strict identifier policy
+      // rejects them at registration instead of relying on escaping.
+      final badField = CollectionSchema<Object?>(
+        name: 't',
+        version: 1,
+        fields: [Field.text('co"l')],
+      );
+      expect(() => DdlCompiler(caps).compile(badField),
+          throwsA(isA<SchemaRegistrationError>()));
     });
 
     test('FTS table and trigger names follow the store name', () {
@@ -553,7 +596,8 @@ void main() {
       expect(p.storeNames, containsAll(['alpha', 'beta']));
     });
 
-    test('enum literal with a quote survives CREATE TABLE and enforces the '
+    test(
+        'enum literal with a quote survives CREATE TABLE and enforces the '
         'CHECK at write time', () async {
       final schema = CollectionSchema<Object?>(
         name: 't',
@@ -586,29 +630,28 @@ void main() {
           pocket.db.execute(
               "INSERT INTO t (id, e, archived, hidden) VALUES (?, 'out', 0, 0)",
               [generateRecordId()]),
-          throwsA(isA<sqlite.SqliteException>().having(
-              (e) => e.message,
-              'message',
-              contains('CHECK constraint failed'))));
+          throwsA(isA<sqlite.SqliteException>().having((e) => e.message,
+              'message', contains('CHECK constraint failed'))));
     });
 
-    test('ref field already covered by a declared index skips the auto '
+    test(
+        'ref field already covered by a declared index skips the auto '
         'index', () {
       final compiled = DdlCompiler(caps).compile(CollectionSchema(
         name: 't',
         version: 1,
-        fields: [
-          Field.text('name'),
-          Field.ref('owner_id', to: 'owners')
+        fields: [Field.text('name'), Field.ref('owner_id', to: 'owners')],
+        indexes: const [
+          IndexSpec(['owner_id'])
         ],
-        indexes: const [IndexSpec(['owner_id'])],
       ));
       final ownerIndexes =
           compiled.indexDdl.where((d) => d.contains('"owner_id"'));
       expect(ownerIndexes, hasLength(1),
           reason: 'the declared index exists; no duplicate auto index is '
               'emitted for the same name');
-      expect(ownerIndexes.single, contains('CREATE INDEX "ix_t_live_owner_id"'));
+      expect(
+          ownerIndexes.single, contains('CREATE INDEX "ix_t_live_owner_id"'));
     });
 
     test('ref field covered by a composite index also skips the auto index',
@@ -616,11 +659,10 @@ void main() {
       final compiled = DdlCompiler(caps).compile(CollectionSchema(
         name: 't',
         version: 1,
-        fields: [
-          Field.text('name'),
-          Field.ref('owner_id', to: 'owners')
+        fields: [Field.text('name'), Field.ref('owner_id', to: 'owners')],
+        indexes: const [
+          IndexSpec(['owner_id', 'name'])
         ],
-        indexes: const [IndexSpec(['owner_id', 'name'])],
       ));
       final ownerIndexes =
           compiled.indexDdl.where((d) => d.contains('"owner_id"'));

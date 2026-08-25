@@ -93,6 +93,7 @@ class Migrator {
         .whereType<String>()
         .toSet();
     for (final f in m.addedFields) {
+      Field.validateName(f.name);
       if (f.required) {
         throw SchemaRegistrationError(
             'Additive migration on "${schema.name}" cannot add a required column '
@@ -134,8 +135,7 @@ class Migrator {
       for (final r in rows) {
         lastRowid = r['rowid']! as int;
         final logical = decodeDbRow(schema, r,
-            cipher: pocket.fieldCipher,
-            cryptoProvider: pocket.cryptoProvider);
+            cipher: pocket.fieldCipher, cryptoProvider: pocket.cryptoProvider);
         final values = m.transform!(logical);
         if (values.isNotEmpty) updates.add((lastRowid, values));
       }
@@ -435,16 +435,14 @@ class Migrator {
     final name = f.name;
     final got = value.runtimeType;
     return switch (violation) {
-      KindViolation.textExpected =>
-        'Field "$name" must be a string, got $got.',
+      KindViolation.textExpected => 'Field "$name" must be a string, got $got.',
       KindViolation.intExpected =>
         'Field "$name" must be an integer, got $got.',
       KindViolation.numberExpected =>
         'Field "$name" must be a number, got $got.',
       KindViolation.boolExpected =>
         'Field "$name" must be a boolean, got $got.',
-      KindViolation.jsonExpected =>
-        'Field "$name" must be JSON, got $got.',
+      KindViolation.jsonExpected => 'Field "$name" must be JSON, got $got.',
       KindViolation.jsonListExpected =>
         'Field "$name" must be a JSON array, got $got.',
       KindViolation.enumValueRejected =>
