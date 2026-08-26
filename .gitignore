@@ -28,6 +28,7 @@ benchmark/*.dll
 # auditing and planning documents
 _*.md
 /probe_*.dart
+/_probe
 
 # secrets
 secret.dart
