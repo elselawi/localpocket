@@ -214,6 +214,12 @@ class PbRealtime {
     );
     await _sessionDone!.future;
     _sub = null;
+    if (failed) {
+      // The subscribe POST never succeeded, so this attempt must count as a
+      // failure: throwing makes _runLoop grow the reconnect backoff instead
+      // of resetting it to the base delay.
+      throw HttpTransportException('realtime subscribe failed');
+    }
   }
 
   Future<void> _handleFrame(_SseFrame frame, Token token) async {
