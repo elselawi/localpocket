@@ -260,7 +260,6 @@ class Outbox {
             opId: opId,
             createdAt: createdAt,
             updatedAt: now,
-            dependsOnOp: outboxOp?.dependsOnOp,
           ));
     } else {
       await exec.execute(
