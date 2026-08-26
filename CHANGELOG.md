@@ -69,6 +69,12 @@
   local edits and left dangling `op_id`s. Pruning is now strictly clean-only
   (settled or orphaned ops are removed; every pending op is retained).
   `maxEntries` is kept for API compatibility but is no longer enforced.
+- The `sqlite3` dependency is now pinned to the tested 3.x major
+  (`^3.5.1`, was `>=2.4.0 <4.0.0`), so the FFI foundation can no longer float
+  across a major version boundary between resolutions. The release gate
+  `tool/dependency_check.dart` now fails any runtime dependency constraint
+  that spans more than one major version (policy shared with
+  `tool/dependency_policy.dart`).
 
 ## 0.1.1
 

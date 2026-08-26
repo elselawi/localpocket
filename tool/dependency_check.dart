@@ -1,10 +1,14 @@
 import 'dart:io';
 import 'package:path/path.dart' as p;
+import 'dependency_policy.dart';
 import 'find_repo_root.dart';
 
 /// Dependency bounds check:
-/// 1. Verifies declared dependencies resolve cleanly.
+/// 1. Verifies no runtime dependency constraint spans more than one major
+///    version (a floating foundational dependency weakens reproducibility
+///    audits; see `dependency_policy.dart`).
 /// 2. Verifies `sqlite3` constraint in pubspec.yaml allows the version pinned in pubspec.lock.
+/// 3. Verifies declared dependencies resolve cleanly.
 void main(List<String> args) {
   final root = findRepoRoot();
   final pubspecFile = File(p.join(root.path, 'pubspec.yaml'));
@@ -18,6 +22,17 @@ void main(List<String> args) {
 
   final pubspecContent = pubspecFile.readAsStringSync();
   final lockContent = lockFile.readAsStringSync();
+
+  // Check that every runtime dependency stays within a single major version.
+  final violations = majorSpanViolations(pubspecContent);
+  if (violations.isNotEmpty) {
+    stderr.writeln('Dependency constraint spans multiple major versions:');
+    for (final violation in violations) {
+      stderr.writeln('  - $violation');
+    }
+    exitCode = 1;
+    return;
+  }
 
   // Check sqlite3 constraint
   final sqlitePubspecMatch = RegExp(
@@ -69,5 +84,6 @@ void main(List<String> args) {
     return;
   }
 
-  stdout.writeln('PASS: Dependency bounds & sqlite3 lockfile compatibility.');
+  stdout.writeln(
+      'PASS: Dependency bounds & sqlite3 lockfile compatibility (single-major constraints).');
 }
