@@ -37,6 +37,7 @@ export 'src/core/schema.dart'
         IndexSpec,
         IndexScope,
         FtsSpec,
+        FtsNormalization,
         StoreMigration,
         ConflictPolicy,
         MissingRemotePolicy,

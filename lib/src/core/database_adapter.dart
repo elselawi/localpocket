@@ -86,6 +86,17 @@ abstract class Database extends DatabaseExecutor {
 
   /// Executes a statement synchronously if the driver allows it.
   void executeSync(String sql, [List<Object?> parameters = const []]);
+
+  /// Registers a scalar SQL user function on the underlying connection.
+  ///
+  /// Used for the per-store FTS text normalizer. Implementations delegate to
+  /// `CommonDatabase.createFunction`, which is available on both native (FFI)
+  /// and web (wasm) drivers.
+  void createFunction({
+    required String functionName,
+    required Object? Function(Object? arguments) function,
+    bool deterministic = false,
+  });
 }
 
 /// A direct synchronous-backed implementation of [Database] wrapping [CommonDatabase].
@@ -277,6 +288,24 @@ class DirectSqliteDatabase implements Database {
     }
     executeSync(sql.toString(), params);
     return _db.updatedRows;
+  }
+
+  @override
+  void createFunction({
+    required String functionName,
+    required Object? Function(Object? arguments) function,
+    bool deterministic = false,
+  }) {
+    _db.createFunction(
+      functionName: functionName,
+      function: (args) => function(args.isEmpty ? null : args.first),
+      argumentCount: const AllowedArgumentCount(1),
+      deterministic: deterministic,
+      // MUST be false: SQLITE_DIRECTONLY functions cannot be called from
+      // trigger bodies, and the FTS write-side normalizer runs exclusively
+      // inside generated triggers.
+      directOnly: false,
+    );
   }
 
   @override

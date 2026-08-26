@@ -1,6 +1,8 @@
 /// Schema declaration model.
 library;
 
+import 'package:collection/collection.dart' show ListEquality;
+
 import 'errors.dart';
 
 /// Reconstructs a schema model from JSON, converting any malformed value
@@ -13,7 +15,9 @@ import 'errors.dart';
 T _parseSchemaJson<T>(T Function() build) {
   try {
     return build();
-  } on StorageError {
+  } on LocalPocketError {
+    // Typed localpocket errors (validation, registration rules, nested
+    // corruption) are rethrown verbatim — never double-wrapped.
     rethrow;
   } catch (e) {
     throw StorageError('Malformed schema JSON: $e');
@@ -275,19 +279,174 @@ class IndexSpec {
 }
 
 /// Enables FTS5 over the declared text fields in [fields].
+///
+/// Two optional, independently toggleable extensions:
+///
+/// - [fuzzy]: indexes every contiguous 3-character sequence (the FTS5 trigram
+///   tokenizer) so queries match substrings anywhere in a value instead of
+///   whole tokens only. Requires SQLite >= 3.34.0 and a larger index.
+/// - [normalize]: consumer-declared character parity rules applied to both
+///   the indexed text and the search term, e.g. mapping Arabic alef forms
+///   (`أ`, `إ`, `آ`) to a single canonical letter (`ا`) so they all match.
 class FtsSpec {
   /// Creates an FTS5 configuration.
-  const FtsSpec(this.fields);
+  const FtsSpec(this.fields,
+      {this.fuzzy = false, this.normalize = const FtsNormalization()});
 
   /// Declared fields indexed for full-text search.
   final List<String> fields;
 
+  /// Whether substring (trigram) matching is enabled.
+  final bool fuzzy;
+
+  /// Character parity rules applied before tokenization.
+  ///
+  /// An identity normalization (no rules) compiles to plain triggers.
+  final FtsNormalization normalize;
+
+  /// Whether this spec declares any parity rules.
+  bool get hasNormalization => normalize.rules.isNotEmpty;
+
   /// Serializes this FTS config to a JSON-compatible map.
-  Map<String, Object?> toJson() => {'fields': fields};
+  Map<String, Object?> toJson() => {
+        'fields': fields,
+        if (fuzzy) 'fuzzy': true,
+        if (hasNormalization) 'normalize': normalize.toJson(),
+      };
 
   /// Reconstructs an FTS config from a JSON-compatible map.
-  static FtsSpec fromJson(Map<String, Object?> j) =>
-      _parseSchemaJson(() => FtsSpec((j['fields']! as List).cast<String>()));
+  static FtsSpec fromJson(Map<String, Object?> j) => _parseSchemaJson(() {
+        final normalizeRaw = j['normalize'];
+        return FtsSpec(
+          (j['fields']! as List).cast<String>(),
+          fuzzy: j['fuzzy'] == true,
+          normalize: normalizeRaw is Map
+              ? FtsNormalization.fromJson(normalizeRaw.cast<String, Object?>())
+              : const FtsNormalization(),
+        );
+      });
+
+  /// Two specs are equal when fields, tokenizer mode, and parity rules all
+  /// match — the exact inputs the compiled DDL depends on.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FtsSpec &&
+          fuzzy == other.fuzzy &&
+          const ListEquality<String>().equals(fields, other.fields) &&
+          normalize == other.normalize;
+
+  @override
+  int get hashCode => Object.hash(
+        Object.hashAll(fields),
+        fuzzy,
+        normalize,
+      );
+}
+
+/// Consumer-declared character parity rules for full-text search.
+///
+/// Each rule maps one source character to its replacement string (usually a
+/// single character; longer strings are rejected to keep token offsets
+/// stable). The same pure-Dart transform is applied on BOTH sides of the
+/// index: at write time inside generated FTS triggers via a per-store SQL
+/// user function (`lp_norm_<store>`), and at query time in pure Dart inside
+/// [SearchBuilder] — so the normalized term rides in plan args and crosses
+/// the web worker boundary without needing a UDF there.
+///
+/// Example (Arabic alef unification):
+///
+/// ```dart
+/// const FtsNormalization(rules: {'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ة': 'ه'})
+/// ```
+class FtsNormalization {
+  /// Creates parity rules from a character → replacement map. Prefer
+  /// [FtsNormalization.fromMap] for user input (it validates and copies);
+  /// this const constructor trusts its arguments.
+  const FtsNormalization({this.rules = const {}});
+
+  /// Builds a validated, unmodifiable copy of [rules].
+  factory FtsNormalization.fromMap(Map<String, String> rules) {
+    for (final e in rules.entries) {
+      validateRule(e.key, e.value);
+    }
+    return FtsNormalization(rules: Map.unmodifiable(rules));
+  }
+
+  /// The declared rules. Iteration order is preserved and deterministic.
+  final Map<String, String> rules;
+
+  /// Validates one parity rule: single-character source, non-empty
+  /// replacement of at most 4 characters.
+  static void validateRule(String from, String to) {
+    if (from.runes.length != 1) {
+      throw SchemaRegistrationError(
+          'FtsNormalization keys must be single characters, got "$from".');
+    }
+    if (to.isEmpty || to.length > 4) {
+      throw SchemaRegistrationError(
+          'FtsNormalization replacement for "$from" must be 1-4 characters.');
+    }
+  }
+
+  /// Whether any rule is declared.
+  bool get isEmpty => rules.isEmpty;
+
+  /// Applies the rules to [text]. Rules are applied in declaration order;
+  /// output characters are never re-normalized by later rules.
+  String normalize(String text) {
+    var result = text;
+    for (final e in rules.entries) {
+      if (!result.contains(e.key)) continue;
+      result = result.replaceAll(e.key, e.value);
+    }
+    return result;
+  }
+
+  /// Serializes these rules to a JSON-compatible map (structured-clone-safe,
+  /// so they persist in `lp_stores.definition_json` and cross the web worker
+  /// boundary).
+  Map<String, Object?> toJson() => {'rules': rules};
+
+  /// Reconstructs parity rules from a JSON-compatible map.
+  static FtsNormalization fromJson(Map<String, Object?> j) =>
+      _parseSchemaJson(() {
+        final raw = j['rules']! as Map<Object?, Object?>;
+        final parsed = <String, String>{};
+        for (final e in raw.entries) {
+          final key = e.key! as String;
+          final value = e.value! as String;
+          validateRule(key, value);
+          parsed[key] = value;
+        }
+        return FtsNormalization(rules: Map.unmodifiable(parsed));
+      });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FtsNormalization &&
+          _mapsEqual(rules, other.rules);
+
+  static bool _mapsEqual(Map<String, String> a, Map<String, String> b) {
+    if (a.length != b.length) return false;
+    for (final e in a.entries) {
+      if (b[e.key] != e.value) return false;
+    }
+    return true;
+  }
+
+  /// Order-independent: two normalizations that are [==] equal always
+  /// produce the same hash regardless of rule declaration order.
+  @override
+  int get hashCode {
+    final keys = rules.keys.toList()..sort();
+    return Object.hashAll(
+        [for (final k in keys) Object.hash(k, rules[k])]);
+  }
+
+  @override
+  String toString() => 'FtsNormalization(${rules.length} rules)';
 }
 
 /// A store schema migration step.

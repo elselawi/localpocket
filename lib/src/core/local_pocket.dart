@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:collection/collection.dart' show ListEquality;
 import 'package:meta/meta.dart';
 import 'database_adapter.dart';
 import 'database_factory.dart';
@@ -12,6 +13,7 @@ import 'change_bus.dart';
 import 'cipher.dart';
 import 'ddl_compiler.dart';
 import 'errors.dart';
+import 'fts_normalizer.dart';
 import 'migrator.dart';
 import 'perf_counters.dart';
 import 'schema.dart';
@@ -426,6 +428,11 @@ class LocalPocket with ChangeBusAwareLP {
   /// Registers [schema], creating or migrating its SQLite table.
   Future<void> registerStore(CollectionSchema<Object?> schema) async {
     final compiled = DdlCompiler(capabilities).compile(schema);
+    // The write-side normalizer must exist before ANY trigger can fire
+    // (fresh create below, or the FTS-rebuild / destructive paths).
+    if (schema.fts != null) {
+      registerFtsNormalizer(db, schema.name, schema.fts!.normalize);
+    }
     final existing = await db.query('lp_stores',
         where: 'store = ?', whereArgs: [schema.name], limit: 1);
     if (existing.isEmpty) {
@@ -454,6 +461,7 @@ class LocalPocket with ChangeBusAwareLP {
       if (current < schema.version) {
         await Migrator.migrateStore(this, schema, fromVersion: current);
       }
+      await _rebuildFtsIfConfigChanged(schema);
       await db.update(
           'lp_stores',
           {
@@ -475,6 +483,79 @@ class LocalPocket with ChangeBusAwareLP {
       return await d.backupFileExists!(path);
     }
     return false;
+  }
+
+  /// Recreates the FTS index when the persisted configuration differs from
+  /// the newly registered schema (tokenizer change, different fields, or new
+  /// normalization rules). The FTS table and its triggers are dropped and
+  /// rebuilt from the live rows, and a ledger row records the rebuild.
+  Future<void> _rebuildFtsIfConfigChanged(
+      CollectionSchema<Object?> schema) async {
+    final stored = await db.query('lp_stores',
+        columns: ['definition_json'],
+        where: 'store = ?',
+        whereArgs: [schema.name],
+        limit: 1);
+    if (stored.isEmpty) return;
+    CollectionSchema<Object?>? old;
+    try {
+      final raw = stored.first['definition_json'];
+      final decoded = raw is String ? jsonDecode(raw) as Object? : raw;
+      old = CollectionSchema<Object?>.fromJson(
+          Map<String, Object?>.from(decoded! as Map));
+    } on StorageError {
+      // Unreadable definition: leave the existing index alone; a later
+      // destructive migration is the recovery path.
+      return;
+    }
+    final before = old.fts;
+    final after = schema.fts;
+    final same = identical(before, after) ||
+        (before == null && after == null) ||
+        (before != null &&
+            after != null &&
+            const ListEquality<String>().equals(before.fields, after.fields) &&
+            before.fuzzy == after.fuzzy &&
+            before.normalize == after.normalize);
+    if (same) return;
+
+    final sw = Stopwatch()..start();
+    // Drop old triggers first: they are recreated by compiled.ftsDdl below
+    // and CREATE TRIGGER fails if an old one is still present.
+    for (final suffix in ['_ai', '_ad', '_au']) {
+      await db.execute(
+          'DROP TRIGGER IF EXISTS ${DdlCompiler.quote(schema.name + suffix)}');
+    }
+    if (before != null) {
+      await db.execute(
+          'DROP TABLE IF EXISTS ${DdlCompiler.quote('${schema.name}_fts')}');
+    }
+    if (after != null) {
+      for (final f in DdlCompiler(capabilities).compile(schema).ftsDdl) {
+        await db.execute(f);
+      }
+      // NOTE: the fts5 'rebuild' command re-tokenizes RAW content-table text
+      // and would bypass the trigger normalizers entirely. Repopulate
+      // explicitly through the same lp_norm_<store> expressions the triggers
+      // use so the reindexed terms match query-side normalization.
+      await db.execute("INSERT INTO ${DdlCompiler.quote('${schema.name}_fts')}"
+          "(${DdlCompiler.quote('${schema.name}_fts')}) VALUES('delete-all')");
+      final fts = schema.fts!;
+      final colList = fts.fields.map(DdlCompiler.quote).join(', ');
+      final selectList = fts.fields
+          .map((c) => ftsTriggerExpr(schema.name, fts.normalize, '', c))
+          .join(', ');
+      await db.execute('INSERT INTO ${DdlCompiler.quote('${schema.name}_fts')}'
+          '(rowid, $colList) SELECT rowid, $selectList FROM '
+          '${DdlCompiler.quote(schema.name)}');
+    }
+    sw.stop();
+    await Migrator.recordMigration(db,
+        name: 'fts:${schema.name}',
+        from: schema.version,
+        to: schema.version,
+        durationMs: sw.elapsedMilliseconds,
+        now: now);
   }
 
   /// Removes the destructive-migration backup file at [path] if it exists,

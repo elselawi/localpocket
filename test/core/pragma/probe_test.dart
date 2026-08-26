@@ -351,7 +351,6 @@ void main() {
 /// A configurable fake [Database] whose `rawQuery` answers exactly the
 /// statements `SqliteCapabilities.probe` issues.
 class _FakeProbeDatabase implements Database {
-
   _FakeProbeDatabase({
     required this.version,
     required this.compileOptions,
@@ -406,6 +405,13 @@ class _FakeProbeDatabase implements Database {
 
   @override
   Future<void> close() async {}
+
+  @override
+  void createFunction({
+    required String functionName,
+    required Object? Function(Object? arguments) function,
+    bool deterministic = false,
+  }) {}
 
   @override
   Future<int> delete(String table, {String? where, List<Object?>? whereArgs}) =>

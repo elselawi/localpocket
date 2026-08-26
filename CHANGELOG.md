@@ -1,5 +1,21 @@
 ## Unreleased
 
+- **FTS: fuzzy (substring) search and consumer-declared character parity
+  rules.** `FtsSpec` gains two independently toggleable options, both off by
+  default: `fuzzy: true` switches the store's FTS table to SQLite's trigram
+  tokenizer so queries match substrings anywhere in a value instead of whole
+  tokens only (requires SQLite >= 3.34.0; terms under 3 characters throw a
+  typed `ValidationException` since trigrams cannot match them), and
+  `normalize: FtsNormalization(rules: {...})` applies consumer-declared
+  character equivalences to BOTH the indexed text and the query — e.g.
+  `{'أ': 'ا', 'إ': 'ا', 'آ': 'ا'}` makes all Arabic alef forms match each
+  other. Normalization runs at write time inside generated FTS triggers via
+  a per-store SQL user function and at query time in pure Dart before the
+  term is bound, so the web compiled-plan transport works unchanged.
+  Changing an FTS configuration on an existing store now rebuilds the index
+  automatically at registration (ledgered in `lp_migrations` as
+  `fts:<store>`).
+
 - **BREAKING (field encryption):** ciphertext format is now versioned and
   AAD-bound, and the cipher no longer ships a hand-rolled AES engine.
   `AesGcmFieldCipher` output is `0x01 ‖ nonce(12) ‖ ciphertext ‖ tag(16)`

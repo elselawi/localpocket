@@ -2,6 +2,7 @@ import 'package:collection/collection.dart';
 
 import 'capabilities.dart';
 import 'errors.dart';
+import 'fts_normalizer.dart';
 import 'schema.dart';
 
 /// The compiled artifact of a [CollectionSchema]: DDL statements plus warnings.
@@ -114,11 +115,25 @@ class DdlCompiler {
         throw FtsUnavailableError(
             'FTS5 is not available on this SQLite engine.');
       }
+      if (fts.fuzzy &&
+          !SqliteCapabilities.versionAtLeast(
+              capabilities.sqliteVersion, 3, 34)) {
+        throw FtsUnavailableError(
+            'Fuzzy (trigram) search requires SQLite >= 3.34.0 '
+            '(found ${capabilities.sqliteVersion}).');
+      }
       for (final c in fts.fields) {
         if (!names.contains(c)) {
           throw SchemaRegistrationError(
               'FTS field "$c" is not a declared field.');
         }
+      }
+      // Re-validate persisted rules defensively (fromJson already validates;
+      // this covers const-constructed specs). Keys are character data passed
+      // as bound arguments to the normalizer UDF — they are NOT SQL
+      // identifiers, so any single character is legal.
+      for (final e in fts.normalize.rules.entries) {
+        FtsNormalization.validateRule(e.key, e.value);
       }
     }
     for (final f in schema.fields) {
@@ -216,13 +231,21 @@ class DdlCompiler {
     final store = schema.name;
     final table = '${store}_fts';
     final cols = fts.fields.map(quote).toList();
-    final newRefs = cols.map((c) => 'new.$c').join(', ');
-    final oldRefs = cols.map((c) => 'old.$c').join(', ');
+    // Normalization wraps each column reference in the per-store UDF so the
+    // indexed text is computed from normalized characters. With identity
+    // rules the expressions collapse to plain column references.
+    final norm = fts.normalize;
+    String expr(String side, String c) => ftsTriggerExpr(store, norm, side, c);
+    final newRefs = fts.fields.map((c) => expr('new', c)).join(', ');
+    final oldRefs = fts.fields.map((c) => expr('old', c)).join(', ');
+    final tail = fts.fuzzy
+      ? ",\n  tokenize = 'trigram'\n);"
+      : ');';
     out.add('CREATE VIRTUAL TABLE ${quote(table)} USING fts5(\n'
         '  ${cols.join(', ')},\n'
         "  content = '$store',\n"
         "  content_rowid = 'rowid'\n"
-        ');');
+      '$tail');
 
     out.add(
         'CREATE TRIGGER ${quote('${store}_ai')} AFTER INSERT ON ${quote(store)} BEGIN\n'

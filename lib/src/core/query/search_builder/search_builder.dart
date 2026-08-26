@@ -105,11 +105,19 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
   }
 
   (String, List<Object?>) _compile({int? limitOverride}) {
-    _validateSearchTerm(_term);
+    // Query-side parity: the term passes through the same normalization the
+    // write-side triggers applied, so declared equivalences (e.g. Arabic alef
+    // forms) match regardless of which form is searched. The normalized term
+    // rides in plan args — no UDF needed at query time.
+    final normalizedTerm = _schema.fts!.normalize.normalize(_term);
+    _validateSearchTerm(normalizedTerm);
+    if (_schema.fts!.fuzzy) {
+      _validateFuzzyTerm(normalizedTerm);
+    }
     final store = _schema.name;
     final ftsTable = '${store}_fts';
     final where = <String>['${DdlCompiler.quote(ftsTable)} MATCH ?'];
-    final args = <Object?>[_term];
+    final args = <Object?>[normalizedTerm];
 
     if (!_includeArchived) where.add('b.archived = 0');
     if (!_includeHidden) where.add('b.hidden = 0');
@@ -158,6 +166,20 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
         trimmed.startsWith('-') ||
         RegExp(r'\b(AND|OR|NOT)\s*$', caseSensitive: false).hasMatch(trimmed)) {
       throw ValidationException('Invalid search term: $term');
+    }
+  }
+
+  /// Validates the fuzzy-mode length contract. The trigram tokenizer indexes
+  /// contiguous 3-character sequences; a shorter query cannot match any row,
+  /// so it is rejected with a typed error instead of silently returning zero
+  /// results. Multi-term queries are checked per token.
+  static void _validateFuzzyTerm(String term) {
+    for (final token in term.split(RegExp(r'\s+'))) {
+      if (token.isNotEmpty && token.runes.length < 3) {
+        throw ValidationException(
+            'Fuzzy search terms must be at least 3 characters '
+            '(trigram index): "$token".');
+      }
     }
   }
 
