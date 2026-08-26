@@ -27,8 +27,10 @@ String generateRecordId({Random? random}) {
   final rng = random ?? _recordIdRandom;
   final counter = ++_idCounter;
   final prefix = counter.toRadixString(36).padLeft(8, '0');
-  final suffix = List.generate(7, (_) => _idAlphabet[rng.nextInt(_idAlphabet.length)]).join();
-  return prefix + suffix;
+  final suffix =
+      List.generate(7, (_) => _idAlphabet[rng.nextInt(_idAlphabet.length)])
+          .join();
+  return (prefix + suffix).substring(0, 15);
 }
 
 /// Returns whether [id] has the required PocketBase record-ID format.
