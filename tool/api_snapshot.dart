@@ -15,7 +15,8 @@ void main(List<String> args) {
   final entrypoints = [
     'lib/localpocket.dart',
     'lib/pocketbase.dart',
-    'lib/sync.dart'
+    'lib/sync.dart',
+    'lib/typed.dart'
   ];
   final buffer = StringBuffer();
   buffer.writeln('# LocalPocket Public API Snapshot');

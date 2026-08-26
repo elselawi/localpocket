@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:localpocket/localpocket.dart';
 
 import '../../core/app_state.dart';
+import '../../core/tasks.dart';
 import '../helpers.dart';
 import '../widgets/demo_panel.dart';
 
@@ -17,7 +18,7 @@ class _CrudPageState extends State<CrudPage> {
   final _titleCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   int _priority = 3;
-  String _status = 'todo';
+  TaskStatus _status = TaskStatus.todo;
   bool _loading = false;
   String? _result;
   Duration? _lastDuration;
@@ -66,19 +67,21 @@ class _CrudPageState extends State<CrudPage> {
     setState(() => _loading = true);
     final sw = Stopwatch()..start();
     try {
-      await db.collection('tasks').put({
-        'title': title,
-        'description': _descCtrl.text.trim().isEmpty
-            ? null
-            : _descCtrl.text.trim(),
-        'status': _status,
-        'priority': _priority,
-        'completed': false,
-        'due_at': DateTime.now()
-            .add(Duration(days: _priority * 2))
-            .millisecondsSinceEpoch,
-        'tags': <String>['demo'],
-      });
+      final tasks = db.store(PlaygroundTasks.instance);
+      await tasks.put(
+        (draft) => draft
+          ..set(PlaygroundTasks.title)(title)
+          ..set(PlaygroundTasks.description)(
+            _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
+          )
+          ..set(PlaygroundTasks.status)(_status)
+          ..set(PlaygroundTasks.priority)(_priority)
+          ..set(PlaygroundTasks.completed)(false)
+          ..set(PlaygroundTasks.dueAt)(
+            DateTime.now().toUtc().add(Duration(days: _priority * 2)),
+          )
+          ..set(PlaygroundTasks.tags)(<String>['demo']),
+      );
       _titleCtrl.clear();
       _descCtrl.clear();
       sw.stop();
@@ -105,7 +108,12 @@ class _CrudPageState extends State<CrudPage> {
     if (db == null) return;
     final sw = Stopwatch()..start();
     try {
-      await db.collection('tasks').patch(id, {'completed': completed});
+      await db
+          .store(PlaygroundTasks.instance)
+          .patch(
+            id,
+            (draft) => draft..set(PlaygroundTasks.completed)(completed),
+          );
       sw.stop();
       setState(() {
         _result =
@@ -217,18 +225,25 @@ class _CrudPageState extends State<CrudPage> {
                 Row(
                   children: [
                     Expanded(
-                      child: DropdownButtonFormField<String>(
+                      child: DropdownButtonFormField<TaskStatus>(
                         initialValue: _status,
                         decoration: const InputDecoration(labelText: 'Status'),
                         items: const [
-                          DropdownMenuItem(value: 'todo', child: Text('todo')),
                           DropdownMenuItem(
-                            value: 'in_progress',
+                            value: TaskStatus.todo,
+                            child: Text('todo'),
+                          ),
+                          DropdownMenuItem(
+                            value: TaskStatus.inProgress,
                             child: Text('in_progress'),
                           ),
-                          DropdownMenuItem(value: 'done', child: Text('done')),
+                          DropdownMenuItem(
+                            value: TaskStatus.done,
+                            child: Text('done'),
+                          ),
                         ],
-                        onChanged: (v) => setState(() => _status = v ?? 'todo'),
+                        onChanged: (v) =>
+                            setState(() => _status = v ?? TaskStatus.todo),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -350,18 +365,19 @@ class _CrudPageState extends State<CrudPage> {
   }
 
   static const _createCode = '''
-final id = await tasks.put({
-  'title': 'Write release notes',
-  'priority': 3,
-  'status': 'todo',
-  'completed': false,
-  'due_at': DateTime.now().millisecondsSinceEpoch,
-  'tags': ['demo'],
-});
+final tasks = db.store(PlaygroundTasks.instance);
+await tasks.put((draft) => draft
+  ..set(PlaygroundTasks.title)('Write release notes')
+  ..set(PlaygroundTasks.priority)(3)
+  ..set(PlaygroundTasks.status)(TaskStatus.todo)
+  ..set(PlaygroundTasks.completed)(false));
 ''';
 
   static const _lifecycleCode = '''
-await tasks.patch(id, {'completed': true}); // partial update
+await tasks.patch(
+  id,
+  (draft) => draft..set(PlaygroundTasks.completed)(true),
+);
 await tasks.archive(id);   // soft delete (archived=true)
 await tasks.restore(id);   // restore
 await tasks.purge(id);     // hard local delete

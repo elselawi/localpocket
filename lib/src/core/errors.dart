@@ -2,9 +2,9 @@ import 'package:sqlite3/common.dart';
 
 /// Root of all typed errors thrown by localpocket.
 sealed class LocalPocketError implements Exception {
-
   /// Creates a LocalPocket error.
   LocalPocketError(this.message);
+
   /// Human-readable description of the failure.
   final String message;
 
@@ -99,6 +99,20 @@ class DestructiveMigrationRefusedError extends LocalPocketError {
 class ReadOnlyTxError extends LocalPocketError {
   ReadOnlyTxError([String? message])
       : super(message ?? 'This Tx is read-only.');
+}
+
+/// A typed store definition was bound under a name already owned by a
+/// different definition instance.
+///
+/// The typed layer's registry keys stores by name and enforces uniqueness
+/// by **reference identity**: every bind of a given name must pass the
+/// identical definition instance, or this error is thrown naming the
+/// store. Sharing the one canonical definition instance (the
+/// `StoreDef` private-constructor + static-instance convention) makes the
+/// mismatch unconstructible in practice; this error is the runtime
+/// backstop for definitions that ignore the convention.
+class TypedStoreMismatchError extends LocalPocketError {
+  TypedStoreMismatchError(super.message);
 }
 
 /// Translates a SQLite exception or error into a typed [LocalPocketError].

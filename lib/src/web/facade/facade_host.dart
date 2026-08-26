@@ -14,6 +14,7 @@ import 'dart:typed_data';
 
 import '../../core/change_bus.dart';
 import '../../core/schema.dart';
+import '../../typed/registry.dart';
 import '../lifecycle.dart';
 
 /// Host operations exposed to the web facade proxy classes.
@@ -38,6 +39,11 @@ abstract interface class WebFacadeHost {
 
   /// Resolves a registered store schema by name.
   CollectionSchema<Object?> schemaFor(String store);
+
+  /// The typed store registry backing typed store handles (`store(def)` and
+  /// `WebTx.store(def)`) — one per facade, keyed by store name, enforced by
+  /// reference identity.
+  TypedStoreRegistry get typedRegistry;
 
   /// Detailed committed record change events (old vs new, origin, action).
   Stream<RecordChangeEvent> get events;

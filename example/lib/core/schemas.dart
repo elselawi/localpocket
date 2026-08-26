@@ -1,10 +1,11 @@
 import 'package:localpocket/localpocket.dart';
 
+import 'tasks.dart';
+
 /// All collection schemas used by the playground.
 ///
-/// These demonstrate the package's real schema API: typed fields, secondary
-/// indexes, full-text search (FTS5), reference fields, field-level encryption
-/// flags, and conflict policies for sync.
+/// `tasks` is defined with the typed API; the other stores deliberately retain
+/// raw schemas to demonstrate that both access styles coexist.
 class PlaygroundSchemas {
   PlaygroundSchemas._();
 
@@ -23,26 +24,8 @@ class PlaygroundSchemas {
     ],
   );
 
-  /// Tasks col: FTS over title+description, indexed by (status, priority),
-  /// and a reference to `users.assigned_to`.
-  static final tasks = CollectionSchema(
-    name: 'tasks',
-    version: 1,
-    fields: [
-      Field.text('title', required: true),
-      Field.text('description'),
-      Field.enumValue('status', const ['todo', 'in_progress', 'done']),
-      Field.int('priority'),
-      Field.date('due_at'),
-      Field.bool('completed'),
-      Field.jsonList('tags'),
-      Field.ref('assigned_to', to: 'users'),
-    ],
-    indexes: const [
-      IndexSpec(['status', 'priority']),
-    ],
-    fts: const FtsSpec(['title', 'description']),
-  );
+  /// Tasks: the canonical typed definition compiles to the same engine schema.
+  static CollectionSchema<Object?> get tasks => PlaygroundTasks.instance.schema;
 
   /// Posts col with numeric counters + jsonList tags + conflict resolvers.
   static final posts = CollectionSchema(

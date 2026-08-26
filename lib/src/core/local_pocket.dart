@@ -27,6 +27,7 @@ import '../sync/conflicts.dart';
 import '../sync/sync_tables.dart';
 import '../files/blob_store.dart';
 import '../files/files_api.dart';
+import '../typed/typed.dart';
 
 /// Default clock: wall-clock epoch milliseconds.
 int _defaultNow() => DateTime.now().millisecondsSinceEpoch;
@@ -282,6 +283,10 @@ class LocalPocket with ChangeBusAwareLP {
 
   final Map<String, StoreTable> _tables = {};
   bool _closed = false;
+
+  /// The typed store registry backing [store] (and `Tx.store`): one per
+  /// [LocalPocket], keyed by store name, enforced by reference identity.
+  final TypedStoreRegistry typedRegistry = TypedStoreRegistry();
 
   /// Tracked `synchronous` pragma state so redundant transitions are skipped.
   /// Writes are serialized through the WriteQueue and the
@@ -589,6 +594,24 @@ class LocalPocket with ChangeBusAwareLP {
   Collection collection(String name) {
     _guardOutsideTx();
     return Collection.internal(this, requireTable(name));
+  }
+
+  /// Returns a typed handle for the store definition [def].
+  ///
+  /// The first `store` call binds [def] in this pocket's typed registry
+  /// (name-keyed, reference identity): re-binding the identical instance is
+  /// idempotent, and binding a different instance under an already-bound
+  /// name throws [TypedStoreMismatchError] naming the store. The store's
+  /// schema must have been registered at [LocalPocket.open] (`stores:`);
+  /// otherwise the engine's "no store registered" error surfaces unchanged.
+  ///
+  /// Inside a transaction, use `tx.store(def)` instead.
+  TypedCollection<S> store<S extends StoreDef<S>>(S def) {
+    _guardOutsideTx();
+    final table = requireTable(def.name);
+    def.verifyRegisteredSchema(table.schema);
+    typedRegistry.bind(def);
+    return TypedCollection<S>.native(def, Collection.internal(this, table));
   }
 
   /// Runs [action] in a serialized, single-writer transaction.

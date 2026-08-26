@@ -5,6 +5,7 @@ import 'database_adapter.dart';
 import 'change_bus.dart';
 import 'local_pocket.dart';
 import 'store.dart';
+import '../typed/typed.dart';
 
 /// A transaction handle. All mutation/read calls inside a
 /// transaction must go through [Tx]; calling `LocalPocket.*` directly inside a
@@ -72,6 +73,20 @@ class Tx {
   Collection collection(String name) =>
       Collection.internal(_pocket, _pocket.requireTable(name),
           exec: _executor, tx: this);
+
+  /// Scoped typed store access bound to this transaction.
+  ///
+  /// Binds against the **same** typed registry as `db.store` — a transaction
+  /// can never shadow the canonical definition instance.
+  TypedCollection<S> store<S extends StoreDef<S>>(S def) {
+    final table = _pocket.requireTable(def.name);
+    def.verifyRegisteredSchema(table.schema);
+    _pocket.typedRegistry.bind(def);
+    return TypedCollection<S>.native(
+      def,
+      Collection.internal(_pocket, table, exec: _executor, tx: this),
+    );
+  }
 
   /// Nested transaction = SAVEPOINT.
   /// `SAVEPOINT` / `ROLLBACK TO` / `RELEASE` explicitly.

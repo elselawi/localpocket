@@ -1,16 +1,13 @@
-# localpocket_playground
+# LocalPocket Playground
 
-A new Flutter project.
+An interactive Flutter showcase for LocalPocket CRUD, queries, watches, FTS,
+transactions, files, maintenance, and optional PocketBase synchronization.
 
-## Getting Started
+The `tasks` store is declared with the canonical typed definition in
+`lib/core/tasks.dart`. Its CRUD page uses `db.store(PlaygroundTasks.instance)`
+and typed drafts. Seeding, joined reads, and several advanced pages deliberately
+use `db.collection('tasks')` against that same store, while `users`, `posts`,
+`metrics`, and `secrets` retain raw schemas. This demonstrates gradual adoption:
+typed and raw access share unchanged SQLite storage and wire formats.
 
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Run the app with the normal Flutter workflow for the selected platform.

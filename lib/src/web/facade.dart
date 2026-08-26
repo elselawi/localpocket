@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/open_core.dart';
+import 'package:localpocket/src/web/facade/query/web_query_builder.dart';
+import 'package:localpocket/src/web/facade/search/web_search_builder.dart';
 import 'package:localpocket/src/web/facade/web_collections.dart';
 import 'package:localpocket/src/web/facade/web_conflicts.dart';
 import 'package:localpocket/src/web/facade/web_files.dart';
@@ -15,8 +17,14 @@ import 'package:web/web.dart' as web;
 import '../core/capabilities.dart';
 import '../core/change_bus.dart';
 import '../core/perf_counters.dart';
+import '../core/query/search_builder/search_builder.dart';
 import '../core/schema.dart';
+import '../core/store.dart';
 import '../sync/conflicts.dart';
+import '../typed/query_surface.dart';
+import '../typed/typed.dart';
+import '../typed/typed_collection.dart' show TypedStoreSurface;
+import '../typed/typed_search.dart' show TypedSearchSurface;
 import 'assets.dart';
 import 'cipher_bridge.dart';
 import 'connector.dart';
@@ -65,6 +73,11 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   /// Browser storage capabilities available to this facade.
   WebStorageCapabilities storageCapabilities;
   final Map<String, CollectionSchema<Object?>> _storeMap = {};
+
+  /// The typed store registry backing [store] (and `WebTx.store`): one per
+  /// facade, keyed by store name, enforced by reference identity.
+  @override
+  final TypedStoreRegistry typedRegistry = TypedStoreRegistry();
 
   /// Performance counters for this facade.
   final PerfCounters perf = PerfCounters();
@@ -310,6 +323,25 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   /// Returns a collection proxy for the registered store [name].
   WebCollection collection(String name) =>
       WebCollection.ins(this, schemaFor(name));
+
+  /// Returns a typed handle for the store definition [def].
+  ///
+  /// Mirrors the native `LocalPocket.store`: the first bind stores [def] in
+  /// this facade's typed registry (reference identity), and the store's
+  /// schema must have been registered at [open] (`stores:`). Inside a web
+  /// transaction, use `tx.store(def)` instead.
+  TypedCollection<S> store<S extends StoreDef<S>>(S def) {
+    if (_sender.isClosed) {
+      throw DatabaseWorkerClosedException('LocalPocket is closed.');
+    }
+    final registered = schemaFor(def.name);
+    def.verifyRegisteredSchema(registered);
+    typedRegistry.bind(def);
+    return TypedCollection<S>(
+      def,
+      _WebTypedSurface(WebCollection.ins(this, registered)),
+    );
+  }
 
   WebLocalPocketFiles? _files;
 
@@ -599,4 +631,186 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     await _remoteDb.dispose();
     _webSqlite.close();
   }
+}
+
+/// Web adapter for the typed layer's map-level seam: delegates verbatim to a
+/// [WebCollection] (no `durability` parameter — same as the raw web surface).
+final class _WebTypedSurface implements TypedStoreSurface {
+  _WebTypedSurface(this._collection);
+
+  final WebCollection _collection;
+
+  @override
+  Future<Map<String, Object?>?> get(String id) => _collection.get(id);
+
+  @override
+  Future<void> put(Map<String, Object?> record) => _collection.put(record);
+
+  @override
+  Future<void> putAll(List<Map<String, Object?>> records) =>
+      _collection.putAll(records);
+
+  @override
+  Future<void> patch(String id, Map<String, Object?> changes) =>
+      _collection.patch(id, changes);
+
+  @override
+  Future<void> patchAll(Map<String, Map<String, Object?>> patches) =>
+      _collection.patchAll(patches);
+
+  @override
+  Future<void> archive(String id) => _collection.archive(id);
+
+  @override
+  Future<void> restore(String id) => _collection.restore(id);
+
+  @override
+  Future<void> purge(String id) => _collection.purge(id);
+
+  @override
+  Stream<Map<String, Object?>?> watchOne(String id) => _collection.watchOne(id);
+
+  @override
+  TypedQuerySurface query() => _WebTypedQuerySurface(_collection.query());
+
+  @override
+  TypedSearchSurface search(String term) =>
+      _WebTypedSearchSurface(_collection.search(term));
+}
+
+final class _WebTypedQuerySurface implements TypedQuerySurface {
+  _WebTypedQuerySurface(this._builder);
+
+  final WebQueryBuilder _builder;
+
+  @override
+  void where(String field,
+      {Object? eq,
+      Object? neq,
+      List<Object?>? inValues,
+      (Object?, Object?)? between,
+      bool? isNull,
+      bool? isNotNull}) {
+    _builder.where(field,
+        eq: eq,
+        neq: neq,
+        inValues: inValues,
+        between: between,
+        isNull: isNull,
+        isNotNull: isNotNull);
+  }
+
+  @override
+  void whereRange(String field,
+      {Object? gt,
+      Object? gte,
+      Object? lt,
+      Object? lte,
+      String? startsWith,
+      String? endsWith,
+      String? contains}) {
+    _builder.where(field,
+        gt: gt,
+        gte: gte,
+        lt: lt,
+        lte: lte,
+        startsWith: startsWith,
+        endsWith: endsWith,
+        contains: contains);
+  }
+
+  @override
+  void orWhere(List<Map<String, Object?>> groups) {
+    _builder.orWhere(groups);
+  }
+
+  @override
+  void orderBy(String field, {bool desc = false}) {
+    _builder.orderBy(field, desc: desc);
+  }
+
+  @override
+  void select(List<String> fields) {
+    _builder.select(fields);
+  }
+
+  @override
+  void pageOptions(
+      {int? limit,
+      bool all = false,
+      bool? includeArchived,
+      bool? includeHidden}) {
+    if (limit != null) _builder.limit(limit);
+    if (all) _builder.all();
+    if (includeArchived ?? false) _builder.includeArchived();
+    if (includeHidden ?? false) _builder.includeHidden();
+  }
+
+  @override
+  Future<Page> fetch({String? cursor}) => _builder.fetch(cursor: cursor);
+
+  @override
+  Future<Page> keysetAfter(String cursor) => _builder.keysetAfter(cursor);
+
+  @override
+  Future<int> count() => _builder.count();
+
+  @override
+  Future<int> countDistinct(String field) => _builder.countDistinct(field);
+
+  @override
+  Future<List<Object?>> distinct(String field) => _builder.distinct(field);
+
+  @override
+  Future<List<String>> ids() => _builder.ids();
+
+  @override
+  Future<String> explain() => _builder.explain();
+
+  @override
+  Future<num?> aggregate(String fn, String field) => switch (fn) {
+        'sum' => _builder.sum(field),
+        'min' => _builder.min(field),
+        'max' => _builder.max(field),
+        'avg' => _builder.avg(field),
+        _ => throw ArgumentError.value(fn, 'fn', 'Unknown aggregate.'),
+      };
+
+  @override
+  (String, List<Object?>) debugCompile() => _builder.queryCore.debugCompile();
+
+  @override
+  Stream<List<Map<String, Object?>>> watch() => _builder.watch();
+}
+
+final class _WebTypedSearchSurface implements TypedSearchSurface {
+  _WebTypedSearchSurface(this._builder);
+
+  final WebSearchBuilder _builder;
+
+  @override
+  void limit(int n) {
+    _builder.limit(n);
+  }
+
+  @override
+  void all() {
+    _builder.all();
+  }
+
+  @override
+  void includeArchived() {
+    _builder.includeArchived();
+  }
+
+  @override
+  void includeHidden() {
+    _builder.includeHidden();
+  }
+
+  @override
+  Future<List<SearchResult>> fetch() => _builder.fetch();
+
+  @override
+  (String, List<Object?>) debugCompile() => _builder.searchCore.debugCompile();
 }

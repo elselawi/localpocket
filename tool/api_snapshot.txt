@@ -61,3 +61,6 @@ export 'src/sync/sync_backend.dart';
 export 'src/sync/sync_config.dart' show SyncConfig;
 export 'src/sync/sync_store.dart' show PullCursor, SweepState, SyncStore;
 
+=== lib/typed.dart ===
+export 'src/typed/typed.dart';
+

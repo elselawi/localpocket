@@ -8,8 +8,10 @@ import 'dart:typed_data';
 
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/sync.dart';
+import 'package:localpocket/typed.dart';
 
 import 'persist.dart';
+import 'typed_benchmark_models.dart';
 
 CollectionSchema<Object?> benchSchema({bool fts = false}) => CollectionSchema(
       name: 'widgets',
@@ -427,15 +429,134 @@ Future<void> main() async {
     final times = <int>[];
     for (var i = 0; i < 50; i++) {
       final sw = Stopwatch()..start();
-      final results = await col.search('"name-$i"').limit(50).fetch();
+      final searchResults = await col.search('$i').limit(50).fetch();
       sw.stop();
-      if (results.isEmpty) throw StateError('empty search results in B12');
+      if (searchResults.isEmpty) {
+        throw StateError('empty search results in B12');
+      }
       times.add(sw.elapsedMicroseconds);
     }
     final sorted = _durations(times);
     final p50us = _median(sorted);
     report('B12', 'FTS5 search over 100k docs, top-50 query p50', p50us ~/ 1000,
         10, '(p50 ${p50us}us)');
+  }
+
+  // ---------------------------------------------------------------- B13 ---
+  // §4.11 case 170: isolate the typed row boundary from SQLite by wrapping
+  // the same already-decoded maps. TypedRow takes each map by reference.
+  {
+    final maps = [
+      for (var i = 0; i < 200000; i++)
+        rec('bench${i.toString().padLeft(10, '0')}', i)
+    ];
+    var checksum = 0;
+    final rawWatch = Stopwatch()..start();
+    for (final map in maps) {
+      checksum += map['qty']! as int;
+    }
+    rawWatch.stop();
+
+    final typedWatch = Stopwatch()..start();
+    for (final map in maps) {
+      final row = TypedRow<BenchmarkWidgets>(BenchmarkWidgets.instance, map);
+      if (!identical(row.asMap(), map)) {
+        throw StateError('TypedRow copied its backing map in B13.');
+      }
+      checksum -= row(BenchmarkWidgets.qty)!;
+    }
+    typedWatch.stop();
+
+    final rawUs = rawWatch.elapsedMicroseconds;
+    final typedUs = typedWatch.elapsedMicroseconds;
+    final overheadUs = typedUs - rawUs;
+    final overheadUsPerRow = overheadUs / maps.length;
+    final ok = checksum == 0 && overheadUsPerRow < 2.0;
+    results.add({
+      'id': 'B13',
+      'label': 'typed vs raw point-read row boundary (200k rows)',
+      'ms': typedWatch.elapsedMilliseconds,
+      'rawUs': rawUs,
+      'typedUs': typedUs,
+      'overheadUs': overheadUs,
+      'overheadUsPerRow': double.parse(overheadUsPerRow.toStringAsFixed(4)),
+      'rows': maps.length,
+      'noMapCopy': true,
+      'ok': ok,
+    });
+    if (!ok) {
+      failures.add(
+          'B13 (typed row overhead ${overheadUsPerRow.toStringAsFixed(3)}us/row)');
+    }
+    stdout.writeln(
+        'B13 typed row boundary: raw=${rawUs}us, typed=${typedUs}us, '
+        'overhead=${overheadUsPerRow.toStringAsFixed(3)}us/row -> ${ok ? 'PASS' : 'FAIL'}');
+  }
+
+  // ---------------------------------------------------------------- B14 ---
+  // §4.11 case 171: one Draft map per row followed by the same engine putAll
+  // path. Separate equivalent databases avoid update/create asymmetry.
+  {
+    const count = 10000;
+    final rawDb = await LocalPocket.open(
+      path: ':memory:',
+      stores: [BenchmarkWidgets.instance.schema],
+    );
+    final typedDb = await LocalPocket.open(
+      path: ':memory:',
+      stores: [BenchmarkWidgets.instance.schema],
+    );
+    final rawRecords = [
+      for (var i = 0; i < count; i++)
+        rec('rawb${i.toString().padLeft(11, '0')}', i),
+    ];
+    final typedBuilds = <void Function(Draft<BenchmarkWidgets>)>[
+      for (var i = 0; i < count; i++)
+        (draft) => draft
+          ..setId('typb${i.toString().padLeft(11, '0')}')
+          ..set(BenchmarkWidgets.widgetName)('name-$i')
+          ..set(BenchmarkWidgets.qty)(i)
+          ..set(BenchmarkWidgets.phone)('p$i')
+          ..set(BenchmarkWidgets.body)(
+            'body content description for item number $i with search terms',
+          ),
+    ];
+
+    final rawWatch = Stopwatch()..start();
+    await rawDb.collection('widgets').putAll(rawRecords);
+    rawWatch.stop();
+    final typedWatch = Stopwatch()..start();
+    await typedDb.store(BenchmarkWidgets.instance).putAll(typedBuilds);
+    typedWatch.stop();
+
+    final rawCount = await rawDb.collection('widgets').query().count();
+    final typedCount = await typedDb.collection('widgets').query().count();
+    final rawMs = rawWatch.elapsedMilliseconds;
+    final typedMs = typedWatch.elapsedMilliseconds;
+    final overheadUsPerRow =
+        (typedWatch.elapsedMicroseconds - rawWatch.elapsedMicroseconds) / count;
+    final ok = rawCount == count &&
+        typedCount == count &&
+        typedMs <= rawMs * 1.35 + 20 &&
+        overheadUsPerRow < 20;
+    results.add({
+      'id': 'B14',
+      'label': 'typed vs raw batch write (10k rows)',
+      'ms': typedMs,
+      'rawMs': rawMs,
+      'typedMs': typedMs,
+      'overheadUsPerRow': double.parse(overheadUsPerRow.toStringAsFixed(3)),
+      'rows': count,
+      'draftMaps': count,
+      'ok': ok,
+    });
+    if (!ok) {
+      failures.add('B14 (raw ${rawMs}ms, typed ${typedMs}ms)');
+    }
+    stdout.writeln('B14 typed batch write: raw=${rawMs}ms, typed=${typedMs}ms, '
+        'overhead=${overheadUsPerRow.toStringAsFixed(3)}us/row -> ${ok ? 'PASS' : 'FAIL'}');
+    await rawDb.close();
+    await typedDb.close();
   }
 
   await db.close();

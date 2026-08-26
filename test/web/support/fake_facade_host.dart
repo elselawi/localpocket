@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/typed/registry.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/lifecycle.dart';
@@ -9,7 +10,6 @@ import 'package:localpocket/src/web/protocol.dart';
 
 /// A recorded `filesUpload` call.
 class RecordedFileUpload {
-
   RecordedFileUpload({
     required this.store,
     required this.recordId,
@@ -57,6 +57,8 @@ class FakeFacadeHost implements WebFacadeHost {
   final Map<int, Object? Function(Object?)> workerEventDecoders = {};
   @override
   final WatchSubscriptionTracker watchTracker = WatchSubscriptionTracker();
+  @override
+  final TypedStoreRegistry typedRegistry = TypedStoreRegistry();
   final ChangeBus changeBus = ChangeBus();
 
   final StreamController<Map<String, Object?>> syncStatusController =

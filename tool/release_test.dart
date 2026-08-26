@@ -22,7 +22,7 @@ void main() {
       final defaultSteps = buildReleaseSteps();
       expect(
           defaultSteps.map((s) => s.id).toList(),
-          containsAllInOrder([
+          equals([
             'analyze',
             'offline_lint',
             'security_review',
@@ -30,6 +30,8 @@ void main() {
             'api_snapshot',
             'snapshot_clean',
             'api_contract_gate',
+            'raw_api_gate',
+            'typed_surface_gate',
             'dependency_bounds',
             'docs_examples',
             'version_check',
@@ -57,6 +59,15 @@ void main() {
       final longSteps = buildReleaseSteps(isLong: true);
       expect(longSteps.any((s) => s.id == 'test_suite_long'), isTrue);
       expect(longSteps.any((s) => s.id == 'release_tests'), isTrue);
+
+      expect(
+        defaultSteps.singleWhere((s) => s.id == 'raw_api_gate').argv,
+        ['run', 'tool/raw_api_gate.dart'],
+      );
+      expect(
+        defaultSteps.singleWhere((s) => s.id == 'typed_surface_gate').argv,
+        ['run', 'tool/typed_surface_gate.dart'],
+      );
     });
 
     test('release gate step includes all gate-tagged suites', () {
@@ -74,6 +85,7 @@ void main() {
             '1',
             'test/release/',
             'test/web/',
+            'test/typed/compile_fail_test.dart',
           ]));
 
       final liveSuite = buildReleaseSteps(withReal: true)
@@ -101,6 +113,9 @@ void main() {
       expect(result.stdout, contains('[analyze]'));
       expect(result.stdout, contains('[security_review]'));
       expect(result.stdout, contains('[traceability]'));
+      expect(result.stdout, contains('[raw_api_gate]'));
+      expect(result.stdout, contains('[typed_surface_gate]'));
+      expect(result.stdout, contains('[docs_examples]'));
     });
 
     test('fail-fast stops at first error with tail output printed', () {

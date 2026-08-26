@@ -1,10 +1,12 @@
 import 'dart:io';
+
 import 'package:path/path.dart' as p;
+
 import 'find_repo_root.dart';
 
 /// Traceability check:
-/// Every public, user-facing API symbol exported from lib/ (localpocket.dart, pocketbase.dart, sync.dart)
-/// must be referenced by at least one test file in test/ AND mentioned in doc / README.md.
+/// Every registered public, user-facing API symbol must be referenced by at
+/// least one test file in test/ AND mentioned in README.md.
 /// Fails with the list of orphan symbols.
 void main(List<String> args) {
   final root = findRepoRoot();
@@ -31,6 +33,13 @@ void main(List<String> args) {
   }
   final combinedTestText = allTestText.toString();
 
+  // Public typed-layer symbols are registered here as they are introduced
+  // (phased rollout, see _modelling_plan.md). Phase 1 adds the definition
+  // core: StoreDef, FieldDef, Fields, TypedStoreMismatchError, and the
+  // per-kind descriptor classes. Each registered symbol must be referenced
+  // by at least one test file in test/ AND in README.md before the check
+  // can pass.
+
   // Key public, user-facing API classes and functions
   final exportedSymbols = <String>[
     'LocalPocket',
@@ -46,6 +55,22 @@ void main(List<String> args) {
     'AesGcmFieldCipher',
     'BlobStore',
     'MemoryBlobStore',
+    // Typed consumer surface. Per-kind descriptors are represented by
+    // FieldDef/Fields; hidden native/web adapter seams are intentionally not
+    // package API and therefore are not registered.
+    'StoreDef',
+    'Fields',
+    'FieldDef',
+    'Draft',
+    'TypedRow',
+    'TypedCollection',
+    'Cond',
+    'TypedQuery',
+    'TypedPage',
+    'TypedSearch',
+    'TypedSearchHit',
+    'TypedStoreRegistry',
+    'TypedStoreMismatchError',
   ];
 
   final missingInTest = <String>[];

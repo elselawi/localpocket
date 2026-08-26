@@ -73,48 +73,48 @@ class GettingStartedPage extends StatelessWidget {
   }
 
   static const _schemaCode = '''
-final taskSchema = CollectionSchema(
-  name: 'tasks',
-  version: 1,
-  fields: [
-    Field.text('title', required: true),
-    Field.text('description'),
-    Field.enumValue('status', ['todo', 'in_progress', 'done']),
-    Field.int('priority'),
-    Field.date('due_at'),
-    Field.bool('completed'),
-    Field.jsonList('tags'),
-    Field.ref('assigned_to', to: 'users'),
-  ],
-  indexes: const [IndexSpec(['status', 'priority'])],
-  fts: const FtsSpec(['title', 'description']),
-);
+final class Tasks extends StoreDef<Tasks> {
+  Tasks._() : super(name: 'tasks', version: 1);
+  static final Tasks instance = Tasks._();
+
+  late final _title = f.text('title').req();
+  late final _status = f.enumOf('status', TaskStatus.values);
+  late final _priority = f.integer('priority');
+  late final _completed = f.boolean('completed');
+
+  static TextFieldReq<Tasks> get title => instance._title;
+  static EnumFieldOpt<Tasks, TaskStatus> get status => instance._status;
+  static IntFieldOpt<Tasks> get priority => instance._priority;
+  static BoolFieldOpt<Tasks> get completed => instance._completed;
+
+  @override
+  List<FieldDef<Tasks, Object?>> get fields =>
+      [_title, _status, _priority, _completed];
+}
 ''';
 
   static const _openCode = '''
 final db = await LocalPocket.open(
   path: ':memory:',          // or a real file path
-  stores: [taskSchema, ...],
+  stores: [Tasks.instance.schema, ...],
   fieldCipher: myCipher,     // optional: encrypt sensitive fields
 );
-final tasks = db.collection('tasks');
+final tasks = db.store(Tasks.instance);
 ''';
 
   static const _queryCode = '''
-final page = await tasks
-    .query()
-    .where('completed', eq: false)
-    .orderBy('priority')
+final page = await tasks.query()
+    .where(Tasks.completed)(eq: false)
+    .orderBy(Tasks.priority)
     .limit(20)
     .fetch();
 
 if (page.hasMore) {
   final next = await tasks.query()
-      .where('completed', eq: false)
-      .orderBy('priority')
+      .where(Tasks.completed)(eq: false)
+      .orderBy(Tasks.priority)
       .limit(20)
-      .keysetAfter(page.nextCursor!)
-      .fetch();
+      .keysetAfter(page.nextCursor!);
 }
 ''';
 }

@@ -2,13 +2,20 @@ import 'dart:io';
 
 Future<void> main() async {
   final checks = <String, List<String>>{
-    'core web compile': [
+    'core typed web compile (JS)': [
       'compile',
       'js',
       '-O4',
       'tool/core_web_compile_smoke.dart',
       '-o',
       '${Directory.systemTemp.path}/localpocket_core_web.js'
+    ],
+    'core typed web compile (WASM)': [
+      'compile',
+      'wasm',
+      'tool/core_web_compile_smoke.dart',
+      '-o',
+      '${Directory.systemTemp.path}/localpocket_core_web.wasm'
     ],
     'facade web compile': [
       'compile',
@@ -40,4 +47,3 @@ Future<void> main() async {
     stdout.writeln('local web gate: all checks passed.');
   }
 }
-

@@ -11,6 +11,10 @@ int? firstInt(List<Map<String, Object?>> rows) {
   return v is int ? v : int.tryParse('$v');
 }
 
+/// A valid `[a-z0-9]{15}` record id derived from [label] and [n].
+String rid(String label, int n) =>
+    '$label${n.toString().padLeft(15 - label.length, '0')}';
+
 /// Reads a golden file, normalizing CRLF and trimming trailing whitespace so
 /// goldens are portable across Windows/Linux/macOS.
 Future<String> readGolden(String relPath) async {
@@ -31,28 +35,29 @@ CollectionSchema<Object?> widgetsSchema({
   Map<int, DocumentMigration>? documentMigrations,
   FtsSpec? fts,
   bool refFk = false,
-}) => CollectionSchema(
-    name: name,
-    version: version,
-    fields: [
-      Field.text('name', required: true),
-      Field.int('qty'),
-      Field.real('price'),
-      Field.bool('active'),
-      Field.date('made_on'),
-      Field.enumValue('size', ['S', 'M', 'L']),
-      Field.json('meta'),
-      Field.jsonList('tags'),
-      Field.ref('owner_id', to: 'owners', enforceFk: refFk),
-      Field.text('phone', uniqueWhenActive: true),
-      ...extraFields,
-    ],
-    indexes: indexes,
-    migrations: migrations,
-    keepUnsyncedArchives: keepUnsyncedArchives,
-    documentMigrations: documentMigrations ?? const {},
-    fts: fts,
-  );
+}) =>
+    CollectionSchema(
+      name: name,
+      version: version,
+      fields: [
+        Field.text('name', required: true),
+        Field.int('qty'),
+        Field.real('price'),
+        Field.bool('active'),
+        Field.date('made_on'),
+        Field.enumValue('size', ['S', 'M', 'L']),
+        Field.json('meta'),
+        Field.jsonList('tags'),
+        Field.ref('owner_id', to: 'owners', enforceFk: refFk),
+        Field.text('phone', uniqueWhenActive: true),
+        ...extraFields,
+      ],
+      indexes: indexes,
+      migrations: migrations,
+      keepUnsyncedArchives: keepUnsyncedArchives,
+      documentMigrations: documentMigrations ?? const {},
+      fts: fts,
+    );
 
 Future<LocalPocket> openPocket({
   Database? database,
@@ -67,20 +72,21 @@ Future<LocalPocket> openPocket({
   int maxDocBytes = 1900000,
   BlobStore? blobStore,
   int Function()? now,
-}) async => LocalPocket.open(
-    path: path ?? ':memory:',
-    database: database,
-    stores: stores ?? [widgetsSchema()],
-    platform: platform,
-    encrypted: encrypted,
-    fieldCipher: fieldCipher,
-    cryptoProvider: cryptoProvider,
-    destructiveBackup: destructiveBackup,
-    testHooks: testHooks,
-    maxDocBytes: maxDocBytes,
-    blobStore: blobStore,
-    now: now,
-  );
+}) async =>
+    LocalPocket.open(
+      path: path ?? ':memory:',
+      database: database,
+      stores: stores ?? [widgetsSchema()],
+      platform: platform,
+      encrypted: encrypted,
+      fieldCipher: fieldCipher,
+      cryptoProvider: cryptoProvider,
+      destructiveBackup: destructiveBackup,
+      testHooks: testHooks,
+      maxDocBytes: maxDocBytes,
+      blobStore: blobStore,
+      now: now,
+    );
 
 /// A record builder for the `widgets` schema.
 Map<String, Object?> record({
@@ -97,21 +103,22 @@ Map<String, Object?> record({
   String? phone,
   bool? archived,
   Map<String, Object?> extra = const {},
-}) => {
-    if (id != null) 'id': id,
-    if (name != null) 'name': name,
-    if (qty != null) 'qty': qty,
-    if (price != null) 'price': price,
-    if (active != null) 'active': active,
-    if (madeOn != null) 'made_on': madeOn,
-    if (size != null) 'size': size,
-    if (meta != null) 'meta': meta,
-    if (tags != null) 'tags': tags,
-    if (ownerId != null) 'owner_id': ownerId,
-    if (phone != null) 'phone': phone,
-    if (archived != null) 'archived': archived,
-    ...extra,
-  };
+}) =>
+    {
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (qty != null) 'qty': qty,
+      if (price != null) 'price': price,
+      if (active != null) 'active': active,
+      if (madeOn != null) 'made_on': madeOn,
+      if (size != null) 'size': size,
+      if (meta != null) 'meta': meta,
+      if (tags != null) 'tags': tags,
+      if (ownerId != null) 'owner_id': ownerId,
+      if (phone != null) 'phone': phone,
+      if (archived != null) 'archived': archived,
+      ...extra,
+    };
 
 /// A temporary file-backed database (for WAL / concurrency tests).
 class TempDb {

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:localpocket_playground/app.dart';
 import 'package:localpocket_playground/core/schemas.dart';
+import 'package:localpocket_playground/core/tasks.dart';
 
 void main() {
   testWidgets('playground boots to the shell', (WidgetTester tester) async {
@@ -14,9 +15,11 @@ void main() {
     ); // app bar or navigation
   });
 
-  test('schemas reference real package field kinds', () {
+  test('typed and raw playground schemas coexist', () {
     final tasks = PlaygroundSchemas.tasks;
+    expect(identical(tasks, PlaygroundTasks.instance.schema), isTrue);
     expect(tasks.name, 'tasks');
     expect(tasks.fts, isNotNull);
+    expect(PlaygroundSchemas.users.name, 'users');
   });
 }

@@ -19,11 +19,14 @@ Flutter / Dart Application
 - [Why LocalPocket?](#why-localpocket)
 - [Installation](#installation)
 - [Step-by-Step Usage Guide](#step-by-step-usage-guide)
-  - [Step 1: Define Schemas](#step-1-define-schemas)
-  - [Step 2: Open the Database](#step-2-open-the-database)
-  - [Step 3: CRUD & Keyset Queries](#step-3-crud--keyset-queries)
+  - [Step 1: Define a Typed Store](#step-1-define-a-typed-store)
+  - [Step 2: Open and Bind](#step-2-open-and-bind)
+  - [Step 3: Typed CRUD & Keyset Queries](#step-3-typed-crud--keyset-queries)
   - [Step 4: Native Aggregates & FTS5 Search](#step-4-native-aggregates--fts5-search)
   - [Step 5: Reactive Live Watches](#step-5-reactive-live-watches)
+  - [Domain Models Without Code Generation](#domain-models-without-code-generation)
+  - [Typed Model Limits](#typed-model-limits)
+  - [Advanced: Raw Maps and Coexistence](#advanced-raw-maps-and-coexistence)
   - [Step 6: Local & Remote Change Hooks](#step-6-local--remote-change-hooks)
   - [Step 7: Synchronize with PocketBase](#step-7-synchronize-with-pocketbase)
 - [PocketBase Server Requirements & Setup](#pocketbase-server-requirements--setup)
@@ -43,6 +46,7 @@ Flutter / Dart Application
 
 ## Why LocalPocket?
 
+- **Typed data models:** One descriptor defines each field for compile-checked reads, writes, queries, projections, search, and watches without generators or reflection.
 - **Local-First & Offline-Ready:** Instant sub-microsecond point reads via LRU caching, ACID-compliant local transactions, and reactive UI watches that work without network connectivity.
 - **Direct SQLite FFI:** Zero message-passing overhead, automatic statement caching, and native aggregate pushdown (`COUNT`, `DISTINCT`, `SUM`, `MIN`, `MAX`, `AVG`).
 - **PocketBase Sync Engine:** Bidirectional sync over REST with SSE realtime change feeds, field-level conflict resolvers, and atomic outbox guarantees.
@@ -65,164 +69,254 @@ dependencies:
 
 ## Step-by-Step Usage Guide
 
-### Step 1: Define Schemas
+### Step 1: Define a Typed Store
 
-Define local collections with typed fields, secondary indexes, and optional full-text search:
+Use one canonical `StoreDef` instance. Each descriptor is both the engine schema declaration and the typed accessor.
 
+<!-- localpocket-compile: typed-readme -->
 ```dart
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/typed.dart';
 
-final taskSchema = CollectionSchema(
-  name: 'tasks',
-  version: 1,
-  fields: [
-    Field.text('title', required: true),
-    Field.text('description'),
-    Field.text('status'),
-    Field.int('priority'),
-    Field.date('due_at'),
-    Field.bool('completed'),
-    Field.json('metadata'),
-    Field.ref('assigned_to', to: 'users'),
-  ],
-  indexes: const [IndexSpec(['status', 'priority'])],
-  fts: const FtsSpec(['title', 'description']),
-);
-```
+enum TaskStatus { todo, inProgress, done }
 
-#### Supported Field Types
+final class Tasks extends StoreDef<Tasks> {
+  Tasks._() : super(name: 'tasks', version: 1);
 
-| Field Declaration | Dart Type | SQLite Storage | Description |
-|---|---|---|---|
-| `Field.text` | `String` | `TEXT` | Plain string text |
-| `Field.int` | `int` | `INTEGER` | 64-bit signed integer |
-| `Field.real` | `num` / `double` | `REAL` | Floating-point value |
-| `Field.bool` | `bool` | `INTEGER` (`0`/`1`) | Boolean flag |
-| `Field.date` | `int` (epoch ms) | `INTEGER` | Milliseconds since epoch |
-| `Field.enumValue` | `String` | `TEXT` | Restricted string enum |
-| `Field.json` | `Map` or `List` | `TEXT` | Canonical JSON string |
-| `Field.jsonList` | `List` | `TEXT` | JSON list array |
-| `Field.ref` | `String` | `TEXT` | Record reference / Foreign key |
+  static final Tasks instance = Tasks._();
 
----
+  late final _title = f.text('title').req();
+  late final _status = f.enumOf(
+    'status',
+    TaskStatus.values,
+    wire: const {TaskStatus.inProgress: 'in_progress'},
+  );
+  late final _priority = f.integer('priority');
+  late final _done = f.boolean('done');
+  late final _dueAt = f.dateTime('due_at');
 
-### Step 2: Open the Database
+  static TextFieldReq<Tasks> get title => instance._title;
+  static EnumFieldOpt<Tasks, TaskStatus> get status => instance._status;
+  static IntFieldOpt<Tasks> get priority => instance._priority;
+  static BoolFieldOpt<Tasks> get done => instance._done;
+  static DateTimeFieldOpt<Tasks> get dueAt => instance._dueAt;
 
-Open an in-memory database for tests or a file-backed database on disk:
+  @override
+  List<FieldDef<Tasks, Object?>> get fields => [
+        _title,
+        _status,
+        _priority,
+        _done,
+        _dueAt,
+      ];
 
-```dart
-// In-memory (ideal for tests and ephemeral state)
-final db = await LocalPocket.open(
-  path: ':memory:',
-  stores: [taskSchema],
-);
+  @override
+  List<IndexSpec> get indexes => const [IndexSpec(['status', 'priority'])];
 
-// File-backed (persistent across app launches)
-final persistentDb = await LocalPocket.open(
-  path: '/path/to/app.db',
-  stores: [taskSchema],
-);
-```
-
----
-
-### Step 3: CRUD & Keyset Queries
-
-```dart
-final tasks = db.collection('tasks');
-
-// 1. Create or Replace (ID is auto-generated if omitted)
-await tasks.put({
-  'id': 'tsk1234567890ab',
-  'title': 'Ship version 1.0',
-  'priority': 1,
-  'status': 'in_progress',
-  'completed': false,
-});
-
-// 2. Sub-microsecond Point Read (served from in-memory LRU cache)
-final task = await tasks.get('tsk1234567890ab');
-
-// 3. Targeted Partial Update
-await tasks.patch('tsk1234567890ab', {'completed': true});
-
-// 4. Soft Delete (archived=true; hidden from normal queries, preserved for sync)
-await tasks.archive('tsk1234567890ab');
-await tasks.restore('tsk1234567890ab');
-
-// 5. Hard Purge (permanently removes local row and blob references)
-await tasks.purge('tsk1234567890ab');
-
-// 6. Keyset Pagination Query
-final firstPage = await tasks.query()
-    .where('completed', eq: false)
-    .orderBy('priority')
-    .select(['id', 'title', 'priority'])
-    .limit(20)
-    .fetch();
-
-if (firstPage.hasMore) {
-  final nextPage = await tasks.query()
-      .where('completed', eq: false)
-      .orderBy('priority')
-      .select(['id', 'title', 'priority'])
-      .limit(20)
-      .keysetAfter(firstPage.nextCursor!)
-      .fetch();
+  @override
+  FtsSpec get fts => const FtsSpec(['title']);
 }
 ```
+
+Enums are stored as strings. Unmapped values use `Enum.name`; the optional `wire` map pins stable alternatives such as `in_progress`. `dateTime` exposes UTC `DateTime` values while storing the same epoch-millisecond integer as `Field.date`; local inputs are converted to UTC and decoded values have `isUtc == true`.
+
+#### Supported Typed Field Types
+
+| Descriptor factory | Typed value | SQLite storage |
+|---|---|---|
+| `f.text` | `String?` / `String` after `.req()` | `TEXT` |
+| `f.integer` | `int?` / `int` after `.req()` | `INTEGER` |
+| `f.real` | `num?` / `num` after `.req()` | `REAL` |
+| `f.boolean` | `bool?` / `bool` after `.req()` | `INTEGER` (`0`/`1`) |
+| `f.date` | epoch-millisecond `int?` | `INTEGER` |
+| `f.dateTime` | UTC `DateTime?` | `INTEGER` |
+| `f.enumOf` | Dart enum value | wire `TEXT` |
+| `f.json` | `Map<String, Object?>?` | canonical JSON `TEXT` |
+| `f.jsonList<T>` | `List<T>?` | canonical JSON `TEXT` |
+| `f.ref` | record-id `String?` | `TEXT` |
+
+---
+
+### Step 2: Open and Bind
+
+Open with the compiled schema, then bind the same canonical definition instance:
+
+<!-- localpocket-compile: typed-readme -->
+```dart
+Future<void> typedReadmeExample() async {
+  final db = await LocalPocket.open(
+    path: ':memory:',
+    stores: [Tasks.instance.schema],
+  );
+  final tasks = db.store(Tasks.instance);
+```
+
+`StoreDef.schema` is memoized. Binding is name-keyed and checked by **reference identity**, not structural equality: `Tasks.instance` must be the same object used throughout the application. A second definition object with the same fields and name throws `TypedStoreMismatchError` rather than silently sharing a typed registry entry.
+
+---
+
+### Step 3: Typed CRUD & Keyset Queries
+
+<!-- localpocket-compile: typed-readme -->
+```dart
+  await tasks.put((draft) => draft
+    ..setId('tsk1234567890ab')
+    ..set(Tasks.title)('Ship version 1.0')
+    ..set(Tasks.status)(TaskStatus.inProgress)
+    ..set(Tasks.priority)(1)
+    ..set(Tasks.done)(false)
+    ..set(Tasks.dueAt)(DateTime.utc(2026, 9, 1)));
+
+  await tasks.patch(
+    'tsk1234567890ab',
+    (draft) => draft..set(Tasks.title)('Ship version 1.0.1'),
+  );
+
+  final task = await tasks.get('tsk1234567890ab');
+  final String? title = task?.call(Tasks.title);
+
+  final firstPage = await tasks
+      .query()
+      .where(Tasks.done)(eq: false)
+      .orderBy(Tasks.priority)
+      .select(<FieldDef<Tasks, Object?>>[Tasks.title, Tasks.priority])
+      .limit(20)
+      .fetch();
+
+  if (firstPage.hasMore) {
+    await tasks
+        .query()
+        .where(Tasks.done)(eq: false)
+        .orderBy(Tasks.priority)
+        .limit(20)
+        .keysetAfter(firstPage.nextCursor!);
+  }
+
+  await tasks.archive('tsk1234567890ab');
+  await tasks.restore('tsk1234567890ab');
+
+  // Hard purge: permanently removes the local row and its blob references.
+  await tasks.purge('tsk1234567890ab');
+```
+
+`put` is an upsert. IDs are generated when `setId` is omitted. Draft setters and predicates are intentionally curried: `draft.set(Tasks.title)('value')` and `query.where(Tasks.done)(eq: false)` preserve strict generic inference.
 
 ---
 
 ### Step 4: Native Aggregates & FTS5 Search
 
-Aggregates compile directly to native SQLite queries for maximum speed:
+Aggregates still compile directly to SQLite, and typed terminals restrict numeric operations to numeric descriptors.
 
+<!-- localpocket-compile: typed-readme -->
 ```dart
-// Native Count & Distinct
-final totalCount = await tasks.query().where('completed', eq: false).count();
-final uniqueStatuses = await tasks.query().distinct('status');
-final distinctCount = await tasks.query().countDistinct('status');
+  final activeCount = await tasks.query().where(Tasks.done)(eq: false).count();
+  final priorities = await tasks.query().distinct(Tasks.priority);
+  final priorityTotal = await tasks.query().sum(Tasks.priority);
 
-// Numeric Aggregates
-final minPriority = await tasks.query().min('priority');
-final maxPriority = await tasks.query().max('priority');
-final sumPriority = await tasks.query().sum('priority');
-final avgPriority = await tasks.query().avg('priority');
-
-// Full-Text Search (BM25 ranked)
-final results = await tasks.search('ship version').limit(10).fetch();
-for (final hit in results) {
-  print('Found record ${hit.id} with score ${hit.score}');
-}
+  final hits = await tasks.search('ship version').limit(10).fetch();
+  for (final hit in hits) {
+    final TypedRow<Tasks>? current = await hit.fetch();
+    if (current != null) {
+      current(Tasks.title);
+    }
+  }
 ```
 
 ---
 
 ### Step 5: Reactive Live Watches
 
-Watch individual records or whole queries. The watcher uses diff-first ID tracking and debounced execution:
+Point and query watches retain the engine's existing cadence and invalidation behavior.
+
+<!-- localpocket-compile: typed-readme -->
+```dart
+  final querySub = tasks
+      .query()
+      .where(Tasks.done)(eq: false)
+      .limit(50)
+      .watch()
+      .listen((List<TypedRow<Tasks>> rows) {});
+
+  final rowSub = tasks.watchOne('tsk1234567890ab').listen(
+        (TypedRow<Tasks>? row) {},
+      );
+
+  await querySub.cancel();
+  await rowSub.cancel();
+  await db.close();
+
+  // Keep analyzed values live in this complete documentation fixture.
+  title;
+  activeCount;
+  priorities;
+  priorityTotal;
+}
+```
+
+---
+
+### Domain Models Without Code Generation
+
+`TypedRow` intentionally uses descriptor access instead of generated properties. Consumers can restore domain-oriented dot reads with a small wrapper, and can hide generic drafts behind intent-named mutations. These are application recipes, not new LocalPocket APIs.
+
+<!-- localpocket-compile: typed-readme -->
+```dart
+final class Task {
+  const Task(this._row);
+
+  final TypedRow<Tasks> _row;
+
+  String get id => _row.id;
+  String get title => _row(Tasks.title);
+  TaskStatus? get status => _row(Tasks.status);
+  bool get isDone => _row(Tasks.done) ?? false;
+  DateTime? get dueAt => _row(Tasks.dueAt);
+}
+
+extension TaskOperations on TypedCollection<Tasks> {
+  Future<Task?> readTask(String id) async {
+    final row = await get(id);
+    return row == null ? null : Task(row);
+  }
+
+  Future<void> markDone(String id) =>
+      patch(id, (draft) => draft..set(Tasks.done)(true));
+
+  Future<void> rename(String id, String title) =>
+      patch(id, (draft) => draft..set(Tasks.title)(title));
+}
+```
+
+Changing a descriptor type makes incompatible wrapper getters and helpers fail analysis. No mirrors, macros, extension types, or package code generation are involved.
+
+The principal typed building blocks are `StoreDef`, `Fields`, `FieldDef`,
+`Draft`, `TypedRow`, `TypedCollection`, `Cond`, `TypedQuery`, `TypedPage`,
+`TypedSearch`, `TypedSearchHit`, and the identity-enforcing
+`TypedStoreRegistry`. Identity failures surface as `TypedStoreMismatchError`.
+
+### Typed Model Limits
+
+- Required descriptor **types** are non-nullable, but a draft cannot prove that every required field was set. Required-field presence remains engine-enforced at runtime.
+- `TypedRow` is a thin wrapper, not a `Map`; it wraps one engine map without copying. `extra` exposes undeclared read values and `asMap()` is the advanced escape hatch.
+- `f.json` intentionally narrows the typed value to `Map<String, Object?>?`; raw `Field.json` also accepts lists. `jsonList<T>` validates/casts elements while decoding.
+- `.req()`, encryption, and uniqueness exist only for field kinds supported by the engine schema factories.
+- Normal cross-store descriptor misuse fails at compile time. Casts or `dynamic` can defeat that protection, in which case runtime identity checks throw `TypedStoreMismatchError`.
+- The typed v1 API has no create-only operation or per-write durability argument; use `put` for upsert and transactions for durability selection.
+
+### Advanced: Raw Maps and Coexistence
+
+Typed and raw access can coexist over the same registered store. Both use the same SQLite rows, validation, encryption, outbox, synchronization, and worker wire operations; adopting typed models changes neither storage nor wire formats.
 
 ```dart
-// Watch a filtered query
-final querySub = tasks.query()
-    .where('completed', eq: false)
-    .orderBy('priority')
-    .limit(50)
-    .watch()
-    .listen((items) {
-      print('Active tasks updated: ${items.length}');
-    });
+final typedTasks = db.store(Tasks.instance);
+final rawTasks = db.collection('tasks');
 
-// Watch a single record
-final recordSub = tasks.watchOne('tsk1234567890ab').listen((doc) {
-  print('Task changed: $doc');
-});
-
-// Cancel subscriptions when done
-await querySub.cancel();
-await recordSub.cancel();
+await rawTasks.patch('tsk1234567890ab', {'done': false});
+final typedRow = await typedTasks.get('tsk1234567890ab');
+final rawMap = typedRow?.asMap();
 ```
+
+Raw collections remain supported for interoperability, dynamic schemas, migrations, codecs, conflict records/resolvers, and gradual adoption. They are not deprecated in this release.
 
 ---
 

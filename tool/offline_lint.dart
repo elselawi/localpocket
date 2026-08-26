@@ -6,13 +6,19 @@ import 'find_repo_root.dart';
 ///
 /// Rules:
 /// 1. `dart:io` leaking into web-compatible libraries.
-///    - `lib/localpocket.dart` and everything under `lib/src/core/` and `lib/src/sync/`
-///      and `lib/sync.dart` must never import `dart:io` or `package:http`.
-///    - `native_blob_store.dart` is the only file allowed to import `dart:io`, via conditional export `native_blob_store_platform.dart`.
+///    - `lib/localpocket.dart`, `lib/typed.dart`, and everything under
+///      `lib/src/core/`, `lib/src/sync/`, and `lib/src/typed/` must never
+///      import `dart:io` or `package:http`.
+///    - `native_blob_store.dart` and `native_backup_file.dart` are the only
+///      files allowed to import `dart:io` — the designated platform-I/O home
+///      in the files layer (see `test/core/layering_test.dart`).
 /// 2. `lib/` must not contain any `print(` statements.
 /// 3. Layering rules:
 ///    - `lib/src/core/` must never import from `lib/src/sync/`, `lib/src/pocketbase/`, or `lib/src/files/`.
 ///    - `lib/src/sync/` must never import from `lib/src/pocketbase/`.
+///    - `lib/src/typed/` (and `lib/typed.dart`) must never import from
+///      `lib/src/pocketbase/` or `package:localpocket/pocketbase.dart` — the
+///      typed layer imports only the public core surface.
 void main(List<String> args) {
   final root = findRepoRoot();
   final libDir = Directory(p.join(root.path, 'lib'));
@@ -43,7 +49,10 @@ void main(List<String> args) {
 
       // Check forbidden dart:io imports
       if (RegExp(r'''^\s*import\s+['"]dart:io['"]''').hasMatch(line)) {
-        if (relPath != 'lib/src/files/native_blob_store.dart') {
+        final isPlatformIo =
+            relPath == 'lib/src/files/native_blob_store.dart' ||
+                relPath == 'lib/src/files/native_backup_file.dart';
+        if (!isPlatformIo) {
           violations
               .add('$relPath:$lineNum: Forbidden direct import of dart:io.');
         }
@@ -57,17 +66,19 @@ void main(List<String> args) {
         }
       }
 
-      // Layering: core cannot import sync, pocketbase, files
+      // Layering: core/sync/files/typed cannot import pocketbase
       if (relPath.startsWith('lib/src/core/') ||
           relPath.startsWith('lib/src/sync/') ||
           relPath.startsWith('lib/src/files/') ||
+          relPath.startsWith('lib/src/typed/') ||
           relPath == 'lib/localpocket.dart' ||
+          relPath == 'lib/typed.dart' ||
           relPath == 'lib/sync.dart') {
         if (RegExp(r'''^\s*import\s+['"][^'"]*pocketbase/''').hasMatch(line) ||
             RegExp(r'''^\s*import\s+['"]package:localpocket/pocketbase\.dart['"]''')
                 .hasMatch(line)) {
           violations.add(
-              '$relPath:$lineNum: Layering violation: cannot import pocketbase from core/sync/files.');
+              '$relPath:$lineNum: Layering violation: cannot import pocketbase from core/sync/files/typed.');
         }
       }
     }
