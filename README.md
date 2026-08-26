@@ -21,10 +21,11 @@ Flutter / Dart Application
 - [Step-by-Step Usage Guide](#step-by-step-usage-guide)
   - [Step 1: Define a Typed Store](#step-1-define-a-typed-store)
   - [Step 2: Open and Bind](#step-2-open-and-bind)
-  - [Step 3: Typed CRUD & Keyset Queries](#step-3-typed-crud--keyset-queries)
-  - [Step 4: Native Aggregates & FTS5 Search](#step-4-native-aggregates--fts5-search)
-  - [Step 5: Reactive Live Watches](#step-5-reactive-live-watches)
+  - [Step 3: Typed CRUD](#step-3-typed-crud)
+  - [Step 4: Typed Queries](#step-4-typed-queries)
+  - [Step 5: FTS Search & Reactive Watches](#step-5-fts-search--reactive-watches)
   - [Domain Models Without Code Generation](#domain-models-without-code-generation)
+  - [Typed Best Practices](#typed-best-practices)
   - [Typed Model Limits](#typed-model-limits)
   - [Advanced: Raw Maps and Coexistence](#advanced-raw-maps-and-coexistence)
   - [Step 6: Local & Remote Change Hooks](#step-6-local--remote-change-hooks)
@@ -155,7 +156,9 @@ Future<void> typedReadmeExample() async {
 
 ---
 
-### Step 3: Typed CRUD & Keyset Queries
+### Step 3: Typed CRUD
+
+`put` is an upsert (the engine generates an id when `setId` is omitted), `patch` touches only the listed fields, and lifecycle state stays on `archive`/`restore`/`purge`.
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
@@ -172,25 +175,9 @@ Future<void> typedReadmeExample() async {
     (draft) => draft..set(Tasks.title)('Ship version 1.0.1'),
   );
 
+  // Reads are the call form row(Tasks.title), or the .get alias.
   final task = await tasks.get('tsk1234567890ab');
   final String? title = task?.call(Tasks.title);
-
-  final firstPage = await tasks
-      .query()
-      .where(Tasks.done)(eq: false)
-      .orderBy(Tasks.priority)
-      .select(<FieldDef<Tasks, Object?>>[Tasks.title, Tasks.priority])
-      .limit(20)
-      .fetch();
-
-  if (firstPage.hasMore) {
-    await tasks
-        .query()
-        .where(Tasks.done)(eq: false)
-        .orderBy(Tasks.priority)
-        .limit(20)
-        .keysetAfter(firstPage.nextCursor!);
-  }
 
   await tasks.archive('tsk1234567890ab');
   await tasks.restore('tsk1234567890ab');
@@ -199,20 +186,70 @@ Future<void> typedReadmeExample() async {
   await tasks.purge('tsk1234567890ab');
 ```
 
-`put` is an upsert. IDs are generated when `setId` is omitted. Draft setters and predicates are intentionally curried: `draft.set(Tasks.title)('value')` and `query.where(Tasks.done)(eq: false)` preserve strict generic inference.
+Draft setters and predicates are intentionally **curried** — `draft.set(Tasks.title)('value')`,
+`query.where(Tasks.done)(eq: false)` — so a wrong value type or a foreign store's descriptor
+fails at compile time instead of silently widening the generic parameter.
 
 ---
 
-### Step 4: Native Aggregates & FTS5 Search
+### Step 4: Typed Queries
 
-Aggregates still compile directly to SQLite, and typed terminals restrict numeric operations to numeric descriptors.
+Equality-family predicates work on every descriptor; kind-scoped operators exist only where they make sense; everything compiles to the engine's parameterized SQL.
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
+  // Equality family: eq, neq, inValues, between, isNull, isNotNull.
+  final donePage = await tasks
+      .query()
+      .where(Tasks.done)(eq: false)
+      .where(Tasks.status)(inValues: [TaskStatus.todo, TaskStatus.done])
+      .where(Tasks.priority)(between: (1, 5))
+      .where(Tasks.title)(isNotNull: true)
+      .fetch();
+
+  // Kind-scoped operators: .gt/.gte/.lt/.lte on comparable descriptors,
+  // .startsWith/.endsWith/.contains on text. whereCond consumes them.
+  final urgentPage = await tasks
+      .query()
+      .whereCond(Tasks.priority.gte(4))
+      .whereCond(Tasks.title.startsWith('Ship'))
+      .orderBy(Tasks.dueAt, desc: true)
+      .limit(20)
+      .fetch();
+
+  // OR groups and projections. Reading an unselected descriptor throws.
+  final firstPage = await tasks
+      .query()
+      .orWhere([eqCond(Tasks.done, true), eqCond(Tasks.priority, 5)])
+      .select(<FieldDef<Tasks, Object?>>[Tasks.title, Tasks.priority])
+      .fetch();
+
+  // Keyset pagination with the engine's opaque cursor.
+  final nextPage = firstPage.hasMore
+      ? await tasks
+          .query()
+          .orderBy(Tasks.priority)
+          .keysetAfter(firstPage.nextCursor!)
+      : null;
+
+  // Aggregates: sum/min/max/avg accept numeric descriptors only.
   final activeCount = await tasks.query().where(Tasks.done)(eq: false).count();
+  final priorityCount = await tasks.query().countDistinct(Tasks.priority);
   final priorities = await tasks.query().distinct(Tasks.priority);
   final priorityTotal = await tasks.query().sum(Tasks.priority);
+```
 
+Set the page size with `limit(n)` or opt out with `all()`; `includeArchived()`/`includeHidden()` widen
+the default visibility scope; `ids()` and `explain()` mirror the raw builder verbatim.
+
+---
+
+### Step 5: FTS Search & Reactive Watches
+
+Search requires an `FtsSpec` on the store. Hits carry `id`/`score` plus `fetch()` for the current row. Watches wrap the engine streams one-to-one — coalescing and invalidation are unchanged.
+
+<!-- localpocket-compile: typed-readme -->
+```dart
   final hits = await tasks.search('ship version').limit(10).fetch();
   for (final hit in hits) {
     final TypedRow<Tasks>? current = await hit.fetch();
@@ -220,16 +257,7 @@ Aggregates still compile directly to SQLite, and typed terminals restrict numeri
       current(Tasks.title);
     }
   }
-```
 
----
-
-### Step 5: Reactive Live Watches
-
-Point and query watches retain the engine's existing cadence and invalidation behavior.
-
-<!-- localpocket-compile: typed-readme -->
-```dart
   final querySub = tasks
       .query()
       .where(Tasks.done)(eq: false)
@@ -237,9 +265,8 @@ Point and query watches retain the engine's existing cadence and invalidation be
       .watch()
       .listen((List<TypedRow<Tasks>> rows) {});
 
-  final rowSub = tasks.watchOne('tsk1234567890ab').listen(
-        (TypedRow<Tasks>? row) {},
-      );
+  final rowSub =
+      tasks.watchOne('tsk1234567890ab').listen((TypedRow<Tasks>? row) {});
 
   await querySub.cancel();
   await rowSub.cancel();
@@ -247,7 +274,11 @@ Point and query watches retain the engine's existing cadence and invalidation be
 
   // Keep analyzed values live in this complete documentation fixture.
   title;
+  donePage;
+  urgentPage;
+  nextPage;
   activeCount;
+  priorityCount;
   priorities;
   priorityTotal;
 }
@@ -293,6 +324,16 @@ The principal typed building blocks are `StoreDef`, `Fields`, `FieldDef`,
 `Draft`, `TypedRow`, `TypedCollection`, `Cond`, `TypedQuery`, `TypedPage`,
 `TypedSearch`, `TypedSearchHit`, and the identity-enforcing
 `TypedStoreRegistry`. Identity failures surface as `TypedStoreMismatchError`.
+
+### Typed Best Practices
+
+- **One definition instance per store, ever.** The private constructor plus static accessors (`Tasks.instance`, `Tasks.title`) is the canonical pattern; sharing that single object is how every file gets the same typed handle. A second instance with the same name throws `TypedStoreMismatchError`.
+- **Typed handles for application code.** Use `db.store(...)` everywhere; keep raw maps for engine-boundary surfaces only — migrations, `DocumentMigration`, conflict records/resolvers, and codecs.
+- **Wrap rows in a domain class** (see above) and express mutations as intent-named helpers, so call sites read like business operations instead of builder chains.
+- **Never cast descriptors across stores or through `dynamic`.** The runtime identity check still throws, but the compile-time check is the product.
+- **Prefer `f.dateTime` for timestamps** (UTC-pinned in both directions) and give enums explicit `wire:` names when a persisted value must survive enum renames.
+- **Use `select` projections only on hot paths** — reading an unselected descriptor throws by design.
+- **`setExtra` accepts only undeclared keys**; declared and system names (`id`, `archived`, `hidden`, `extra`) are rejected so legacy keys cannot shadow schema fields.
 
 ### Typed Model Limits
 
