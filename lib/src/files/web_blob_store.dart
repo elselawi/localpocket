@@ -3,7 +3,8 @@ import 'dart:js_interop';
 import 'dart:typed_data';
 // ignore: implementation_imports
 import 'package:sqlite3/src/wasm/js_interop/new_file_system_access.dart';
-import 'package:web/web.dart' show FileSystemDirectoryHandle;
+import 'package:meta/meta.dart';
+import 'package:web/web.dart' show DOMException, FileSystemDirectoryHandle;
 
 import 'blob_store.dart';
 
@@ -20,17 +21,39 @@ import 'blob_store.dart';
 ///   write never leaves a published-looking blob.
 /// - Does NOT create object URLs (window-scope work); see
 ///   [web_blob_object_url.dart].
+///
+/// Error surface: genuine storage failures (permission denied, quota pressure,
+/// corruption, ...) are rethrown as [BlobStorageException] preserving the
+/// original error. The `Blob not found` [StateError] is reserved exclusively
+/// for the true missing-blob case, so the files API and file-sync lane can
+/// distinguish "storage is broken" from "blob is missing".
 class WebBlobStore extends BlobStore {
+  /// Creates a [WebBlobStore] backed by OPFS when available.
+  ///
+  /// Pass [opfsDir] only in tests to inject a pure-Dart backend and bypass the
+  /// `storageManager` probe (which returns `null` under the VM, where real OPFS
+  /// handles are unavailable). Production callers leave [opfsDir] unset and
+  /// let the store resolve the real OPFS directory via the worker-safe
+  /// `storageManager` probe.
+  WebBlobStore({
+    String rootPrefix = 'localpocket_blobs',
+    @visibleForTesting this.opfsDir,
+  }) : _rootPrefix = rootPrefix;
 
-  WebBlobStore({String rootPrefix = 'localpocket_blobs'})
-      : _rootPrefix = rootPrefix;
   final String _rootPrefix;
   final Map<String, Uint8List> _memoryFallback = {};
+
+  /// Test seam: when non-null, the store uses this backend directly instead of
+  /// probing `navigator.storage`. See [WebBlobStore.new].
+  @visibleForTesting
+  final OpfsDir? opfsDir;
 
   /// Cached OPFS availability probe. `null` until the first probe; then the
   /// outcome for this worker's lifetime. A store that loses OPFS mid-session
   /// cannot regain it (storage availability is decided by the context), so a
   /// cached `false` is both conservative and stable.
+  ///
+  /// Ignored when [opfsDir] is set (the test seam supplies its own backend).
   bool? _opfsAvailable;
 
   /// Probes whether the OPFS root for this store's blobs is reachable.
@@ -50,16 +73,21 @@ class WebBlobStore extends BlobStore {
   Future<bool> _isOpfsAvailable() async =>
       _opfsAvailable ??= await _probeOpfs();
 
-  /// The OPFS root directory for this store's blobs, or `null` when OPFS is
-  /// unavailable (for example in a worker without storage, or non-secure
-  /// context). Callers fall back to [_memoryFallback] in that case.
-  Future<FileSystemDirectoryHandle?> _getOpfsDir() async {
+  /// Returns the backend directory for this store's blobs, or `null` when
+  /// OPFS is unavailable (for example in a worker without storage, or a
+  /// non-secure context). Callers fall back to [_memoryFallback] in that case.
+  ///
+  /// When the [opfsDir] test seam is set, it is returned directly and the
+  /// availability probe is skipped.
+  Future<OpfsDir?> _getOpfsDir() async {
+    final seam = opfsDir;
+    if (seam != null) return seam;
     if (!await _isOpfsAvailable()) return null;
     try {
       final storage = storageManager;
       if (storage == null) return null;
       final root = await storage.directory;
-      return await root.getDirectory(_rootPrefix, create: true);
+      return _RealOpfsDir(await root.getDirectory(_rootPrefix, create: true));
     } catch (_) {
       return null;
     }
@@ -94,10 +122,7 @@ class WebBlobStore extends BlobStore {
 
     final opfs = await _getOpfsDir();
     if (opfs != null) {
-      final fileHandle = await opfs.openFile(result.hash, create: true);
-      final writable = await fileHandle.createWritable().toDart;
-      await writable.write(data.buffer.toJS).toDart;
-      await writable.close().toDart;
+      await opfs.write(result.hash, data);
     } else {
       _memoryFallback[result.hash] = data;
     }
@@ -115,12 +140,18 @@ class WebBlobStore extends BlobStore {
     final opfs = await _getOpfsDir();
     if (opfs != null) {
       try {
-        final fileHandle = await opfs.openFile(hash);
-        final file = await fileHandle.getFile().toDart;
-        final arrayBuffer = await file.arrayBuffer().toDart;
-        final uint8 = arrayBuffer.toDart.asUint8List();
+        final uint8 = await opfs.read(hash);
         return Stream.value(uint8);
-      } catch (_) {}
+      } catch (e) {
+        // Only the genuine "file does not exist" case falls through to the
+        // `Blob not found` StateError below. Every other failure (permission
+        // denied, quota pressure, corruption, ...) is preserved as a typed
+        // [BlobStorageException] so callers can distinguish a broken backend
+        // from a missing blob.
+        if (!isBlobMissing(e)) {
+          throw BlobStorageException(e, hash);
+        }
+      }
     }
 
     throw StateError('Blob not found: $hash');
@@ -135,7 +166,15 @@ class WebBlobStore extends BlobStore {
     if (opfs != null) {
       try {
         await opfs.remove(hash);
-      } catch (_) {}
+      } catch (e) {
+        // `delete` is best-effort for a genuinely missing entry (the blob
+        // may have been removed concurrently), but a real storage failure
+        // (permission denied, quota, ...) must not be silently swallowed —
+        // surface it as a typed [BlobStorageException] preserving the cause.
+        if (!isBlobMissing(e)) {
+          throw BlobStorageException(e, hash);
+        }
+      }
     }
   }
 
@@ -146,12 +185,7 @@ class WebBlobStore extends BlobStore {
 
     final opfs = await _getOpfsDir();
     if (opfs != null) {
-      try {
-        await opfs.openFile(hash);
-        return true;
-      } catch (_) {
-        return false;
-      }
+      return opfs.exists(hash);
     }
     return false;
   }
@@ -165,11 +199,7 @@ class WebBlobStore extends BlobStore {
 
     final opfs = await _getOpfsDir();
     if (opfs != null) {
-      try {
-        final fileHandle = await opfs.openFile(hash);
-        final file = await fileHandle.getFile().toDart;
-        return file.size;
-      } catch (_) {}
+      return opfs.size(hash);
     }
     return null;
   }
@@ -180,8 +210,7 @@ class WebBlobStore extends BlobStore {
     if (opfs == null) return 0;
     var cleaned = 0;
     try {
-      await for (final entry in opfs.list()) {
-        final name = entry.name;
+      for (final name in await opfs.list()) {
         if (!name.startsWith('tmp_')) continue;
         try {
           await opfs.remove(name);
@@ -198,13 +227,100 @@ class WebBlobStore extends BlobStore {
     final opfs = await _getOpfsDir();
     if (opfs != null) {
       try {
-        await for (final element in opfs.list()) {
-          final entry = element;
-          final name = entry.name;
+        for (final name in await opfs.list()) {
           if (BlobStore.validHashPattern.hasMatch(name)) result.add(name);
         }
       } catch (_) {}
     }
     return result.toList();
+  }
+
+  /// Returns `true` when [error] is a `DOMException` whose name matches the
+  /// File System Access API's "entry does not exist" condition. Used by
+  /// [_RealOpfsDir] to translate the platform signal into the platform-neutral
+  /// [BlobMissingError] (which the store then classifies via [isBlobMissing]).
+  static bool _isNotFoundDomException(Object error) =>
+      error is DOMException &&
+      (error.name == 'NotFoundError' || error.name == 'TypeMismatchError');
+}
+
+/// Real OPFS backend: adapts a `FileSystemDirectoryHandle` to [OpfsDir].
+///
+/// Lives behind the public [OpfsDir] interface so [WebBlobStore] never touches
+/// `dart:js_interop` directly outside this adapter, keeping the store logic
+/// unit-testable under the VM.
+class _RealOpfsDir implements OpfsDir {
+  _RealOpfsDir(this._handle);
+
+  final FileSystemDirectoryHandle _handle;
+
+  @override
+  Future<Uint8List> read(String name) async {
+    try {
+      final fileHandle = await _handle.openFile(name);
+      final file = await fileHandle.getFile().toDart;
+      final arrayBuffer = await file.arrayBuffer().toDart;
+      return arrayBuffer.toDart.asUint8List();
+    } catch (e) {
+      // Translate the platform-specific "file not found" DOMException into the
+      // platform-neutral [BlobMissingError] so [isBlobMissing] can classify it
+      // uniformly (and without touching JS interop at the store layer). Any
+      // other error (permission, quota, corruption, ...) is rethrown unchanged
+      // so the store can wrap it as a [BlobStorageException] preserving the
+      // original cause.
+      if (WebBlobStore._isNotFoundDomException(e)) throw BlobMissingError(name);
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> write(String name, Uint8List bytes) async {
+    final fileHandle = await _handle.openFile(name, create: true);
+    final writable = await fileHandle.createWritable().toDart;
+    await writable.write(bytes.buffer.toJS).toDart;
+    await writable.close().toDart;
+  }
+
+  @override
+  Future<void> remove(String name) async {
+    try {
+      await _handle.remove(name);
+    } catch (e) {
+      // Same translation as [read]: a genuinely missing entry is not a
+      // failure, but a real storage error must propagate for the store to
+      // wrap as a [BlobStorageException].
+      if (WebBlobStore._isNotFoundDomException(e)) throw BlobMissingError(name);
+      rethrow;
+    }
+  }
+
+  @override
+  Future<bool> exists(String name) async {
+    try {
+      await _handle.openFile(name);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<int?> size(String name) async {
+    try {
+      final fileHandle = await _handle.openFile(name);
+      final file = await fileHandle.getFile().toDart;
+      return file.size;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<List<String>> list() async {
+    final names = <String>[];
+    await for (final entry in _handle.list()) {
+      names.add(entry.name);
+    }
+    return names;
   }
 }
