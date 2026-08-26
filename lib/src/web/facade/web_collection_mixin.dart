@@ -1,3 +1,4 @@
+import 'package:localpocket/src/core/local_pocket.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 
@@ -41,44 +42,79 @@ mixin WireCollectionMixin {
   }
 
   /// Inserts or replaces [record].
-  Future<void> put(Map<String, Object?> record) => _sendMutations([
+  ///
+  /// Mirrors native `Collection.put`: [durability] selects the commit's
+  /// durability class (`DurabilityClass.normal` by default,
+  /// `DurabilityClass.full` when the write must survive an OS/power loss).
+  /// The worker applies it to the transaction that commits this batch.
+  Future<void> put(Map<String, Object?> record,
+          {DurabilityClass durability = DurabilityClass.normal}) =>
+      _sendMutations([
         {'action': 'put', 'record': encodeWireValue(record)}
-      ]);
+      ], durability: durability);
 
   /// Inserts or replaces [records] in one batch.
-  Future<void> putAll(List<Map<String, Object?>> records) => _sendMutations([
+  ///
+  /// Mirrors native `Collection.putAll` (see [put] for [durability]).
+  Future<void> putAll(List<Map<String, Object?>> records,
+          {DurabilityClass durability = DurabilityClass.normal}) =>
+      _sendMutations([
         for (final record in records)
           {'action': 'put', 'record': encodeWireValue(record)}
-      ]);
+      ], durability: durability);
 
   /// Applies a partial update to the record with [id].
-  Future<void> patch(String id, Map<String, Object?> changes) =>
+  ///
+  /// Mirrors native `Collection.patch` (see [put] for [durability]).
+  Future<void> patch(String id, Map<String, Object?> changes,
+          {DurabilityClass durability = DurabilityClass.normal}) =>
       _sendMutations([
         {'action': 'patch', 'id': id, 'record': encodeWireValue(changes)}
-      ]);
+      ], durability: durability);
 
   /// Applies partial updates to many records in one batched request.
-  Future<void> patchAll(Map<String, Map<String, Object?>> patches) =>
+  ///
+  /// Mirrors native `Collection.patchAll` (see [put] for [durability]).
+  Future<void> patchAll(Map<String, Map<String, Object?>> patches,
+          {DurabilityClass durability = DurabilityClass.normal}) =>
       _sendMutations([
         for (final e in patches.entries)
           {'action': 'patch', 'id': e.key, 'record': encodeWireValue(e.value)}
-      ]);
+      ], durability: durability);
 
   /// Archives the record with [id].
-  Future<void> archive(String id) => _sendMutations([
+  ///
+  /// Mirrors native `Collection.archive` (see [put] for [durability]).
+  Future<void> archive(String id,
+          {DurabilityClass durability = DurabilityClass.normal}) =>
+      _sendMutations([
         {'action': 'archive', 'id': id}
-      ]);
+      ], durability: durability);
 
   /// Restores the archived record with [id].
-  Future<void> restore(String id) => _sendMutations([
+  ///
+  /// Mirrors native `Collection.restore` (see [put] for [durability]).
+  Future<void> restore(String id,
+          {DurabilityClass durability = DurabilityClass.normal}) =>
+      _sendMutations([
         {'action': 'restore', 'id': id}
-      ]);
+      ], durability: durability);
 
   /// Hard-deletes the record with [id] and its metadata.
-  Future<void> purge(String id) => _sendMutations([
+  ///
+  /// Mirrors native `Collection.purge` (see [put] for [durability]).
+  Future<void> purge(String id,
+          {DurabilityClass durability = DurabilityClass.normal}) =>
+      _sendMutations([
         {'action': 'purge', 'id': id}
-      ]);
+      ], durability: durability);
 
-  Future<void> _sendMutations(List<Map<String, Object?>> mutations) =>
-      pocket.send(mutateOp, {..._envelope(), 'mutations': mutations});
+  Future<void> _sendMutations(List<Map<String, Object?>> mutations,
+          {DurabilityClass durability = DurabilityClass.normal}) =>
+      pocket.send(mutateOp, {
+        ..._envelope(),
+        'mutations': mutations,
+        if (durability != DurabilityClass.normal)
+          'durability': durability.name,
+      });
 }

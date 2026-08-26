@@ -331,6 +331,42 @@ void main() {
       expect(event['action'], 'create');
       expect(event['origin'], 'local');
     });
+
+    test(
+        'durability: full on a single-op batch commits via the durable '
+        'transaction path', () async {
+      final id = generateRecordId();
+      await h.sendOk(h.req(WireOp.mutateBatch, args: {
+        'store': 'widgets',
+        // An explicit durability request must NOT take the no-transaction
+        // fast path: it rides pocket.transaction so synchronous=FULL applies.
+        'durability': 'full',
+        'mutations': [
+          {
+            'action': 'put',
+            'record': encodeWireValue(record(name: 'durable', qty: 1, id: id))
+          },
+        ],
+      }));
+      expect((await h.get('widgets', id))!['name'], 'durable');
+    });
+
+    test('unknown durability value → typed ProtocolEnvelopeException',
+        () async {
+      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
+        'store': 'widgets',
+        'durability': 'eventually',
+        'mutations': [
+          {
+            'action': 'put',
+            'record': encodeWireValue({'id': generateRecordId(), 'name': 'x'})
+          }
+        ],
+      }));
+      expect(err.code, WireErrorCode.localpocket);
+      expect(err.details?['type'], 'ProtocolEnvelopeException');
+      expect(err.message, contains('durability'));
+    });
   });
 
   group('WorkerEngine — compiled query plan', () {

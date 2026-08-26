@@ -26,8 +26,13 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
     final w = WireArgs(req.args);
     final store = w.requireString('store', op: 'mutate_batch');
     final mutations = w.requireList('mutations', op: 'mutate_batch');
+    final durability =
+      _parseDurability(w.optionalString('durability'), op: 'mutate_batch');
 
-    if (mutations.length == 1) {
+    // Fast path: a lone mutation at the default durability class skips the
+    // transaction machinery entirely. Any explicit durability request must
+    // ride the transaction path below so its synchronous mode is honored.
+    if (mutations.length == 1 && durability == DurabilityClass.normal) {
       await _applyMutation(pocket.collection(store), mutations.first);
       return {'ok': true};
     }
@@ -37,8 +42,26 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
       for (final m in mutations) {
         await _applyMutation(txCol, m);
       }
-    });
+    }, durability: durability);
     return {'ok': true};
+  }
+
+  /// Parses the optional wire `durability` argument (`"normal"` / `"full"`).
+  /// Absent means [DurabilityClass.normal]; an unrecognized value is a typed
+  /// protocol error, never a silent fallback.
+  DurabilityClass _parseDurability(String? raw, {required String op}) {
+    switch (raw) {
+      case null:
+        return DurabilityClass.normal;
+      case 'normal':
+        return DurabilityClass.normal;
+      case 'full':
+        return DurabilityClass.full;
+      default:
+        throw ProtocolEnvelopeException(
+            'Invalid "$op" durability argument: expected "normal" or "full", '
+            'got "$raw".');
+    }
   }
 
   Future<Object?> _handleOpen(WorkerEventSink sink, WebRequest req) async {
