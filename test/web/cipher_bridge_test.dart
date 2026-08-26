@@ -9,10 +9,12 @@ import 'package:test/test.dart';
 /// default async/batch implementations are inherited.
 class _CustomFieldCipher extends FieldCipher {
   @override
-  List<int> encrypt(List<int> plaintext) => plaintext.reversed.toList();
+  List<int> encrypt(List<int> plaintext, {List<int> aad = const []}) =>
+      plaintext.reversed.toList();
 
   @override
-  List<int> decrypt(List<int> ciphertext) => ciphertext.reversed.toList();
+  List<int> decrypt(List<int> ciphertext, {List<int> aad = const []}) =>
+      ciphertext.reversed.toList();
 }
 
 CollectionSchema<Object?> encryptedSchema(String name) => CollectionSchema(

@@ -24,7 +24,8 @@ export 'src/core/cipher.dart'
         FieldCipher,
         CryptoProvider,
         SingleKeyCryptoProvider,
-        AesGcmFieldCipher;
+        AesGcmFieldCipher,
+        fieldAad;
 export 'src/core/errors.dart';
 export 'src/core/capabilities.dart' show SqliteCapabilities, PlatformProfile;
 export 'src/core/perf_counters.dart';

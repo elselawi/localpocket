@@ -90,7 +90,8 @@ Map<String, Object?> encodeDbRow(
   final row = <String, Object?>{'id': id};
   for (final f in schema.fields) {
     final fc = cipher ?? cryptoProvider?.getFieldCipher(schema.name, f.name);
-    row[f.name] = _encodeValue(f, logical[f.name], cipher: fc);
+    row[f.name] = _encodeValue(f, logical[f.name],
+        cipher: fc, aad: fieldAad(schema.name, f.name, id));
   }
   final extra = <String, Object?>{};
   for (final e in logical.entries) {
@@ -112,11 +113,13 @@ Object? encodeFieldValue(
   CollectionSchema<Object?> schema,
   Field field,
   Object? value, {
+  required String recordId,
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
 }) {
   final fc = cipher ?? cryptoProvider?.getFieldCipher(schema.name, field.name);
-  return _encodeValue(field, value, cipher: fc);
+  return _encodeValue(field, value,
+      cipher: fc, aad: fieldAad(schema.name, field.name, recordId));
 }
 
 /// Appends a full DB row's values in [encodeDbRow]'s exact column order
@@ -136,7 +139,8 @@ void appendDomainValues(
   target.add(id);
   for (final f in schema.fields) {
     final fc = cipher ?? cryptoProvider?.getFieldCipher(schema.name, f.name);
-    target.add(_encodeValue(f, logical[f.name], cipher: fc));
+    target.add(_encodeValue(f, logical[f.name],
+        cipher: fc, aad: fieldAad(schema.name, f.name, id)));
   }
   final extra = <String, Object?>{};
   for (final e in logical.entries) {
@@ -202,7 +206,10 @@ Map<String, Object?> decodeDbRow(
   final logical = <String, Object?>{'id': dbRow['id']};
   for (final f in schema.fields) {
     logical[f.name] = _decodeStoredValue(f, dbRow[f.name],
-        cipher: cipher, cryptoProvider: cryptoProvider, store: schema.name);
+        cipher: cipher,
+        cryptoProvider: cryptoProvider,
+        store: schema.name,
+        recordId: (dbRow['id'] as String?) ?? '');
   }
   logical['archived'] = dbRow['archived'] == 1;
   final extra = dbRow['extra'];
@@ -284,7 +291,10 @@ Map<String, Object?> _decodeDbRowProjectedResolved(
   for (final (name, f) in resolved) {
     if (f == null) continue;
     logical[name] = _decodeStoredValue(f, dbRow[name],
-        cipher: cipher, cryptoProvider: cryptoProvider, store: store);
+        cipher: cipher,
+        cryptoProvider: cryptoProvider,
+        store: store,
+        recordId: (dbRow['id'] as String?) ?? '');
   }
   if (wantArchived) {
     logical['archived'] = dbRow['archived'] == 1;
@@ -313,7 +323,8 @@ Future<List<Map<String, Object?>>> decodeDbRowsAsync(
 
 /// Decodes a single stored value (plaintext typed column or base64 ciphertext)
 /// into its logical form for [f]. [store] is the owning store name, used to
-/// resolve a per-field [CryptoProvider] cipher.
+/// resolve a per-field [CryptoProvider] cipher; [recordId] is the owning row's
+/// id and is bound into the AAD of encrypted values.
 ///
 /// This is the single source of the "stored value → logical value" coercion
 /// rules, shared by the full [decodeDbRow] and projection-aware
@@ -322,6 +333,7 @@ Object? _decodeStoredValue(
   Field f,
   Object? stored, {
   required String store,
+  required String recordId,
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
 }) {
@@ -337,7 +349,8 @@ Object? _decodeStoredValue(
           'Corrupt $store row: encrypted field "${f.name}" must be TEXT '
           'ciphertext but is ${stored.runtimeType}.');
     }
-    final plainStr = utf8.decode(fc.decrypt(base64Decode(stored)));
+    final plainStr = utf8.decode(fc.decrypt(base64Decode(stored),
+        aad: fieldAad(store, f.name, recordId)));
     return switch (f.kind) {
       FieldKind.bool => plainStr == '1' || plainStr == 'true',
       FieldKind.int || FieldKind.date => int.parse(plainStr),
@@ -358,7 +371,8 @@ Object? _decodeStoredValue(
   return stored;
 }
 
-Object? _encodeValue(Field f, Object? v, {FieldCipher? cipher}) {
+Object? _encodeValue(Field f, Object? v,
+    {FieldCipher? cipher, List<int> aad = const []}) {
   if (v == null) return null;
   if (f.encrypted) {
     if (cipher == null) {
@@ -380,7 +394,7 @@ Object? _encodeValue(Field f, Object? v, {FieldCipher? cipher}) {
         plainStr = v as String;
     }
     final plainBytes = utf8.encode(plainStr);
-    final cipherBytes = cipher.encrypt(plainBytes);
+    final cipherBytes = cipher.encrypt(plainBytes, aad: aad);
     return base64Encode(cipherBytes);
   }
   switch (f.kind) {

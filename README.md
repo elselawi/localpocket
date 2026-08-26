@@ -474,6 +474,31 @@ final db = await LocalPocket.open(
 
 *Encrypted fields use fresh 12-byte random nonces per write and are stored as ciphertext in SQLite while decrypting transparently during reads.*
 
+### Threat model and ciphertext format
+
+Field-level encryption protects values **at rest** (against a reader who can open the raw
+database file or its backups). It is *not* full-database encryption: schema, row ids, `extra`
+keys, and the set of encrypted fields remain visible, and the key must be supplied on every
+open. It does not defend against a local attacker who can read the process's memory.
+
+Each encrypted value is an AES-256-GCM box (`0x01 ‖ nonce(12) ‖ ciphertext ‖ tag(16)`)
+encrypted through `package:cryptography` — the Web Crypto API on browsers, and the package's
+audited pure-Dart engine on native and as the non-secure web-worker fallback. The format
+version byte is the migration hook: `decrypt` rejects unknown versions loudly instead of
+silently misreading them. The authenticated data is bound to the exact
+`store \x00 field \x00 recordId` triple the value belongs to (see `fieldAad`), so a ciphertext
+captured from one cell cannot be transplanted into another same-shaped field or record.
+
+Two caveats worth knowing:
+
+- **Blob attachments** encrypted via `EncryptingBlobStore.withCipher` reuse the same
+  `AesGcmFieldCipher`, but blob identity is the plaintext hash, not a record — so blob bytes
+  are NOT AAD-bound to a store/record. To bind blobs to a record, encrypt them in your
+  application layer with a per-record AAD before `attach`.
+- **Legacy ciphertext (≤ v0.1.x, unversioned and AAD-free) does not decrypt** under the new
+  format. Re-encrypt existing encrypted stores with the v1 cipher before upgrading; reads of
+  legacy bytes throw a `StateError` naming the version.
+
 ---
 
 ## Binary Files & Blob Attachments

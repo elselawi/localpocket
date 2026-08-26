@@ -357,7 +357,8 @@ class Collection with ChangeBusAwareStore {
       row = {
         field.name: encodeFieldValue(_schema, field, merged[field.name],
             cipher: _pocket.fieldCipher,
-            cryptoProvider: _pocket.cryptoProvider),
+            cryptoProvider: _pocket.cryptoProvider,
+            recordId: id),
         'hidden': 0,
       };
     } else {
@@ -543,7 +544,8 @@ class Collection with ChangeBusAwareStore {
       writeRow = {
         field.name: encodeFieldValue(_schema, field, logical[field.name],
             cipher: _pocket.fieldCipher,
-            cryptoProvider: _pocket.cryptoProvider),
+            cryptoProvider: _pocket.cryptoProvider,
+            recordId: recordId),
         'hidden': 0,
       };
     } else {

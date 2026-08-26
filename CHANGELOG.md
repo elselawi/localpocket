@@ -1,5 +1,22 @@
 ## Unreleased
 
+- **BREAKING (field encryption):** ciphertext format is now versioned and
+  AAD-bound, and the cipher no longer ships a hand-rolled AES engine.
+  `AesGcmFieldCipher` output is `0x01 ‖ nonce(12) ‖ ciphertext ‖ tag(16)`
+  (was `nonce‖ct‖tag`), encrypted through `package:cryptography`'s AES-256-GCM
+  (Web Crypto on browsers; the package's audited pure-Dart engine on native
+  and as the web-worker fallback). Every encrypted value is now authenticated
+  against `store \x00 field \x00 recordId` (see `fieldAad`), so a ciphertext
+  swapped between two same-shaped fields or records fails tag verification
+  instead of decrypting silently. `decrypt` rejects unknown version bytes
+  loudly (no silent migration), so a future algorithm change has a hook. The
+  `FieldCipher` interface's `encrypt`/`decrypt` (and async/batch variants) now
+  accept an optional `aad`, and `encodeFieldValue` requires `recordId`.
+  **Migration:** values written by ≤0.1.x (unversioned, unbound ciphertext)
+  must be re-encrypted with the new format before reading; reads of legacy
+  ciphertext throw a `StateError` naming the version. See the threat-model
+  note in `lib/src/core/cipher.dart` and the README.
+
 - **BREAKING (files): volatile blob storage must now be opted into.** A blob
   store whose bytes do not survive restarts (e.g. the web in-memory fallback
   when OPFS is unavailable, or `MemoryBlobStore`) no longer accepts

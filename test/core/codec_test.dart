@@ -558,7 +558,8 @@ void main() {
         'name': null,
         'secret': null,
         // ciphertext whose decrypted plaintext is not an integer
-        'code': base64Encode(cipher.encrypt(utf8.encode('not-an-int'))),
+        'code': base64Encode(cipher.encrypt(utf8.encode('not-an-int'),
+            aad: fieldAad('secrets', 'code', 'aaaaaaaaaaaaaaa'))),
         'blob': null,
         'archived': 0,
         'hidden': 0,
@@ -577,7 +578,8 @@ void main() {
         'name': null,
         'secret': null,
         'code': null,
-        'blob': base64Encode(cipher.encrypt(utf8.encode('{invalid json'))),
+        'blob': base64Encode(cipher.encrypt(utf8.encode('{invalid json'),
+            aad: fieldAad('secrets', 'blob', 'aaaaaaaaaaaaaaa'))),
         'archived': 0,
         'hidden': 0,
         'extra': '',
@@ -665,7 +667,8 @@ void main() {
         'secret': null,
         'code': null,
         'blob': null,
-        'balance': base64Encode(cipher.encrypt(utf8.encode('42'))),
+        'balance': base64Encode(cipher.encrypt(utf8.encode('42'),
+            aad: fieldAad('secrets', 'balance', 'aaaaaaaaaaaaaaa'))),
         'stamp': null,
         'flag': null,
         'archived': 0,
@@ -697,7 +700,8 @@ void main() {
         'secret': null,
         'code': null,
         'blob': null,
-        'balance': base64Encode(cipher.encrypt(utf8.encode('42.5'))),
+        'balance': base64Encode(cipher.encrypt(utf8.encode('42.5'),
+            aad: fieldAad('secrets', 'balance', 'aaaaaaaaaaaaaaa'))),
         'stamp': null,
         'flag': null,
         'archived': 0,
@@ -722,7 +726,8 @@ void main() {
         'secret': null,
         'code': null,
         'blob': null,
-        'balance': base64Encode(cipher.encrypt(utf8.encode('not-a-number'))),
+        'balance': base64Encode(cipher.encrypt(utf8.encode('not-a-number'),
+            aad: fieldAad('secrets', 'balance', 'aaaaaaaaaaaaaaa'))),
         'stamp': null,
         'flag': null,
         'archived': 0,
@@ -767,6 +772,57 @@ void main() {
       expect(decoded['secret'], 's');
       expect(decoded['code'], 42);
       expect(decoded['blob'], {'a': 1});
+    });
+
+    test('AAD binds ciphertext to (store, field, recordId): cell swaps fail',
+        () {
+      // Two records of the same shape under the same key. Without AAD
+      // binding, swapping the stored ciphertext between two same-shaped cells
+      // would authenticate; with it, tag verification fails. This pins the
+      // fixed (AAD-bound) behavior.
+      final id1 = 'aaaaaaaaaaaa001';
+      final id2 = 'aaaaaaaaaaaa002';
+      final row1 = encodeDbRow(encSchema,
+          id: id1,
+          logical: {'name': 'a', 'secret': 'secret-1', 'code': 1, 'blob': {}},
+          archived: false,
+          cipher: cipher);
+      final row2 = encodeDbRow(encSchema,
+          id: id2,
+          logical: {'name': 'b', 'secret': 'secret-2', 'code': 2, 'blob': {}},
+          archived: false,
+          cipher: cipher);
+
+      // Sanity: each row decodes under its own id.
+      expect(
+          decodeDbRow(encSchema, row1, cipher: cipher)['secret'], 'secret-1');
+      expect(
+          decodeDbRow(encSchema, row2, cipher: cipher)['secret'], 'secret-2');
+
+      // Swap the two encrypted 'secret' cells across records.
+      final swapped1 = Map<String, Object?>.of(row1)
+        ..['secret'] = row2['secret'];
+      final swapped2 = Map<String, Object?>.of(row2)
+        ..['secret'] = row1['secret'];
+      // The record id is bound into the AAD: record 2's ciphertext cannot be
+      // read out of record 1 (and vice versa).
+      expect(() => decodeDbRow(encSchema, swapped1, cipher: cipher),
+          throwsA(isA<StateError>()));
+      expect(() => decodeDbRow(encSchema, swapped2, cipher: cipher),
+          throwsA(isA<StateError>()));
+
+      // Same-record field swap: ciphertext written for 'code' cannot be read
+      // back out of the same record's 'secret' cell.
+      final rowA = encodeDbRow(encSchema,
+          id: id1,
+          logical: {'name': 'a', 'secret': 's', 'code': 9, 'blob': {}},
+          archived: false,
+          cipher: cipher);
+      final fieldSwapped = Map<String, Object?>.of(rowA)
+        ..['secret'] = rowA['code']
+        ..['code'] = rowA['secret'];
+      expect(() => decodeDbRow(encSchema, fieldSwapped, cipher: cipher),
+          throwsA(isA<StateError>()));
     });
 
     test('provider returning different ciphers per store/field', () {

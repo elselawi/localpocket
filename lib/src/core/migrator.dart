@@ -136,19 +136,21 @@ class Migrator {
           [cursor, backfillChunk]);
       if (rows.isEmpty) break;
 
-      final updates = <(int, Map<String, Object?>)>[];
+      final updates = <(int, String, Map<String, Object?>)>[];
       var lastRowid = cursor;
       for (final r in rows) {
         lastRowid = r['rowid']! as int;
         final logical = decodeDbRow(schema, r,
             cipher: pocket.fieldCipher, cryptoProvider: pocket.cryptoProvider);
         final values = m.transform!(logical);
-        if (values.isNotEmpty) updates.add((lastRowid, values));
+        if (values.isNotEmpty) {
+          updates.add((lastRowid, logical['id'] as String? ?? '', values));
+        }
       }
 
       if (updates.isNotEmpty) {
         await db.transaction((txn) async {
-          for (final (rowid, values) in updates) {
+          for (final (rowid, recordId, values) in updates) {
             final set = <String, Object?>{};
             for (final e in values.entries) {
               final field = _fieldByName(schema, e.key);
@@ -162,7 +164,8 @@ class Migrator {
               _validateTransformValue(field, e.value);
               set[e.key] = encodeFieldValue(schema, field, e.value,
                   cipher: pocket.fieldCipher,
-                  cryptoProvider: pocket.cryptoProvider);
+                  cryptoProvider: pocket.cryptoProvider,
+                  recordId: recordId);
             }
             await txn.update(schema.name, set,
                 where: 'rowid = ?', whereArgs: [rowid]);

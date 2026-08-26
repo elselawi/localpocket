@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:cryptography/cryptography.dart' as crypto;
+import 'package:cryptography/dart.dart' as cryptodart;
 import 'package:localpocket/localpocket.dart';
 import 'package:test/test.dart';
 
@@ -64,9 +66,10 @@ void main() {
       expect(rawRows, hasLength(1));
       final rawNotes = rawRows.first['notes'] as String;
       expect(rawNotes, isNot(contains('Allergic to penicillin')));
-      // Decrypting raw notes base64 manually produces original plaintext
-      final manualDecrypted =
-          utf8.decode(cipher.decrypt(base64Decode(rawNotes)));
+      // Decrypting raw notes base64 manually (with the bound AAD) produces the
+      // original plaintext.
+      final manualDecrypted = utf8.decode(cipher.decrypt(base64Decode(rawNotes),
+          aad: fieldAad('patients', 'notes', id)));
       expect(manualDecrypted,
           'Allergic to penicillin; confidential medical history.');
     });
@@ -86,9 +89,9 @@ void main() {
       final plaintext = utf8.encode('Authentic immutable record payload');
       final ciphertext = cipher.encrypt(plaintext);
 
-      // Tamper nonce (first 12 bytes)
+      // Tamper nonce (first 12 bytes follow the version byte).
       final tamperedNonce = List<int>.from(ciphertext);
-      tamperedNonce[0] ^= 0xFF;
+      tamperedNonce[1] ^= 0xFF;
       expect(() => cipher.decrypt(tamperedNonce), throwsA(anything));
 
       // Tamper body
@@ -259,12 +262,14 @@ void main() {
       expect(raw['count'], isNot(contains('12345')));
       expect(raw['ratio'], isNot(contains('2.5')));
 
-      // Manual decrypt recovers the logical value.
-      final decryptedCount =
-          utf8.decode(cipher.decrypt(base64Decode(raw['count'] as String)));
+      // Manual decrypt (with the bound AAD) recovers the logical value.
+      final decryptedCount = utf8.decode(cipher.decrypt(
+          base64Decode(raw['count'] as String),
+          aad: fieldAad('nums', 'count', id)));
       expect(decryptedCount, '12345');
-      final decryptedRatio =
-          utf8.decode(cipher.decrypt(base64Decode(raw['ratio'] as String)));
+      final decryptedRatio = utf8.decode(cipher.decrypt(
+          base64Decode(raw['ratio'] as String),
+          aad: fieldAad('nums', 'ratio', id)));
       expect(decryptedRatio, '2.5');
     });
 
@@ -404,9 +409,10 @@ void main() {
           '0000000000000000000000000000000000000000000000000000000000000000';
       const iv = '000000000000000000000000';
       final out = encryptFixed(key, iv, []);
-      // Output layout: [12-byte nonce][ciphertext][16-byte tag].
-      expect(bytesToHex(out.sublist(0, 12)), iv);
-      expect(bytesToHex(out.sublist(12)), '530f8afbc74536b9a963b4f1c4cb738b');
+      // Output layout: [version byte][12-byte nonce][ciphertext][16-byte tag].
+      expect(out[0], 0x01, reason: 'format version byte');
+      expect(bytesToHex(out.sublist(1, 13)), iv);
+      expect(bytesToHex(out.sublist(13)), '530f8afbc74536b9a963b4f1c4cb738b');
     });
 
     test('NIST AES-256-GCM test case 2 (16 zero bytes)', () {
@@ -414,10 +420,11 @@ void main() {
           '0000000000000000000000000000000000000000000000000000000000000000';
       const iv = '000000000000000000000000';
       final out = encryptFixed(key, iv, List.filled(16, 0));
-      expect(bytesToHex(out.sublist(0, 12)), iv);
+      expect(out[0], 0x01, reason: 'format version byte');
+      expect(bytesToHex(out.sublist(1, 13)), iv);
       expect(
-          bytesToHex(out.sublist(12, 28)), 'cea7403d4d606b6e074ec5d3baf39d18');
-      expect(bytesToHex(out.sublist(28)), 'd0d1c8a799996bf0265b98b5d48ab919');
+          bytesToHex(out.sublist(13, 29)), 'cea7403d4d606b6e074ec5d3baf39d18');
+      expect(bytesToHex(out.sublist(29)), 'd0d1c8a799996bf0265b98b5d48ab919');
     });
 
     test('NIST AES-256-GCM test case 3 (60-byte plaintext)', () {
@@ -428,12 +435,13 @@ void main() {
           'd9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72'
           '1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39');
       final out = encryptFixed(key, iv, pt);
-      expect(bytesToHex(out.sublist(0, 12)), iv);
+      expect(out[0], 0x01, reason: 'format version byte');
+      expect(bytesToHex(out.sublist(1, 13)), iv);
       expect(
-          bytesToHex(out.sublist(12, 72)),
+          bytesToHex(out.sublist(13, 73)),
           '522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa'
           '8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662');
-      expect(bytesToHex(out.sublist(72)), 'eb9f796c8d356fc31a8433884b696f4f');
+      expect(bytesToHex(out.sublist(73)), 'eb9f796c8d356fc31a8433884b696f4f');
     });
 
     test('fixed key/nonce vectors for 0, 1, 15, 16, 17 byte plaintexts', () {
@@ -462,10 +470,11 @@ void main() {
         final n = entry.key;
         final pt = [for (var i = 0; i < n; i++) (i * 3 + 1) % 256];
         final out = encryptFixed(key, iv, pt);
-        expect(bytesToHex(out.sublist(0, 12)), iv, reason: 'len $n nonce');
-        expect(bytesToHex(out.sublist(12, 12 + n)), entry.value.$1,
+        expect(out[0], 0x01, reason: 'len $n version byte');
+        expect(bytesToHex(out.sublist(1, 13)), iv, reason: 'len $n nonce');
+        expect(bytesToHex(out.sublist(13, 13 + n)), entry.value.$1,
             reason: 'len $n ciphertext');
-        expect(bytesToHex(out.sublist(12 + n)), entry.value.$2,
+        expect(bytesToHex(out.sublist(13 + n)), entry.value.$2,
             reason: 'len $n tag');
       }
     });
@@ -486,7 +495,7 @@ void main() {
           '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'));
       final ct = cipher.encrypt(utf8.encode('payload'));
       final tamperedNonce = List<int>.from(ct);
-      tamperedNonce[0] ^= 0x01;
+      tamperedNonce[1] ^= 0x01;
       expect(() => cipher.decrypt(tamperedNonce), throwsA(isA<StateError>()));
     });
 
@@ -513,8 +522,8 @@ void main() {
           '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'));
       final pt = utf8.encode('tag boundary');
       final ct = cipher.encrypt(pt);
-      expect(ct.length, 12 + pt.length + 16,
-          reason: 'exactly a 16-byte GCM tag is appended');
+      expect(ct.length, 1 + 12 + pt.length + 16,
+          reason: 'version byte + exactly a 16-byte GCM tag is appended');
       // Flip every tag byte: each must fail authentication.
       for (var i = 0; i < 16; i++) {
         final tampered = List<int>.from(ct);
@@ -522,6 +531,72 @@ void main() {
         expect(() => cipher.decrypt(tampered), throwsA(isA<StateError>()),
             reason: 'tampered tag byte $i');
       }
+    });
+  });
+
+  group('AAD binding and format version', () {
+    final key = List<int>.generate(32, (i) => (i * 7 + 13) % 256);
+    final cipher = AesGcmFieldCipher(key);
+
+    test('byte-parity with package:cryptography AES-GCM under a fixed nonce',
+        () {
+      // With an injected Random the AesGcmFieldCipher output must match
+      // package:cryptography's AES-256-GCM for the same key/nonce/AAD, modulo
+      // the version-byte prefix. This pins the default cipher to the audited
+      // engine and proves the v1 box is exactly `version ‖ SecretBox`.
+      final nonce = List<int>.generate(12, (i) => (i * 5 + 7) % 256);
+      final aad = fieldAad('patients', 'notes', 'pat000000000001');
+      final pt = utf8.encode('classified payload ✓ 1234567890');
+
+      final out = AesGcmFieldCipher(key, random: _FixedRandom(nonce))
+          .encrypt(pt, aad: aad);
+      expect(out[0], 0x01, reason: 'version byte precedes the box');
+
+      final box = cryptodart.DartAesGcm.with256bits().encryptSync(
+        pt,
+        secretKeyData: crypto.SecretKeyData(key),
+        nonce: nonce,
+        aad: aad,
+      );
+      expect(out,
+          equals([0x01, ...box.nonce, ...box.cipherText, ...box.mac.bytes]));
+    });
+
+    test('AAD binds a ciphertext to its store/field/recordId triple', () {
+      final pt = utf8.encode('vaulted secret');
+      final aadNotesRec1 = fieldAad('patients', 'notes', 'pat000000000001');
+      final aadDiagRec1 = fieldAad('patients', 'diagnosis', 'pat000000000001');
+      final aadNotesRec2 = fieldAad('patients', 'notes', 'pat000000000002');
+
+      final ct = cipher.encrypt(pt, aad: aadNotesRec1);
+      // The correct binding decrypts.
+      expect(
+          utf8.decode(cipher.decrypt(ct, aad: aadNotesRec1)), 'vaulted secret');
+      // The same record's OTHER field cannot decrypt it (field swap).
+      expect(() => cipher.decrypt(ct, aad: aadDiagRec1),
+          throwsA(isA<StateError>()));
+      // The SAME field of ANOTHER record cannot decrypt it (record swap).
+      expect(() => cipher.decrypt(ct, aad: aadNotesRec2),
+          throwsA(isA<StateError>()));
+      // And the unbound (empty AAD) read fails too.
+      expect(() => cipher.decrypt(ct), throwsA(isA<StateError>()));
+    });
+
+    test('versioned format round-trips; a version bump is detectable', () {
+      final pt = utf8.encode('migratable payload');
+      final ct = cipher.encrypt(pt);
+      expect(ct[0], 0x01);
+      expect(cipher.decrypt(ct), pt);
+
+      // A future format (e.g. version 0x02) is rejected loudly with the
+      // version named — never silently decrypted with the wrong layout.
+      final bumped = List<int>.from(ct);
+      bumped[0] = 0x02;
+      expect(
+        () => cipher.decrypt(bumped),
+        throwsA(isA<StateError>()
+            .having((e) => e.message, 'message', contains('version'))),
+      );
     });
   });
 
@@ -570,7 +645,8 @@ void main() {
 
     test('empty plaintext round-trips', () {
       final ct = cipher.encrypt(<int>[]);
-      expect(ct, hasLength(28), reason: 'nonce(12) + empty ct + tag(16)');
+      expect(ct, hasLength(29),
+          reason: 'version(1) + nonce(12) + empty ct + tag(16)');
       expect(cipher.decrypt(ct), isEmpty);
     });
 
@@ -580,7 +656,7 @@ void main() {
       final all = <String>{};
       for (var i = 0; i < 200; i++) {
         final out = cipher.encrypt(pt);
-        nonces.add(bytesToHexHelper(out.sublist(0, 12)));
+        nonces.add(bytesToHexHelper(out.sublist(1, 13)));
         all.add(bytesToHexHelper(out));
       }
       expect(nonces, hasLength(200),
@@ -647,7 +723,7 @@ void main() {
       for (final len in [0, 1, 1024, 64 * 1024 - 1, 64 * 1024]) {
         final pt = List<int>.generate(len, (i) => i % 251);
         final ct = await cipher.encryptAsync(pt);
-        expect(ct.length, 12 + len + 16);
+        expect(ct.length, 1 + 12 + len + 16);
         expect(await cipher.decryptAsync(ct), pt, reason: 'len $len');
       }
     });
@@ -655,7 +731,7 @@ void main() {
     test('large payload async parity', () async {
       final pt = List<int>.generate(1024 * 1024 + 13, (i) => (i * 7) % 256);
       final ct = await cipher.encryptAsync(pt);
-      expect(ct.length, 12 + pt.length + 16);
+      expect(ct.length, 1 + 12 + pt.length + 16);
       expect(await cipher.decryptAsync(ct), pt);
     });
 
