@@ -189,7 +189,6 @@ class FileSyncLane {
       remoteFilename = updatedRec.imgs.isNotEmpty ? updatedRec.imgs.last : name;
     }
 
-    // Update lp_file_refs to synced
     await pocket.transaction((tx) async {
       await tx.executor.update(
         'lp_file_refs',
@@ -220,7 +219,6 @@ class FileSyncLane {
       );
     }
 
-    // Delete ref and decrement blob refcount
     await pocket.transaction((tx) async {
       final exec = tx.executor;
       await exec

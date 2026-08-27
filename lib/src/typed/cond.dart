@@ -16,7 +16,6 @@ import 'field_def.dart';
 /// phantom type [S]. [args] have already passed through the descriptor's
 /// boundary encoder.
 final class Cond<S> {
-  /// Creates an encoded condition.
   const Cond(this.owner, this.field, this.operator, this.args);
 
   /// The canonical store definition instance that owns the field.

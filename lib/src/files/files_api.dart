@@ -301,7 +301,6 @@ class LocalPocketFiles {
       throw StateError('File is remote_only; download it before opening.');
     }
 
-    // Update last_access
     await _pocket.db.execute(
       'UPDATE lp_blobs SET last_access = ? WHERE hash = ?',
       [_pocket.now(), ref.hash],

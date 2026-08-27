@@ -7,7 +7,6 @@ import 'schema.dart';
 
 /// The compiled artifact of a [CollectionSchema]: DDL statements plus warnings.
 class CompiledSchema {
-  /// Creates a compiled schema artifact.
   const CompiledSchema({
     required this.schema,
     required this.tableDdl,
@@ -238,14 +237,12 @@ class DdlCompiler {
     String expr(String side, String c) => ftsTriggerExpr(store, norm, side, c);
     final newRefs = fts.fields.map((c) => expr('new', c)).join(', ');
     final oldRefs = fts.fields.map((c) => expr('old', c)).join(', ');
-    final tail = fts.fuzzy
-      ? ",\n  tokenize = 'trigram'\n);"
-      : ');';
+    final tail = fts.fuzzy ? ",\n  tokenize = 'trigram'\n);" : ');';
     out.add('CREATE VIRTUAL TABLE ${quote(table)} USING fts5(\n'
         '  ${cols.join(', ')},\n'
         "  content = '$store',\n"
         "  content_rowid = 'rowid'\n"
-      '$tail');
+        '$tail');
 
     out.add(
         'CREATE TRIGGER ${quote('${store}_ai')} AFTER INSERT ON ${quote(store)} BEGIN\n'

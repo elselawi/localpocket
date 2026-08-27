@@ -17,7 +17,6 @@ const String remoteDeletedKey = '__lp_deleted__';
 
 /// Representation of a conflict row in `lp_conflicts`.
 class ConflictRecord {
-  /// Creates a conflict row representation.
   ConflictRecord({
     required this.store,
     required this.recordId,

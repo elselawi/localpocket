@@ -216,7 +216,6 @@ class Collection with ChangeBusAwareStore {
     final existing = await _readLogical(id);
     final exec = _tx!.executor;
     await vanishRecordMetadata(exec, name, id, deleteSyncAndOutbox: true);
-    // Delete domain row
     await exec.delete(_table.tableName, where: 'id = ?', whereArgs: [id]);
     _tx!.addChange(ChangeSet(name, {id}));
     if (existing != null) {

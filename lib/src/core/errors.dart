@@ -2,7 +2,6 @@ import 'package:sqlite3/common.dart';
 
 /// Root of all typed errors thrown by localpocket.
 sealed class LocalPocketError implements Exception {
-  /// Creates a LocalPocket error.
   LocalPocketError(this.message);
 
   /// Human-readable description of the failure.

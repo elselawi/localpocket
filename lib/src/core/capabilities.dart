@@ -5,8 +5,6 @@ enum PlatformProfile { native, web }
 
 /// Probing result of the SQLite engine.
 class SqliteCapabilities {
-
-  /// Creates a capability snapshot.
   const SqliteCapabilities({
     required this.sqliteVersion,
     required this.hasStrict,
@@ -14,6 +12,7 @@ class SqliteCapabilities {
     required this.hasFts5,
     required this.platform,
   });
+
   /// SQLite engine version reported by the connection.
   final String sqliteVersion;
 
@@ -56,13 +55,14 @@ class SqliteCapabilities {
     String v, {
     PlatformProfile platform = PlatformProfile.native,
     bool hasFts5 = true,
-  }) => SqliteCapabilities(
-      sqliteVersion: v,
-      hasStrict: versionAtLeast(v, 3, 37),
-      walSupported: platform == PlatformProfile.native,
-      hasFts5: hasFts5,
-      platform: platform,
-    );
+  }) =>
+      SqliteCapabilities(
+        sqliteVersion: v,
+        hasStrict: versionAtLeast(v, 3, 37),
+        walSupported: platform == PlatformProfile.native,
+        hasFts5: hasFts5,
+        platform: platform,
+      );
 
   /// Serializes this capability snapshot for diagnostics.
   Map<String, Object?> toJson() => {

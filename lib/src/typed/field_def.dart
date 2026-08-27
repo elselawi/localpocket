@@ -32,8 +32,6 @@ typedef FieldEncodeFn<T> = Object? Function(T value);
 /// (the phantom store type [S] binds it for compile-time cross-store
 /// checks); [required] marks a non-nullable field.
 abstract base class FieldDef<S, T> {
-  /// Creates a descriptor.
-  ///
   /// [decode]/[encode] default to an unchecked cast / identity; kinds with a
   /// boundary codec (enum, dateTime) pass closures instead. A defense-in-depth
   /// guard rejects the impossible combination `required: true` with a

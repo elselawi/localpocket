@@ -9,9 +9,8 @@ import '../core/sql_utils.dart';
 
 /// Identity-scoped pull cursor.
 class PullCursor {
-
-  /// Creates a pull cursor.
   const PullCursor(this.updated, this.id);
+
   /// Last remote update timestamp.
   final String updated;
 
@@ -21,9 +20,8 @@ class PullCursor {
 
 /// Rotating anti-entropy sweep state.
 class SweepState {
-
-  /// Creates sweep state.
   const SweepState(this.bucket, this.lastSweepAt);
+
   /// Last bucket visited, or `-1` before the first sweep.
   final int bucket;
 
@@ -33,7 +31,6 @@ class SweepState {
 
 /// Persists pull cursors, sweep progress, and aggregate sync status.
 class SyncStore {
-
   SyncStore(this.pocket, this.scope);
   final LocalPocket pocket;
   final String scope;

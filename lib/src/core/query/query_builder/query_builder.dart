@@ -28,7 +28,6 @@ class WhereClause {
 
 /// A field ordering term.
 class OrderClause {
-  /// Creates an ordering term.
   const OrderClause(this.field, {this.desc = false});
 
   /// The field to order by.

@@ -40,7 +40,6 @@ const Object _sentinelUnset = Object();
 
 /// A post-commit notification of a specific record state transition.
 class RecordChangeEvent {
-  /// Creates a record change event.
   const RecordChangeEvent({
     required this.store,
     required this.id,
