@@ -71,6 +71,8 @@ void main(List<String> args) {
     'TypedSearchHit',
     'TypedStoreRegistry',
     'TypedStoreMismatchError',
+    'indexSpec',
+    'ftsSpec',
   ];
 
   final missingInTest = <String>[];

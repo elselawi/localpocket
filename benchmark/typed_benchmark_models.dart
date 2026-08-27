@@ -1,4 +1,3 @@
-import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/typed.dart';
 
 final class BenchmarkWidgets extends StoreDef<BenchmarkWidgets> {
@@ -25,8 +24,8 @@ final class BenchmarkWidgets extends StoreDef<BenchmarkWidgets> {
       ];
 
   @override
-  List<IndexSpec> get indexes => const [
-        IndexSpec(['name', 'qty']),
-        IndexSpec(['qty']),
+  List<IndexSpec> get indexes => [
+        indexSpec(<FieldDef<BenchmarkWidgets, Object?>>[_name, _qty]),
+        indexSpec([_qty]),
       ];
 }

@@ -34,10 +34,54 @@ CollectionSchema<Object?> rawTasksSchema() => CollectionSchema<Object?>(
       ],
     );
 
+final class _ParityHelpers extends StoreDef<_ParityHelpers> {
+  _ParityHelpers._() : super(name: 'parity_helpers', version: 1);
+
+  static final _ParityHelpers instance = _ParityHelpers._();
+
+  late final _title = f.text('title');
+  late final _priority = f.integer('priority');
+
+  @override
+  List<FieldDef<_ParityHelpers, Object?>> get fields => [_title, _priority];
+
+  @override
+  List<IndexSpec> get indexes => [
+        indexSpec(<FieldDef<_ParityHelpers, Object?>>[_title, _priority],
+            unique: true, scope: IndexScope.notArchived),
+      ];
+
+  @override
+  FtsSpec get fts => ftsSpec([_title]);
+}
+
 Future<LocalPocket> openTasks() =>
     LocalPocket.open(path: ':memory:', stores: [Tasks.instance.schema]);
 
 void main() {
+  test('typed index and FTS helpers preserve schema JSON and DDL parity', () {
+    final typedSchema = _ParityHelpers.instance.schema;
+    final rawSchema = CollectionSchema<Object?>(
+      name: 'parity_helpers',
+      version: 1,
+      fields: [Field.text('title'), Field.int('priority')],
+      indexes: const [
+        IndexSpec(['title', 'priority'],
+            unique: true, scope: IndexScope.notArchived),
+      ],
+      fts: const FtsSpec(['title']),
+    );
+
+    expect(typedSchema.toJson(), rawSchema.toJson());
+    final typedDdl = DdlCompiler(SqliteCapabilities.forVersion('3.44.2'))
+        .compile(typedSchema);
+    final rawDdl =
+        DdlCompiler(SqliteCapabilities.forVersion('3.44.2')).compile(rawSchema);
+    expect(typedDdl.tableDdl, rawDdl.tableDdl);
+    expect(typedDdl.indexDdl, rawDdl.indexDdl);
+    expect(typedDdl.ftsDdl, rawDdl.ftsDdl);
+  });
+
   group('façade <-> engine parity', () {
     test('case 83: typed put produces the byte-identical logical map',
         () async {

@@ -68,34 +68,45 @@ class Field {
   });
 
   /// Declares a text field.
-  factory Field.text(String name,
-          {bool required = false,
-          bool uniqueWhenActive = false,
-          bool encrypted = false}) =>
+  factory Field.text(
+    String name, {
+    bool required = false,
+    bool uniqueWhenActive = false,
+    bool encrypted = false,
+  }) =>
       Field._(
-          name: name,
-          kind: FieldKind.text,
-          required: required,
-          uniqueWhenActive: uniqueWhenActive,
-          encrypted: encrypted);
+        name: name,
+        kind: FieldKind.text,
+        required: required,
+        uniqueWhenActive: uniqueWhenActive,
+        encrypted: encrypted,
+      );
 
   /// Declares an integer field.
-  factory Field.int(String name,
-          {bool required = false, bool encrypted = false}) =>
+  factory Field.int(
+    String name, {
+    bool required = false,
+    bool encrypted = false,
+  }) =>
       Field._(
-          name: name,
-          kind: FieldKind.int,
-          required: required,
-          encrypted: encrypted);
+        name: name,
+        kind: FieldKind.int,
+        required: required,
+        encrypted: encrypted,
+      );
 
   /// Declares a real-number field.
-  factory Field.real(String name,
-          {bool required = false, bool encrypted = false}) =>
+  factory Field.real(
+    String name, {
+    bool required = false,
+    bool encrypted = false,
+  }) =>
       Field._(
-          name: name,
-          kind: FieldKind.real,
-          required: required,
-          encrypted: encrypted);
+        name: name,
+        kind: FieldKind.real,
+        required: required,
+        encrypted: encrypted,
+      );
 
   /// Declares a boolean field stored as SQLite `0` or `1`.
   factory Field.bool(String name, {bool required = false}) =>
@@ -106,13 +117,17 @@ class Field {
       Field._(name: name, kind: FieldKind.date, required: required);
 
   /// Declares a string field restricted to [values].
-  factory Field.enumValue(String name, List<String> values,
-          {bool required = false}) =>
+  factory Field.enumValue(
+    String name,
+    List<String> values, {
+    bool required = false,
+  }) =>
       Field._(
-          name: name,
-          kind: FieldKind.enumValue,
-          required: required,
-          enumValues: List.unmodifiable(values));
+        name: name,
+        kind: FieldKind.enumValue,
+        required: required,
+        enumValues: List.unmodifiable(values),
+      );
 
   /// Declares a JSON object or array field.
   factory Field.json(String name, {bool encrypted = false}) =>
@@ -123,8 +138,11 @@ class Field {
       Field._(name: name, kind: FieldKind.jsonList, encrypted: encrypted);
 
   /// Declares a reference to collection [to].
-  factory Field.ref(String name,
-          {required String to, bool enforceFk = false}) =>
+  factory Field.ref(
+    String name, {
+    required String to,
+    bool enforceFk = false,
+  }) =>
       Field._(name: name, kind: FieldKind.ref, refTo: to, enforceFk: enforceFk);
 
   /// Column name exposed to queries and records.
@@ -155,8 +173,10 @@ class Field {
   /// followed by any number of letters, digits, or underscores. Unicode
   /// letters are allowed (SQLite identifiers may contain them); whitespace,
   /// quotes, and punctuation are not.
-  static final RegExp _identifierPattern =
-      RegExp(r'^[\p{L}_][\p{L}\p{N}_]*$', unicode: true);
+  static final RegExp _identifierPattern = RegExp(
+    r'^[\p{L}_][\p{L}\p{N}_]*$',
+    unicode: true,
+  );
 
   /// Validates [name] against the strict identifier policy.
   ///
@@ -167,8 +187,9 @@ class Field {
   static void validateName(String name) {
     if (!_identifierPattern.hasMatch(name)) {
       throw SchemaRegistrationError(
-          'Field "$name" is not a valid identifier (must start with a letter '
-          'or underscore and contain only letters, digits, or underscores).');
+        'Field "$name" is not a valid identifier (must start with a letter '
+        'or underscore and contain only letters, digits, or underscores).',
+      );
     }
   }
 
@@ -211,10 +232,12 @@ class Field {
         final encrypted = j['encrypted'] == true;
         switch (kind) {
           case FieldKind.text:
-            return Field.text(name,
-                required: required,
-                uniqueWhenActive: j['uniqueWhenActive'] == true,
-                encrypted: encrypted);
+            return Field.text(
+              name,
+              required: required,
+              uniqueWhenActive: j['uniqueWhenActive'] == true,
+              encrypted: encrypted,
+            );
           case FieldKind.int:
             return Field.int(name, required: required, encrypted: encrypted);
           case FieldKind.real:
@@ -225,15 +248,20 @@ class Field {
             return Field.date(name, required: required);
           case FieldKind.enumValue:
             return Field.enumValue(
-                name, (j['enumValues']! as List).cast<String>(),
-                required: required);
+              name,
+              (j['enumValues']! as List).cast<String>(),
+              required: required,
+            );
           case FieldKind.json:
             return Field.json(name, encrypted: encrypted);
           case FieldKind.jsonList:
             return Field.jsonList(name, encrypted: encrypted);
           case FieldKind.ref:
-            return Field.ref(name,
-                to: j['refTo']! as String, enforceFk: j['enforceFk'] == true);
+            return Field.ref(
+              name,
+              to: j['refTo']! as String,
+              enforceFk: j['enforceFk'] == true,
+            );
         }
       });
 }
@@ -250,10 +278,20 @@ enum IndexScope {
 /// Declares a SQLite index for one or more fields.
 class IndexSpec {
   /// Creates an index declaration.
-  const IndexSpec(this.columns,
-      {this.unique = false, this.scope = IndexScope.live});
+  const IndexSpec(
+    this.columns, {
+    this.unique = false,
+    this.scope = IndexScope.live,
+  });
 
   /// Ordered indexed column names.
+  ///
+  /// During schema compilation, each explicit name must be a declared field
+  /// or one of the engine-owned columns (`id`, `archived`, `hidden`, or
+  /// `extra`); an unknown name throws [SchemaRegistrationError]. An empty
+  /// list remains valid and produces an index over the implicit `id` column.
+  /// The typed layer's `indexSpec([...])` helper derives these names from field
+  /// descriptors.
   final List<String> columns;
 
   /// Whether indexed values must be unique within [scope].
@@ -270,15 +308,21 @@ class IndexSpec {
       };
 
   /// Reconstructs an index declaration from a JSON-compatible map.
-  static IndexSpec fromJson(Map<String, Object?> j) =>
-      _parseSchemaJson(() => IndexSpec(
-            (j['columns']! as List).cast<String>(),
-            unique: j['unique'] == true,
-            scope: IndexScope.values.byName(j['scope']! as String),
-          ));
+  static IndexSpec fromJson(Map<String, Object?> j) => _parseSchemaJson(
+        () => IndexSpec(
+          (j['columns']! as List).cast<String>(),
+          unique: j['unique'] == true,
+          scope: IndexScope.values.byName(j['scope']! as String),
+        ),
+      );
 }
 
+/// {@template localpocket.fts_spec}
 /// Enables FTS5 over the declared text fields in [fields].
+///
+/// The typed layer's `ftsSpec([...])` helper derives [fields] from
+/// store-owned descriptors while preserving this raw engine-level
+/// constructor for dynamic and boundary schemas.
 ///
 /// Two optional, independently toggleable extensions:
 ///
@@ -288,10 +332,16 @@ class IndexSpec {
 /// - [normalize]: consumer-declared character parity rules applied to both
 ///   the indexed text and the search term, e.g. mapping Arabic alef forms
 ///   (`أ`, `إ`, `آ`) to a single canonical letter (`ا`) so they all match.
+/// {@endtemplate}
 class FtsSpec {
   /// Creates an FTS5 configuration.
-  const FtsSpec(this.fields,
-      {this.fuzzy = false, this.normalize = const FtsNormalization()});
+  ///
+  /// {@macro localpocket.fts_spec}
+  const FtsSpec(
+    this.fields, {
+    this.fuzzy = false,
+    this.normalize = const FtsNormalization(),
+  });
 
   /// Declared fields indexed for full-text search.
   final List<String> fields;
@@ -337,11 +387,7 @@ class FtsSpec {
           normalize == other.normalize;
 
   @override
-  int get hashCode => Object.hash(
-        Object.hashAll(fields),
-        fuzzy,
-        normalize,
-      );
+  int get hashCode => Object.hash(Object.hashAll(fields), fuzzy, normalize);
 }
 
 /// Consumer-declared character parity rules for full-text search.
@@ -381,11 +427,13 @@ class FtsNormalization {
   static void validateRule(String from, String to) {
     if (from.runes.length != 1) {
       throw SchemaRegistrationError(
-          'FtsNormalization keys must be single characters, got "$from".');
+        'FtsNormalization keys must be single characters, got "$from".',
+      );
     }
     if (to.isEmpty || to.length > 4) {
       throw SchemaRegistrationError(
-          'FtsNormalization replacement for "$from" must be 1-4 characters.');
+        'FtsNormalization replacement for "$from" must be 1-4 characters.',
+      );
     }
   }
 
@@ -425,8 +473,7 @@ class FtsNormalization {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is FtsNormalization &&
-          _mapsEqual(rules, other.rules);
+      other is FtsNormalization && _mapsEqual(rules, other.rules);
 
   static bool _mapsEqual(Map<String, String> a, Map<String, String> b) {
     if (a.length != b.length) return false;
@@ -441,8 +488,7 @@ class FtsNormalization {
   @override
   int get hashCode {
     final keys = rules.keys.toList()..sort();
-    return Object.hashAll(
-        [for (final k in keys) Object.hash(k, rules[k])]);
+    return Object.hashAll([for (final k in keys) Object.hash(k, rules[k])]);
   }
 
   @override
@@ -486,20 +532,22 @@ class StoreMigration {
       };
 
   /// Reconstructs migration metadata from a JSON-compatible map.
-  static StoreMigration fromJson(Map<String, Object?> json) =>
-      _parseSchemaJson(() => StoreMigration(
-            toVersion: json['toVersion']! as int,
-            destructive: json['destructive'] == true,
-            addedFields: [
-              for (final field in (json['addedFields'] as List? ?? const []))
-                Field.fromJson(field as Map<String, Object?>),
-            ],
-          ));
+  static StoreMigration fromJson(Map<String, Object?> json) => _parseSchemaJson(
+        () => StoreMigration(
+          toVersion: json['toVersion']! as int,
+          destructive: json['destructive'] == true,
+          addedFields: [
+            for (final field in (json['addedFields'] as List? ?? const []))
+              Field.fromJson(field as Map<String, Object?>),
+          ],
+        ),
+      );
 }
 
 /// A lazy, deterministic, never-pushed document-format migration.
 typedef DocumentMigration = Map<String, Object?> Function(
-    Map<String, Object?> doc);
+  Map<String, Object?> doc,
+);
 
 /// Policy applied when a pushed update's target record no longer exists
 /// remotely (a remote deletion raced a local offline edit).
@@ -579,28 +627,29 @@ class CollectionSchema<T> {
   });
 
   /// Reconstructs a schema from a JSON-compatible map.
-  factory CollectionSchema.fromJson(Map<String, Object?> j) =>
-      _parseSchemaJson(() => CollectionSchema<T>(
-            name: j['name']! as String,
-            version: j['version']! as int,
-            fields: [
-              for (final f in (j['fields']! as List))
-                Field.fromJson(f as Map<String, Object?>)
-            ],
-            indexes: [
-              for (final ix in (j['indexes']! as List))
-                IndexSpec.fromJson(ix as Map<String, Object?>)
-            ],
-            keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
-            prefetchFiles: j['prefetchFiles'] == true,
-            fts: j['fts'] is Map
-                ? FtsSpec.fromJson(j['fts']! as Map<String, Object?>)
-                : null,
-            migrations: [
-              for (final migration in (j['migrations'] as List? ?? const []))
-                StoreMigration.fromJson(migration as Map<String, Object?>),
-            ],
-          ));
+  factory CollectionSchema.fromJson(Map<String, Object?> j) => _parseSchemaJson(
+        () => CollectionSchema<T>(
+          name: j['name']! as String,
+          version: j['version']! as int,
+          fields: [
+            for (final f in (j['fields']! as List))
+              Field.fromJson(f as Map<String, Object?>),
+          ],
+          indexes: [
+            for (final ix in (j['indexes']! as List))
+              IndexSpec.fromJson(ix as Map<String, Object?>),
+          ],
+          keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
+          prefetchFiles: j['prefetchFiles'] == true,
+          fts: j['fts'] is Map
+              ? FtsSpec.fromJson(j['fts']! as Map<String, Object?>)
+              : null,
+          migrations: [
+            for (final migration in (j['migrations'] as List? ?? const []))
+              StoreMigration.fromJson(migration as Map<String, Object?>),
+          ],
+        ),
+      );
 
   /// Collection and SQLite table name.
   final String name;
@@ -638,8 +687,9 @@ class CollectionSchema<T> {
   /// Cached declared-name set. The identity-keyed Expando preserves the const
   /// constructor while avoiding rebuilding the Set on every encode/payload
   /// pass (cache immutable schema metadata).
-  static final Expando<Set<String>> _declaredNamesCache =
-      Expando<Set<String>>('declaredNames');
+  static final Expando<Set<String>> _declaredNamesCache = Expando<Set<String>>(
+    'declaredNames',
+  );
 
   /// Returns the names of all fields declared by this schema.
   Set<String> get declaredFieldNames =>

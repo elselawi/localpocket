@@ -7,6 +7,7 @@ import 'dart:collection';
 import 'package:localpocket/localpocket.dart';
 
 import 'field_def.dart';
+import 'schema_helpers.dart' as schema_helpers;
 
 /// A system field descriptor: engine-owned column (`id`/`archived`) exposed
 /// for typed reads, never settable through the typed write path and never
@@ -140,6 +141,12 @@ final class Fields<S> {
 ///
 ///   @override
 ///   List<FieldDef<Tasks, Object?>> get fields => [_title];
+///
+///   @override
+///   List<IndexSpec> get indexes => [indexSpec([_title])];
+///
+///   @override
+///   FtsSpec? get fts => ftsSpec([_title]);
 /// }
 /// ```
 ///
@@ -177,10 +184,48 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// member initialized through [f].
   List<FieldDef<S, Object?>> get fields;
 
+  /// Builds an index for this store from its field descriptors.
+  ///
+  /// The receiver fixes the owner type [S], so a foreign descriptor is an
+  /// analysis error. Use the top-level `indexSpec` helper from
+  /// `schema_helpers.dart` outside a [StoreDef]. When a list combines
+  /// different descriptor subtypes, use an explicit list type such as
+  /// `indexSpec(<FieldDef<S, Object?>>[first, second])`.
+  IndexSpec indexSpec(
+    List<FieldDef<S, Object?>> fields, {
+    bool unique = false,
+    IndexScope scope = IndexScope.live,
+  }) =>
+      schema_helpers.indexSpec<S>(fields, unique: unique, scope: scope);
+
+  /// Builds an FTS declaration for this store from its field descriptors.
+  ///
+  /// The receiver fixes the owner type [S], so a foreign descriptor is an
+  /// analysis error. Use the top-level `ftsSpec` helper from
+  /// `schema_helpers.dart` outside a [StoreDef]. It is named `ftsSpec`
+  /// rather than `fts` because that name is already occupied by this class's
+  /// FTS getter.
+  FtsSpec ftsSpec(
+    List<FieldDef<S, Object?>> fields, {
+    bool fuzzy = false,
+    FtsNormalization normalize = const FtsNormalization(),
+  }) =>
+      schema_helpers.ftsSpec<S>(fields, fuzzy: fuzzy, normalize: normalize);
+
   /// Schema indexes, forwarded verbatim to the engine.
+  ///
+  /// Prefer the typed [indexSpec] helper so column names come from this store's
+  /// field descriptors. Raw [IndexSpec] values remain supported for dynamic
+  /// declarations and engine-boundary schemas. Helper-based declarations are
+  /// non-const because descriptors are runtime objects.
   List<IndexSpec> get indexes => const [];
 
   /// Optional FTS5 configuration, forwarded verbatim to the engine.
+  ///
+  /// Prefer [ftsSpec] to derive FTS field names from this store's descriptors.
+  /// The helper is intentionally named `ftsSpec`, not `fts`, because this
+  /// getter already occupies the `fts` name. Raw [FtsSpec] values remain
+  /// supported, and helper-based declarations are non-const.
   FtsSpec? get fts => null;
 
   /// Forward store migrations, forwarded verbatim to the engine.

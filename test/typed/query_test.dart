@@ -25,7 +25,7 @@ final class SearchTasks extends StoreDef<SearchTasks> {
   List<FieldDef<SearchTasks, Object?>> get fields => [_title];
 
   @override
-  FtsSpec get fts => const FtsSpec(['title']);
+  FtsSpec get fts => ftsSpec<SearchTasks>([_title]);
 }
 
 Future<LocalPocket> openTyped({

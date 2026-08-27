@@ -608,6 +608,8 @@ class LocalPocket with ChangeBusAwareLP {
   /// Inside a transaction, use `tx.store(def)` instead.
   TypedCollection<S> store<S extends StoreDef<S>>(S def) {
     _guardOutsideTx();
+    // Verify structure and existence BEFORE binding so a failed lookup leaves
+    // the typed registry untouched (matching tx.store and the web facades).
     final table = requireTable(def.name);
     def.verifyRegisteredSchema(table.schema);
     typedRegistry.bind(def);

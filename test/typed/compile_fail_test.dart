@@ -18,6 +18,13 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+String _normalizeDiagnosticCode(String code) {
+  final normalized = code.toLowerCase();
+  return normalized == 'list_element_type_not_assignable'
+      ? 'argument_type_not_assignable'
+      : normalized;
+}
+
 void main() {
   final fixturesDir = Directory('test/typed/compile_fail');
   final fixtures = fixturesDir
@@ -46,7 +53,8 @@ void main() {
         final reported = <String>{
           for (final raw in '${result.stdout}'.split('\n'))
             if (raw.contains('|'))
-              if (raw.split('|')[0] == 'ERROR') raw.split('|')[2].toLowerCase(),
+              if (raw.split('|')[0] == 'ERROR')
+                _normalizeDiagnosticCode(raw.split('|')[2]),
         };
 
         expect(

@@ -246,8 +246,7 @@ void main() {
       expect(await pocket.collection('t').query().all().count(), 0);
     });
 
-    test('index on an undeclared column compiles but fails at SQLite',
-        () async {
+    test('index on an undeclared column is rejected by the compiler', () {
       final ghostIx = CollectionSchema<Object?>(
         name: 't',
         version: 1,
@@ -256,12 +255,34 @@ void main() {
           IndexSpec(['ghost'])
         ],
       );
-      // Compiler-only: DDL is produced without a typed error...
-      final compiled = DdlCompiler(caps).compile(ghostIx);
-      expect(compiled.indexDdl.single, contains('"ghost"'));
-      // ...but the real open fails at the SQLite level with no such column.
+      expect(
+        () => DdlCompiler(caps).compile(ghostIx),
+        throwsA(isA<SchemaRegistrationError>().having(
+          (error) => error.message,
+          'message',
+          'Index column "ghost" is not a declared field of store "t".',
+        )),
+      );
       expect(openPocket(stores: [ghostIx]),
-          throwsA(isA<sqlite.SqliteException>()));
+          throwsA(isA<SchemaRegistrationError>()));
+    });
+
+    test('index declarations may target physical system columns', () async {
+      final schema = CollectionSchema<Object?>(
+        name: 't',
+        version: 1,
+        fields: [Field.text('a')],
+        indexes: const [
+          IndexSpec(['id']),
+          IndexSpec(['archived']),
+          IndexSpec(['hidden']),
+          IndexSpec(['extra']),
+        ],
+      );
+      final compiled = DdlCompiler(caps).compile(schema);
+      expect(compiled.indexDdl, hasLength(4));
+      final pocket = await openPocket(stores: [schema]);
+      addTearDown(pocket.close);
     });
 
     test('empty index degenerates to an id-only index and opens', () async {

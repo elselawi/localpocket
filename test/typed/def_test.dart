@@ -10,7 +10,6 @@ library;
 
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/typed.dart';
-import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
 
 import 'support/tasks.dart';
@@ -181,6 +180,31 @@ final class _BadIndex extends StoreDef<_BadIndex> {
       ];
 }
 
+/// Store used to exercise typed index and FTS helper forwarding.
+final class _HelperStore extends StoreDef<_HelperStore> {
+  _HelperStore() : super(name: 'helper', version: 1);
+
+  late final _title = f.text('title');
+  late final _priority = f.integer('priority');
+
+  @override
+  List<FieldDef<_HelperStore, Object?>> get fields => [_title, _priority];
+
+  @override
+  List<IndexSpec> get indexes => [
+        indexSpec(<FieldDef<_HelperStore, Object?>>[_title, _priority],
+            unique: true, scope: IndexScope.notArchived),
+        indexSpec([]),
+      ];
+
+  @override
+  FtsSpec? get fts => ftsSpec(
+        [_title],
+        fuzzy: true,
+        normalize: const FtsNormalization(rules: {'é': 'e'}),
+      );
+}
+
 /// FTS referencing a field that is not declared.
 final class _BadFts extends StoreDef<_BadFts> {
   _BadFts() : super(name: 'badfts', version: 1);
@@ -218,11 +242,11 @@ final class _Forward extends StoreDef<_Forward> {
 
   @override
   List<IndexSpec> get indexes => [
-        const IndexSpec(['a'])
+        indexSpec([_a])
       ];
 
   @override
-  FtsSpec? get fts => const FtsSpec(['a']);
+  FtsSpec? get fts => ftsSpec([_a]);
 
   @override
   List<StoreMigration> get migrations => [_migration];
@@ -472,6 +496,74 @@ void main() {
       for (final (label, typed, raw) in pairs) {
         expect(typed.sqlType, raw.sqlType, reason: label);
       }
+    });
+  });
+
+  group('typed index and FTS helpers', () {
+    test('index derives names and forwards options', () {
+      final title = probe.f.text('title');
+      final priority = probe.f.integer('priority');
+      final typed = indexSpec<_Probe>(
+        <FieldDef<_Probe, Object?>>[title, priority],
+        unique: true,
+        scope: IndexScope.notArchived,
+      );
+      final raw = const IndexSpec(
+        ['title', 'priority'],
+        unique: true,
+        scope: IndexScope.notArchived,
+      );
+      expect(typed.columns, ['title', 'priority']);
+      expect(typed.unique, isTrue);
+      expect(typed.scope, IndexScope.notArchived);
+      expect(typed.toJson(), raw.toJson());
+      expect(typed.columns, isNot(contains('FieldDef')));
+    });
+
+    test('index supports empty lists and required descriptors', () {
+      final title = probe.f.text('title').req();
+      expect(indexSpec<_Probe>([title]).columns, ['title']);
+      expect(indexSpec<_Probe>([]).columns, isEmpty);
+      expect(indexSpec<_Probe>([]).toJson(), const IndexSpec([]).toJson());
+    });
+
+    test('ftsSpec derives names and forwards options', () {
+      final title = probe.f.text('title');
+      const normalize = FtsNormalization(rules: {'é': 'e'});
+      final typed = ftsSpec<_Probe>(
+        <FieldDef<_Probe, Object?>>[title],
+        fuzzy: true,
+        normalize: normalize,
+      );
+      final raw = const FtsSpec(
+        ['title'],
+        fuzzy: true,
+        normalize: normalize,
+      );
+      expect(typed.fields, ['title']);
+      expect(typed.fuzzy, isTrue);
+      expect(typed.normalize, normalize);
+      expect(typed.toJson(), raw.toJson());
+    });
+
+    test('helper-backed store schema equals hand-built raw twin', () {
+      final typed = _HelperStore().schema;
+      final raw = CollectionSchema<Object?>(
+        name: 'helper',
+        version: 1,
+        fields: [Field.text('title'), Field.int('priority')],
+        indexes: const [
+          IndexSpec(['title', 'priority'],
+              unique: true, scope: IndexScope.notArchived),
+          IndexSpec([]),
+        ],
+        fts: const FtsSpec(
+          ['title'],
+          fuzzy: true,
+          normalize: FtsNormalization(rules: {'é': 'e'}),
+        ),
+      );
+      expect(typed.toJson(), raw.toJson());
     });
   });
 
@@ -731,14 +823,17 @@ void main() {
       );
     });
 
-    test(
-        'case 39: unknown index field surfaces the engine error, not a '
-        'typed-layer crash', () async {
-      final schema = _BadIndex().schema; // typed layer forwards verbatim
+    test('case 39: unknown index field surfaces the engine registration error',
+        () async {
+      final schema = _BadIndex().schema; // raw IndexSpec remains supported
       expect(schema.indexes.single.columns, ['nope']);
       await expectLater(
         () => LocalPocket.open(path: ':memory:', stores: [schema]),
-        throwsA(isA<SqliteException>()),
+        throwsA(isA<SchemaRegistrationError>().having(
+          (error) => error.message,
+          'message',
+          'Index column "nope" is not a declared field of store "badindex".',
+        )),
       );
     });
 
@@ -752,7 +847,7 @@ void main() {
       expect(schema.documentMigrations, same(store.documentMigrations));
       expect(schema.validator, same(store.validator));
       expect(schema.conflictPolicy, same(store.conflictPolicy));
-      expect(schema.fts, same(store.fts));
+      expect(schema.fts!.toJson(), store.fts!.toJson());
       expect(schema.indexes.single.columns, ['a']);
       // The forwarded callbacks still behave:
       expect(schema.validator!({'a': 'x'}), isEmpty);

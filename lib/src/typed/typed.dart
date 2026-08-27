@@ -1,19 +1,5 @@
 /// Typed data-model layer implementation.
 ///
-/// Phase 1 (definition core): `FieldDef` and its per-kind subclasses, the
-/// `Fields` factory object, `StoreDef` with its memoized `schema` property and
-/// `verify()`, and the reference-identity `TypedStoreRegistry`.
-///
-/// Phase 2 (CRUD + rows): `Draft` (typed writes), `TypedRow` (call-form
-/// reads), `TypedCollection`, and `db.store`/`tx.store` on both the native
-/// engine and the web facade.
-///
-/// Phase 3 (queries + search + watch): `Cond`, `TypedQuery`, `TypedPage`,
-/// typed search hits, and delegated query watch streams.
-///
-/// Phase 5 keeps native/web adapter surfaces hidden from this consumer
-/// entrypoint and enforces descriptor/draft-only public writes.
-///
 /// Layering: this directory imports only the public core surface
 /// (`package:localpocket/localpocket.dart`), never `dart:io`,
 /// `package:http`, or the pocketbase adapter — enforced by
@@ -21,8 +7,15 @@
 library;
 
 export 'field_def.dart';
+export 'schema_helpers.dart';
 export 'store_def.dart';
 export 'registry.dart';
+
+// These schema value types appear in the helper signatures and named
+// arguments. Re-export the core declarations so a typed-only import can use
+// custom index scopes and FTS normalization without a second import.
+export 'package:localpocket/localpocket.dart'
+    show FtsNormalization, FtsSpec, IndexScope, IndexSpec;
 export 'draft.dart';
 export 'typed_row.dart';
 export 'cond.dart';

@@ -35,7 +35,12 @@ final class _WebTasks extends StoreDef<_WebTasks> {
       ];
 
   @override
-  FtsSpec get fts => const FtsSpec(['title']);
+  List<IndexSpec> get indexes => [
+        indexSpec([_title])
+      ];
+
+  @override
+  FtsSpec get fts => ftsSpec([_title]);
 }
 
 final class _WebTasksImposter extends StoreDef<_WebTasksImposter> {

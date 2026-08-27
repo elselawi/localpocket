@@ -28,7 +28,12 @@ final class _SmokeNotes extends StoreDef<_SmokeNotes> {
       ];
 
   @override
-  FtsSpec get fts => const FtsSpec(['title']);
+  List<IndexSpec> get indexes => [
+        indexSpec([_title])
+      ];
+
+  @override
+  FtsSpec get fts => ftsSpec([_title]);
 }
 
 /// Retains representative typed CRUD/query/search/watch calls in both web

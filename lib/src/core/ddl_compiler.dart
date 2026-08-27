@@ -89,6 +89,18 @@ class DdlCompiler {
       }
     }
 
+    // Validate explicit index columns before generating DDL. The four
+    // reserved columns are real physical columns and remain valid for raw
+    // engine schemas; every other explicit column must be a declared field.
+    for (final ix in schema.indexes) {
+      for (final column in ix.columns) {
+        if (!names.contains(column) && !reservedColumns.contains(column)) {
+          throw SchemaRegistrationError(
+              'Index column "$column" is not a declared field of store "${schema.name}".');
+        }
+      }
+    }
+
     // Duplicate / prefix-subsumed index warnings.
     for (var i = 0; i < schema.indexes.length; i++) {
       for (var j = 0; j < schema.indexes.length; j++) {

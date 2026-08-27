@@ -1,4 +1,3 @@
-import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/typed.dart';
 
 enum TaskStatus { todo, inProgress, done }
@@ -45,10 +44,11 @@ final class PlaygroundTasks extends StoreDef<PlaygroundTasks> {
   ];
 
   @override
-  List<IndexSpec> get indexes => const [
-    IndexSpec(['status', 'priority']),
+  List<IndexSpec> get indexes => [
+    indexSpec(<FieldDef<PlaygroundTasks, Object?>>[_status, _priority]),
   ];
 
   @override
-  FtsSpec get fts => const FtsSpec(['title', 'description']);
+  FtsSpec get fts =>
+      ftsSpec(<FieldDef<PlaygroundTasks, Object?>>[_title, _description]);
 }

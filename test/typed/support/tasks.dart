@@ -7,7 +7,6 @@
 /// The tests double as the pattern's proof.
 library;
 
-import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/typed.dart';
 
 /// Access roles for the tasks store.
@@ -70,6 +69,6 @@ final class Tasks extends StoreDef<Tasks> {
 
   @override
   List<IndexSpec> get indexes => [
-        const IndexSpec(['title'])
+        indexSpec<Tasks>([_title])
       ];
 }

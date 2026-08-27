@@ -74,7 +74,11 @@ void main() {
       ]);
       await expectLater(
         LocalPocket.open(path: t.path, stores: [good, bad]),
-        throwsA(isA<sqlite.SqliteException>()),
+        throwsA(isA<SchemaRegistrationError>().having(
+          (error) => error.message,
+          'message',
+          'Index column "ghost" is not a declared field of store "bad".',
+        )),
       );
 
       // Reopen with only the good store: ledger contains good, never bad.
