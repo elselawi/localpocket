@@ -1,59 +1,21 @@
 # LocalPocket
 
-**LocalPocket is a fast, local-first SQLite database for Dart and Flutter with automatic synchronization to PocketBase.**
+<p align="center">
+  <img src="logo.svg" alt="LocalPocket" width="180">
+</p>
 
-```text
-Flutter / Dart Application
-       │
-       ▼ (Sub-microsecond cached point reads & transactional local writes)
-  LocalPocket (Direct SQLite FFI + In-Memory LRU Read Cache + Statement Pool)
-       │
-       ▼ (Eventually-consistent background sync via REST + SSE Realtime)
-  PocketBase Backend (Centralized Envelope Storage in `data` Collection)
-```
-
----
-
-## Table of Contents
-
-- [Why LocalPocket?](#why-localpocket)
-- [Installation](#installation)
-- [Step-by-Step Usage Guide](#step-by-step-usage-guide)
-  - [Step 1: Define a Typed Store](#step-1-define-a-typed-store)
-  - [Step 2: Open and Bind](#step-2-open-and-bind)
-  - [Step 3: Typed CRUD](#step-3-typed-crud)
-  - [Step 4: Typed Queries](#step-4-typed-queries)
-  - [Step 5: FTS Search & Reactive Watches](#step-5-fts-search--reactive-watches)
-  - [Domain Models Without Code Generation](#domain-models-without-code-generation)
-  - [Typed Best Practices](#typed-best-practices)
-  - [Typed Model Limits](#typed-model-limits)
-  - [Advanced: Raw Maps and Coexistence](#advanced-raw-maps-and-coexistence)
-  - [Step 6: Local & Remote Change Hooks](#step-6-local--remote-change-hooks)
-  - [Step 7: Synchronize with PocketBase](#step-7-synchronize-with-pocketbase)
-- [PocketBase Server Requirements & Setup](#pocketbase-server-requirements--setup)
-- [Conflict Resolution & 3-Way Merge](#conflict-resolution--3-way-merge)
-  - [Precedence & Built-in Resolvers](#precedence--built-in-resolvers)
-  - [Configuring Conflict Policies](#configuring-conflict-policies)
-  - [Manual Conflict Review UI](#manual-conflict-review-ui)
-- [Schema Evolution & Migrations](#schema-evolution--migrations)
-- [Field-Level Encryption (AES-256-GCM)](#field-level-encryption-aes-256-gcm)
-- [Binary Files & Blob Attachments](#binary-files--blob-attachments)
-- [Storage Maintenance & Compaction](#storage-maintenance--compaction)
-- [Transactions & Durability Modes](#transactions--durability-modes)
-- [Running Tests & Benchmarks](#running-tests--benchmarks)
-- [License](#license)
-
----
-
-## Why LocalPocket?
-
-- **Typed data models:** One descriptor defines each field for compile-checked reads, writes, queries, projections, search, and watches without generators or reflection.
-- **Local-First & Offline-Ready:** Instant sub-microsecond point reads via LRU caching, ACID-compliant local transactions, and reactive UI watches that work without network connectivity.
-- **Direct SQLite FFI:** Zero message-passing overhead, automatic statement caching, and native aggregate pushdown (`COUNT`, `DISTINCT`, `SUM`, `MIN`, `MAX`, `AVG`).
-- **PocketBase Sync Engine:** Bidirectional sync over REST with SSE realtime change feeds, field-level conflict resolvers, and atomic outbox guarantees.
-- **Full-Text Search (FTS5):** Native BM25-ranked full-text indexing and querying.
-- **Durable File Blobs:** Content-addressed binary attachment storage with deduplication and dedicated background transfer lanes.
-- **Zero Platform Boilerplate:** Runs directly on SQLite via native FFI on mobile/desktop and automatically manages Web Workers on the web.
+- **A database**: SQLite FFI with an in-memory LRU point-read cache.
+- **Strongly typed**: Schema-first strictly typed API.
+- **Cross Platform**: One API on mobile/desktop/web — 0 boilerplate.
+- **Durable**: ACID transactions, WAL mode (native), pluggable crash-safety levels.
+- **Reactive**: Queries and single-record reads are watchable streams.
+- **Synchronized**: Two-way sync with PocketBase over REST + SSE realtime.
+- **Search**: Full-text search with SQLite FTS5.
+- **Encrypted**: Built-in field-level encryption; encryption via SQLCipher (native).
+- **Durable File Blobs**: content-addressed attachment storage with dedup and background lanes.
+- **Battle-tested**: ~2000 unit/integration tests, 100+ live-server e2e scenarios, 45+ browser matrix runs on Chromium/Firefox/WebKit.
+- **Migrations**: versioned, forward-only ledgers with safe destructive rebuilds and backups.
+- **Conflict-aware**: deterministic 3-way merge engine with field-level resolvers.
 
 ---
 

@@ -10,6 +10,7 @@
     <title>LocalPocket — Local-First SQLite for Dart &amp; Flutter</title>
     <meta name="description"
         content="LocalPocket is a fast, local-first SQLite database for Dart and Flutter with automatic synchronization to PocketBase." />
+    <link rel="icon" type="image/jpeg" href="./icon.jpg" />
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -134,13 +135,8 @@
             width: 30px;
             height: 30px;
             border-radius: 9px;
-            background: linear-gradient(135deg, var(--accent-strong), var(--accent));
-            display: grid;
-            place-items: center;
-            font-size: 0.85rem;
-            color: #101112;
-            font-weight: 800;
-            font-family: var(--mono);
+            display: block;
+            object-fit: fill;
             box-shadow: 0 4px 14px -6px rgba(167, 192, 174, 0.4);
         }
 
@@ -217,6 +213,13 @@
 
         .hero>* {
             position: relative;
+        }
+
+        .hero-logo {
+            width: clamp(78px, 9vw, 106px);
+            height: auto;
+            margin-bottom: 1.1rem;
+            animation: rise 0.6s ease both;
         }
 
         .hero .badge {
@@ -881,7 +884,7 @@
 
     <nav id="topnav">
         <a class="brand" href="#top">
-            <span class="logo">LP</span>
+            <img class="logo" src="logo.svg" alt="" />
             LocalPocket
         </a>
         <div class="links">
@@ -893,6 +896,7 @@
     </nav>
 
     <header class="hero" id="top">
+        <img class="hero-logo" src="logo.svg" alt="LocalPocket logo" />
         <span class="badge">Local-First · Dart &amp; Flutter</span>
         <h1>Your data, <span class="grad">instantly local.</span><br />Synced when it matters.</h1>
         <p class="sub">

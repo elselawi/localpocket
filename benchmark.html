@@ -10,6 +10,7 @@
     <title>LocalPocket — Benchmarks</title>
     <meta name="description"
         content="Interactive charts comparing LocalPocket against SQLite, Drift, Sembast, Hive and Isar across read, write and query workloads." />
+    <link rel="icon" type="image/jpeg" href="./icon.jpg" />
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -147,13 +148,8 @@
             width: 30px;
             height: 30px;
             border-radius: 9px;
-            background: linear-gradient(135deg, var(--accent-strong), var(--accent));
-            display: grid;
-            place-items: center;
-            font-size: 0.85rem;
-            color: #101112;
-            font-weight: 800;
-            font-family: var(--mono);
+            display: block;
+            object-fit: fill;
             box-shadow: 0 4px 14px -6px rgba(167, 192, 174, 0.4);
         }
 
@@ -224,6 +220,13 @@
 
         .hero>* {
             position: relative;
+        }
+
+        .hero-logo {
+            width: clamp(72px, 8vw, 96px);
+            height: auto;
+            margin-bottom: 1rem;
+            animation: rise 0.6s ease both;
         }
 
         .badge {
@@ -788,7 +791,7 @@
 
     <nav id="topnav">
         <a class="brand" href="index.html">
-            <span class="logo">LP</span>
+            <img class="logo" src="logo.svg" alt="" />
             LocalPocket
         </a>
         <div class="links">
@@ -800,6 +803,7 @@
     </nav>
 
     <header class="hero">
+        <img class="hero-logo" src="logo.svg" alt="LocalPocket logo" />
         <span class="badge">Benchmarks · Comparative</span>
         <h1>LocalPocket vs. <span class="grad">the usual suspects.</span></h1>
         <p class="sub">
