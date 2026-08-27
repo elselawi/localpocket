@@ -12,7 +12,7 @@ import 'support/tasks.dart';
 
 Future<LocalPocket> openTasks({int maxDocBytes = 1900000}) => LocalPocket.open(
     path: ':memory:',
-    stores: [Tasks.instance.schema],
+    stores: [Tasks.instance.collectionSchema],
     maxDocBytes: maxDocBytes);
 
 Future<List<String>> allIds(LocalPocket db) =>

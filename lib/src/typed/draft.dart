@@ -69,7 +69,7 @@ final class Draft<S extends StoreDef<S>> {
   void setExtra(String key, Object? value) {
     const systemKeys = {'id', 'archived', 'hidden', 'extra'};
     if (systemKeys.contains(key) ||
-        _def.schema.declaredFieldNames.contains(key)) {
+        _def.collectionSchema.declaredFieldNames.contains(key)) {
       throw ValidationException(
         'Key "$key" is declared or engine-owned and cannot be set as extra.',
         field: key,

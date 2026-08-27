@@ -11,8 +11,8 @@ final class Users extends StoreDef<Users> {
   /// The single instance.
   static final Users instance = Users._();
 
-  late final _email = f.text('email').req();
-  late final _age = f.integer('age');
+  late final _email = schema.text('email').req();
+  late final _age = schema.integer('age');
 
   static TextFieldReq<Users> get email => instance._email;
   static IntFieldOpt<Users> get age => instance._age;

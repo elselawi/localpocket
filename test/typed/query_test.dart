@@ -17,7 +17,7 @@ final class SearchTasks extends StoreDef<SearchTasks> {
 
   static final SearchTasks instance = SearchTasks._();
 
-  late final _title = f.text('title').req();
+  late final _title = schema.text('title').req();
 
   static TextFieldReq<SearchTasks> get title => instance._title;
 
@@ -35,10 +35,10 @@ Future<LocalPocket> openTyped({
     LocalPocket.open(
       path: ':memory:',
       stores: <CollectionSchema<Object?>>[
-        Tasks.instance.schema,
-        Users.instance.schema,
-        if (includeSecrets) SecretNotes.instance.schema,
-        if (includeSearch) SearchTasks.instance.schema,
+        Tasks.instance.collectionSchema,
+        Users.instance.collectionSchema,
+        if (includeSecrets) SecretNotes.instance.collectionSchema,
+        if (includeSearch) SearchTasks.instance.collectionSchema,
       ],
     );
 

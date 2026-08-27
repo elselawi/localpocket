@@ -17,7 +17,7 @@ void main() {
 
   test('typed and raw playground schemas coexist', () {
     final tasks = PlaygroundSchemas.tasks;
-    expect(identical(tasks, PlaygroundTasks.instance.schema), isTrue);
+    expect(identical(tasks, PlaygroundTasks.instance.collectionSchema), isTrue);
     expect(tasks.name, 'tasks');
     expect(tasks.fts, isNotNull);
     expect(PlaygroundSchemas.users.name, 'users');

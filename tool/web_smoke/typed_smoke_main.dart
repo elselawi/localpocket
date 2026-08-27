@@ -12,14 +12,14 @@ final class _WebTasks extends StoreDef<_WebTasks> {
 
   static final _WebTasks instance = _WebTasks._();
 
-  late final _title = f.text('title').req();
-  late final _role = f.enumOf(
+  late final _title = schema.text('title').req();
+  late final _role = schema.enumOf(
     'role',
     _WebRole.values,
     wire: const {_WebRole.admin: 'administrator'},
   ).req();
-  late final _dueAt = f.dateTime('dueAt').req();
-  late final _done = f.boolean('done').req();
+  late final _dueAt = schema.dateTime('dueAt').req();
+  late final _done = schema.boolean('done').req();
 
   static TextFieldReq<_WebTasks> get title => instance._title;
   static EnumFieldReq<_WebTasks, _WebRole> get role => instance._role;
@@ -84,7 +84,8 @@ Future<void> main() async {
     if (touchedDone.name != 'done' || touchedTitle.name != 'title') {
       throw StateError('Descriptor initialization failed.');
     }
-    final ordered = def.schema.fields.map((field) => field.name).toList();
+    final ordered =
+        def.collectionSchema.fields.map((field) => field.name).toList();
     const expectedOrder = ['role', 'title', 'dueAt', 'done'];
     if (ordered.length != expectedOrder.length ||
         !ordered
@@ -106,7 +107,7 @@ Future<void> main() async {
     mark('open');
     pocket = await LocalPocket.open(
       path: 'typed_phase4_worker_v1',
-      stores: [def.schema],
+      stores: [def.collectionSchema],
     );
 
     mark('registry');

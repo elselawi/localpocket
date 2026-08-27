@@ -8,18 +8,18 @@ final class PlaygroundTasks extends StoreDef<PlaygroundTasks> {
 
   static final PlaygroundTasks instance = PlaygroundTasks._();
 
-  late final _title = f.text('title').req();
-  late final _description = f.text('description');
-  late final _status = f.enumOf(
+  late final _title = schema.text('title').req();
+  late final _description = schema.text('description');
+  late final _status = schema.enumOf(
     'status',
     TaskStatus.values,
     wire: const {TaskStatus.inProgress: 'in_progress'},
   );
-  late final _priority = f.integer('priority');
-  late final _dueAt = f.dateTime('due_at');
-  late final _completed = f.boolean('completed');
-  late final _tags = f.jsonList<String>('tags');
-  late final _assignedTo = f.ref('assigned_to', to: 'users');
+  late final _priority = schema.integer('priority');
+  late final _dueAt = schema.dateTime('due_at');
+  late final _completed = schema.boolean('completed');
+  late final _tags = schema.jsonList<String>('tags');
+  late final _assignedTo = schema.ref('assigned_to', to: 'users');
 
   static TextFieldReq<PlaygroundTasks> get title => instance._title;
   static TextFieldOpt<PlaygroundTasks> get description => instance._description;

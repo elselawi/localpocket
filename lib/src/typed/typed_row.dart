@@ -43,7 +43,7 @@ final class TypedRow<S extends StoreDef<S>> {
   /// Undeclared keys stored in `extra`, excluding the declared fields and
   /// the system columns. Values are live references into the backing map.
   Map<String, Object?> get extra {
-    final declared = def.schema.declaredFieldNames;
+    final declared = def.collectionSchema.declaredFieldNames;
     return Map.unmodifiable(<String, Object?>{
       for (final e in _map.entries)
         if (e.key != 'id' && e.key != 'archived' && !declared.contains(e.key))

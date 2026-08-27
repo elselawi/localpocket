@@ -74,29 +74,24 @@ class GettingStartedPage extends StatelessWidget {
 
   static const _schemaCode = '''
 final class Tasks extends StoreDef<Tasks> {
-  Tasks._() : super(name: 'tasks', version: 1);
   static final Tasks instance = Tasks._();
+  Tasks._() : super(name: 'tasks', version: 1);
 
-  late final _title = f.text('title').req();
-  late final _status = f.enumOf('status', TaskStatus.values);
-  late final _priority = f.integer('priority');
-  late final _completed = f.boolean('completed');
-
-  static TextFieldReq<Tasks> get title => instance._title;
-  static EnumFieldOpt<Tasks, TaskStatus> get status => instance._status;
-  static IntFieldOpt<Tasks> get priority => instance._priority;
-  static BoolFieldOpt<Tasks> get completed => instance._completed;
+  static final title = instance.schema.text('title').req();
+  static final status = instance.schema.enumOf('status', TaskStatus.values);
+  static final priority = instance.schema.integer('priority');
+  static final completed = instance.schema.boolean('completed');
 
   @override
   List<FieldDef<Tasks, Object?>> get fields =>
-      [_title, _status, _priority, _completed];
+      [title, status, priority, completed];
 }
 ''';
 
   static const _openCode = '''
 final db = await LocalPocket.open(
   path: ':memory:',          // or a real file path
-  stores: [Tasks.instance.schema, ...],
+  stores: [Tasks.instance.collectionSchema, ...],
   fieldCipher: myCipher,     // optional: encrypt sensitive fields
 );
 final tasks = db.store(Tasks.instance);

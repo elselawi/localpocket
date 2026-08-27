@@ -5,10 +5,10 @@ final class BenchmarkWidgets extends StoreDef<BenchmarkWidgets> {
 
   static final BenchmarkWidgets instance = BenchmarkWidgets._();
 
-  late final _name = f.text('name').req();
-  late final _qty = f.integer('qty');
-  late final _phone = f.text('phone', uniqueWhenActive: true);
-  late final _body = f.text('body');
+  late final _name = schema.text('name').req();
+  late final _qty = schema.integer('qty');
+  late final _phone = schema.text('phone', uniqueWhenActive: true);
+  late final _body = schema.text('body');
 
   static TextFieldReq<BenchmarkWidgets> get widgetName => instance._name;
   static IntFieldOpt<BenchmarkWidgets> get qty => instance._qty;

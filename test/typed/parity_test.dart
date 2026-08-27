@@ -39,8 +39,8 @@ final class _ParityHelpers extends StoreDef<_ParityHelpers> {
 
   static final _ParityHelpers instance = _ParityHelpers._();
 
-  late final _title = f.text('title');
-  late final _priority = f.integer('priority');
+  late final _title = schema.text('title');
+  late final _priority = schema.integer('priority');
 
   @override
   List<FieldDef<_ParityHelpers, Object?>> get fields => [_title, _priority];
@@ -55,12 +55,12 @@ final class _ParityHelpers extends StoreDef<_ParityHelpers> {
   FtsSpec get fts => ftsSpec([_title]);
 }
 
-Future<LocalPocket> openTasks() =>
-    LocalPocket.open(path: ':memory:', stores: [Tasks.instance.schema]);
+Future<LocalPocket> openTasks() => LocalPocket.open(
+    path: ':memory:', stores: [Tasks.instance.collectionSchema]);
 
 void main() {
   test('typed index and FTS helpers preserve schema JSON and DDL parity', () {
-    final typedSchema = _ParityHelpers.instance.schema;
+    final typedSchema = _ParityHelpers.instance.collectionSchema;
     final rawSchema = CollectionSchema<Object?>(
       name: 'parity_helpers',
       version: 1,
@@ -160,7 +160,7 @@ void main() {
       final keyBytes = List<int>.generate(32, (i) => (i * 7 + 13) % 256);
       final db = await LocalPocket.open(
         path: ':memory:',
-        stores: [SecretNotes.instance.schema],
+        stores: [SecretNotes.instance.collectionSchema],
         fieldCipher: AesGcmFieldCipher(keyBytes),
       );
       addTearDown(db.close);
@@ -273,13 +273,13 @@ void main() {
         ..set(Tasks.role)(Role.admin)
         ..setExtra('k', 1);
       final fromDraft = encodeDbRow(
-        Tasks.instance.schema,
+        Tasks.instance.collectionSchema,
         id: id,
         logical: draft.build(),
         archived: false,
       );
       final fromHand = encodeDbRow(
-        Tasks.instance.schema,
+        Tasks.instance.collectionSchema,
         id: id,
         logical: {'id': id, 'title': 'bytes', 'role': 'admin', 'k': 1},
         archived: false,
@@ -292,12 +292,12 @@ void main() {
         'with no spurious migration on reopen', () async {
       final t = await tempDbPath();
       addTearDown(t.cleanup);
-      final first =
-          await LocalPocket.open(path: t.path, stores: [Tasks.instance.schema]);
+      final first = await LocalPocket.open(
+          path: t.path, stores: [Tasks.instance.collectionSchema]);
       await first.close();
 
-      final db =
-          await LocalPocket.open(path: t.path, stores: [Tasks.instance.schema]);
+      final db = await LocalPocket.open(
+          path: t.path, stores: [Tasks.instance.collectionSchema]);
       addTearDown(db.close);
       final rows = await db.db.query('lp_stores',
           columns: ['definition_json', 'schema_ver'],

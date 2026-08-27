@@ -4,7 +4,7 @@
 /// (`.gt`, `.startsWith`, …) or by `TypedQuery.where`, then consumed by
 /// `TypedQuery.whereCond`. Values are encoded through the descriptor's
 /// boundary codec at construction: enum wire strings, `DateTime` epoch-
-/// milliseconds, and the int pass-through form for `f.date` all normalize
+/// milliseconds, and the int pass-through form for `schema.date` all normalize
 /// before they reach the engine.
 library;
 

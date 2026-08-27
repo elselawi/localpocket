@@ -21,7 +21,7 @@ final class _SystemFieldDef<S, T> extends FieldDef<S, T> {
       'engine owns the "$name" column.');
 }
 
-/// The per-store field factory (`f.`).
+/// The per-store field factory.
 ///
 /// One instance per store, created by [StoreDef]. Each factory method
 /// returns a typed descriptor whose [FieldDef.owner] is bound to the store,
@@ -135,24 +135,24 @@ final class Fields<S> {
 ///   static final Tasks instance = Tasks._();
 ///   Tasks._() : super(name: 'tasks', version: 1);
 ///
-///   late final _title = f.text('title').req();
-///
-///   static FieldDef<Tasks, String> get title => instance._title;
+///   static final title = instance.schema.text('title').req();
 ///
 ///   @override
-///   List<FieldDef<Tasks, Object?>> get fields => [_title];
+///   List<FieldDef<Tasks, Object?>> get fields => [title];
 ///
 ///   @override
-///   List<IndexSpec> get indexes => [indexSpec([_title])];
+///   List<IndexSpec> get indexes => [indexSpec([title])];
 ///
 ///   @override
-///   FtsSpec? get fts => ftsSpec([_title]);
+///   FtsSpec? get fts => ftsSpec([title]);
 /// }
 /// ```
 ///
-/// The private constructor makes a second instance unconstructible outside
-/// the class, so every file in the app reaches the same definition through
-/// the static accessors (`Tasks.title`). The name-keyed
+/// Descriptors are public statics: they initialize lazily after
+/// `instance` has settled, so every file reaches the same definition —
+/// and the same typed descriptor objects — through `Tasks.title` with
+/// zero plumbing. The private constructor makes a second instance
+/// unconstructible outside the class; the name-keyed
 /// [TypedStoreRegistry] enforces uniqueness by **reference identity** at
 /// bind time as the backstop for any definition that ignores the
 /// convention.
@@ -160,7 +160,7 @@ final class Fields<S> {
 /// [fields] is the single, explicit, ordered registry of user fields: it
 /// *references* the descriptor objects — it never restates their metadata —
 /// so there is still exactly one definition per field, and column order in
-/// the compiled [schema] is list order (deterministic, independent of
+/// the compiled [collectionSchema] is list order (deterministic, independent of
 /// declaration/access order). System columns (`id`, `archived`) are exposed
 /// through [id]/[archived] and are **not** part of [fields].
 abstract base class StoreDef<S extends StoreDef<S>> {
@@ -174,14 +174,16 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   final int version;
 
   /// The bound field factory. Descriptors are declared as
-  /// `late final _title = f.text('title').req();` — `f.` avoids shadowing
-  /// the `int`/`bool` type names inside the class body and binds each
-  /// descriptor's owner without writing `this` per declaration.
-  late final Fields<S> f = Fields<S>(this as S);
+  /// `static final title = instance.schema.text('title').req();` —
+  /// `schema.` avoids shadowing the `int`/`bool` type names inside the
+  /// class body and binds each descriptor's owner without writing `this`
+  /// per declaration. Statics initialize lazily, after `instance` has
+  /// settled, so declaration order above `fields` is irrelevant.
+  late final Fields<S> schema = Fields<S>(this as S);
 
   /// The ordered registry of user fields. Descriptors are referenced, not
-  /// restated: each field is declared exactly once, as a `late final`
-  /// member initialized through [f].
+  /// restated: each field is declared exactly once, as a `static final`
+  /// member initialized through [schema].
   List<FieldDef<S, Object?>> get fields;
 
   /// Builds an index for this store from its field descriptors.
@@ -243,6 +245,19 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// the engine.
   List<String> Function(Map<String, Object?> record)? get validator => null;
 
+  /// Whether archived records that never existed remotely stay archived
+  /// locally (soft archive) instead of vanishing on [Collection.archive].
+  ///
+  /// The engine drops archived rows whose server-side existence was never
+  /// confirmed — there is no network operation to record. Override this to
+  /// keep such rows locally; forward-verbatim like every other schema extra.
+  bool get keepUnsyncedArchives => false;
+
+  /// Whether remote file references on this store should be prefetched
+  /// during sync pulls. Forwarded verbatim like every other schema extra;
+  /// engine default is false.
+  bool get prefetchFiles => false;
+
   /// The system `id` descriptor (engine-owned record id column). Readable
   /// and queryable, never settable through the typed write path.
   late final FieldDef<S, String> id =
@@ -257,7 +272,7 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// identical instance. Compilation forces [fields] first (deterministic
   /// column order), runs [verify], then maps each descriptor through its
   /// [FieldDef.toField].
-  late final CollectionSchema<Object?> schema = _compile();
+  late final CollectionSchema<Object?> collectionSchema = _compile();
 
   CollectionSchema<Object?> _compile() {
     final fs = fields; // force late-final descriptors in LIST order, once
@@ -272,6 +287,8 @@ abstract base class StoreDef<S extends StoreDef<S>> {
       migrations: migrations,
       documentMigrations: documentMigrations,
       validator: validator,
+      keepUnsyncedArchives: keepUnsyncedArchives,
+      prefetchFiles: prefetchFiles,
     );
   }
 
@@ -279,7 +296,7 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// this definition. A typed handle must never interpret a same-name raw
   /// schema with different fields, constraints, codecs, or versions.
   void verifyRegisteredSchema(CollectionSchema<Object?> registered) {
-    final expectedJson = canonicalize(schema.toJson());
+    final expectedJson = canonicalize(collectionSchema.toJson());
     final registeredJson = canonicalize(registered.toJson());
     if (expectedJson != registeredJson) {
       throw TypedStoreMismatchError(
@@ -292,7 +309,7 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// Verifies the definition and throws a [StateError] on the first
   /// inconsistency:
   ///
-  /// - a descriptor created through [f] but **omitted from [fields]** —
+  /// - a descriptor created through [schema] but **omitted from [fields]** —
   ///   a field left out is an error, never silently dropped. (An
   ///   unforced `late final` descriptor is invisible — no mirrors — so the
   ///   check covers every descriptor that has actually been created,
@@ -308,7 +325,7 @@ abstract base class StoreDef<S extends StoreDef<S>> {
 
   void _verify(List<FieldDef<S, Object?>> fs) {
     final registered = HashSet<FieldDef<S, Object?>>.identity()..addAll(fs);
-    for (final created in f._created) {
+    for (final created in schema._created) {
       final counterpart = created.reqCounterpart;
       final isRegistered = registered.contains(created) ||
           (counterpart != null && registered.contains(counterpart));
@@ -325,7 +342,7 @@ abstract base class StoreDef<S extends StoreDef<S>> {
         throw StateError(
             'Store "$name": field "${fd.name}" is not owned by this store '
             '(owner is ${fd.owner.runtimeType}). Declare fields with this '
-            "store's f. factory.");
+            "store's schema. factory.");
       }
       if (!seen.add(fd.name)) {
         throw StateError('Store "$name": duplicate field "${fd.name}".');

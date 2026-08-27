@@ -9,10 +9,10 @@ final class _SmokeNotes extends StoreDef<_SmokeNotes> {
 
   static final _SmokeNotes instance = _SmokeNotes._();
 
-  late final _title = f.text('title').req();
-  late final _role = f.enumOf('role', _SmokeRole.values).req();
-  late final _createdAt = f.dateTime('createdAt').req();
-  late final _published = f.boolean('published').req();
+  late final _title = schema.text('title').req();
+  late final _role = schema.enumOf('role', _SmokeRole.values).req();
+  late final _createdAt = schema.dateTime('createdAt').req();
+  late final _published = schema.boolean('published').req();
 
   static TextFieldReq<_SmokeNotes> get title => instance._title;
   static EnumFieldReq<_SmokeNotes, _SmokeRole> get role => instance._role;
@@ -74,7 +74,7 @@ void main() {
   // Touch a representative slice so tree-shaking retains the symbols.
   final id = generateRecordId();
   final hash = sha256Hex('smoke-$id');
-  final schema = _SmokeNotes.instance.schema;
+  final schema = _SmokeNotes.instance.collectionSchema;
   final ts = formatPbTimestamp(DateTime.utc(2026, 8, 15, 10, 0, 0, 123));
   final parsed = pbTimestampToDateTime(ts);
 

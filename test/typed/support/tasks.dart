@@ -23,19 +23,19 @@ final class Tasks extends StoreDef<Tasks> {
   /// unconstructible outside this class — uniqueness by construction.
   static final Tasks instance = Tasks._();
 
-  late final _title = f.text('title').req();
-  late final _priority = f.enumOf('priority', Priority.values);
+  late final _title = schema.text('title').req();
+  late final _priority = schema.enumOf('priority', Priority.values);
   // Optional here so raw-path fixtures can omit it; `title` carries the
   // required-missing coverage.
-  late final _role = f.enumOf('role', Role.values);
-  late final _done = f.boolean('done');
-  late final _dueDay = f.date('dueDay');
-  late final _dueAt = f.dateTime('dueAt');
-  late final _estimate = f.real('estimate');
-  late final _count = f.integer('count');
-  late final _tags = f.jsonList<String>('tags');
-  late final _meta = f.json('meta');
-  late final _ownerId = f.ref('ownerId', to: 'users');
+  late final _role = schema.enumOf('role', Role.values);
+  late final _done = schema.boolean('done');
+  late final _dueDay = schema.date('dueDay');
+  late final _dueAt = schema.dateTime('dueAt');
+  late final _estimate = schema.real('estimate');
+  late final _count = schema.integer('count');
+  late final _tags = schema.jsonList<String>('tags');
+  late final _meta = schema.json('meta');
+  late final _ownerId = schema.ref('ownerId', to: 'users');
 
   /// Static accessors: any file writes `Tasks.title` with zero plumbing.
   /// The concrete descriptor types keep `Draft.set` (and the Phase-3

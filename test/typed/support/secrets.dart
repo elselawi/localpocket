@@ -11,8 +11,8 @@ final class SecretNotes extends StoreDef<SecretNotes> {
   /// The single instance.
   static final SecretNotes instance = SecretNotes._();
 
-  late final _label = f.text('name').req();
-  late final _note = f.text('note', encrypted: true);
+  late final _label = schema.text('name').req();
+  late final _note = schema.text('note', encrypted: true);
 
   /// The `name` column descriptor. The accessor is named `label` because
   /// `StoreDef.name` already occupies the `name` member slot.

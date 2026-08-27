@@ -61,12 +61,27 @@ final class _Probe extends StoreDef<_Probe> {
   List<FieldDef<_Probe, Object?>> get fields => const [];
 }
 
+/// Overrides the never-synced archive policy — the typed mirror of the
+/// engine's `keepUnsyncedArchives` knob (plus `prefetchFiles`).
+final class _KeepArchives extends StoreDef<_KeepArchives> {
+  _KeepArchives() : super(name: 'keep', version: 1);
+
+  @override
+  bool get keepUnsyncedArchives => true;
+
+  @override
+  bool get prefetchFiles => true;
+
+  @override
+  List<FieldDef<_KeepArchives, Object?>> get fields => const [];
+}
+
 /// 100-field store for the wide-definition case.
 final class _Wide extends StoreDef<_Wide> {
   _Wide() : super(name: 'wide', version: 1);
 
   late final List<FieldDef<_Wide, Object?>> _fs = [
-    for (var i = 0; i < 100; i++) f.integer('c$i'),
+    for (var i = 0; i < 100; i++) schema.integer('c$i'),
   ];
 
   @override
@@ -77,8 +92,8 @@ final class _Wide extends StoreDef<_Wide> {
 final class _DuePair extends StoreDef<_DuePair> {
   _DuePair() : super(name: 'duepair', version: 1);
 
-  late final _day = f.date('due');
-  late final _at = f.dateTime('dueAt');
+  late final _day = schema.date('due');
+  late final _at = schema.dateTime('dueAt');
 
   @override
   List<FieldDef<_DuePair, Object?>> get fields => [_day, _at];
@@ -88,8 +103,8 @@ final class _DuePair extends StoreDef<_DuePair> {
 final class _DueClash extends StoreDef<_DueClash> {
   _DueClash() : super(name: 'dueclash', version: 1);
 
-  late final _day = f.date('due');
-  late final _at = f.dateTime('due');
+  late final _day = schema.date('due');
+  late final _at = schema.dateTime('due');
 
   @override
   List<FieldDef<_DueClash, Object?>> get fields => [_day, _at];
@@ -99,8 +114,8 @@ final class _DueClash extends StoreDef<_DueClash> {
 final class _Dup extends StoreDef<_Dup> {
   _Dup() : super(name: 'dup', version: 1);
 
-  late final _a = f.text('x');
-  late final _b = f.integer('x');
+  late final _a = schema.text('x');
+  late final _b = schema.integer('x');
 
   @override
   List<FieldDef<_Dup, Object?>> get fields => [_a, _b];
@@ -128,8 +143,8 @@ final class _Omit extends StoreDef<_Omit> {
 
   static final _Omit instance = _Omit();
 
-  late final _kept = f.text('kept');
-  late final _forgotten = f.text('forgotten');
+  late final _kept = schema.text('kept');
+  late final _forgotten = schema.text('forgotten');
 
   static FieldDef<_Omit, String?> get forgotten => instance._forgotten;
 
@@ -162,14 +177,14 @@ final class _Reserved extends StoreDef<_Reserved> {
   final String badName;
 
   @override
-  List<FieldDef<_Reserved, Object?>> get fields => [f.text(badName)];
+  List<FieldDef<_Reserved, Object?>> get fields => [schema.text(badName)];
 }
 
 /// Index referencing a field that is not declared.
 final class _BadIndex extends StoreDef<_BadIndex> {
   _BadIndex() : super(name: 'badindex', version: 1);
 
-  late final _a = f.text('a');
+  late final _a = schema.text('a');
 
   @override
   List<FieldDef<_BadIndex, Object?>> get fields => [_a];
@@ -184,8 +199,8 @@ final class _BadIndex extends StoreDef<_BadIndex> {
 final class _HelperStore extends StoreDef<_HelperStore> {
   _HelperStore() : super(name: 'helper', version: 1);
 
-  late final _title = f.text('title');
-  late final _priority = f.integer('priority');
+  late final _title = schema.text('title');
+  late final _priority = schema.integer('priority');
 
   @override
   List<FieldDef<_HelperStore, Object?>> get fields => [_title, _priority];
@@ -209,7 +224,7 @@ final class _HelperStore extends StoreDef<_HelperStore> {
 final class _BadFts extends StoreDef<_BadFts> {
   _BadFts() : super(name: 'badfts', version: 1);
 
-  late final _a = f.text('a');
+  late final _a = schema.text('a');
 
   @override
   List<FieldDef<_BadFts, Object?>> get fields => [_a];
@@ -222,7 +237,7 @@ final class _BadFts extends StoreDef<_BadFts> {
 final class _Forward extends StoreDef<_Forward> {
   _Forward() : super(name: 'forward', version: 2);
 
-  late final _a = f.text('a');
+  late final _a = schema.text('a');
   late final _migration = StoreMigration(
     toVersion: 2,
     addedFields: [Field.text('b')],
@@ -271,68 +286,68 @@ void main() {
   // Descriptor → Field twins, per kind. Shared by the sqlType matrix
   // (case 16) and the JSON round-trip (case 15).
   final pairs = <(String, Field, Field)>[
-    ('text', probe.f.text('t').toField(), Field.text('t')),
+    ('text', probe.schema.text('t').toField(), Field.text('t')),
     (
       'text enc',
-      probe.f.text('te', encrypted: true).toField(),
+      probe.schema.text('te', encrypted: true).toField(),
       Field.text('te', encrypted: true)
     ),
     (
       'text req',
-      probe.f.text('tr').req().toField(),
+      probe.schema.text('tr').req().toField(),
       Field.text('tr', required: true)
     ),
-    ('int', probe.f.integer('i').toField(), Field.int('i')),
+    ('int', probe.schema.integer('i').toField(), Field.int('i')),
     (
       'int enc',
-      probe.f.integer('ie', encrypted: true).toField(),
+      probe.schema.integer('ie', encrypted: true).toField(),
       Field.int('ie', encrypted: true)
     ),
-    ('real', probe.f.real('r').toField(), Field.real('r')),
+    ('real', probe.schema.real('r').toField(), Field.real('r')),
     (
       'real enc',
-      probe.f.real('re', encrypted: true).toField(),
+      probe.schema.real('re', encrypted: true).toField(),
       Field.real('re', encrypted: true)
     ),
-    ('bool', probe.f.boolean('b').toField(), Field.bool('b')),
-    ('date', probe.f.date('d').toField(), Field.date('d')),
-    ('dateTime', probe.f.dateTime('dt').toField(), Field.date('dt')),
+    ('bool', probe.schema.boolean('b').toField(), Field.bool('b')),
+    ('date', probe.schema.date('d').toField(), Field.date('d')),
+    ('dateTime', probe.schema.dateTime('dt').toField(), Field.date('dt')),
     (
       'enum',
-      probe.f.enumOf('en', Role.values).toField(),
+      probe.schema.enumOf('en', Role.values).toField(),
       Field.enumValue('en', ['admin', 'member', 'guest'])
     ),
-    ('json', probe.f.json('j').toField(), Field.json('j')),
+    ('json', probe.schema.json('j').toField(), Field.json('j')),
     (
       'json enc',
-      probe.f.json('je', encrypted: true).toField(),
+      probe.schema.json('je', encrypted: true).toField(),
       Field.json('je', encrypted: true)
     ),
     (
       'jsonList',
-      probe.f.jsonList<String>('jl').toField(),
+      probe.schema.jsonList<String>('jl').toField(),
       Field.jsonList('jl')
     ),
     (
       'jsonList enc',
-      probe.f.jsonList<String>('jle', encrypted: true).toField(),
+      probe.schema.jsonList<String>('jle', encrypted: true).toField(),
       Field.jsonList('jle', encrypted: true)
     ),
     (
       'ref',
-      probe.f.ref('rf', to: 'users').toField(),
+      probe.schema.ref('rf', to: 'users').toField(),
       Field.ref('rf', to: 'users')
     ),
     (
       'ref fk',
-      probe.f.ref('rf2', to: 'users', enforceFk: true).toField(),
+      probe.schema.ref('rf2', to: 'users', enforceFk: true).toField(),
       Field.ref('rf2', to: 'users', enforceFk: true)
     ),
   ];
 
   group('descriptor -> Field parity', () {
-    test('case 1: f.text is a Field.text twin (optional)', () {
-      final TextFieldOpt<_Probe> t = probe.f.text('x');
+    test('case 1: schema.text is a Field.text twin (optional)', () {
+      final TextFieldOpt<_Probe> t = probe.schema.text('x');
       expect(t.required, isFalse);
       expect(t.toField().kind, FieldKind.text);
       expect(t.toField().required, isFalse);
@@ -344,7 +359,7 @@ void main() {
     });
 
     test('case 2: .req() flips nullability to a required Field.text', () {
-      final TextFieldReq<_Probe> r = probe.f.text('x').req();
+      final TextFieldReq<_Probe> r = probe.schema.text('x').req();
       expect(r.required, isTrue);
       expect(r.toField().required, isTrue);
       expect(r.toField().toJson(), Field.text('x', required: true).toJson());
@@ -354,64 +369,68 @@ void main() {
 
     test('case 3: uniqueWhenActive exists on text only', () {
       expect(
-          probe.f.text('u', uniqueWhenActive: true).toField().uniqueWhenActive,
+          probe.schema
+              .text('u', uniqueWhenActive: true)
+              .toField()
+              .uniqueWhenActive,
           isTrue);
-      expect(probe.f.text('u2').toField().uniqueWhenActive, isFalse);
-      expect(probe.f.integer('i2').toField().uniqueWhenActive, isFalse);
+      expect(probe.schema.text('u2').toField().uniqueWhenActive, isFalse);
+      expect(probe.schema.integer('i2').toField().uniqueWhenActive, isFalse);
     });
 
     test('case 4: encrypted text stores as TEXT (ciphertext column)', () {
-      final e = probe.f.text('e', encrypted: true);
+      final e = probe.schema.text('e', encrypted: true);
       expect(e.toField().encrypted, isTrue);
       expect(e.toField().sqlType, 'TEXT');
       expect(e.toField().toJson(), Field.text('e', encrypted: true).toJson());
     });
 
-    test('case 5: f.integer and .req() map to Field.int / INTEGER', () {
-      final IntFieldOpt<_Probe> i = probe.f.integer('i');
+    test('case 5: schema.integer and .req() map to Field.int / INTEGER', () {
+      final IntFieldOpt<_Probe> i = probe.schema.integer('i');
       expect(i.toField().kind, FieldKind.int);
       expect(i.toField().sqlType, 'INTEGER');
       expect(i.toField().toJson(), Field.int('i').toJson());
       expect(i.decode(null), isNull);
 
-      final IntFieldReq<_Probe> ir = probe.f.integer('i').req();
+      final IntFieldReq<_Probe> ir = probe.schema.integer('i').req();
       expect(ir.required, isTrue);
       expect(ir.toField().toJson(), Field.int('i', required: true).toJson());
       final int v = ir.decode(42);
       expect(v, 42);
     });
 
-    test('case 6: f.real maps to REAL; encrypted real becomes TEXT', () {
-      expect(probe.f.real('r').toField().sqlType, 'REAL');
-      final enc = probe.f.real('re', encrypted: true);
+    test('case 6: schema.real maps to REAL; encrypted real becomes TEXT', () {
+      expect(probe.schema.real('r').toField().sqlType, 'REAL');
+      final enc = probe.schema.real('re', encrypted: true);
       expect(enc.toField().sqlType, 'TEXT');
       expect(enc.toField().encrypted, isTrue);
     });
 
-    test('case 7: f.boolean maps to Field.bool (no encrypted parameter)', () {
-      final BoolFieldOpt<_Probe> b = probe.f.boolean('b');
+    test('case 7: schema.boolean maps to Field.bool (no encrypted parameter)',
+        () {
+      final BoolFieldOpt<_Probe> b = probe.schema.boolean('b');
       expect(b.toField().kind, FieldKind.bool);
       expect(b.toField().toJson(), Field.bool('b').toJson());
       expect(b.decode(true), isTrue);
-      // `f.boolean('x', encrypted: true)` does not compile — the parameter
+      // `schema.boolean('x', encrypted: true)` does not compile — the parameter
       // does not exist (pinned by the §4.8 compile-fail harness in Phase 2).
     });
 
-    test('case 8: f.date maps to Field.date with logical int', () {
-      final DateFieldOpt<_Probe> d = probe.f.date('d');
+    test('case 8: schema.date maps to Field.date with logical int', () {
+      final DateFieldOpt<_Probe> d = probe.schema.date('d');
       expect(d.toField().kind, FieldKind.date);
       expect(d.toField().sqlType, 'INTEGER');
       expect(d.toField().toJson(), Field.date('d').toJson());
       expect(d.decode(1788134400000), 1788134400000);
       expect(d.encode(1788134400000), 1788134400000);
       expect(d.decode(null), isNull);
-      final DateFieldReq<_Probe> dr = probe.f.date('d').req();
+      final DateFieldReq<_Probe> dr = probe.schema.date('d').req();
       final int epoch = dr.decode(1788134400000);
       expect(epoch, 1788134400000);
     });
 
-    test('case 9: f.dateTime maps to Field.date; codec is UTC-pinned', () {
-      final DateTimeFieldOpt<_Probe> dt = probe.f.dateTime('due');
+    test('case 9: schema.dateTime maps to Field.date; codec is UTC-pinned', () {
+      final DateTimeFieldOpt<_Probe> dt = probe.schema.dateTime('due');
       expect(dt.toField().kind, FieldKind.date);
       expect(dt.toField().sqlType, 'INTEGER');
       expect(dt.toField().toJson(), Field.date('due').toJson());
@@ -429,12 +448,12 @@ void main() {
       expect(dt.encode(local), local.toUtc().millisecondsSinceEpoch);
       expect(dt.decode(dt.encode(local)!), local.toUtc());
 
-      final DateTime d = probe.f.dateTime('due').req().decode(epoch);
+      final DateTime d = probe.schema.dateTime('due').req().decode(epoch);
       expect(d, DateTime.fromMillisecondsSinceEpoch(epoch, isUtc: true));
     });
 
-    test('case 10: f.enumOf derives Field.enumValue from E.values', () {
-      final fd = probe.f.enumOf('role', Role.values);
+    test('case 10: schema.enumOf derives Field.enumValue from E.values', () {
+      final fd = probe.schema.enumOf('role', Role.values);
       expect(fd.toField().toJson(),
           Field.enumValue('role', ['admin', 'member', 'guest']).toJson());
       expect(fd.toField().enumValues, ['admin', 'member', 'guest']);
@@ -445,7 +464,7 @@ void main() {
 
     test('case 11: enum wire overrides flow to enumValues', () {
       final fd =
-          probe.f.enumOf('role', Role.values, wire: {Role.admin: 'ADMIN'});
+          probe.schema.enumOf('role', Role.values, wire: {Role.admin: 'ADMIN'});
       expect(fd.toField().enumValues, ['ADMIN', 'member', 'guest']);
       expect(fd.decode('ADMIN'), Role.admin);
       expect(fd.decode('member'), Role.member);
@@ -457,8 +476,8 @@ void main() {
       );
     });
 
-    test('case 12: f.json maps to Field.json (required always false)', () {
-      final JsonField<_Probe> j = probe.f.json('j');
+    test('case 12: schema.json maps to Field.json (required always false)', () {
+      final JsonField<_Probe> j = probe.schema.json('j');
       expect(j.required, isFalse);
       expect(j.toField().toJson(), Field.json('j').toJson());
       final map = {'a': 1};
@@ -467,19 +486,20 @@ void main() {
       // There is no `required` parameter to pass — `Field.json` has none.
     });
 
-    test('case 13: f.jsonList<T> maps to Field.jsonList', () {
-      final JsonListField<_Probe, String> jl = probe.f.jsonList<String>('jl');
+    test('case 13: schema.jsonList<T> maps to Field.jsonList', () {
+      final JsonListField<_Probe, String> jl =
+          probe.schema.jsonList<String>('jl');
       expect(jl.toField().toJson(), Field.jsonList('jl').toJson());
       expect(jl.decode(['a', 'b']), ['a', 'b']);
       expect(jl.decode(null), isNull);
     });
 
-    test('case 14: f.ref passes to/enforceFk through', () {
-      final RefField<_Probe> r = probe.f.ref('owner', to: 'users');
+    test('case 14: schema.ref passes to/enforceFk through', () {
+      final RefField<_Probe> r = probe.schema.ref('owner', to: 'users');
       expect(r.toField().toJson(), Field.ref('owner', to: 'users').toJson());
       expect(r.toField().refTo, 'users');
       expect(r.toField().enforceFk, isFalse);
-      final r2 = probe.f.ref('owner2', to: 'users', enforceFk: true);
+      final r2 = probe.schema.ref('owner2', to: 'users', enforceFk: true);
       expect(r2.toField().enforceFk, isTrue);
       expect(r.decode('someid'), 'someid');
     });
@@ -501,8 +521,8 @@ void main() {
 
   group('typed index and FTS helpers', () {
     test('index derives names and forwards options', () {
-      final title = probe.f.text('title');
-      final priority = probe.f.integer('priority');
+      final title = probe.schema.text('title');
+      final priority = probe.schema.integer('priority');
       final typed = indexSpec<_Probe>(
         <FieldDef<_Probe, Object?>>[title, priority],
         unique: true,
@@ -521,14 +541,14 @@ void main() {
     });
 
     test('index supports empty lists and required descriptors', () {
-      final title = probe.f.text('title').req();
+      final title = probe.schema.text('title').req();
       expect(indexSpec<_Probe>([title]).columns, ['title']);
       expect(indexSpec<_Probe>([]).columns, isEmpty);
       expect(indexSpec<_Probe>([]).toJson(), const IndexSpec([]).toJson());
     });
 
     test('ftsSpec derives names and forwards options', () {
-      final title = probe.f.text('title');
+      final title = probe.schema.text('title');
       const normalize = FtsNormalization(rules: {'é': 'e'});
       final typed = ftsSpec<_Probe>(
         <FieldDef<_Probe, Object?>>[title],
@@ -547,7 +567,7 @@ void main() {
     });
 
     test('helper-backed store schema equals hand-built raw twin', () {
-      final typed = _HelperStore().schema;
+      final typed = _HelperStore().collectionSchema;
       final raw = CollectionSchema<Object?>(
         name: 'helper',
         version: 1,
@@ -570,27 +590,28 @@ void main() {
   group('definition edge cases', () {
     test('case 17: single-value and many-value enums build valid value sets',
         () {
-      expect(
-          probe.f.enumOf('s', _Single.values).toField().enumValues, ['only']);
-      final many = probe.f.enumOf('m', _Many.values).toField();
+      expect(probe.schema.enumOf('s', _Single.values).toField().enumValues,
+          ['only']);
+      final many = probe.schema.enumOf('m', _Many.values).toField();
       expect(many.enumValues, [for (final v in _Many.values) v.name]);
       expect(many.enumValues!.length, 26);
     });
 
     test('case 18: partial wire override falls back to .name', () {
-      final fd = probe.f.enumOf('r', Role.values, wire: {Role.guest: 'GUEST'});
+      final fd =
+          probe.schema.enumOf('r', Role.values, wire: {Role.guest: 'GUEST'});
       expect(fd.toField().enumValues, ['admin', 'member', 'GUEST']);
       expect(fd.decode('GUEST'), Role.guest);
       expect(fd.decode('admin'), Role.admin);
     });
 
     test('case 19: keyword-looking enum names use the literal name', () {
-      expect(probe.f.enumOf('w', _Weird.values).toField().enumValues,
+      expect(probe.schema.enumOf('w', _Weird.values).toField().enumValues,
           ['group', 'order', 'select']);
     });
 
     test('case 20: a wire override to the empty string is accepted', () {
-      final fd = probe.f.enumOf('r', Role.values, wire: {Role.admin: ''});
+      final fd = probe.schema.enumOf('r', Role.values, wire: {Role.admin: ''});
       expect(fd.toField().enumValues, ['', 'member', 'guest']);
       expect(fd.decode(''), Role.admin);
       expect(fd.encode(Role.admin), '');
@@ -598,14 +619,14 @@ void main() {
 
     test('enum values are snapshotted and wire names must be bijective', () {
       final values = <Role>[Role.admin, Role.member];
-      final fd = probe.f.enumOf('stable', values);
+      final fd = probe.schema.enumOf('stable', values);
       values
         ..clear()
         ..add(Role.guest);
       expect(fd.toField().enumValues, ['admin', 'member']);
 
       expect(
-        () => probe.f.enumOf(
+        () => probe.schema.enumOf(
           'duplicateWire',
           Role.values,
           wire: {Role.admin: 'same', Role.member: 'same'},
@@ -613,7 +634,7 @@ void main() {
         throwsStateError,
       );
       expect(
-        () => probe.f.enumOf(
+        () => probe.schema.enumOf(
           'foreignWire',
           const [Role.admin],
           wire: const {Role.member: 'member'},
@@ -625,14 +646,14 @@ void main() {
     test('case 21: SQLite keyword field names are accepted', () {
       for (final kw in ['order', 'group', 'select']) {
         expect(() => Field.validateName(kw), returnsNormally);
-        expect(probe.f.text(kw).toField().name, kw);
+        expect(probe.schema.text(kw).toField().name, kw);
       }
     });
 
     test('case 22: unicode names accepted; whitespace/punctuation rejected',
         () {
       expect(() => Field.validateName('名前'), returnsNormally);
-      expect(probe.f.text('名前').toField().name, '名前');
+      expect(probe.schema.text('名前').toField().name, '名前');
       expect(
         () => Field.validateName('has space'),
         throwsA(isA<SchemaRegistrationError>()),
@@ -647,13 +668,14 @@ void main() {
         () {
       // The typed layer defers to the engine: construction and toField work,
       // DdlCompiler.compile rejects (see case 35 for the full matrix).
-      expect(probe.f.text('id').toField().toJson(), Field.text('id').toJson());
-      expect(probe.f.text('archived').toField().toJson(),
+      expect(probe.schema.text('id').toField().toJson(),
+          Field.text('id').toJson());
+      expect(probe.schema.text('archived').toField().toJson(),
           Field.text('archived').toJson());
     });
 
     test('case 24: .req() exists only on the Opt variant', () {
-      final opt = probe.f.text('x');
+      final opt = probe.schema.text('x');
       final first = opt.req();
       // `first.req()` does not compile — the Req variant has no req() member
       // (pinned by the §4.8 compile-fail harness in Phase 2). Repeat calls
@@ -664,23 +686,23 @@ void main() {
 
     test('case 25: date and dateTime coexist on different columns', () {
       final pair = _DuePair();
+      expect(pair.collectionSchema.fields.map((f) => f.kind),
+          everyElement(FieldKind.date));
       expect(
-          pair.schema.fields.map((f) => f.kind), everyElement(FieldKind.date));
-      expect(
-          () => _DueClash().schema,
+          () => _DueClash().collectionSchema,
           throwsA(isA<StateError>()
               .having((e) => e.message, 'message', contains('"due"'))));
     });
 
     test('case 26: a store with zero user fields builds a valid schema', () {
-      final schema = _Probe().schema;
+      final schema = _Probe().collectionSchema;
       expect(schema.name, 'probe');
       expect(schema.version, 1);
       expect(schema.fields, isEmpty);
     });
 
     test('case 27: 100 fields build without ordering issues', () {
-      final wide = _Wide().schema;
+      final wide = _Wide().collectionSchema;
       expect(wide.fields.length, 100);
       expect([for (final f in wide.fields) f.name],
           [for (var i = 0; i < 100; i++) 'c$i']);
@@ -689,7 +711,7 @@ void main() {
 
   group('StoreDef assembly', () {
     test('case 28: schema name/version/order match the fields list', () {
-      final schema = Tasks.instance.schema;
+      final schema = Tasks.instance.collectionSchema;
       expect(schema.name, 'tasks');
       expect(schema.version, 1);
       expect([for (final f in schema.fields) f.name],
@@ -718,7 +740,7 @@ void main() {
           const IndexSpec(['title'])
         ],
       );
-      expect(Tasks.instance.schema.toJson(), handBuilt.toJson());
+      expect(Tasks.instance.collectionSchema.toJson(), handBuilt.toJson());
     });
 
     test('case 30: fields ordering is stable across repeated reads', () {
@@ -730,13 +752,25 @@ void main() {
     });
 
     test('case 31: index override reaches schema verbatim', () {
-      expect(Tasks.instance.schema.indexes.single.columns, ['title']);
-      expect(Tasks.instance.schema.conflictPolicy, isA<ConflictPolicy>());
+      expect(Tasks.instance.collectionSchema.indexes.single.columns, ['title']);
+      expect(Tasks.instance.collectionSchema.conflictPolicy,
+          isA<ConflictPolicy>());
+    });
+
+    test('case 31b: schema-extra overrides reach the schema', () {
+      final keep = _KeepArchives().collectionSchema;
+      expect(keep.keepUnsyncedArchives, isTrue);
+      expect(keep.prefetchFiles, isTrue);
+      expect(keep.toJson()['keepUnsyncedArchives'], isTrue);
+      expect(keep.toJson()['prefetchFiles'], isTrue);
+      // Both defaults stay off, matching the engine defaults:
+      expect(Tasks.instance.collectionSchema.keepUnsyncedArchives, isFalse);
+      expect(Tasks.instance.collectionSchema.prefetchFiles, isFalse);
     });
 
     test('case 32: duplicate column name rejected with StateError', () {
       expect(
-        () => _Dup().schema,
+        () => _Dup().collectionSchema,
         throwsA(isA<StateError>()
             .having((e) => e.message, 'message', contains('"x"'))),
       );
@@ -746,10 +780,10 @@ void main() {
       final donor = _Borrower();
       // The descriptor's static type matches the borrower's S, but its
       // runtime owner is the donor — the verify() backstop fires.
-      final shared = donor.f.text('shared');
+      final shared = donor.schema.text('shared');
       final borrower = _Borrower(shared);
       expect(
-        () => borrower.schema,
+        () => borrower.collectionSchema,
         throwsA(isA<StateError>()
             .having((e) => e.message, 'message', contains('borrower'))
             .having((e) => e.message, 'message', contains('shared'))),
@@ -765,7 +799,7 @@ void main() {
       );
       // …and therefore also through the schema/verify path.
       expect(
-        () => _BadNull().schema,
+        () => _BadNull().collectionSchema,
         throwsA(isA<StateError>()
             .having((e) => e.message, 'message', contains('nullable'))),
       );
@@ -774,7 +808,7 @@ void main() {
     test('case 35: reserved names rejected through the DdlCompiler path', () {
       for (final reserved in ['id', 'archived', 'hidden', 'extra']) {
         expect(
-          () => DdlCompiler(caps).compile(_Reserved(reserved).schema),
+          () => DdlCompiler(caps).compile(_Reserved(reserved).collectionSchema),
           throwsA(isA<SchemaRegistrationError>()),
           reason: reserved,
         );
@@ -800,24 +834,27 @@ void main() {
       final forgotten = _Omit.forgotten;
       expect(forgotten.name, 'forgotten');
       expect(
-        () => _Omit.instance.schema,
+        () => _Omit.instance.collectionSchema,
         throwsA(isA<StateError>()
             .having((e) => e.message, 'message', contains('forgotten'))),
       );
       // Sanity: forcing a *registered* field first is fine.
       expect(Tasks.title.name, 'title');
-      expect(Tasks.instance.schema.name, 'tasks');
+      expect(Tasks.instance.collectionSchema.name, 'tasks');
     });
 
     test('case 38: schema is memoized (identical on repeat reads)', () {
-      expect(identical(Tasks.instance.schema, Tasks.instance.schema), isTrue);
+      expect(
+          identical(
+              Tasks.instance.collectionSchema, Tasks.instance.collectionSchema),
+          isTrue);
     });
 
     test('case 39: unknown FTS field surfaces the engine error', () {
       final store = _BadFts();
-      expect(store.schema.fts!.fields, ['nope']);
+      expect(store.collectionSchema.fts!.fields, ['nope']);
       expect(
-        () => DdlCompiler(caps).compile(store.schema),
+        () => DdlCompiler(caps).compile(store.collectionSchema),
         throwsA(isA<SchemaRegistrationError>().having(
             (e) => e.message, 'message', contains('not a declared field'))),
       );
@@ -825,7 +862,8 @@ void main() {
 
     test('case 39: unknown index field surfaces the engine registration error',
         () async {
-      final schema = _BadIndex().schema; // raw IndexSpec remains supported
+      final schema =
+          _BadIndex().collectionSchema; // raw IndexSpec remains supported
       expect(schema.indexes.single.columns, ['nope']);
       await expectLater(
         () => LocalPocket.open(path: ':memory:', stores: [schema]),
@@ -841,7 +879,7 @@ void main() {
         'case 40: migrations/documentMigrations/validator forwarded '
         'verbatim', () {
       final store = _Forward();
-      final schema = store.schema;
+      final schema = store.collectionSchema;
       expect(schema.version, 2);
       expect(schema.migrations.single.toVersion, 2);
       expect(schema.documentMigrations, same(store.documentMigrations));

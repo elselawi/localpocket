@@ -1,4 +1,4 @@
-// Case 154: f.boolean('x', encrypted: true) — the parameter does not exist
+// Case 154: schema.boolean('x', encrypted: true) — the parameter does not exist
 // (the engine's Field.bool has no encryption).
 import 'package:localpocket/typed.dart';
 

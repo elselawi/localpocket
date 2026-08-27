@@ -6,8 +6,7 @@
 /// while the raw constructors remain available for engine-level schemas.
 library;
 
-import 'package:localpocket/localpocket.dart';
-
+import 'package:localpocket/src/core/schema.dart';
 import 'field_def.dart';
 
 /// Builds an index declaration from store-owned field descriptors.

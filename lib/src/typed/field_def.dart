@@ -263,7 +263,7 @@ final class RealFieldReq<S> extends FieldDef<S, num>
 
 /// Optional (nullable [bool]) boolean descriptor.
 ///
-/// `f.boolean` deliberately has **no** `encrypted` parameter: the engine's
+/// `schema.boolean` deliberately has **no** `encrypted` parameter: the engine's
 /// `Field.bool` does not support encryption, so the impossible constraint
 /// is unspellable rather than a runtime error.
 base class BoolFieldOpt<S> extends FieldDef<S, bool?>
@@ -301,7 +301,7 @@ final class BoolFieldReq<S> extends FieldDef<S, bool>
 ///
 /// The logical type is epoch milliseconds — the engine's type for
 /// `Field.date`. This adapter is pass-through (no `DateTime` conversion);
-/// use `f.dateTime` for a `DateTime` boundary codec over the same column.
+/// use `schema.dateTime` for a `DateTime` boundary codec over the same column.
 base class DateFieldOpt<S> extends FieldDef<S, int?>
     with ComparableFieldDef<S, int?>
     implements SettableFieldDef<S, int?>, NumericFieldDef<S> {

@@ -500,11 +500,11 @@ Future<void> main() async {
     const count = 10000;
     final rawDb = await LocalPocket.open(
       path: ':memory:',
-      stores: [BenchmarkWidgets.instance.schema],
+      stores: [BenchmarkWidgets.instance.collectionSchema],
     );
     final typedDb = await LocalPocket.open(
       path: ':memory:',
-      stores: [BenchmarkWidgets.instance.schema],
+      stores: [BenchmarkWidgets.instance.collectionSchema],
     );
     final rawRecords = [
       for (var i = 0; i < count; i++)
