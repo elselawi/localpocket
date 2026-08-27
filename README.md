@@ -70,7 +70,7 @@ dependencies:
 
 ## Step-by-Step Usage Guide
 
-### Step 1: Define a Typed Store
+### Step 1: Define your schemas and store types
 
 Use one canonical `StoreDef` instance. Each descriptor is both the engine schema declaration and the typed accessor.
 
@@ -760,7 +760,7 @@ dart test
 # 2. The rest — every skipped suite: the live PocketBase E2E plus the
 #    release/web gates.
 dart test --tags real --run-skipped -j 1
-dart test --tags web --run-skipped -j 1
+dart test --tags gate --run-skipped -j 1
 ```
 
 > **Why `-j 1`:** the gate suites spawn `dart run` subprocesses that re-stage
