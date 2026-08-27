@@ -76,49 +76,93 @@ Use one canonical `StoreDef` instance. Each descriptor is both the engine schema
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
-import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/typed.dart';
+
+import '../localpocket/lib/localpocket.dart';
+import '../localpocket/lib/typed.dart';
 
 enum TaskStatus { todo, inProgress, done }
 
 final class Tasks extends StoreDef<Tasks> {
+  // core definitions and instantiation
   Tasks._() : super(name: 'tasks', version: 1);
-
   static final Tasks instance = Tasks._();
 
-  late final _title = f.text('title').req();
+  // ------  define the schema ------ //
+  // Text field can be:
+  late final _title = f
+      .text(
+        // field title
+        'title',
+        // constraint: unique when active
+        // (active = not deleted/archived)
+        // default is false
+        uniqueWhenActive: true,
+        // field-level encryption
+        // default is false
+        encrypted: false,
+      )
+      .req();
+
+  // Enum field can be:
   late final _status = f.enumOf(
+    // field title
     'status',
+    // enum values
     TaskStatus.values,
-    wire: const {TaskStatus.inProgress: 'in_progress'},
+    // optional: mapping enum values to custom strings
+    wire: const {
+      TaskStatus.inProgress: 'in_progress',
+      TaskStatus.done: 'done!!',
+    },
   );
+
+  // ... rest of the fields ...
   late final _priority = f.integer('priority');
   late final _done = f.boolean('done');
   late final _dueAt = f.dateTime('due_at');
 
+  // ------  define static accessors ------ //
+  // P.S. forgive the redundancy but this will
+  // give you stronger typing and better API
   static TextFieldReq<Tasks> get title => instance._title;
   static EnumFieldOpt<Tasks, TaskStatus> get status => instance._status;
   static IntFieldOpt<Tasks> get priority => instance._priority;
   static BoolFieldOpt<Tasks> get done => instance._done;
   static DateTimeFieldOpt<Tasks> get dueAt => instance._dueAt;
 
+  // ----- define the ordered registry ----- //
+  // declares which fields exist and in
+  // what order they become columns
   @override
   List<FieldDef<Tasks, Object?>> get fields => [
-        _title,
-        _status,
-        _priority,
-        _done,
-        _dueAt,
-      ];
+    _title,
+    _status,
+    _priority,
+    _done,
+    _dueAt,
+  ];
 
+  // ----- define indexes ----- //
+  // for faster querying
   @override
   List<IndexSpec> get indexes => [
-        indexSpec(<FieldDef<Tasks, Object?>>[_status, _priority]),
-      ];
+    index<Tasks>([status, priority]),
+    index<Tasks>([title], unique: true),
+  ];
 
   @override
-  FtsSpec get fts => ftsSpec(<FieldDef<Tasks, Object?>>[_title]);
+  FtsSpec get fts => ftsSpec<Tasks>(
+    // fields to search into
+    [title],
+    // "fuzzy: true" searches arbitrary substring
+    fuzzy: true,
+    // normalization example:
+    normalize: const FtsNormalization(
+      rules: {'à': 'a', 'á': 'a', 'â': 'a', 'ä': 'a'},
+    ),
+  );
 }
+
 ```
 
 
