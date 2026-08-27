@@ -72,7 +72,7 @@ dependencies:
 
 ### Step 1: Define your schemas and store types
 
-Use one canonical `StoreDef` instance. Each descriptor is both the engine schema declaration and the typed accessor.
+Use one canonical `StoreDef` instance. Each descriptor is both the engine schema declaration and the typed accessor. The `indexSpec([...])` and `ftsSpec([...])` helpers derive schema-extra names from those descriptors; they are intentionally non-`const` because descriptors are runtime objects. When a declaration combines different field kinds, an explicit list type such as `<FieldDef<Tasks, Object?>>[...]` may be needed under strict inference.
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
@@ -112,14 +112,15 @@ final class Tasks extends StoreDef<Tasks> {
       ];
 
   @override
-  List<IndexSpec> get indexes => const [IndexSpec(['status', 'priority'])];
+  List<IndexSpec> get indexes => [
+        indexSpec(<FieldDef<Tasks, Object?>>[_status, _priority]),
+      ];
 
   @override
-  FtsSpec get fts => const FtsSpec(['title']);
+  FtsSpec get fts => ftsSpec(<FieldDef<Tasks, Object?>>[_title]);
 }
 ```
 
-Enums are stored as strings. Unmapped values use `Enum.name`; the optional `wire` map pins stable alternatives such as `in_progress`. `dateTime` exposes UTC `DateTime` values while storing the same epoch-millisecond integer as `Field.date`; local inputs are converted to UTC and decoded values have `isUtc == true`.
 
 #### Supported Typed Field Types
 
@@ -135,6 +136,14 @@ Enums are stored as strings. Unmapped values use `Enum.name`; the optional `wire
 | `f.json` | `Map<String, Object?>?` | canonical JSON `TEXT` |
 | `f.jsonList<T>` | `List<T>?` | canonical JSON `TEXT` |
 | `f.ref` | record-id `String?` | `TEXT` |
+
+#### Field Type Notes
+
+- Enums are stored as strings. Unmapped values use `Enum.name`; the optional `wire` map pins stable alternatives such as `in_progress`.
+- **`f.date` vs `f.dateTime`** — Both store the same epoch-**milliseconds** integer in an `INTEGER` column; only the boundary codec differs. `f.date` is a pass-through adapter typed as `int?` (raw epoch ms, no conversion — you manage timezones) and supports numeric aggregates. `f.dateTime` is typed as `DateTime?` and is **UTC-pinned in both directions**: local inputs are converted to UTC before storage and decoded values always have `isUtc == true`. The two adapters share the same column and are interchangeable on the wire. Prefer `f.dateTime` for timestamps; use `f.date` when you already hold epoch-ms integers or want `sum`/`min`/`max` over a date column.
+- **`f.integer` vs `f.real`** — `f.integer` is typed `int?` and stored as `INTEGER`; `f.real` is typed `num?` (not `double` — Dart `int` values are accepted) and stored as `REAL`. Both support `.req()`, comparison operators, and numeric aggregates. Use `f.integer` for counts/ids/whole numbers and `f.real` for fractional measurements and percentages.
+- **`f.ref`** — Stores a **record id** (`String?`) pointing at a record in another collection. There is no `.req()` (always optional) and no join/fetch API: read the id and fetch the target row from its own store.
+- `enforceFk: true` adds a SQLite `REFERENCES` constraint on the column; ref fields not covered by a declared index are auto-indexed for lookups.
 
 ---
 
@@ -331,6 +340,7 @@ The principal typed building blocks are `StoreDef`, `Fields`, `FieldDef`,
 - **Typed handles for application code.** Use `db.store(...)` everywhere; keep raw maps for engine-boundary surfaces only — migrations, `DocumentMigration`, conflict records/resolvers, and codecs.
 - **Wrap rows in a domain class** (see above) and express mutations as intent-named helpers, so call sites read like business operations instead of builder chains.
 - **Never cast descriptors across stores or through `dynamic`.** The runtime identity check still throws, but the compile-time check is the product.
+- **Use `indexSpec([...])` and `ftsSpec([...])` for typed schema extras.** They derive names from descriptors, remain non-`const`, and leave raw `IndexSpec`/`FtsSpec` available at engine boundaries.
 - **Prefer `f.dateTime` for timestamps** (UTC-pinned in both directions) and give enums explicit `wire:` names when a persisted value must survive enum renames.
 - **Use `select` projections only on hot paths** — reading an unselected descriptor throws by design.
 - **`setExtra` accepts only undeclared keys**; declared and system names (`id`, `archived`, `hidden`, `extra`) are rejected so legacy keys cannot shadow schema fields.
@@ -780,7 +790,8 @@ dart run benchmark/benchmark.dart
 
 # Live PocketBase E2E alone (without the release gates) — the same
 # backend-swapped scenarios run against pb.apexo.app
-dart test --tags real --run-skipped test/e2e/
+dart test --tags real --run-skipped -j 1
+dart test --tags gate --run-skipped -j 1
 ```
 
 ## Update & test coverage

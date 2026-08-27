@@ -1,16 +1,13 @@
 ## Unreleased
 
-- **Typed data models (phase 5): documentation and enforcement.** The README
-  and Flutter playground are now typed-first, including canonical
-  `StoreDef` definitions, descriptor/draft CRUD, typed query/search/watch,
-  enum wire strings, UTC `DateTime`, consumer-owned domain wrappers, and
-  intent-named mutation helpers. Raw and typed handles remain interoperable
-  over unchanged SQLite storage and worker wire formats. New raw-API
-  allowlist, typed-surface, and compile-checked README gates are release
-  requirements. Deterministic benchmarks verify the one-wrapper/no-map-copy
-  point-read boundary and the one-draft-map/existing-engine batch-write path.
-  The typed API is verified under native, JavaScript, WASM, and the production
-  worker facade.
+- **Typed index and FTS declarations.** The typed layer now provides
+  `indexSpec([...])` and `ftsSpec([...])` helpers that derive column names from
+  store-owned descriptors, preventing typos and cross-store declarations at
+  compile time. The helpers preserve the raw `IndexSpec`/`FtsSpec` JSON and
+  wire shapes and are intentionally non-const because descriptors are runtime
+  objects. `DdlCompiler` now rejects undeclared raw index columns with a clear
+  `SchemaRegistrationError`; the engine-owned `id`, `archived`, `hidden`, and
+  `extra` columns remain valid index targets.
 
 - **Typed data models (phase 1): the definition core.** `lib/typed.dart`
   now exports a typed boundary layer for declaring stores: `FieldDef` with
@@ -23,7 +20,7 @@
   an explicit ordered `fields` list, schema extras overrides
   (`indexes`/`fts`/`migrations`/`conflictPolicy`/`documentMigrations`/
   `validator`), built-in `id`/`archived` system descriptors, a memoized
-  `schema` property compiling to the engine `CollectionSchema`, and `verify()`
+  `schema` getter compiling to the engine `CollectionSchema`, and `verify()`
   rejecting duplicate columns, foreign descriptors, and fields omitted from
   the `fields` list. `TypedStoreRegistry` binds each store name to its one
   canonical definition instance by **reference identity**; a non-identical
@@ -38,31 +35,15 @@
   (`rec(field)` call form, `.get`, `id`/`archived`/`extra`/`asMap`) and writes
   go through a mutable `Draft<S>` builder (`set`/`setId`/`setExtra`) that
   delegates straight to the engine's `put`/`putAll`/`patch`/`patchAll`/
-  `archive`/`restore`/`purge`. `setExtra` accepts undeclared keys but rejects
-  declared and engine-owned names, while required-missing, enum-membership,
-  size-cap, and id-format validation remains in the engine and surfaces as its
-  existing `ValidationException`s. Binding verifies the definition against the
-  registered engine schema (a same-name schema with different fields,
-  constraints, or version throws `TypedStoreMismatchError`) and resolves the
-  store before touching the identity registry. Corrupt rows read
+  `archive`/`restore`/`purge` — no validation of its own, so
+  required-missing, enum-membership, size-cap, and id-format violations
+  surface as the engine's existing `ValidationException`s. Corrupt rows read
   through the raw path surface as typed `ValidationException`s (never silent
   wrong-typed values); cross-store misuse is a compile error and a
   `TypedStoreMismatchError` where casts defeat the type system. System
   fields (`id`, `archived`) are readable but not settable — `Draft.set`
   rejects them at compile time. A gate-tagged compile-fail harness
   (`test/typed/compile_fail/`) pins the compile-time guarantees.
-
-- **Typed data models (phase 3): typed queries, search, and watch.**
-  `TypedQuery<S>` delegates filters, ordering, projections, keyset pages,
-  counts, distinct values, numeric aggregates, ids, explain plans, and
-  `debugCompile()` to the existing query builder; descriptor codecs encode
-  enum/date-time predicate values at the boundary, while kind-scoped
-  `.gt`/`.gte`/`.lt`/`.lte` and text LIKE operators make invalid query
-  combinations compile errors. `TypedPage<S>` and projected `TypedRow<S>`
-  wrap query results, typed FTS hits expose `id`/`score` plus `fetch()`, and
-  `query().watch()` wraps the existing `QueryWatcher` stream without adding
-  an invalidation path. Native and web facade seams remain additive and use
-  the unchanged engine/wire plan protocol.
 
 - **FTS: fuzzy (substring) search and consumer-declared character parity
   rules.** `FtsSpec` gains two independently toggleable options, both off by
