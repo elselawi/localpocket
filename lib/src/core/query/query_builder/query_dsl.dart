@@ -1,3 +1,5 @@
+import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
+
 /// Common interface for fluent query construction across native and web query builders.
 abstract interface class QueryFilterDsl<Self extends Object> {
   /// Adds one or more predicates for [field].
@@ -20,6 +22,11 @@ abstract interface class QueryFilterDsl<Self extends Object> {
 
   /// OR-group of equality predicates.
   Self orWhere(List<Map<String, Object?>> groups);
+
+  /// Adds one predicate-tree clause (the typed layer's `&`/`|`/`~` algebra
+  /// lowered to [PredicateNode] values). Compiles into one self-contained,
+  /// fully parameterized WHERE fragment.
+  Self wherePredicate(PredicateNode node);
 
   /// Adds an ordering term.
   Self orderBy(String field, {bool desc = false});

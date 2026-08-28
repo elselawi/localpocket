@@ -87,35 +87,31 @@ abstract base class FieldDef<S, T> {
   // lists (`TypedCollection.query(where: [...])`) and stay fully typed.
   // ---------------------------------------------------------------------
 
-  /// `field == value` — also the only condition kind an OR group accepts
-  /// (its static type is [EqCond], so a range condition cannot enter
-  /// `anyOf`).
+  /// `field == value`. For an optional field, `eq(null)` reads as SQL
+  /// `IS NULL` (the typed layer routes it there; SQL `= NULL` never
+  /// matches). On a required field the null case is a compile error because
+  /// the value type is non-nullable.
   ///
-  /// For an optional field, `eq(null)` reads as SQL `IS NULL` (the typed
-  /// layer routes it there; SQL `= NULL` never matches). On a required
-  /// field the null case is a compile error because the value type is
-  /// non-nullable.
-  EqCond<S> eq(T value) => EqCond<S>(owner, name, encode(value));
-
-  /// `field <> value`.
-  ///
-  /// For an optional field, `neq(null)` reads as SQL `IS NOT NULL`.
-  Cond<S> neq(T value) => Cond<S>(owner, name, 'neq', <Object?>[encode(value)]);
+  /// Conditions compose into boolean trees with `&`, `|`, and `~` —
+  /// `field.eq(v) & other.gt(0)`, `field.a | field.b`, `~field.eq(v)` for
+  /// not-equal.
+  FieldCond<S> eq(T value) =>
+      FieldCond<S>(owner, name, 'eq', <Object?>[encode(value)]);
 
   /// `field IN (values)`. The list must not be empty — the database would
   /// otherwise emit invalid SQL.
-  Cond<S> inValues(List<T> values) {
+  FieldCond<S> inValues(List<T> values) {
     if (values.isEmpty) {
       throw ArgumentError.value(values, 'values', 'inValues cannot be empty.');
     }
-    return Cond<S>(owner, name, 'inValues',
+    return FieldCond<S>(owner, name, 'inValues',
         <Object?>[for (final value in values) encode(value)]);
   }
 
   /// `field BETWEEN a AND b` — inclusive on both ends, matching SQL
   /// `BETWEEN`. For a half-open window use `gte(a)` with `lt(b)`.
-  Cond<S> between(T a, T b) =>
-      Cond<S>(owner, name, 'between', <Object?>[encode(a), encode(b)]);
+  FieldCond<S> between(T a, T b) =>
+      FieldCond<S>(owner, name, 'between', <Object?>[encode(a), encode(b)]);
 
   /// Ascending order term for this field.
   OrderTerm<S> get asc => OrderTerm<S>(this, desc: false);

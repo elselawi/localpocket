@@ -250,8 +250,8 @@ One entry point per terminal, named arguments, no builder, nothing to chain:
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
-  // Equality family on every descriptor: eq, neq, inValues, between —
-  // plus isNull/isNotNull on optional descriptors.
+  // Equality family on every descriptor: eq, inValues, between —
+  // plus isNull() on optional descriptors.
   final donePage = await tasks.query(
     where: [
       Tasks.done.eq(false),
@@ -264,16 +264,14 @@ One entry point per terminal, named arguments, no builder, nothing to chain:
 
   // Kind-scoped operators: .gt/.gte/.lt/.lte on comparable descriptors,
   // .startsWith/.endsWith/.contains on text — the same grammar, same slot.
-  final urgentPage = await tasks.query(
-    where: [Tasks.priority.gte(4), Tasks.title.startsWith('Ship')],
-    orderBy: [Tasks.dueAt.desc],
-    limit: 20,
-  );
-
-  // OR groups accept equality conditions only — enforced at compile time
-  // (their static type is EqCond). Reading an unselected descriptor throws.
+  // Compose any of them into boolean trees with & (AND), | (OR), and
+  // ~ (NOT): every operator participates in every position. Reading an
+  // unselected descriptor throws.
   final firstPage = await tasks.query(
-    anyOf: [Tasks.done.eq(true), Tasks.priority.eq(5)],
+    where: [
+      (Tasks.done.eq(true) | Tasks.priority.eq(5)) &
+          ~Tasks.title.startsWith('Draft'),
+    ],
     select: [Tasks.title, Tasks.priority],
     limit: 20,
   );
@@ -296,10 +294,11 @@ One entry point per terminal, named arguments, no builder, nothing to chain:
 
 Set the page size with `limit:` or opt out with `all:`; `includeArchived:`/`includeHidden:` widen
 the default visibility scope; `ids()`, `explain()`, and `debugCompile(...)` mirror the raw
-builder verbatim. The `where:` predicates are ANDed and every multi-value slot is a list —
-the same slots (`where:`, `anyOf:`, `orderBy:`, `limit:`, `all:`, `includeArchived:`,
-`includeHidden:`) repeat across `query`, `queryAfter`, `ids`, `explain`, and `watch`, so the
-predicate shape is identical everywhere.
+builder verbatim. The `where:` slot is an AND-list of condition trees — the list elements AND
+together and each element may itself be any `&`/`|`/`~` expression — and the same slots
+(`where:`, `orderBy:`, `limit:`, `all:`, `includeArchived:`, `includeHidden:`) repeat across
+`query`, `queryAfter`, `ids`, `explain`, and `watch`, so the predicate shape is identical
+everywhere.
 
 ---
 
@@ -331,7 +330,7 @@ Search requires an `FtsSpec` on the store. Hits carry `id`/`score` plus `fetch()
   // Keep analyzed values live in this complete documentation fixture.
   title;
   donePage;
-  urgentPage;
+  firstPage;
   nextPage;
   activeCount;
   priorityCount;
@@ -381,7 +380,8 @@ extension TaskOperations on TypedCollection<Tasks> {
 Changing a descriptor type makes incompatible wrapper getters and helpers fail analysis. No mirrors, macros, extension types, or package code generation are involved.
 
 The principal typed building blocks are `StoreDef`, `Fields`, `FieldDef`,
-`Write`, `Writes`, `TypedRow`, `TypedCollection`, `Cond`, `EqCond`,
+`Write`, `Writes`, `TypedRow`, `TypedCollection`, `Cond` (with the
+`FieldCond`, `AllCond`, `AnyCond`, and `NotCond` node types),
 `OrderTerm`, `TypedPage`, `TypedSearchHit`, and the identity-enforcing
 `TypedStoreRegistry`. Identity failures surface as
 `TypedStoreMismatchError`.
@@ -392,6 +392,7 @@ The principal typed building blocks are `StoreDef`, `Fields`, `FieldDef`,
 - **Typed handles for application code.** Use `db.store(...)` everywhere; keep raw maps for engine-boundary surfaces only — migrations, `DocumentMigration`, conflict records/resolvers, and codecs.
 - **Wrap rows in a domain class** (see above) and express mutations as intent-named helpers, so call sites read like business operations instead of builder chains.
 - **Writes are values too.** `Tasks.title.set('x')` collected into `put([...])` / `patch(id, [...])` keeps every write compile-checked against its field — the same values build single writes and batches.
+- **Compose filters with the algebra.** `&`, `|`, and `~` build boolean trees you can store in a variable and reuse on every terminal; NOT replaces not-equal (`~field.eq(v)` matches the same rows `field <> v` did).
 - **Never cast descriptors across stores or through `dynamic`.** The runtime identity check still throws, but the compile-time check is the product.
 - **Use `indexSpec([...])` and `ftsSpec([...])` for typed schema extras.** They derive names from descriptors, remain non-`const`, and leave raw `IndexSpec`/`FtsSpec` available at engine boundaries.
 - **Prefer `schema.dateTime` for timestamps** (UTC-pinned in both directions) and give enums explicit `wire:` names when a persisted value must survive enum renames.

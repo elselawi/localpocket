@@ -1,3 +1,4 @@
+import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
 import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/core/query/query_builder/query_dsl.dart';
 
@@ -50,6 +51,12 @@ mixin QueryForwarder<T extends Object> implements QueryFilterDsl<T> {
   @override
   T orWhere(List<Map<String, Object?>> groups) {
     queryCore = queryCore.orWhere(groups);
+    return this as T;
+  }
+
+  @override
+  T wherePredicate(PredicateNode node) {
+    queryCore = queryCore.wherePredicate(node);
     return this as T;
   }
 

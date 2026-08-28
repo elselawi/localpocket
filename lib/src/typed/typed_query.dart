@@ -3,8 +3,8 @@
 /// There is no query builder in the typed layer. Query construction lives
 /// entirely in `TypedCollection`'s named-argument terminals (`query`,
 /// `queryAfter`, `count`, `ids`, `watch`, ...) — each accepts the same
-/// condition values built beside the descriptors (`Cond`/`EqCond`/
-/// `OrderTerm`) and returns its result directly.
+/// condition trees built beside the descriptors (`Cond` composed with
+/// `&`/`|`/`~`, plus `OrderTerm`) and returns its result directly.
 library;
 
 import 'store_def.dart';

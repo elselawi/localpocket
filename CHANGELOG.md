@@ -15,14 +15,16 @@
   are values built beside the descriptors — `Tasks.done.eq(false)`,
   `Tasks.priority.gt(0)`, `Tasks.dueAt.desc` — and every terminal lives on
   `TypedCollection` with the same named-argument slots: `query(where:,
-  anyOf:, orderBy:, limit:, all:, includeArchived:, includeHidden:,
-  select:)` returns its page directly, and `queryAfter`, `count`,
-  `countDistinct`, `distinct`, `ids`, `explain`, `sum`/`min`/`max`/`avg`,
-  `watch`, and `debugCompile` accept the same predicate shape. There is no
-  query builder to lose or double-apply; the previous curried
-  `query().where(field)(...)` form and the `TypedQuery`/`TypedSearch`
-  builder classes are gone. OR groups take `EqCond` values only, so the
-  engine's equality-only lowering is enforced at compile time.
+  orderBy:, limit:, all:, includeArchived:, includeHidden:, select:)`
+  returns its page directly, and `queryAfter`, `count`, `countDistinct`,
+  `distinct`, `ids`, `explain`, `sum`/`min`/`max`/`avg`, `watch`, and
+  `debugCompile` accept the same predicate shape. There is no query builder
+  to lose or double-apply; the previous curried `query().where(field)(...)`
+  form and the `TypedQuery`/`TypedSearch` builder classes are gone.
+  Conditions compose into boolean trees with `&` (AND), `|` (OR), and
+  `~` (NOT) — every predicate operator participates in every position, so
+  `where:` is an AND-list of arbitrarily deep expressions and no separate
+  OR parameter exists.
 
 - **Typed writes: field-native values.** Writes are built beside the
   descriptors — `Tasks.title.set('Ship it')` — and collected into
@@ -36,21 +38,24 @@
 
 - **Fixed: unrouted typed operators silently dropped their predicate.**
   `TypedQuery.whereCond` only routed `eq` and the range/text operators; a
-  condition with operator `neq`, `inValues`, `between`, `isNull`, or
-  `isNotNull` fell through to the raw builder as an all-null no-op and the
-  predicate vanished from the compiled SQL. Every operator the descriptors
-  can build now has an explicit route with a per-operator compile parity
-  test, and an unknown operator throws instead of silently no-oping.
+  condition with operator `inValues`, `between`, or `isNull` fell through
+  to the raw builder as an all-null no-op and the predicate vanished from
+  the compiled SQL. Every operator the descriptors can build now has an
+  explicit route with a per-operator compile parity test, and an unknown
+  operator throws instead of silently no-oping.
 
-- **Descriptor-side condition family.** Every field descriptor now carries
-  the full equality family — `eq`, `neq`, `inValues`, `between` (plus
-  `asc`/`desc` order terms) — and optional descriptors additionally expose
-  `isNull()`/`isNotNull()`; required (`NOT NULL`) columns make those
-  unspellable. `field.eq(null)` reads as SQL `IS NULL` and
-  `field.neq(null)` as `IS NOT NULL` (SQL `= NULL` never matches, so the
-  null forms never reach the builder as equality bindings); on required
-  fields the null case is a compile error. `eqCond(...)` is deprecated in
-  favor of `field.eq(...)`.
+- **Descriptor-side condition family with a full boolean algebra.** Every
+  field descriptor carries `eq`, `inValues`, and `between` (plus
+  `asc`/`desc` order terms), optional descriptors expose `isNull()`, and
+  required (`NOT NULL`) columns make that unspellable. Conditions compose
+  with `&`/`|`/`~`: `~field.eq(v)` replaces not-equal — it matches the same
+  rows `field <> v` did, NULLs included — `~field.isNull()` replaces
+  IS NOT NULL, and `field.eq(null)` reads as SQL `IS NULL` (SQL `= NULL`
+  never matches, so the null form never reaches the builder as an equality
+  binding); on required fields the null case is a compile error. Composite
+  trees lower to one parenthesized WHERE clause on the engine side, so
+  keyset pagination, watch, aggregates, and the web facade compose with
+  them unchanged.
 
 - **Engine-level typed-wrapper caching.** `TypedStoreRegistry` now memoizes
   the non-transactional wrappers it hands out: repeated `db.store(def)` /

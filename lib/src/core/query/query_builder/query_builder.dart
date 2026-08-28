@@ -7,6 +7,7 @@ import 'package:localpocket/src/core/errors.dart';
 import 'package:localpocket/src/core/hashing.dart';
 import 'package:localpocket/src/core/local_pocket.dart';
 import 'package:localpocket/src/core/query_plan.dart';
+import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
 import 'package:localpocket/src/core/query/query_builder/query_dsl.dart';
 import 'package:localpocket/src/core/schema.dart';
 import 'package:localpocket/src/core/sql_utils.dart';
@@ -218,15 +219,15 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     }
     if (startsWith != null) {
       clauses.add(WhereClause(
-          "$col LIKE ? ESCAPE '\\'", ['${_escapeLike(startsWith)}%']));
+          "$col LIKE ? ESCAPE '\\'", ['${escapeLikePattern(startsWith)}%']));
     }
     if (endsWith != null) {
       clauses.add(WhereClause(
-          "$col LIKE ? ESCAPE '\\'", ['%${_escapeLike(endsWith)}']));
+          "$col LIKE ? ESCAPE '\\'", ['%${escapeLikePattern(endsWith)}']));
     }
     if (contains != null) {
       clauses.add(WhereClause(
-          "$col LIKE ? ESCAPE '\\'", ['%${_escapeLike(contains)}%']));
+          "$col LIKE ? ESCAPE '\\'", ['%${escapeLikePattern(contains)}%']));
     }
     if (isNull == true) clauses.add(WhereClause('$col IS NULL', const []));
     if (isNotNull == true) {
@@ -262,8 +263,42 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     return copy;
   }
 
-  static String _escapeLike(String s) =>
-      s.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_');
+  /// Adds one predicate-tree clause, e.g. the typed layer's `&`/`|`/`~`
+  /// algebra lowered to [PredicateNode] values.
+  ///
+  /// The tree compiles into **one** self-contained WHERE clause: composites
+  /// are parenthesized at every boundary, so the fragment composes safely
+  /// with the scope flags, the other AND clauses, and the keyset predicate.
+  /// Every field is validated (unknown and encrypted fields throw) and every
+  /// value travels as a bound parameter — LIKE needles are escaped here.
+  ///
+  /// ```dart
+  /// builder.wherePredicate(AnyPredicate([
+  ///   LeafPredicate('done', 'eq', [false]),
+  ///   NotPredicate(LeafPredicate('count', 'gt', [9])),
+  /// ]));
+  /// ```
+  @override
+  QueryBuilder wherePredicate(PredicateNode node) {
+    _validatePredicateFields(node);
+    final (sql, args) = compilePredicateTree(node);
+    final copy = _copyWith();
+    copy._where.add(WhereClause(sql, args));
+    return copy;
+  }
+
+  void _validatePredicateFields(PredicateNode node) {
+    switch (node) {
+      case LeafPredicate(:final field):
+        _checkQueryable(field);
+      case NotPredicate(:final child):
+        _validatePredicateFields(child);
+      case AllPredicate(:final children) || AnyPredicate(:final children):
+        for (final child in children) {
+          _validatePredicateFields(child);
+        }
+    }
+  }
 
   /// Adds an ordering term. An `id` tie-breaker is added automatically.
   @override

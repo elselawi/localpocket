@@ -3,6 +3,7 @@
 /// implements.
 library;
 
+import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
 import 'package:localpocket/src/core/store.dart';
 
 /// The delegating query surface `TypedCollection`'s terminals forward to.
@@ -35,33 +36,11 @@ abstract interface class TypedQuerySurface {
   /// [field]. the database's validation runs unchanged.
   Future<num?> aggregate(String fn, String field);
 
-  /// Applies equality operators for [field].
-  void where(
-    String field, {
-    Object? eq,
-    Object? neq,
-    List<Object?>? inValues,
-    (Object?, Object?)? between,
-    bool? isNull,
-    bool? isNotNull,
-  });
-
-  /// Applies range and text operators for [field]. Kind-scoped descriptor
-  /// operators create these values and `TypedCollection`'s composer
-  /// forwards them.
-  void whereRange(
-    String field, {
-    Object? gt,
-    Object? gte,
-    Object? lt,
-    Object? lte,
-    String? startsWith,
-    String? endsWith,
-    String? contains,
-  });
-
-  /// Applies an OR-equality group (field-name → wire value).
-  void orWhere(List<Map<String, Object?>> groups);
+  /// Adds one predicate-tree clause: a `Cond` tree (`&`/`|`/`~`) lowered to
+  /// engine [PredicateNode] values. The builder validates every field and
+  /// compiles the tree into one self-contained, fully parameterized WHERE
+  /// fragment.
+  void wherePredicate(PredicateNode node);
 
   /// Applies an ordering term on [field].
   void orderBy(String field, {bool desc = false});

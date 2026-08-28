@@ -6,6 +6,7 @@ library;
 // public barrel by design (see typed.dart).
 import 'package:localpocket/src/core/ddl_compiler.dart';
 import 'package:localpocket/src/core/errors.dart';
+import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
 import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
 import 'package:localpocket/src/core/store.dart';
@@ -113,44 +114,8 @@ final class _NativeCollectionQuerySurface implements TypedQuerySurface {
   QueryBuilder _builder;
 
   @override
-  void where(String field,
-      {Object? eq,
-      Object? neq,
-      List<Object?>? inValues,
-      (Object?, Object?)? between,
-      bool? isNull,
-      bool? isNotNull}) {
-    _builder = _builder.where(field,
-        eq: eq,
-        neq: neq,
-        inValues: inValues,
-        between: between,
-        isNull: isNull,
-        isNotNull: isNotNull);
-  }
-
-  @override
-  void whereRange(String field,
-      {Object? gt,
-      Object? gte,
-      Object? lt,
-      Object? lte,
-      String? startsWith,
-      String? endsWith,
-      String? contains}) {
-    _builder = _builder.where(field,
-        gt: gt,
-        gte: gte,
-        lt: lt,
-        lte: lte,
-        startsWith: startsWith,
-        endsWith: endsWith,
-        contains: contains);
-  }
-
-  @override
-  void orWhere(List<Map<String, Object?>> groups) {
-    _builder = _builder.orWhere(groups);
+  void wherePredicate(PredicateNode node) {
+    _builder = _builder.wherePredicate(node);
   }
 
   @override
@@ -267,6 +232,7 @@ final class TypedCollection<S extends StoreDef<S>> {
   ///
   /// {@macro localpocket.typed_collection}
   factory TypedCollection.native(S def, Collection collection) =>
+
       /// {@macro localpocket.typed_collection}
       TypedCollection<S>(def, _NativeSurface(collection));
 
@@ -348,20 +314,23 @@ final class TypedCollection<S extends StoreDef<S>> {
   ///
   /// ```dart
   /// final page = await tasks.query(
-  ///   where: [Tasks.done.eq(false), Tasks.priority.gt(0)], // ANDed
-  ///   anyOf: [Tasks.title.eq('Draft it'), Tasks.done.eq(true)], // OR group
+  ///   where: [
+  ///     Tasks.done.eq(false), // one element: a leaf predicate
+  ///     (Tasks.priority.gte(4) | Tasks.title.startsWith('Ship')) &
+  ///         ~Tasks.title.eq('Draft'), // one element: a boolean tree
+  ///   ],
   ///   orderBy: [Tasks.priority.desc],
   ///   limit: 50,
   /// );
   /// ```
   ///
-  /// - [where] predicates are ANDed. Conditions carry their store, so a
-  ///   foreign store's condition is a compile error.
-  /// - [anyOf] is the OR group. the database lowers each alternative to a
-  ///   field-equality binding, so the slot only accepts [EqCond] values —
-  ///   a range condition cannot enter it. An alternative that carries
-  ///   `eq(null)` (IS NULL) cannot be expressed by the database's OR group
-  ///   and throws [ArgumentError]; put such a condition in [where] instead.
+  /// - [where] is an AND-list of [Cond] trees: the list elements AND
+  ///   together, and each element may itself be an arbitrarily deep boolean
+  ///   expression composed with `&` (AND), `|` (OR), and `~` (NOT). All
+  ///   predicate operators participate — ranges, text matches, `inValues`,
+  ///   `between`, and `eq(null)` (IS NULL) are all legal inside `|` and `~`.
+  ///   Conditions carry their store, so a foreign store's condition is a
+  ///   compile error.
   /// - [orderBy] terms come from a descriptor's `asc`/`desc` getters.
   /// - [limit] is required unless [all] is set — the database's
   ///   `MissingLimitError` still applies at execution time.
@@ -373,7 +342,6 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// predicate shape is identical across every terminal.
   Future<TypedPage<S>> query({
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     List<OrderTerm<S>> orderBy = const [],
     int? limit,
     bool all = false,
@@ -384,7 +352,6 @@ final class TypedCollection<S extends StoreDef<S>> {
     final projected = _projectedOf(select);
     final page = await _compose(
       where: where,
-      anyOf: anyOf,
       orderBy: orderBy,
       limit: limit,
       all: all,
@@ -400,7 +367,6 @@ final class TypedCollection<S extends StoreDef<S>> {
   Future<TypedPage<S>> queryAfter(
     String cursor, {
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     List<OrderTerm<S>> orderBy = const [],
     int? limit,
     bool all = false,
@@ -411,7 +377,6 @@ final class TypedCollection<S extends StoreDef<S>> {
     final projected = _projectedOf(select);
     final page = await _compose(
       where: where,
-      anyOf: anyOf,
       orderBy: orderBy,
       limit: limit,
       all: all,
@@ -426,13 +391,11 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// apply, so their slots are absent.
   Future<int> count({
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     bool includeArchived = false,
     bool includeHidden = false,
   }) =>
       _compose(
         where: where,
-        anyOf: anyOf,
         includeArchived: includeArchived,
         includeHidden: includeHidden,
       ).count();
@@ -441,14 +404,12 @@ final class TypedCollection<S extends StoreDef<S>> {
   Future<int> countDistinct<V>(
     FieldDef<S, V> field, {
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     bool includeArchived = false,
     bool includeHidden = false,
   }) {
     _checkOwner(field.owner, field.name);
     return _compose(
       where: where,
-      anyOf: anyOf,
       includeArchived: includeArchived,
       includeHidden: includeHidden,
     ).countDistinct(field.name);
@@ -460,7 +421,6 @@ final class TypedCollection<S extends StoreDef<S>> {
   Future<List<V>> distinct<V>(
     FieldDef<S, V> field, {
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     int? limit,
     bool all = false,
     bool includeArchived = false,
@@ -469,7 +429,6 @@ final class TypedCollection<S extends StoreDef<S>> {
     _checkOwner(field.owner, field.name);
     final raws = await _compose(
       where: where,
-      anyOf: anyOf,
       limit: limit,
       all: all,
       includeArchived: includeArchived,
@@ -482,7 +441,6 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// database's `MissingLimitError` still applies.
   Future<List<String>> ids({
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     List<OrderTerm<S>> orderBy = const [],
     int? limit,
     bool all = false,
@@ -491,7 +449,6 @@ final class TypedCollection<S extends StoreDef<S>> {
   }) =>
       _compose(
         where: where,
-        anyOf: anyOf,
         orderBy: orderBy,
         limit: limit,
         all: all,
@@ -502,7 +459,6 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// Returns the delegated query plan explanation.
   Future<String> explain({
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     List<OrderTerm<S>> orderBy = const [],
     int? limit,
     bool all = false,
@@ -512,7 +468,6 @@ final class TypedCollection<S extends StoreDef<S>> {
   }) =>
       _compose(
         where: where,
-        anyOf: anyOf,
         orderBy: orderBy,
         limit: limit,
         all: all,
@@ -525,13 +480,11 @@ final class TypedCollection<S extends StoreDef<S>> {
   Future<num?> sum(
     NumericFieldDef<S> field, {
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     bool includeArchived = false,
     bool includeHidden = false,
   }) =>
       _aggregate('sum', field,
           where: where,
-          anyOf: anyOf,
           includeArchived: includeArchived,
           includeHidden: includeHidden);
 
@@ -539,13 +492,11 @@ final class TypedCollection<S extends StoreDef<S>> {
   Future<num?> min(
     NumericFieldDef<S> field, {
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     bool includeArchived = false,
     bool includeHidden = false,
   }) =>
       _aggregate('min', field,
           where: where,
-          anyOf: anyOf,
           includeArchived: includeArchived,
           includeHidden: includeHidden);
 
@@ -553,13 +504,11 @@ final class TypedCollection<S extends StoreDef<S>> {
   Future<num?> max(
     NumericFieldDef<S> field, {
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     bool includeArchived = false,
     bool includeHidden = false,
   }) =>
       _aggregate('max', field,
           where: where,
-          anyOf: anyOf,
           includeArchived: includeArchived,
           includeHidden: includeHidden);
 
@@ -567,13 +516,11 @@ final class TypedCollection<S extends StoreDef<S>> {
   Future<num?> avg(
     NumericFieldDef<S> field, {
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     bool includeArchived = false,
     bool includeHidden = false,
   }) =>
       _aggregate('avg', field,
           where: where,
-          anyOf: anyOf,
           includeArchived: includeArchived,
           includeHidden: includeHidden);
 
@@ -581,7 +528,6 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// `QueryWatcher` remains the sole invalidation/coalescing mechanism.
   Stream<List<TypedRow<S>>> watch({
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     List<OrderTerm<S>> orderBy = const [],
     int? limit,
     bool all = false,
@@ -592,7 +538,6 @@ final class TypedCollection<S extends StoreDef<S>> {
     final projected = _projectedOf(select);
     return _compose(
       where: where,
-      anyOf: anyOf,
       orderBy: orderBy,
       limit: limit,
       all: all,
@@ -608,7 +553,6 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// the same slots as [query], evaluated without executing.
   (String, List<Object?>) debugCompile({
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     List<OrderTerm<S>> orderBy = const [],
     int? limit,
     bool all = false,
@@ -618,7 +562,6 @@ final class TypedCollection<S extends StoreDef<S>> {
   }) =>
       _compose(
         where: where,
-        anyOf: anyOf,
         orderBy: orderBy,
         limit: limit,
         all: all,
@@ -654,7 +597,6 @@ final class TypedCollection<S extends StoreDef<S>> {
 
   TypedQuerySurface _compose({
     List<Cond<S>> where = const [],
-    List<EqCond<S>> anyOf = const [],
     List<OrderTerm<S>> orderBy = const [],
     int? limit,
     bool all = false,
@@ -664,24 +606,7 @@ final class TypedCollection<S extends StoreDef<S>> {
   }) {
     final surface = _surface.query();
     for (final condition in where) {
-      _routeCondition(surface, condition);
-    }
-    if (anyOf.isNotEmpty) {
-      final groups = <Map<String, Object?>>[];
-      for (final condition in anyOf) {
-        _checkOwner(condition.owner, condition.field);
-        final value = condition.args.single;
-        if (value == null) {
-          throw ArgumentError.value(
-            condition.field,
-            'anyOf',
-            'An OR alternative cannot express IS NULL. Move the '
-                'field.eq(null) condition into `where:` instead.',
-          );
-        }
-        groups.add(<String, Object?>{condition.field: value});
-      }
-      surface.orWhere(groups);
+      surface.wherePredicate(_toNode(condition));
     }
     for (final term in orderBy) {
       _checkOwner(term.field.owner, term.field.name);
@@ -702,70 +627,30 @@ final class TypedCollection<S extends StoreDef<S>> {
     return surface;
   }
 
-  /// Routes one descriptor-built condition onto the surface. Every operator
-  /// the descriptors can build has an explicit route here; an unknown
-  /// operator is an [ArgumentError], never a silently dropped predicate.
-  void _routeCondition(TypedQuerySurface surface, Cond<S> condition) {
+  /// Lowers one condition tree onto the engine's predicate nodes. The sealed
+  /// [Cond] hierarchy makes this switch total: leaves, conjunctions,
+  /// disjunctions, and negations are the only shapes a typed condition can
+  /// have, so no operator can fall through unrouted.
+  PredicateNode _toNode(Cond<S> condition) => switch (condition) {
+        FieldCond<S>() => _leafNode(condition),
+        AllCond<S>(:final children) => AllPredicate(<PredicateNode>[
+            for (final child in children) _toNode(child),
+          ]),
+        AnyCond<S>(:final children) => AnyPredicate(<PredicateNode>[
+            for (final child in children) _toNode(child),
+          ]),
+        NotCond<S>(:final child) => NotPredicate(_toNode(child)),
+      };
+
+  /// Lowers one leaf. The owner check is the runtime backstop for a cast
+  /// that defeated the phantom store type; `eq(null)` is the documented
+  /// IS NULL shorthand and is routed there (`= NULL` never matches).
+  PredicateNode _leafNode(FieldCond<S> condition) {
     _checkOwner(condition.owner, condition.field);
-    final value = condition.args.isEmpty ? null : condition.args.first;
-    switch (condition.operator) {
-      case 'eq':
-        // `eq(null)` is the documented IS NULL shorthand: SQL `= NULL`
-        // never matches, so the null form must not reach the builder as an
-        // equality binding.
-        if (value == null) {
-          surface.where(condition.field, isNull: true);
-        } else {
-          surface.where(condition.field, eq: value);
-        }
-      case 'neq':
-        // `neq(null)` is the documented IS NOT NULL shorthand.
-        if (value == null) {
-          surface.where(condition.field, isNotNull: true);
-        } else {
-          surface.where(condition.field, neq: value);
-        }
-      case 'inValues':
-        surface.where(condition.field, inValues: condition.args);
-      case 'between':
-        if (condition.args.length != 2) {
-          throw ArgumentError.value(
-            condition.args,
-            'condition.args',
-            'A between condition carries exactly two encoded arguments.',
-          );
-        }
-        surface.where(
-          condition.field,
-          between: (condition.args[0], condition.args[1]),
-        );
-      case 'isNull':
-        surface.where(condition.field, isNull: true);
-      case 'isNotNull':
-        surface.where(condition.field, isNotNull: true);
-      case 'gt' || 'gte' || 'lt' || 'lte':
-        surface.whereRange(
-          condition.field,
-          gt: condition.operator == 'gt' ? value : null,
-          gte: condition.operator == 'gte' ? value : null,
-          lt: condition.operator == 'lt' ? value : null,
-          lte: condition.operator == 'lte' ? value : null,
-        );
-      case 'startsWith' || 'endsWith' || 'contains':
-        surface.whereRange(
-          condition.field,
-          startsWith:
-              condition.operator == 'startsWith' ? value as String? : null,
-          endsWith: condition.operator == 'endsWith' ? value as String? : null,
-          contains: condition.operator == 'contains' ? value as String? : null,
-        );
-      default:
-        throw ArgumentError.value(
-          condition.operator,
-          'condition.operator',
-          'Unknown typed condition operator.',
-        );
+    if (condition.operator == 'eq' && condition.args.single == null) {
+      return LeafPredicate(condition.field, 'isNull', const <Object?>[]);
     }
+    return LeafPredicate(condition.field, condition.operator, condition.args);
   }
 
   /// Lowers one record's field-native writes into the database's logical map.
@@ -828,14 +713,12 @@ final class TypedCollection<S extends StoreDef<S>> {
     String fn,
     NumericFieldDef<S> field, {
     required List<Cond<S>> where,
-    required List<EqCond<S>> anyOf,
     required bool includeArchived,
     required bool includeHidden,
   }) {
     _checkOwner(field.owner, field.name);
     return _compose(
       where: where,
-      anyOf: anyOf,
       includeArchived: includeArchived,
       includeHidden: includeHidden,
     ).aggregate(fn, field.name);

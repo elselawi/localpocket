@@ -105,7 +105,6 @@ void main() {
           Tasks.dueDay.between(5, 30),
           Tasks.count.lt(9),
           Tasks.dueDay.gte(10),
-          Tasks.priority.isNotNull(),
           Tasks.ownerId.isNull(),
           Tasks.role.eq(Role.admin),
           Tasks.dueAt.gt(DateTime.utc(2026)),
@@ -123,7 +122,6 @@ void main() {
           .where('dueDay', between: (5, 30))
           .where('count', lt: 9)
           .where('dueDay', gte: 10)
-          .where('priority', isNotNull: true)
           .where('ownerId', isNull: true)
           .where('role', eq: 'admin')
           .where('dueAt', gt: DateTime.utc(2026).millisecondsSinceEpoch)
@@ -207,12 +205,11 @@ void main() {
       expect(await typed.explain(all: true), await raw.explain());
     });
 
-    test('case 108: typed anyOf equality group compiles like raw', () {
+    test('case 108: an OR element compiles like the raw OR group', () {
       expectCompileParity(
         db.store(Tasks.instance).debugCompile(
-          anyOf: <EqCond<Tasks>>[
-            Tasks.role.eq(Role.admin),
-            Tasks.done.eq(false),
+          where: <Cond<Tasks>>[
+            Tasks.role.eq(Role.admin) | Tasks.done.eq(false),
           ],
           limit: 5,
         ),
@@ -347,10 +344,6 @@ void main() {
         db.collection('tasks').query().where('done', eq: false).limit(2),
       );
       expectCompileParity(
-        tasks.debugCompile(where: [Tasks.done.neq(true)], limit: 2),
-        db.collection('tasks').query().where('done', neq: true).limit(2),
-      );
-      expectCompileParity(
         tasks.debugCompile(
           where: [
             Tasks.role.inValues(<Role>[Role.admin, Role.member])
@@ -374,14 +367,6 @@ void main() {
         db.collection('tasks').query().where('estimate', isNull: true).limit(2),
       );
       expectCompileParity(
-        tasks.debugCompile(where: [Tasks.estimate.isNotNull()], limit: 2),
-        db
-            .collection('tasks')
-            .query()
-            .where('estimate', isNotNull: true)
-            .limit(2),
-      );
-      expectCompileParity(
         tasks.debugCompile(where: [Tasks.count.lte(9)], limit: 2),
         db.collection('tasks').query().where('count', lte: 9).limit(2),
       );
@@ -391,32 +376,31 @@ void main() {
       );
     });
 
-    test('v3: eq(null) is IS NULL and neq(null) is IS NOT NULL', () {
+    test('v3: eq(null) is IS NULL and ~eq(null) is IS NOT NULL', () {
       final tasks = db.store(Tasks.instance);
       expectCompileParity(
         tasks.debugCompile(where: [Tasks.estimate.eq(null)], limit: 2),
         db.collection('tasks').query().where('estimate', isNull: true).limit(2),
       );
-      expectCompileParity(
-        tasks.debugCompile(where: [Tasks.estimate.neq(null)], limit: 2),
-        db
-            .collection('tasks')
-            .query()
-            .where('estimate', isNotNull: true)
-            .limit(2),
-      );
+      // The negated form compiles to NOT (IS NULL) — the raw builder has no
+      // NOT, so this is a direct SQL pin rather than a raw parity check.
+      final (sql, args) =
+          tasks.debugCompile(where: [~Tasks.estimate.eq(null)], limit: 2);
+      expect(sql, contains('NOT ("estimate" IS NULL)'));
+      expect(args, isEmpty);
     });
 
     test('v3: routed conditions actually filter (the silent no-op fix)',
         () async {
       final tasks = db.store(Tasks.instance);
       expect(
-        await tasks.count(where: [Tasks.done.neq(true)]),
+        // ~eq replaces the old not-equal operator: not-done tasks.
+        await tasks.count(where: [~Tasks.done.eq(true)]),
         2,
       ); // qt1 and qt3 are not done.
       expect(
         await tasks.count(
-          anyOf: [Tasks.role.eq(Role.admin), Tasks.done.eq(true)],
+          where: [Tasks.role.eq(Role.admin) | Tasks.done.eq(true)],
         ),
         2, // qt1 is admin, qt2 is done.
       );
@@ -426,23 +410,26 @@ void main() {
       );
     });
 
-    test('v3: anyOf accepts only EqCond values and compiles like raw', () {
-      final List<EqCond<Tasks>> alternatives = [
-        Tasks.role.eq(Role.admin),
-        Tasks.done.eq(true),
-      ];
-      final typed = db.store(Tasks.instance).debugCompile(
-            anyOf: alternatives,
-            limit: 5,
-          );
-      expect(typed.$1, contains(' OR '));
+    test('v3: OR elements accept every operator kind and compile like raw', () {
+      final tasks = db.store(Tasks.instance);
+      // Equality alternatives still compile exactly like the raw OR group.
       expectCompileParity(
-        typed,
+        tasks.debugCompile(
+          where: [Tasks.role.eq(Role.admin) | Tasks.done.eq(true)],
+          limit: 5,
+        ),
         db.collection('tasks').query().orWhere(<Map<String, Object?>>[
           <String, Object?>{'role': 'admin'},
           <String, Object?>{'done': true},
         ]).limit(5),
       );
+      // A range alternative has no raw equivalent — pin the compiled shape.
+      final (sql, args) = tasks.debugCompile(
+        where: [Tasks.count.gt(9) | Tasks.done.eq(false)],
+        limit: 5,
+      );
+      expect(sql, contains('(("count" > ?) OR ("done" = ?))'));
+      expect(args, <Object?>[9, false]);
     });
 
     test('v3: the named-argument query entry compiles like the raw builder',
@@ -458,11 +445,13 @@ void main() {
       ];
       expectCompileParity(
         db.store(Tasks.instance).debugCompile(
-              where: where,
-              anyOf: [Tasks.title.eq('Ship alpha'), Tasks.role.eq(Role.admin)],
-              orderBy: order,
-              limit: 10,
-            ),
+          where: [
+            ...where,
+            Tasks.title.eq('Ship alpha') | Tasks.role.eq(Role.admin),
+          ],
+          orderBy: order,
+          limit: 10,
+        ),
         db
             .collection('tasks')
             .query()
@@ -481,13 +470,6 @@ void main() {
 
     test('v3: inValues rejects an empty list at construction', () {
       expect(() => Tasks.role.inValues(const <Role>[]), throwsArgumentError);
-    });
-
-    test('v3: an eq(null) alternative cannot enter an OR group', () async {
-      await expectLater(
-        db.store(Tasks.instance).query(anyOf: [Tasks.done.eq(null)]),
-        throwsArgumentError,
-      );
     });
   });
 

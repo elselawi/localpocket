@@ -1,3 +1,4 @@
+import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
 import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/core/query/query_builder/query_forwarder.dart';
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
@@ -220,44 +221,8 @@ final class _WebTxTypedQuerySurface implements TypedQuerySurface {
   final WebTxQueryBuilder _builder;
 
   @override
-  void where(String field,
-      {Object? eq,
-      Object? neq,
-      List<Object?>? inValues,
-      (Object?, Object?)? between,
-      bool? isNull,
-      bool? isNotNull}) {
-    _builder.where(field,
-        eq: eq,
-        neq: neq,
-        inValues: inValues,
-        between: between,
-        isNull: isNull,
-        isNotNull: isNotNull);
-  }
-
-  @override
-  void whereRange(String field,
-      {Object? gt,
-      Object? gte,
-      Object? lt,
-      Object? lte,
-      String? startsWith,
-      String? endsWith,
-      String? contains}) {
-    _builder.where(field,
-        gt: gt,
-        gte: gte,
-        lt: lt,
-        lte: lte,
-        startsWith: startsWith,
-        endsWith: endsWith,
-        contains: contains);
-  }
-
-  @override
-  void orWhere(List<Map<String, Object?>> groups) {
-    _builder.orWhere(groups);
+  void wherePredicate(PredicateNode node) {
+    _builder.wherePredicate(node);
   }
 
   @override
