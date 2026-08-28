@@ -6,7 +6,9 @@
 /// limit: ..., ...)` — there is no search builder in the typed layer.
 library;
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/typed/store_def.dart';
+import 'package:localpocket/src/typed/typed_row.dart';
 
 /// Delegating search surface implemented by native and web facade adapters.
 abstract interface class TypedSearchSurface {

@@ -2,12 +2,21 @@
 /// `WebCollection` behind one thin map-level seam.
 library;
 
-import 'package:localpocket/localpocket.dart';
-
 // Imported directly: the raw record-map seam types are hidden from the
 // public barrel by design (see typed.dart).
-import 'query_surface.dart';
-import 'typed_search.dart' show TypedSearchSurface;
+import 'package:localpocket/src/core/ddl_compiler.dart';
+import 'package:localpocket/src/core/errors.dart';
+import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/core/store.dart';
+import 'package:localpocket/src/typed/cond.dart';
+import 'package:localpocket/src/typed/field_def.dart';
+import 'package:localpocket/src/typed/store_def.dart';
+import 'package:localpocket/src/typed/typed_query.dart';
+import 'package:localpocket/src/typed/typed_row.dart';
+import 'package:localpocket/src/typed/write.dart';
+import 'package:localpocket/src/typed/typed_search.dart';
+import 'package:localpocket/src/typed/query_surface.dart';
 
 /// The map-level surface `TypedCollection` delegates to, absorbing the
 /// native/web difference. Implement it to adapt another backend (the

@@ -27,7 +27,9 @@
 /// ```
 library;
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/local_pocket.dart';
+import 'package:localpocket/src/typed/store_def.dart';
+import 'package:localpocket/src/typed/typed_collection.dart';
 
 /// The declaration list naming every store a database owns.
 ///

@@ -3,7 +3,7 @@
 /// implements.
 library;
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/store.dart';
 
 /// The delegating query surface `TypedCollection`'s terminals forward to.
 /// Each concrete adapter wraps one builder and mutates it in place; the

@@ -2,7 +2,9 @@
 /// canonical [StoreDef] instance.
 library;
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/errors.dart';
+import 'package:localpocket/src/typed/store_def.dart';
+import 'package:localpocket/src/typed/typed_collection.dart';
 
 /// A name-keyed registry mapping each store name to its one canonical
 /// [StoreDef] instance, enforced by **reference identity**.

@@ -8,7 +8,9 @@
 /// entirely at this consumer-facing boundary.
 library;
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/errors.dart';
+import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/typed/cond.dart';
 
 /// Decodes a raw stored value into a value of type `T`.
 typedef FieldDecodeFn<T> = T Function(Object? raw);
