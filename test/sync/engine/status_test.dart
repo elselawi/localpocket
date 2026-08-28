@@ -290,5 +290,27 @@ void main() {
       expect(engine.state, isNot(SyncEngineState.closed));
       await sub.cancel();
     });
+
+    test('SyncReport.toString names every report field', () {
+      const report = SyncReport(
+        pulled: {'widgets': 3},
+        swept: {'widgets': 2},
+        pushed: 5,
+        deadLettered: 1,
+        blocked: 1,
+        discarded: 1,
+        hadError: true,
+      );
+      final text = report.toString();
+      expect(text, contains('pulled: {widgets: 3}'));
+      expect(text, contains('swept: {widgets: 2}'));
+      expect(text, contains('pushed: 5'));
+      expect(text, contains('deadLettered: 1'));
+      expect(text, contains('blocked: 1'));
+      expect(text, contains('discarded: 1'));
+      expect(text, contains('hadError: true'));
+      // The defaults render too.
+      expect(const SyncReport().toString(), contains('pushed: 0'));
+    });
   });
 }

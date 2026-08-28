@@ -681,4 +681,178 @@ void main() {
       expect(nested, containsAll(['meta', 'meta.name']));
     });
   });
+
+  group('record-level resolvers and async paths', () {
+    test('concrete resolvers arbitrate whole records as collectionResolver',
+        () {
+      const base = {'v': 0};
+      const local = {'v': 1};
+      const remote = {'v': 2};
+
+      for (final resolver in <ConflictResolver>[
+        const LocalWinsResolver(),
+        const RemoteWinsResolver(),
+        const SetUnionWithDeletionWinsResolver(),
+        const CounterResolver(),
+        const AppendOnlyListResolver(),
+        const AppendOnlyLinesResolver(),
+      ]) {
+        final res = merge3Way(
+          base: base,
+          local: local,
+          remote: remote,
+          policy: MergePolicy(collectionResolver: resolver),
+        );
+        expect(res.merged['v'], resolver is LocalWinsResolver ? 1 : 2,
+            reason: '${resolver.runtimeType} arbitrates a genuine conflict');
+      }
+    });
+
+    test(
+        'a generic ConflictResolver field override falls back to remote '
+        'wins', () {
+      final res = merge3Way(
+        base: {'v': 0},
+        local: {'v': 1},
+        remote: {'v': 2},
+        policy: const MergePolicy(fieldOverrides: {'v': _FallbackResolver()}),
+      );
+      expect(res.merged['v'], 2,
+          reason: 'an unclassified ConflictResolver field override defaults '
+              'to remote wins');
+    });
+
+    test('MergeContext computes dirty sets when not supplied', () {
+      final ctx = MergeContext(
+        store: 's',
+        recordId: 'r',
+        base: {'a': 1, 'b': 2},
+        local: {'a': 1, 'b': 3},
+        remote: {'a': 1, 'b': 2},
+      );
+      expect(ctx.dirtyLocal, {'b'}, reason: 'only the locally-changed key');
+      expect(ctx.dirtyRemote, isEmpty, reason: 'remote equals base');
+    });
+
+    test('an async resolver in the sync merge path fails loudly', () {
+      expect(
+        () => merge3Way(
+          base: {'v': 0},
+          local: {'v': 1},
+          remote: {'v': 2},
+          policy: MergePolicy(
+              collectionResolver: CustomResolver((ctx) async => null)),
+        ),
+        throwsA(isA<StateError>()),
+        reason: 'an async resolver must use merge3WayAsync',
+      );
+    });
+
+    test('merge3WayAsync resolves through an async collection resolver',
+        () async {
+      final res = await merge3WayAsync(
+        base: {'v': 0},
+        local: {'v': 1},
+        remote: {'v': 2},
+        store: 's',
+        recordId: 'r',
+        policy: MergePolicy(
+          collectionResolver: CustomResolver((ctx) async =>
+              MergeResult(merged: {'v': 99, 'store': ctx.store})),
+        ),
+      );
+      expect(res.merged['v'], 99);
+      expect(res.merged['store'], 's');
+    });
+
+    test('async field resolver on a nested map path resolves the child',
+        () async {
+      final res = await merge3WayAsync(
+        base: {
+          'meta': {'name': 'a', 'qty': 1}
+        },
+        local: {
+          'meta': {'name': 'b', 'qty': 1}
+        },
+        remote: {
+          'meta': {'name': 'c', 'qty': 1}
+        },
+        policy: MergePolicy(
+          fieldOverrides: {
+            'meta.name': CustomResolver(
+                (ctx) async => MergeResult(merged: {'name': 'custom'})),
+          },
+        ),
+      );
+      expect(res.merged['meta'], {'name': 'custom', 'qty': 1},
+          reason: 'the async dotted-path resolver governs the nested child');
+    });
+
+    test('async field resolver declining a nested field escalates to review',
+        () async {
+      final res = await merge3WayAsync(
+        base: {
+          'meta': {'name': 'a'}
+        },
+        local: {
+          'meta': {'name': 'b'}
+        },
+        remote: {
+          'meta': {'name': 'c'}
+        },
+        policy: MergePolicy(
+          fieldOverrides: {
+            'meta.name': CustomResolver((ctx) async => null),
+          },
+        ),
+      );
+      expect(res.needsReview, isTrue);
+      expect((res.merged['meta'] as Map)['name'], 'c',
+          reason: 'a declined async field override takes remote and '
+              'escalates');
+    });
+
+    test('a sync CustomResolver field override resolving wins the field', () {
+      final res = merge3Way(
+        base: {'v': 0},
+        local: {'v': 1},
+        remote: {'v': 2},
+        policy: MergePolicy(
+          fieldOverrides: {
+            'v': CustomResolver((ctx) => MergeResult(merged: {'v': 9})),
+          },
+        ),
+      );
+      expect(res.merged['v'], 9);
+      expect(res.needsReview, isFalse);
+    });
+
+    test(
+        'a sync CustomResolver field override declining takes remote and '
+        'escalates', () {
+      final res = merge3Way(
+        base: {'v': 0},
+        local: {'v': 1},
+        remote: {'v': 2},
+        policy: MergePolicy(
+          fieldOverrides: {
+            'v': CustomResolver((ctx) => null),
+          },
+        ),
+      );
+      expect(res.needsReview, isTrue);
+      expect(res.merged['v'], 2,
+          reason: 'a declined field override falls back to remote');
+    });
+  });
+}
+
+/// A generic [ConflictResolver] subclass that is none of the concrete
+/// record/field resolvers — pins the unclassified field-override fallback.
+class _FallbackResolver extends ConflictResolver {
+  const _FallbackResolver();
+
+  @override
+  MergeResult resolve(MergeContext ctx) =>
+      const RemoteWinsResolver().resolve(ctx);
 }

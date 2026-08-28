@@ -11,6 +11,35 @@ import 'package:test/test.dart';
 
 import '../support/helpers.dart';
 
+/// A BlobStore that overrides nothing — used to pin the base-class defaults
+/// (e.g. [BlobStore.modifiedAt] and [BlobStore.isDurable]).
+class _MinimalBlobStore extends BlobStore {
+  @override
+  Future<String> put(Stream<List<int>> bytes,
+          {String? expectedSha256, int? expectedSize, String? key}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Stream<List<int>>> open(String hash) => throw UnimplementedError();
+
+  @override
+  Future<void> delete(String hash) => throw UnimplementedError();
+
+  @override
+  Future<bool> exists(String hash) => throw UnimplementedError();
+
+  @override
+  Future<int?> size(String hash) => throw UnimplementedError();
+
+  @override
+  Future<int> cleanTmp(
+          {Duration olderThan = const Duration(hours: 24)}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<String>> listHashes() => throw UnimplementedError();
+}
+
 /// Blob store tests.
 void main() {
   group('BlobStore', () {
@@ -676,6 +705,119 @@ void main() {
           expectedSize: 3, expectedSha256: hash);
       expect(ok.hash, hash);
       expect(ok.totalBytes, 3);
+    });
+
+    test('a key is used as the computed hash when provided', () async {
+      final key = 'a' * 64;
+      final result = await processAndValidateBlobStream(
+        Stream.value([1, 2, 3]),
+        key: key,
+      );
+      expect(result.hash, key, reason: 'the key wins over the digest');
+      expect(result.totalBytes, 3);
+    });
+  });
+
+  group('BlobMissingError / BlobStorageException classification', () {
+    test('isBlobMissing recognizes only BlobMissingError', () {
+      expect(isBlobMissing(BlobMissingError('a' * 64)), isTrue);
+      expect(isBlobMissing(StateError('boom')), isFalse);
+      expect(isBlobMissing(Exception('boom')), isFalse);
+    });
+
+    test('toString renders the hash and cause', () {
+      final missing = BlobMissingError('a' * 64);
+      expect(missing.hash, 'a' * 64);
+      expect(missing.toString(), contains('BlobMissingError'));
+      expect(missing.toString(), contains('a' * 64));
+
+      final storage =
+          BlobStorageException(Exception('disk full'), 'b' * 64);
+      expect(storage.hash, 'b' * 64);
+      expect(storage.cause, isA<Exception>());
+      expect(storage.toString(), contains('BlobStorageException'));
+      expect(storage.toString(), contains('disk full'));
+    });
+  });
+
+  group('MemoryBlobStore missing-blob and metadata behavior', () {
+    test('open of a missing blob throws the documented StateError', () async {
+      final store = MemoryBlobStore();
+      await expectLater(
+        store.open('a' * 64),
+        throwsA(isA<StateError>()
+            .having((e) => e.message, 'message', contains('Blob not found'))),
+      );
+      // delete of a missing blob is a silent no-op.
+      await store.delete('b' * 64);
+      expect(await store.listHashes(), isEmpty);
+    });
+
+    test('modifiedAt reports the write time and null for unknown', () async {
+      final store = MemoryBlobStore();
+      final data = utf8.encode('tracked content');
+      final hash = await store.put(Stream.value(data));
+      final seen = await store.modifiedAt(hash);
+      expect(seen, isNotNull);
+      expect(seen, greaterThan(0));
+
+      expect(await store.modifiedAt('f' * 64), isNull,
+          reason: 'a missing blob has no modification time');
+      // modifiedAt validates the hash like every other accessor.
+      await expectLater(
+        store.modifiedAt('bad'),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('the in-memory store reports non-durable', () async {
+      final store = MemoryBlobStore();
+      expect(await store.isDurable, isFalse,
+          reason: 'bytes vanish with the process; nothing survives restarts');
+    });
+
+    test('the base modifiedAt default reports unknown for every hash', () async {
+      // A store that does not override modifiedAt (e.g. an OPFS-backed web
+      // store with no cheap mtime) reports null so GC never ages its blobs.
+      final bare = _MinimalBlobStore();
+      expect(await bare.modifiedAt('a' * 64), isNull);
+    });
+  });
+
+  group('EncryptingBlobStore delegation and size', () {
+    late BlobStore inner;
+    List<int> enc(List<int> p) => p.map((b) => (b + 42) % 256).toList();
+    List<int> dec(List<int> c) => c.map((b) => (b - 42 + 256) % 256).toList();
+
+    setUp(() {
+      inner = MemoryBlobStore();
+    });
+
+    test('size returns the decrypted plaintext size', () async {
+      final store = EncryptingBlobStore(inner, encrypt: enc, decrypt: dec);
+      final data = utf8.encode('plaintext size probe');
+      final hash = await store.put(Stream.value(data));
+
+      expect(await store.size(hash), data.length,
+          reason: 'the size is the plaintext length, not the ciphertext');
+      expect(await store.exists(hash), isTrue);
+      expect(await store.size('f' * 64), isNull,
+          reason: 'a missing blob reports null size');
+    });
+
+    test('delete, cleanTmp, listHashes and isDurable delegate to the inner '
+        'store', () async {
+      final store = EncryptingBlobStore(inner, encrypt: enc, decrypt: dec);
+      final data = utf8.encode('delegated');
+      final hash = await store.put(Stream.value(data));
+
+      expect(await store.listHashes(), [hash]);
+      expect(await store.isDurable, await inner.isDurable);
+      expect(await store.cleanTmp(), 0);
+
+      await store.delete(hash);
+      expect(await store.exists(hash), isFalse);
+      expect(await store.listHashes(), isEmpty);
     });
   });
 }

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:localpocket/localpocket.dart';
 import 'package:test/test.dart';
 
+import '../support/helpers.dart';
+
 /// ChangeBus lifecycle, broadcast, and overflow-contract tests.
 void main() {
   group('ChangeBus', () {
@@ -178,6 +180,13 @@ void main() {
       expect(event.isLocal, isTrue);
       expect(event.isRemote, isFalse);
       expect(event.isResolution, isFalse);
+
+      final rendered = event.toString();
+      expect(rendered, contains('RecordChangeEvent'));
+      expect(rendered, contains('local'));
+      expect(rendered, contains('update'));
+      expect(rendered, contains('tasks/t1'));
+      expect(rendered, contains('title'));
 
       expect(event.hasFieldChange('title'), isTrue);
       expect(event.hasFieldChange('done'), isTrue);
@@ -374,10 +383,15 @@ void main() {
       final tasksEvents = <RecordChangeEvent>[];
       final doneTransitions = <RecordChangeEvent>[];
 
+      final actionEvents = <RecordChangeEvent>[];
+      final fieldEvents = <RecordChangeEvent>[];
+
       stream.whereLocal().listen(localEvents.add);
       stream.whereRemote().listen(remoteEvents.add);
       stream.whereResolution().listen(resolutionEvents.add);
       stream.whereStore('tasks').listen(tasksEvents.add);
+      stream.whereAction(ChangeAction.update).listen(actionEvents.add);
+      stream.whereField('done').listen(fieldEvents.add);
       stream
           .whereFieldTransition('done', from: false, to: true)
           .listen(doneTransitions.add);
@@ -420,6 +434,8 @@ void main() {
       expect(remoteEvents, [e2]);
       expect(resolutionEvents, [e3]);
       expect(tasksEvents, [e1, e3]);
+      expect(actionEvents, [e1, e3], reason: 'both e1 and e3 are updates');
+      expect(fieldEvents, [e1, e3], reason: 'both touch the done field');
       expect(doneTransitions, [e1]);
 
       await controller.close();
@@ -476,6 +492,103 @@ void main() {
           .toList();
 
       expect(filtered, completion([event]));
+    });
+  });
+
+  group('ChangeBusAware conveniences', () {
+    test('hasListener and hasEventListeners track active subscriptions',
+        () async {
+      final bus = ChangeBus();
+      expect(bus.hasListener, isFalse);
+      expect(bus.hasEventListeners, isFalse);
+
+      final sub = bus.stream.listen((_) {});
+      final sub2 = bus.events.listen((_) {});
+      await Future<void>.delayed(Duration.zero);
+      expect(bus.hasListener, isTrue,
+          reason: 'either stream listener makes hasListener true');
+      expect(bus.hasEventListeners, isTrue);
+
+      await sub.cancel();
+      await sub2.cancel();
+      bus.close();
+    });
+
+    test('LocalPocket-level onLocal and onRemote filter across collections',
+        () async {
+      final db = await openPocket();
+      addTearDown(db.close);
+
+      final local = <RecordChangeEvent>[];
+      final remote = <RecordChangeEvent>[];
+      final localSub = db.onLocal().listen(local.add);
+      final remoteSub = db.onRemote().listen(remote.add);
+      addTearDown(localSub.cancel);
+      addTearDown(remoteSub.cancel);
+
+      db.changeBus.emitEvent(RecordChangeEvent(
+        store: 'widgets',
+        id: 'a',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.create,
+        newRecord: {'name': 'x'},
+        changedFields: {'name'},
+      ));
+      db.changeBus.emitEvent(RecordChangeEvent(
+        store: 'widgets',
+        id: 'b',
+        origin: ChangeOrigin.remote,
+        action: ChangeAction.update,
+        oldRecord: {'name': 'y'},
+        newRecord: {'name': 'z'},
+        changedFields: {'name'},
+      ));
+
+      await Future<void>.delayed(Duration.zero);
+      expect(local, hasLength(1), reason: 'only the local-origin event');
+      expect(local.single.id, 'a');
+      expect(remote, hasLength(1), reason: 'only the remote-origin event');
+      expect(remote.single.id, 'b');
+    });
+
+    test('collection-level onLocal and onFieldChange filter one store',
+        () async {
+      final db = await openPocket();
+      addTearDown(db.close);
+      final col = db.collection('widgets');
+
+      final locals = <RecordChangeEvent>[];
+      final fieldChanges = <RecordChangeEvent>[];
+      final localSub = col.onLocal().listen(locals.add);
+      final fieldSub = col.onFieldChange('name').listen(fieldChanges.add);
+      addTearDown(localSub.cancel);
+      addTearDown(fieldSub.cancel);
+
+      // A foreign-store event must not reach the collection-level filters.
+      db.changeBus.emitEvent(RecordChangeEvent(
+        store: 'orders',
+        id: 'o1',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.update,
+        oldRecord: {'name': 'x'},
+        newRecord: {'name': 'y'},
+        changedFields: {'name'},
+      ));
+      db.changeBus.emitEvent(RecordChangeEvent(
+        store: 'widgets',
+        id: 'a',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.update,
+        oldRecord: {'name': 'x', 'qty': 1},
+        newRecord: {'name': 'y', 'qty': 1},
+        changedFields: {'name'},
+      ));
+
+      await Future<void>.delayed(Duration.zero);
+      expect(locals, hasLength(1), reason: 'the orders event is filtered out');
+      expect(locals.single.id, 'a');
+      expect(fieldChanges, hasLength(1), reason: 'the name change matches');
+      expect(fieldChanges.single.id, 'a');
     });
   });
 }

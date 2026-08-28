@@ -176,5 +176,44 @@ void main() {
         throwsA(isA<StateError>()),
       );
     });
+
+    test('prepare() defaults to a no-op that completes', () async {
+      final b = _MinimalBackend();
+      await expectLater(b.prepare(), completes,
+          reason: 'a backend that does not override prepare warms up as a '
+              'no-op (e.g. a non-PocketBase backend with no batch probe)');
+    });
+
+    test('RemoteRecord.copyWith replaces selected fields and keeps the rest',
+        () {
+      const base = RemoteRecord(
+        id: 'a',
+        store: 'widgets',
+        updated: '2026-01-01 00:00:00.000Z',
+        data: {'name': 'old'},
+        imgs: ['f.bin'],
+      );
+
+      final newData = base.copyWith(data: {'name': 'new'});
+      expect(newData.id, 'a');
+      expect(newData.store, 'widgets');
+      expect(newData.updated, '2026-01-01 00:00:00.000Z',
+          reason: 'updated is preserved when not replaced');
+      expect(newData.data, {'name': 'new'});
+      expect(newData.imgs, ['f.bin']);
+
+      final newUpdated = base.copyWith(updated: '2026-02-02 00:00:00.000Z');
+      expect(newUpdated.updated, '2026-02-02 00:00:00.000Z');
+      expect(newUpdated.data, {'name': 'old'},
+          reason: 'data is preserved when not replaced');
+
+      final both = base.copyWith(
+        updated: '2026-03-03 00:00:00.000Z',
+        data: {'qty': 1},
+      );
+      expect(both.updated, '2026-03-03 00:00:00.000Z');
+      expect(both.data, {'qty': 1});
+      expect(both.id, 'a');
+    });
   });
 }

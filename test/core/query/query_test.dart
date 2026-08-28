@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/src/core/compiled_query_runner.dart';
+import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
@@ -386,6 +387,97 @@ void main() {
           .fetch();
       expect(page.items.map((r) => r['made_on']).toList(), [100, 199, 200],
           reason: 'inclusive [start, end] semantics');
+    });
+  });
+
+  group('predicate tree structural validation', () {
+    test('an unknown leaf operator is rejected before compilation', () {
+      expect(
+        () => compilePredicateTree(
+            const LeafPredicate('name', 'bogus', <Object?>[])),
+        throwsA(isA<ArgumentError>()
+            .having((e) => e.message, 'message', contains('Unknown'))),
+      );
+    });
+
+    test('leaves must carry the exact arity their operator needs', () {
+      // eq needs exactly one argument.
+      expect(
+        () => compilePredicateTree(
+            const LeafPredicate('name', 'eq', <Object?>['a', 'b'])),
+        throwsA(isA<ArgumentError>()
+            .having((e) => e.message, 'message', contains('exactly 1'))),
+      );
+      // between needs exactly two.
+      expect(
+        () => compilePredicateTree(
+            const LeafPredicate('name', 'between', <Object?>['a'])),
+        throwsA(isA<ArgumentError>()
+            .having((e) => e.message, 'message', contains('exactly 2'))),
+      );
+    });
+
+    test('an empty inValues predicate is rejected', () {
+      expect(
+        () => compilePredicateTree(
+            const LeafPredicate('name', 'inValues', <Object?>[])),
+        throwsA(isA<ArgumentError>()
+            .having((e) => e.message, 'message', contains('at least one'))),
+      );
+    });
+
+    test('eq(null) never reaches the compiler', () {
+      expect(
+        () => compilePredicateTree(
+            const LeafPredicate('name', 'eq', <Object?>[null])),
+        throwsA(isA<ArgumentError>()
+            .having((e) => e.message, 'message', contains('isNull'))),
+      );
+    });
+
+    test('empty composite predicates are rejected', () {
+      expect(
+        () => compilePredicateTree(const AllPredicate(<PredicateNode>[])),
+        throwsA(isA<ArgumentError>()
+            .having((e) => e.message, 'message', contains('at least one'))),
+      );
+      expect(
+        () => compilePredicateTree(const AnyPredicate(<PredicateNode>[])),
+        throwsA(isA<ArgumentError>()
+            .having((e) => e.message, 'message', contains('at least one'))),
+      );
+    });
+
+    test('LIKE wildcards are escaped inside contains predicates', () {
+      final (sql, args) = compilePredicateTree(
+          const LeafPredicate('name', 'contains', <Object?>['100%_x']));
+      expect(sql, contains('LIKE ?'));
+      expect(args, ['%100\\%\\_x%'],
+          reason: '% and _ are escaped and the needle is wrapped in %');
+    });
+
+    test('LIKE wildcards are escaped inside startsWith/endsWith predicates',
+        () {
+      final (startSql, startArgs) = compilePredicateTree(
+          const LeafPredicate('name', 'startsWith', <Object?>['100%_x']));
+      expect(startArgs, ['100\\%\\_x%'],
+          reason: 'startsWith appends one trailing % to the escaped needle');
+      expect(startSql, contains('LIKE ?'));
+
+      final (endSql, endArgs) = compilePredicateTree(
+          const LeafPredicate('name', 'endsWith', <Object?>['100%_x']));
+      expect(endArgs, ['%100\\%\\_x'],
+          reason: 'endsWith prepends one leading % to the escaped needle');
+      expect(endSql, contains('LIKE ?'));
+    });
+
+    test('a malformed tree through the builder surfaces the same errors', () {
+      final q = QueryBuilder.compileOnly(widgetsSchema());
+      expect(
+        () =>
+            q.wherePredicate(const LeafPredicate('name', 'bogus', <Object?>[])),
+        throwsA(isA<ArgumentError>()),
+      );
     });
   });
 }
