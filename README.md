@@ -41,84 +41,76 @@ import 'package:localpocket/localpocket.dart';
 enum TaskStatus { todo, inProgress, done }
 
 final class Tasks extends StoreDef<Tasks> {
-  // core definitions and instantiation
+  // ----- start with defining store name ----- //
+  // define store name and schema version
   Tasks._() : super(name: 'tasks', version: 1);
-  static final Tasks instance = Tasks._();
+  // instantiate store as a static member
+  static final Tasks store = Tasks._();
 
-  // ------  define the schema ------ //
-  // Text field can be:
-  late final _title = schema
+  // ----- define the schema per field ----- //
+  static final title = store.schema
       .text(
-        // field title
+        // field name
         'title',
-        // constraint: unique when active
-        // (active = not deleted/archived)
-        // default is false
+        // unique constraint
         uniqueWhenActive: true,
-        // field-level encryption
-        // default is false
-        encrypted: false,
       )
-      .req();
+      .req(); // makes it required
 
-  // Enum field can be:
-  late final _status = schema.enumOf(
-    // field title
+  // Enums:
+  static final status = store.schema.enumOf(
     'status',
-    // enum values
     TaskStatus.values,
-    // optional: mapping enum values to custom strings
     wire: const {
+      // overwriting the textual (string) representation of the enum
       TaskStatus.inProgress: 'in_progress',
-      TaskStatus.done: 'done!!',
+      TaskStatus.todo: 'to_do'
+      // unmapped values fallback to `.name`
     },
   );
 
-  // ... rest of the fields ...
-  late final _priority = schema.integer('priority');
-  late final _done = schema.boolean('done');
-  late final _dueAt = schema.dateTime('due_at');
-
-  // ------  define static accessors ------ //
-  // P.S. forgive the redundancy but this will
-  // give you stronger typing and better API
-  static TextFieldReq<Tasks> get title => instance._title;
-  static EnumFieldOpt<Tasks, TaskStatus> get status => instance._status;
-  static IntFieldOpt<Tasks> get priority => instance._priority;
-  static BoolFieldOpt<Tasks> get done => instance._done;
-  static DateTimeFieldOpt<Tasks> get dueAt => instance._dueAt;
+  // ... defining schema for the rest of the fields ...
+  static final priority = store.schema.integer('priority');
+  static final done = store.schema.boolean('done');
+  static final dueAt = store.schema.dateTime('due_at');
+  // refer to the table below for more field types
 
   // ----- define the ordered registry ----- //
   // declares which fields exist and in
   // what order they become columns
   @override
-  List<FieldDef<Tasks, Object?>> get fields => [
-    _title,
-    _status,
-    _priority,
-    _done,
-    _dueAt,
-  ];
+  get fields => [title, status, priority, done, dueAt];
 
-  // ----- define indexes ----- //
-  // for faster querying
+  // ----- define indexing ----- //
   @override
-  List<IndexSpec> get indexes => [
-    indexSpec<Tasks>([status, priority]),
-    indexSpec<Tasks>([title], unique: true),
-  ];
+  get indexes => [
+        indexSpec<Tasks>(
+          [status, priority],
+          scope: IndexScope.notArchived,
+          unique: true,
+        ),
+      ];
 
+  // ----- define search specs ----- //
   @override
-  FtsSpec get fts => ftsSpec<Tasks>(
-    // fields to search into
-    [title],
-    // "fuzzy: true" searches arbitrary substring
-    fuzzy: true,
-    // normalization example:
-    normalize: const FtsNormalization(
-      rules: {'à': 'a', 'á': 'a', 'â': 'a', 'ä': 'a'},
-    ),
-  );
+  get fts => ftsSpec<Tasks>(
+        [title],
+        fuzzy: true,
+        normalize: const FtsNormalization(rules: {'à': 'a', 'ä': 'a'}),
+      );
+
+
+  // if an archived record hasn't syched yet
+  // keep it in the local store? or purge it?
+  // default: false
+  @override
+  bool get keepUnsyncedArchives => true;
+
+  // Whether remote file references on this
+  // store should be prefetched during sync pulls.
+  // default: false
+  @override
+  bool get prefetchFiles => true;
 }
 ```
 
@@ -137,7 +129,7 @@ final class Tasks extends StoreDef<Tasks> {
 | `schema.jsonList<T>` | `List<T>?` | canonical JSON `TEXT` |
 | `schema.ref` | record-id `String?` | `TEXT` |
 
-#### Field Type Notes
+#### Notes on field types:
 
 - Enums are stored as strings. Unmapped values use `Enum.name`; the optional `wire` map pins stable alternatives such as `in_progress`.
 - **`schema.date` vs `schema.dateTime`** — Both store the same epoch-**milliseconds** integer in an `INTEGER` column; only the boundary codec differs. `schema.date` is a pass-through adapter typed as `int?` (raw epoch ms, no conversion — you manage timezones) and supports numeric aggregates. `schema.dateTime` is typed as `DateTime?` and is **UTC-pinned in both directions**: local inputs are converted to UTC before storage and decoded values always have `isUtc == true`. The two adapters share the same column and are interchangeable on the wire. Prefer `schema.dateTime` for timestamps; use `schema.date` when you already hold epoch-ms integers or want `sum`/`min`/`max` over a date column.
@@ -152,36 +144,228 @@ final class Tasks extends StoreDef<Tasks> {
 While this step is optional, it is recommended to have a cleaner and more concise API.
 
 ```dart
-// READS: typed getters on the row.
-final class Task extends TypedModel<Tasks> {
-  Task(super.row);
+// define a helper type for the row
+typedef Task = TypedRow<Tasks>;
 
-  String get title => row(Tasks.title);
-  TaskStatus? get status => row(Tasks.status);
-  bool get isDone => row(Tasks.done) ?? false;
-  DateTime? get dueAt => row(Tasks.dueAt);
+// define and extension that maps each field in the row to a class member
 
-  // you can also define whatever computations you like
+extension TaskReads on TypedRow<Tasks> {
+  String get title => this(Tasks.title);
+
+  // this can also have default values
+  TaskStatus get status => this(Tasks.status) ?? TaskStatus.todo;
+  bool get isDone => this(Tasks.done) ?? false;
+  int get priority => this(Tasks.priority) ?? 0;
+
+  // nullable fields can be accessed directly
+  DateTime? get dueAt => this(Tasks.dueAt);
+
+  // you can add fields based on whatever computations you want
   String get taskColor => status == TaskStatus.todo ? 'red' : 'blue';
 }
 
-extension TaskOperations on TypedCollection<Tasks> {
-  Future<Task?> readTask(String id) async {
-    final row = await get(id);
-    return row == null ? null : Task(row);
+
+// finally ...
+// define common operations on your store
+// the following example is quite verbose
+// to show you the syntax and composability of the queries
+
+extension TaskStore on TypedCollection<Tasks> {
+
+  // ---- point reads
+  Future<Task?> readTask(String id) => get(id);
+
+
+  // ---- helper condiitions
+  Cond<Tasks> get notDone => ~Tasks.done.eq(true);
+  Cond<Tasks> get shipped => Tasks.done.eq(true);
+  Cond<Tasks> get openOrOverdue =>
+      (~Tasks.done.eq(true)) | Tasks.dueAt.lt(DateTime.now());
+
+  // ---- queries: one shape, every terminal, any boolean tree
+  Future<List<Task>> notDoneTasks({int limit = 50}) async => (await query(
+        where: [notDone],
+        orderBy: [Tasks.priority.desc],
+        limit: limit,
+      ))
+          .items;
+
+  Future<List<Task>> highPriority({int limit = 50}) async => (await query(
+        where: [
+          // Precedence: & binds tighter than | — parens make it explicit.
+          (Tasks.priority.gt(0) & Tasks.priority.lt(2)) | shipped,
+          Tasks.dueAt.lt(DateTime.now()) | Tasks.dueAt.eq(null),
+        ],
+        orderBy: [Tasks.priority.desc],
+        limit: limit,
+      ))
+          .items;
+
+  // An OR of ANDs — the shape a separate "OR group" could never express.
+  Future<List<Task>> workable({int limit = 50}) async => (await query(
+        where: [
+          Tasks.title.startsWith('Draft') |
+              (Tasks.status.eq(TaskStatus.inProgress) & notDone),
+        ],
+        limit: limit,
+      ))
+          .items;
+
+  Future<List<Task>> dueThisWeek() async {
+    final now = DateTime.now().toUtc();
+    return (await query(
+      where: [
+        Tasks.dueAt.between(now, now.add(const Duration(days: 7))),
+        notDone,
+      ],
+      orderBy: [Tasks.dueAt.asc],
+      all: true,
+    ))
+        .items;
   }
 
-  // WRITES are field-native values — no per-store write layer needed.
+  // Runtime-assembled filters: the where list ANDs its elements, and each
+  // element may itself be a composed tree.
+  Future<List<Task>> matching(
+    List<Cond<Tasks>> filters, {
+    int limit = 50,
+  }) async =>
+      (await query(
+        where: filters,
+        orderBy: [Tasks.priority.desc],
+        limit: limit,
+      ))
+          .items;
+
+  // ---- writes: field-native values
+  Future<void> newTask(String title, {int priority = 0}) => put([
+        Tasks.title.set(title),
+        Tasks.priority.set(priority),
+        Tasks.done.set(false),
+      ]);
+
+  Future<void> newTaskWithId(String id, String title) =>
+      put([Writes.id<Tasks>(id), Tasks.title.set(title)]);
+
   Future<void> markDone(String id) => patch(id, [Tasks.done.set(true)]);
+
+  // null clears an optional field; on a .req() field it would not compile.
+  Future<void> clearPriority(String id) =>
+      patch(id, [Tasks.priority.set(null)]);
 
   Future<void> rename(String id, String newTitle) =>
       patch(id, [Tasks.title.set(newTitle)]);
+
+  Future<void> seed(List<String> titles) => putAll([
+        for (var i = 0; i < titles.length; i++)
+          [
+            Writes.id<Tasks>('task${(i + 1).toString().padLeft(11, '0')}'),
+            Tasks.title.set(titles[i]),
+            Tasks.priority.set(i),
+            Tasks.status.set(TaskStatus.todo),
+            Tasks.done.set(false),
+          ],
+      ]);
+
+  Future<void> markAllDone(List<String> ids) => patchAll({
+        for (final id in ids) id: [Tasks.done.set(true)],
+      });
+
+  // ---- lifecycle
+  Future<void> archiveTask(String id) => archive(id);
+  Future<void> restoreTask(String id) => restore(id);
+  Future<void> deleteTask(String id) => purge(id);
+
+  // ---- search: hits come straight back
+  Future<void> printSearch(String term) async {
+    for (final hit in await search(term, limit: 10)) {
+      final row = await hit.fetch();
+      print(
+        '  hit id=${hit.id} score=${hit.score.toStringAsFixed(3)} '
+        'title=${row?.title}',
+      );
+    }
+  }
+
+  // ---- stats: the same predicate slots on every terminal
+  Future<void> printStats() async {
+    final open = await count(where: [notDone]);
+    final load = await sum(Tasks.priority, where: [notDone]);
+    final states = await distinct(Tasks.status);
+    final hot = await ids(
+      where: [Tasks.priority.gt(0) & ~Tasks.title.startsWith('Draft')],
+      limit: 100,
+    );
+    print('open=$open load=$load states=$states hot=${hot.length}');
+  }
+
+  // ---- reactive: the same trees drive watches
+  Stream<List<Task>> watchOpen() => watch(
+        where: [openOrOverdue],
+        orderBy: [Tasks.dueAt.asc],
+        limit: 50,
+      );
+
+  // ---- keyset pagination
+  Future<void> printAllPages() async {
+    var page = await query(orderBy: [Tasks.priority.asc], limit: 2);
+    while (true) {
+      for (final t in page.items) {
+        print('  ${t.id}: ${t.title}');
+      }
+      if (!page.hasMore) break;
+      page = await queryAfter(
+        page.nextCursor!,
+        orderBy: [Tasks.priority.asc],
+        limit: 2,
+      );
+    }
+  }
+
+  // ---- projection: reading an unselected field throws
+  Future<List<String>> openTitles() async => [
+        for (final row in (await query(
+          where: [notDone],
+          select: [Tasks.title],
+          limit: 100,
+        ))
+            .items)
+          row.title,
+      ];
 }
 ```
 
 ### Step 3: Wire the store schema to the Database
 
+```dart
 
+// this class will be the main database handle
+
+final class AppDb extends TypedPocket {
+  AppDb(super.path);
+
+  // required: define the stores this app uses
+  @override
+  StoreDefs get stores => [Tasks.store];
+
+  // optional: add one-line accessors for each store
+  TypedCollection<Tasks> get tasks => handle(Tasks.store);
+}
+```
+
+Now you can use the stores in your app:
+
+```dart
+void main(List<String> args) async {
+  final db = AppDb('whatever');
+  await db.open();
+  await db.tasks.seed(['Draft it', 'Ship it', 'File taxes']);
+  await db.tasks.markDone('task00000000002');
+  await db.tasks.printSearch('ship');
+  await db.tasks.printStats();
+  await db.close();
+}
+```
 
 ---
 
