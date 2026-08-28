@@ -5,11 +5,15 @@ import 'package:crypto/crypto.dart';
 
 import '../core/cipher.dart';
 
+/// {@template localpocket.blob_store}
 /// BlobStore interface.
 ///
 /// Implemented natively with `dart:io` or in-memory/OPFS on web.
+/// {@endtemplate}
 abstract class BlobStore {
   /// Creates a blob-store implementation.
+  ///
+  /// {@macro localpocket.blob_store}
   const BlobStore();
 
   /// Pattern matching lowercase hexadecimal SHA-256 digests.
@@ -70,6 +74,7 @@ abstract class BlobStore {
   Future<bool> get isDurable => Future.value(true);
 }
 
+/// {@template localpocket.blob_missing_error}
 /// Sentinel error signalling that a blob entry is genuinely absent — the
 /// platform-neutral "file not found" condition.
 ///
@@ -78,8 +83,11 @@ abstract class BlobStore {
 /// whose name is `'NotFoundError'`) translate that native signal into this
 /// type so [WebBlobStore] (and any other [BlobStore]) can classify it
 /// uniformly and without depending on JS interop types.
+/// {@endtemplate}
 class BlobMissingError implements Exception {
   /// Creates a not-found signal for [hash].
+  ///
+  /// {@macro localpocket.blob_missing_error}
   BlobMissingError(this.hash);
 
   /// The blob hash that was not found.
@@ -89,6 +97,7 @@ class BlobMissingError implements Exception {
   String toString() => 'BlobMissingError: $hash';
 }
 
+/// {@template localpocket.blob_storage_exception}
 /// A blob-store backend operation failed for a reason other than the blob
 /// being absent — for example an OPFS permission denial, quota-exceeded
 /// error, or read corruption.
@@ -98,8 +107,11 @@ class BlobMissingError implements Exception {
 /// (the files API, the file-sync lane) can distinguish "storage is broken"
 /// from "blob is missing" and avoid misleading re-download attempts or
 /// masking the real failure during debugging.
+/// {@endtemplate}
 class BlobStorageException implements Exception {
   /// Creates a blob-storage exception wrapping [cause] for [hash].
+  ///
+  /// {@macro localpocket.blob_storage_exception}
   BlobStorageException(this.cause, this.hash);
 
   /// The original platform error (e.g. a `DOMException` name, an `IOError`,
@@ -166,9 +178,13 @@ abstract class OpfsDir {
 /// rethrowing as a typed [BlobStorageException] (real failure).
 bool isBlobMissing(Object error) => error is BlobMissingError;
 
+/// {@template localpocket.stream_validation_result}
 /// Result of streaming validation containing the verified hash and byte count.
+/// {@endtemplate}
 class StreamValidationResult {
   /// Creates a stream-validation result.
+  ///
+  /// {@macro localpocket.stream_validation_result}
   const StreamValidationResult({required this.hash, required this.totalBytes});
 
   /// Verified SHA-256 hash, or the supplied storage key.
@@ -218,9 +234,13 @@ Future<StreamValidationResult> processAndValidateBlobStream(
   return StreamValidationResult(hash: computedHash, totalBytes: totalBytes);
 }
 
+/// {@template localpocket.memory_blob_store}
 /// In-memory implementation of BlobStore, useful for hermetic testing and web mock.
+/// {@endtemplate}
 class MemoryBlobStore extends BlobStore {
   /// Creates an empty in-memory blob store.
+  ///
+  /// {@macro localpocket.memory_blob_store}
   MemoryBlobStore();
 
   final Map<String, Uint8List> _blobs = {};
@@ -296,13 +316,17 @@ class MemoryBlobStore extends BlobStore {
   Future<bool> get isDurable => Future.value(false);
 }
 
+/// {@template localpocket.encrypting_blob_store}
 /// EncryptingBlobStore decorator.
 ///
 /// Encrypts bytes at rest; `put` hashes the **plaintext** stream,
 /// so dedup, refcount, and remote-name logic are untouched.
 /// Decorates a [BlobStore] with encryption at rest.
+/// {@endtemplate}
 class EncryptingBlobStore extends BlobStore {
   /// Creates an encrypting store from explicit byte transformation callbacks.
+  ///
+  /// {@macro localpocket.encrypting_blob_store}
   EncryptingBlobStore(
     this._inner, {
     required List<int> Function(List<int> plaintext) encrypt,
@@ -312,6 +336,8 @@ class EncryptingBlobStore extends BlobStore {
         _cipher = null;
 
   /// Creates an encrypting store backed by [cipher].
+  ///
+  /// {@macro localpocket.encrypting_blob_store}
   EncryptingBlobStore.withCipher(
     this._inner,
     FieldCipher cipher,

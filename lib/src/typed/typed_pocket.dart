@@ -40,6 +40,7 @@ import 'package:localpocket/src/typed/typed_collection.dart';
 /// once here.
 typedef StoreDefs = List<StoreDef<Object?>>;
 
+/// {@template localpocket.typed_pocket}
 /// A single application-owned [LocalPocket] wiring base.
 ///
 /// Subclass once per application. The base owns lifecycle mechanics
@@ -48,9 +49,12 @@ typedef StoreDefs = List<StoreDef<Object?>>;
 /// that delegate to [handle]. No global state lives inside the package —
 /// instances are ordinary objects the app holds (a singleton, DI container,
 /// or provider).
+/// {@endtemplate}
 abstract class TypedPocket {
   /// Creates an unopened instance. Instances are reusable across open/close
   /// cycles; construct them wherever the app wires its singletons.
+  ///
+  /// {@macro localpocket.typed_pocket}
   TypedPocket();
 
   /// The already-opened database handle, or `null`.

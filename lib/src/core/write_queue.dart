@@ -1,8 +1,12 @@
 import 'dart:async';
 
+/// {@template localpocket.write_queue}
 /// Serializes mutations through a single-writer queue.
+/// {@endtemplate}
 class WriteQueue {
   /// Creates a queue and optionally observes changes to its depth.
+  ///
+  /// {@macro localpocket.write_queue}
   WriteQueue({this.onQueueDepthChanged});
 
   Future<void> _tail = Future.value();

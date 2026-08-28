@@ -5,12 +5,16 @@ import 'package:localpocket/src/web/facade/facade_host.dart';
 
 import 'web_search_forwarder.dart';
 
+/// {@template localpocket.web_search_builder}
 /// Main-thread search query builder.
+/// {@endtemplate}
 class WebSearchBuilder
     with
         SearchForwarder<WebSearchBuilder>,
         WebCompiledSearchForwarder<WebSearchBuilder> {
   /// Creates a web search builder bound to [pocket], [schema], and [term].
+  ///
+  /// {@macro localpocket.web_search_builder}
   WebSearchBuilder(this._pocket, this.schema, this.term)
       : _core = SearchBuilder.compileOnly(schema, term);
 

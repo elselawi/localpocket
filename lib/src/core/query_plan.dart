@@ -1,6 +1,7 @@
 /// Version of the engine compiler that produced a [QueryPlan].
 const int queryCompilerVersion = 2;
 
+/// {@template localpocket.query_plan}
 /// SQL plan produced by the engine query compiler for the web transport.
 /// This is a typed compiler artifact, not an arbitrary SQL API.
 ///
@@ -11,8 +12,10 @@ const int queryCompilerVersion = 2;
 /// [limit] is the resolved SQL-level limit baked into [sql] (for `query`
 /// plans compiled for the web it is the page limit + 1; the transport passes
 /// the page limit separately).
+/// {@endtemplate}
 final class QueryPlan {
 
+  /// {@macro localpocket.query_plan}
   const QueryPlan({
     required this.operation, required this.compilerVersion, required this.store, required this.schemaVersion, required this.schemaFingerprint, required this.sql, required this.args, required this.limit, required this.projection, required this.shape, this.typeName = type,
     this.decodeColumns,

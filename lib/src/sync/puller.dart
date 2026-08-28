@@ -33,9 +33,13 @@ enum ApplyResult {
   skipped,
 }
 
+/// {@template localpocket.pull_report}
 /// Summary of one incremental pull pass.
+/// {@endtemplate}
 class PullReport {
   /// Creates a report for a pull pass.
+  ///
+  /// {@macro localpocket.pull_report}
   const PullReport(this.store, this.applied, this.pages,
       {this.quarantined = 0, this.conflicts = 0, this.hitPageLimit = false});
 
@@ -60,12 +64,16 @@ class PullReport {
   final bool hitPageLimit;
 }
 
+/// {@template localpocket.puller}
 /// Incremental pull + the conflict-aware applier.
 ///
 /// This is the single authoritative ingest path: SSE hints, sweeps and manual
 /// refreshes all funnel through [pullStore]/[applyRemote].
+/// {@endtemplate}
 class Puller {
   /// Creates a puller for [pocket] using [backend] and [config].
+  ///
+  /// {@macro localpocket.puller}
   Puller(this.pocket, this.backend, this.config, this.syncStore,
       {this.fileLane, ApplyLane? applyLane})
       : applyLane = applyLane ?? ApplyLane();

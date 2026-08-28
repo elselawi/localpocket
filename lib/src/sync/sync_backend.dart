@@ -13,10 +13,14 @@ const int pbMaxPage = 500;
 // decisions; they are never strings.
 // ---------------------------------------------------------------------------
 
+/// {@template localpocket.sync_error}
 /// Base class for typed synchronization failures.
+/// {@endtemplate}
 sealed class SyncError implements Exception {
 
   /// Creates a synchronization failure.
+  ///
+  /// {@macro localpocket.sync_error}
   SyncError([this.message = 'sync error']);
   /// Human-readable failure description.
   final String message;
@@ -24,64 +28,97 @@ sealed class SyncError implements Exception {
   String toString() => '$runtimeType: $message';
 }
 
+/// {@template localpocket.transient_network_error}
 /// Timeout / connection reset / DNS — retry with backoff.
+/// {@endtemplate}
 class TransientNetworkError extends SyncError {
+  /// {@macro localpocket.transient_network_error}
   TransientNetworkError([super.message = 'network error']);
 }
 
+/// {@template localpocket.server_busy_error}
 /// 408 / 429 — honor Retry-After; 429 throttles the whole lane.
+/// {@endtemplate}
 class ServerBusyError extends SyncError {
+  /// {@macro localpocket.server_busy_error}
   ServerBusyError([this.retryAfter, super.message = 'server busy']);
   /// Retry-After seconds, when provided by the server.
   final String? retryAfter;
 }
 
+/// {@template localpocket.server_error}
 /// 5xx — retry with backoff, escalate after N attempts.
+/// {@endtemplate}
 class ServerError extends SyncError {
+  /// {@macro localpocket.server_error}
   ServerError([super.message = 'server error']);
 }
 
+/// {@template localpocket.auth_error}
 /// 401 — refresh once, then AuthRequired (never rewrites rows).
+/// {@endtemplate}
 class AuthError extends SyncError {
+  /// {@macro localpocket.auth_error}
   AuthError([super.message = 'auth required']);
 }
 
+/// {@template localpocket.forbidden_error}
 /// 403 — quarantine, no retry.
+/// {@endtemplate}
 class ForbiddenError extends SyncError {
+  /// {@macro localpocket.forbidden_error}
   ForbiddenError([super.message = 'forbidden']);
 }
 
+/// {@template localpocket.not_found_error}
 /// 404 on a targeted fetch is AMBIGUOUS — never a delete.
+/// {@endtemplate}
 class NotFoundError extends SyncError {
+  /// {@macro localpocket.not_found_error}
   NotFoundError([super.message = 'not found']);
 }
 
+/// {@template localpocket.payload_error}
 /// 400 validation / too large — dead-letter with the server message.
+/// {@endtemplate}
 class PayloadError extends SyncError {
+  /// {@macro localpocket.payload_error}
   PayloadError([super.message = 'invalid payload']);
 }
 
+/// {@template localpocket.protocol_error}
 /// Unparseable / contract violation — log loudly.
+/// {@endtemplate}
 class ProtocolError extends SyncError {
+  /// {@macro localpocket.protocol_error}
   ProtocolError([super.message = 'protocol error']);
 }
 
+/// {@template localpocket.duplicate_id_error}
 /// A create retried after a lost response (duplicate-id).
+/// {@endtemplate}
 class DuplicateIdError extends SyncError {
+  /// {@macro localpocket.duplicate_id_error}
   DuplicateIdError([super.message = 'duplicate id']);
 }
 
+/// {@template localpocket.batch_failed_error}
 /// A transactional batch failed as a whole (poison item).
+/// {@endtemplate}
 class BatchFailedError extends SyncError {
+  /// {@macro localpocket.batch_failed_error}
   BatchFailedError([super.message = 'batch failed']);
 }
 
+/// {@template localpocket.remote_version_conflict}
 /// A write was rejected because the record's remote version moved since the
 /// client's optimistic-concurrency read (the GET before a PATCH, or the batch
 /// preflight GET). The pusher re-fetches, re-merges against [current] and
 /// retries instead of blindly overwriting the concurrent edit.
+/// {@endtemplate}
 class RemoteVersionConflict extends SyncError {
 
+  /// {@macro localpocket.remote_version_conflict}
   RemoteVersionConflict({String message = 'version conflict', this.current})
       : super(message);
   /// The remote record at the version that caused the rejection, when the
@@ -93,10 +130,14 @@ class RemoteVersionConflict extends SyncError {
 // Capabilities & wire types
 // ---------------------------------------------------------------------------
 
+/// {@template localpocket.backend_capabilities}
 /// Capabilities negotiated with a synchronization backend.
+/// {@endtemplate}
 class BackendCapabilities {
 
   /// Creates a backend capability snapshot.
+  ///
+  /// {@macro localpocket.backend_capabilities}
   const BackendCapabilities({
     this.batchEnabled = false,
     this.maxBatch = 25,
@@ -112,10 +153,14 @@ class BackendCapabilities {
   final int maxPage;
 }
 
+/// {@template localpocket.stream_file_upload}
 /// Replayable file source for streamed backend uploads.
+/// {@endtemplate}
 class StreamFileUpload {
 
   /// Creates a streamed upload description.
+  ///
+  /// {@macro localpocket.stream_file_upload}
   const StreamFileUpload({
     required this.filename,
     required this.length,
@@ -131,10 +176,14 @@ class StreamFileUpload {
   final Future<Stream<List<int>>> Function() streamFactory;
 }
 
+/// {@template localpocket.remote_record}
 /// A record received from or sent to a synchronization backend.
+/// {@endtemplate}
 class RemoteRecord {
 
   /// Creates a remote record value.
+  ///
+  /// {@macro localpocket.remote_record}
   const RemoteRecord({
     required this.id,
     required this.store,
@@ -159,6 +208,7 @@ class RemoteRecord {
 
   /// Copies this record while replacing selected fields.
   RemoteRecord copyWith({String? updated, Map<String, Object?>? data}) =>
+      /// {@macro localpocket.remote_record}
       RemoteRecord(
         id: id,
         store: store,
@@ -168,10 +218,13 @@ class RemoteRecord {
       );
 }
 
+/// {@template localpocket.push_op}
 /// An outbox op encoded for a single push (create vs update by [baseUpdated]).
 /// One desired record state prepared for a backend push.
+/// {@endtemplate}
 class PushOp {
 
+  /// {@macro localpocket.push_op}
   const PushOp({
     required this.opId,
     required this.store,
@@ -200,9 +253,12 @@ class PushOp {
   final bool upsert;
 }
 
+/// {@template localpocket.push_result}
 /// Result of one remote push operation.
+/// {@endtemplate}
 class PushResult {
 
+  /// {@macro localpocket.push_result}
   const PushResult({
     required this.opId,
     required this.ok,
@@ -229,9 +285,12 @@ class PushResult {
 /// Kind of event signaled by a backend realtime hint.
 enum BackendHintKind { changed, deleted, authChanged }
 
+/// {@template localpocket.backend_hint}
 /// Backend event hint that triggers pull or fast-path processing.
+/// {@endtemplate}
 class BackendHint {
 
+  /// {@macro localpocket.backend_hint}
   const BackendHint(this.store,
       [this.kind = BackendHintKind.changed, this.record]);
   /// Affected collection.

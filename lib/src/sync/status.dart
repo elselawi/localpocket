@@ -15,10 +15,14 @@ enum SyncEngineState {
   fullResync,
 }
 
+/// {@template localpocket.sync_report}
 /// Result of one manual/triggered sync cycle.
+/// {@endtemplate}
 class SyncReport {
 
   /// Creates a sync-cycle report.
+  ///
+  /// {@macro localpocket.sync_report}
   const SyncReport({
     this.pulled = const {},
     this.swept = const {},
@@ -57,10 +61,14 @@ class SyncReport {
       'discarded: $discarded, hadError: $hadError)';
 }
 
+/// {@template localpocket.sync_status}
 /// Current synchronization status suitable for a status indicator.
+/// {@endtemplate}
 class SyncStatus {
 
   /// Creates a sync-status snapshot.
+  ///
+  /// {@macro localpocket.sync_status}
   const SyncStatus({
     required this.state,
     required this.pending,

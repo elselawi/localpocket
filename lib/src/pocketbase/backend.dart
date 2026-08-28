@@ -19,6 +19,7 @@ import 'pb_client.dart';
 import 'sse.dart';
 import 'transport.dart';
 
+/// {@template localpocket.pocket_base_backend}
 /// PocketBase implementation of [SyncBackend].
 ///
 /// Create one backend for the authenticated user and pass it to [SyncEngine]:
@@ -43,8 +44,11 @@ import 'transport.dart';
 /// time-serialized. Apps needing strict optimistic concurrency must enforce
 /// it server-side (PB record hook / custom endpoint) — the client keeps its
 /// `RemoteVersionConflict` re-merge machinery for backends that CAN throw it.
+/// {@endtemplate}
 class PocketBaseBackend implements SyncBackend {
   /// Creates a PocketBase synchronization backend.
+  ///
+  /// {@macro localpocket.pocket_base_backend}
   PocketBaseBackend({
     required this.baseUrl,
     required this.tokenProvider,

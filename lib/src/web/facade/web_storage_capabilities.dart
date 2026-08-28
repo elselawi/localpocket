@@ -1,9 +1,12 @@
+/// {@template localpocket.web_storage_capabilities}
 /// Main-thread public `LocalPocket` implementation for web.
 ///
 /// Dispatches public-API requests (`WebRequest`) to the dedicated engine worker
 /// over `Database.customRequest`.
+/// {@endtemplate}
 class WebStorageCapabilities {
 
+  /// {@macro localpocket.web_storage_capabilities}
   const WebStorageCapabilities({
     required this.storage,
     required this.durable,

@@ -637,9 +637,12 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   }
 }
 
+/// {@template localpocket.__web_typed_surface}
 /// Web adapter for the typed layer's map-level seam: delegates verbatim to a
 /// [WebCollection] (no `durability` parameter — same as the raw web surface).
+/// {@endtemplate}
 final class _WebTypedSurface implements TypedStoreSurface {
+  /// {@macro localpocket.__web_typed_surface}
   _WebTypedSurface(this._collection);
 
   final WebCollection _collection;

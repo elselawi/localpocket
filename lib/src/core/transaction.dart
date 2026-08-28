@@ -7,11 +7,15 @@ import 'local_pocket.dart';
 import 'store.dart';
 import '../typed/typed.dart';
 
+/// {@template localpocket.tx}
 /// A transaction handle. All mutation/read calls inside a
 /// transaction must go through [Tx]; calling `LocalPocket.*` directly inside a
 /// transaction is a programming error and throws.
+/// {@endtemplate}
 class Tx {
   /// Internal: constructed by [LocalPocket].
+  ///
+  /// {@macro localpocket.tx}
   Tx.internal(
     this._pocket,
     this._executor,

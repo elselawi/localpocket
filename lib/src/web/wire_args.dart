@@ -2,6 +2,7 @@ library;
 
 import 'protocol.dart';
 
+/// {@template localpocket.wire_args}
 /// Validated, typed access to a wire request's arguments.
 ///
 /// The outer envelope ([WebRequest.fromJson]) validates the envelope shape,
@@ -14,8 +15,11 @@ import 'protocol.dart';
 /// argument always surfaces as a stable [ProtocolEnvelopeException] (a typed
 /// protocol error), never a raw cast error. The worker's `_stableErrorType`
 /// maps `ProtocolEnvelopeException` to a fixed, minification-stable category.
+/// {@endtemplate}
 final class WireArgs {
   /// Creates a validated view over wire arguments.
+  ///
+  /// {@macro localpocket.wire_args}
   const WireArgs(this._map);
 
   final Map<String, Object?> _map;

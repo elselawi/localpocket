@@ -18,6 +18,7 @@ typedef FieldDecodeFn<T> = T Function(Object? raw);
 /// Encodes a value of type `T` into its raw logical-map form.
 typedef FieldEncodeFn<T> = Object? Function(T value);
 
+/// {@template localpocket.field_def}
 /// A typed field descriptor for store type [S] holding logical values of
 /// type [T].
 ///
@@ -31,12 +32,15 @@ typedef FieldEncodeFn<T> = Object? Function(T value);
 /// [owner] is the store definition instance this field belongs to
 /// (the phantom store type [S] binds it for compile-time cross-store
 /// checks); [required] marks a non-nullable field.
+/// {@endtemplate}
 abstract base class FieldDef<S, T> {
   /// [decode]/[encode] default to an unchecked cast / identity; kinds with a
   /// boundary codec (enum, dateTime) pass closures instead. A defense-in-depth
   /// guard rejects the impossible combination `required: true` with a
   /// nullable [T] — such a descriptor can only be built by hand, never by
   /// the [Fields] factories.
+  ///
+  /// {@macro localpocket.field_def}
   FieldDef(
     this.owner,
     this.name, {
@@ -172,11 +176,15 @@ abstract interface class NumericFieldDef<S> {
 // text
 // ---------------------------------------------------------------------------
 
+/// {@template localpocket.text_field_opt}
 /// Optional (nullable [String]) text descriptor.
+/// {@endtemplate}
 base class TextFieldOpt<S> extends FieldDef<S, String?>
     with TextFieldDef<S, String?>, NullableFieldCond<S, String?>
     implements SettableFieldDef<S, String?> {
   /// Creates an optional text descriptor.
+  ///
+  /// {@macro localpocket.text_field_opt}
   TextFieldOpt(
     super.owner,
     super.name, {
@@ -209,11 +217,15 @@ base class TextFieldOpt<S> extends FieldDef<S, String?>
   FieldDef<S, Object?>? get reqCounterpart => _req;
 }
 
+/// {@template localpocket.text_field_req}
 /// Required (non-nullable [String]) text descriptor.
+/// {@endtemplate}
 final class TextFieldReq<S> extends FieldDef<S, String>
     with TextFieldDef<S, String>
     implements SettableFieldDef<S, String> {
   /// Creates a required text descriptor.
+  ///
+  /// {@macro localpocket.text_field_req}
   TextFieldReq(
     super.owner,
     super.name, {
@@ -236,11 +248,15 @@ final class TextFieldReq<S> extends FieldDef<S, String>
 // int
 // ---------------------------------------------------------------------------
 
+/// {@template localpocket.int_field_opt}
 /// Optional (nullable [int]) integer descriptor.
+/// {@endtemplate}
 base class IntFieldOpt<S> extends FieldDef<S, int?>
     with ComparableFieldDef<S, int?>, NullableFieldCond<S, int?>
     implements SettableFieldDef<S, int?>, NumericFieldDef<S> {
   /// Creates an optional integer descriptor.
+  ///
+  /// {@macro localpocket.int_field_opt}
   IntFieldOpt(super.owner, super.name, {this.encrypted = false})
       : super(required: false);
 
@@ -260,11 +276,15 @@ base class IntFieldOpt<S> extends FieldDef<S, int?>
   FieldDef<S, Object?>? get reqCounterpart => _req;
 }
 
+/// {@template localpocket.int_field_req}
 /// Required (non-nullable [int]) integer descriptor.
+/// {@endtemplate}
 final class IntFieldReq<S> extends FieldDef<S, int>
     with ComparableFieldDef<S, int>
     implements SettableFieldDef<S, int>, NumericFieldDef<S> {
   /// Creates a required integer descriptor.
+  ///
+  /// {@macro localpocket.int_field_req}
   IntFieldReq(super.owner, super.name, {this.encrypted = false})
       : super(required: true);
 
@@ -279,11 +299,15 @@ final class IntFieldReq<S> extends FieldDef<S, int>
 // real
 // ---------------------------------------------------------------------------
 
+/// {@template localpocket.real_field_opt}
 /// Optional (nullable [num]) real-number descriptor.
+/// {@endtemplate}
 base class RealFieldOpt<S> extends FieldDef<S, num?>
     with ComparableFieldDef<S, num?>, NullableFieldCond<S, num?>
     implements SettableFieldDef<S, num?>, NumericFieldDef<S> {
   /// Creates an optional real descriptor.
+  ///
+  /// {@macro localpocket.real_field_opt}
   RealFieldOpt(super.owner, super.name, {this.encrypted = false})
       : super(required: false);
 
@@ -303,11 +327,15 @@ base class RealFieldOpt<S> extends FieldDef<S, num?>
   FieldDef<S, Object?>? get reqCounterpart => _req;
 }
 
+/// {@template localpocket.real_field_req}
 /// Required (non-nullable [num]) real-number descriptor.
+/// {@endtemplate}
 final class RealFieldReq<S> extends FieldDef<S, num>
     with ComparableFieldDef<S, num>
     implements SettableFieldDef<S, num>, NumericFieldDef<S> {
   /// Creates a required real descriptor.
+  ///
+  /// {@macro localpocket.real_field_req}
   RealFieldReq(super.owner, super.name, {this.encrypted = false})
       : super(required: true);
 
@@ -322,15 +350,19 @@ final class RealFieldReq<S> extends FieldDef<S, num>
 // bool
 // ---------------------------------------------------------------------------
 
+/// {@template localpocket.bool_field_opt}
 /// Optional (nullable [bool]) boolean descriptor.
 ///
 /// `schema.boolean` deliberately has **no** `encrypted` parameter: the database's
 /// `Field.bool` does not support encryption, so the impossible constraint
 /// is unspellable rather than a runtime error.
+/// {@endtemplate}
 base class BoolFieldOpt<S> extends FieldDef<S, bool?>
     with NullableFieldCond<S, bool?>
     implements SettableFieldDef<S, bool?> {
   /// Creates an optional boolean descriptor.
+  ///
+  /// {@macro localpocket.bool_field_opt}
   BoolFieldOpt(super.owner, super.name) : super(required: false);
 
   BoolFieldReq<S>? _req;
@@ -345,10 +377,14 @@ base class BoolFieldOpt<S> extends FieldDef<S, bool?>
   FieldDef<S, Object?>? get reqCounterpart => _req;
 }
 
+/// {@template localpocket.bool_field_req}
 /// Required (non-nullable [bool]) boolean descriptor.
+/// {@endtemplate}
 final class BoolFieldReq<S> extends FieldDef<S, bool>
     implements SettableFieldDef<S, bool> {
   /// Creates a required boolean descriptor.
+  ///
+  /// {@macro localpocket.bool_field_req}
   BoolFieldReq(super.owner, super.name) : super(required: true);
 
   @override
@@ -359,15 +395,19 @@ final class BoolFieldReq<S> extends FieldDef<S, bool>
 // date
 // ---------------------------------------------------------------------------
 
+/// {@template localpocket.date_field_opt}
 /// Optional (nullable [int]) date descriptor.
 ///
 /// The logical type is epoch milliseconds — the database's type for
 /// `Field.date`. This adapter is pass-through (no `DateTime` conversion);
 /// use `schema.dateTime` for a `DateTime` boundary codec over the same column.
+/// {@endtemplate}
 base class DateFieldOpt<S> extends FieldDef<S, int?>
     with ComparableFieldDef<S, int?>, NullableFieldCond<S, int?>
     implements SettableFieldDef<S, int?>, NumericFieldDef<S> {
   /// Creates an optional date descriptor.
+  ///
+  /// {@macro localpocket.date_field_opt}
   DateFieldOpt(super.owner, super.name) : super(required: false);
 
   DateFieldReq<S>? _req;
@@ -382,11 +422,15 @@ base class DateFieldOpt<S> extends FieldDef<S, int?>
   FieldDef<S, Object?>? get reqCounterpart => _req;
 }
 
+/// {@template localpocket.date_field_req}
 /// Required (non-nullable [int]) date descriptor.
+/// {@endtemplate}
 final class DateFieldReq<S> extends FieldDef<S, int>
     with ComparableFieldDef<S, int>
     implements SettableFieldDef<S, int>, NumericFieldDef<S> {
   /// Creates a required date descriptor.
+  ///
+  /// {@macro localpocket.date_field_req}
   DateFieldReq(super.owner, super.name) : super(required: true);
 
   @override
@@ -416,6 +460,7 @@ DateTime _decodeUtcReq(String name, Object? raw) {
 
 Object? _encodeUtc(DateTime? value) => value?.toUtc().millisecondsSinceEpoch;
 
+/// {@template localpocket.date_time_field_opt}
 /// Optional (nullable [DateTime]) date-time descriptor.
 ///
 /// Maps to the same `Field.date` column as [DateFieldOpt] — only the
@@ -423,10 +468,13 @@ Object? _encodeUtc(DateTime? value) => value?.toUtc().millisecondsSinceEpoch;
 /// produces an `isUtc: true` value and encode converts through
 /// [DateTime.toUtc] before extracting epoch milliseconds, so the two
 /// adapters are interchangeable on the wire over the same column.
+/// {@endtemplate}
 base class DateTimeFieldOpt<S> extends FieldDef<S, DateTime?>
     with ComparableFieldDef<S, DateTime?>, NullableFieldCond<S, DateTime?>
     implements SettableFieldDef<S, DateTime?> {
   /// Creates an optional date-time descriptor.
+  ///
+  /// {@macro localpocket.date_time_field_opt}
   DateTimeFieldOpt(super.owner, super.name)
       : super(
           required: false,
@@ -446,11 +494,15 @@ base class DateTimeFieldOpt<S> extends FieldDef<S, DateTime?>
   FieldDef<S, Object?>? get reqCounterpart => _req;
 }
 
+/// {@template localpocket.date_time_field_req}
 /// Required (non-nullable [DateTime]) date-time descriptor.
+/// {@endtemplate}
 final class DateTimeFieldReq<S> extends FieldDef<S, DateTime>
     with ComparableFieldDef<S, DateTime>
     implements SettableFieldDef<S, DateTime> {
   /// Creates a required date-time descriptor.
+  ///
+  /// {@macro localpocket.date_time_field_req}
   DateTimeFieldReq(super.owner, super.name) : super(required: true);
 
   @override
@@ -513,14 +565,18 @@ base mixin EnumCodec<E extends Enum> {
       );
 }
 
+/// {@template localpocket.enum_field_opt}
 /// Optional (nullable [E]) enum descriptor.
 ///
 /// Encodes to the wire string by default (`E.name`) with optional per-value
 /// [wire] overrides (unmapped values fall back to `.name`).
+/// {@endtemplate}
 base class EnumFieldOpt<S, E extends Enum> extends FieldDef<S, E?>
     with NullableFieldCond<S, E?>, EnumCodec<E>
     implements SettableFieldDef<S, E?> {
   /// Creates an optional enum descriptor.
+  ///
+  /// {@macro localpocket.enum_field_opt}
   EnumFieldOpt(super.owner, super.name, List<E> values, {Map<E, String>? wire})
       : values = List.unmodifiable(values),
         wire = Map.unmodifiable(wire ?? const {}),
@@ -553,11 +609,15 @@ base class EnumFieldOpt<S, E extends Enum> extends FieldDef<S, E?>
   FieldDef<S, Object?>? get reqCounterpart => _req;
 }
 
+/// {@template localpocket.enum_field_req}
 /// Required (non-nullable [E]) enum descriptor.
+/// {@endtemplate}
 final class EnumFieldReq<S, E extends Enum> extends FieldDef<S, E>
     with EnumCodec<E>
     implements SettableFieldDef<S, E> {
   /// Creates a required enum descriptor.
+  ///
+  /// {@macro localpocket.enum_field_req}
   EnumFieldReq(super.owner, super.name, List<E> values, {Map<E, String>? wire})
       : values = List.unmodifiable(values),
         wire = Map.unmodifiable(wire ?? const {}),
@@ -612,16 +672,20 @@ void _verifyEnumCodec<E extends Enum>(
 // json / jsonList / ref (no `required` — the engine factories have none)
 // ---------------------------------------------------------------------------
 
+/// {@template localpocket.json_field}
 /// JSON-object descriptor (`Map<String, Object?>`), optional by definition.
 ///
 /// There is no `.req()` and no `required` flag: the database's `Field.json`
 /// has no `required` parameter, so the impossible constraint is
 /// unspellable. (The raw path also admits a `List` here — a documented
 /// asymmetry; the typed surface is the stricter one.)
+/// {@endtemplate}
 final class JsonField<S> extends FieldDef<S, Map<String, Object?>?>
     with NullableFieldCond<S, Map<String, Object?>?>
     implements SettableFieldDef<S, Map<String, Object?>?> {
   /// Creates a JSON-object descriptor.
+  ///
+  /// {@macro localpocket.json_field}
   JsonField(super.owner, super.name, {this.encrypted = false})
       : super(required: false);
 
@@ -632,11 +696,15 @@ final class JsonField<S> extends FieldDef<S, Map<String, Object?>?>
   Field toField() => Field.json(name, encrypted: encrypted);
 }
 
+/// {@template localpocket.json_list_field}
 /// JSON-array descriptor (`List<T>`), optional by definition.
+/// {@endtemplate}
 final class JsonListField<S, T> extends FieldDef<S, List<T>?>
     with NullableFieldCond<S, List<T>?>
     implements SettableFieldDef<S, List<T>?> {
   /// Creates a JSON-array descriptor.
+  ///
+  /// {@macro localpocket.json_list_field}
   JsonListField(super.owner, super.name, {this.encrypted = false})
       : super(required: false);
 
@@ -659,15 +727,19 @@ final class JsonListField<S, T> extends FieldDef<S, List<T>?>
   Field toField() => Field.jsonList(name, encrypted: encrypted);
 }
 
+/// {@template localpocket.ref_field}
 /// Reference descriptor (a record id of type [String]), optional by
 /// definition.
 ///
 /// There is no `.req()` and no `required` flag: the database's `Field.ref`
 /// has no `required` parameter.
+/// {@endtemplate}
 final class RefField<S> extends FieldDef<S, String?>
     with NullableFieldCond<S, String?>
     implements SettableFieldDef<S, String?> {
   /// Creates a reference descriptor.
+  ///
+  /// {@macro localpocket.ref_field}
   RefField(
     super.owner,
     super.name, {

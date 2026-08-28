@@ -5,11 +5,15 @@ import 'package:localpocket/src/core/change_bus.dart';
 import 'package:localpocket/src/core/schema.dart';
 import 'package:localpocket/src/core/watch.dart';
 
+/// {@template localpocket.compiled_watcher}
 /// Compiled query plan watcher for web worker engine.
 /// Watches a compiled SQL query by subscribing to [ChangeBus] and re-running
 /// the compiled plan whenever matching stores are mutated.
+/// {@endtemplate}
 class CompiledWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
   /// Creates a watcher for a compiled SQL query plan.
+  ///
+  /// {@macro localpocket.compiled_watcher}
   CompiledWatcher(
     super.pocket,
     this._schema,

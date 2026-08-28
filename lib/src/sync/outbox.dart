@@ -14,10 +14,14 @@ import '../core/transaction.dart';
 import 'merge.dart';
 import 'sync_tables.dart';
 
+/// {@template localpocket.base_snapshot}
 /// The captured optimistic-concurrency base of a dirty row.
 /// Stored only while the row is dirty.
+/// {@endtemplate}
 class BaseSnapshot {
   /// Creates a base snapshot.
+  ///
+  /// {@macro localpocket.base_snapshot}
   const BaseSnapshot(
       {required this.baseJson, required this.baseHash, this.baseUpdated});
 
@@ -31,9 +35,13 @@ class BaseSnapshot {
   final String? baseUpdated;
 }
 
+/// {@template localpocket.local_write_result}
 /// Result of applying a local mutation to the outbox.
+/// {@endtemplate}
 class LocalWriteResult {
   /// Creates a local-write result.
+  ///
+  /// {@macro localpocket.local_write_result}
   const LocalWriteResult({required this.vanished, this.opId});
 
   /// Whether the mutation caused an unsynced archived record to vanish.
@@ -43,9 +51,13 @@ class LocalWriteResult {
   final String? opId;
 }
 
+/// {@template localpocket.push_settlement}
 /// The local data needed to settle one successful remote push.
+/// {@endtemplate}
 class PushSettlement {
   /// Creates a push-settlement description.
+  ///
+  /// {@macro localpocket.push_settlement}
   const PushSettlement({
     required this.op,
     required this.serverDataJson,
@@ -70,10 +82,14 @@ class PushSettlement {
   final Map<String, Object?>? mergedLogical;
 }
 
+/// {@template localpocket.outbox}
 /// The durable outbox: a *set* of record identities that differ
 /// from the server, not a log of operations. Coalescing is structural.
+/// {@endtemplate}
 class Outbox {
   /// Internal: constructed by [LocalPocket].
+  ///
+  /// {@macro localpocket.outbox}
   Outbox.internal(this.pocket);
   final LocalPocket pocket;
   final Random _rng = Random.secure();

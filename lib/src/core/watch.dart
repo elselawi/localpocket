@@ -12,9 +12,13 @@ import 'local_pocket.dart';
 /// Emissions only ever happen after commit; identical snapshots do not emit;
 /// bursts coalesce on a 16 ms latest-wins window.
 
+/// {@template localpocket.query_watcher}
 /// A [Stream] of query results that emits whenever the query results change.
+/// {@endtemplate}
 class QueryWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
   /// Creates a watcher for a query.
+  ///
+  /// {@macro localpocket.query_watcher}
   QueryWatcher(super.pocket, this._query, {super.coalesceWindow});
 
   /// Query being tracked by this watcher.
@@ -65,10 +69,14 @@ class QueryWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
   }
 }
 
+/// {@template localpocket.one_watcher}
 /// `watchOne` fast path: re-fetches only when the ChangeSet mentions the id
 /// (or is an unknown/external change).
+/// {@endtemplate}
 class OneWatcher extends CoalescedWatcher<Map<String, Object?>?> {
   /// Creates a watcher for a single record by id.
+  ///
+  /// {@macro localpocket.one_watcher}
   OneWatcher(super.pocket, this._table, this.id, {super.coalesceWindow});
 
   /// Store table being watched.
@@ -151,12 +159,16 @@ String computeSnapshotDigest(
   return sha256Hex(joined);
 }
 
+/// {@template localpocket.coalesced_watcher}
 /// Base implementation for watchers that coalesce repeated invalidations.
 ///
 /// Subclasses fetch a fresh snapshot after relevant change notifications and
 /// emit only when the computed digest differs from the previous snapshot.
+/// {@endtemplate}
 abstract class CoalescedWatcher<T> {
   /// Creates a watcher with the provided pocket and coalescing window.
+  ///
+  /// {@macro localpocket.coalesced_watcher}
   CoalescedWatcher(
     this.pocket, {
     this.coalesceWindow = const Duration(milliseconds: 16),

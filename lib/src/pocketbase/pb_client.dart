@@ -10,9 +10,13 @@ import 'auth.dart';
 import 'filter_builder.dart';
 import 'transport.dart';
 
+/// {@template localpocket.pb_client}
 /// Low-level PocketBase wire client for records, batches, and files.
+/// {@endtemplate}
 class PbClient {
   /// Creates a PocketBase client over [transport].
+  ///
+  /// {@macro localpocket.pb_client}
   PbClient(
       {required this.transport, required this.baseUrl, required this.auth});
 

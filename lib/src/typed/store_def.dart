@@ -28,10 +28,13 @@ TypedStoreMismatchError typedStoreMismatch({
       'error; a cast has defeated the type system.',
     );
 
+/// {@template localpocket.__system_field_def}
 /// A system field descriptor: database-owned column (`id`/`archived`) exposed
 /// for typed reads, never settable through the typed write path and never
 /// part of the schema `fields` list.
+/// {@endtemplate}
 final class _SystemFieldDef<S, T> extends FieldDef<S, T> {
+  /// {@macro localpocket.__system_field_def}
   _SystemFieldDef(super.owner, super.name) : super(required: false);
 
   @override
@@ -40,14 +43,18 @@ final class _SystemFieldDef<S, T> extends FieldDef<S, T> {
       'engine owns the "$name" column.');
 }
 
+/// {@template localpocket.fields}
 /// The per-store field factory.
 ///
 /// One instance per store, created by [StoreDef]. Each factory method
 /// returns a typed descriptor whose [FieldDef.owner] is bound to the store,
 /// and records it so [StoreDef.verify] can detect a descriptor that was
 /// created but omitted from the `fields` list.
+/// {@endtemplate}
 final class Fields<S> {
   /// Creates the field factory for [owner].
+  ///
+  /// {@macro localpocket.fields}
   Fields(this._owner);
 
   final S _owner;
@@ -143,6 +150,7 @@ final class Fields<S> {
   }
 }
 
+/// {@template localpocket.store_def}
 /// The typed definition of one store: the consumer-facing home of the
 /// store's field descriptors and the schema extras (`indexes`, `fts`,
 /// `migrations`, `conflictPolicy`, `documentMigrations`, `validator`).
@@ -180,8 +188,11 @@ final class Fields<S> {
 /// the compiled [collectionSchema] is list order (deterministic, independent of
 /// declaration/access order). System columns (`id`, `archived`) are exposed
 /// through [id]/[archived] and are **not** part of [fields].
+/// {@endtemplate}
 abstract base class StoreDef<S extends StoreDef<S>> {
   /// Creates a store definition.
+  ///
+  /// {@macro localpocket.store_def}
   StoreDef({required this.name, this.version = 1});
 
   /// Collection (and SQLite table) name.

@@ -13,19 +13,25 @@ library;
 import 'field_def.dart';
 import 'store_def.dart';
 
+/// {@template localpocket.write}
 /// One typed write: a declared-field assignment, an explicit record id, or
 /// an undeclared `extra` key.
 ///
 /// Built by `field.set(value)`, [Writes.id], and [Writes.extra]; consumed by
 /// `TypedCollection.put`/`putAll`/`patch`/`patchAll`. There is no other write
 /// path — the sealed hierarchy keeps the set of write kinds closed.
+/// {@endtemplate}
 sealed class Write<S extends StoreDef<S>> {
+  /// {@macro localpocket.write}
   const Write();
 }
 
+/// {@template localpocket.field_write}
 /// A declared-field write produced by `field.set(value)`; [encoded] has
 /// already passed through the descriptor's boundary codec.
+/// {@endtemplate}
 final class FieldWrite<S extends StoreDef<S>> extends Write<S> {
+  /// {@macro localpocket.field_write}
   const FieldWrite(this.owner, this.name, this.encoded);
 
   /// The canonical store definition instance owning the field (runtime
@@ -39,19 +45,25 @@ final class FieldWrite<S extends StoreDef<S>> extends Write<S> {
   final Object? encoded;
 }
 
+/// {@template localpocket.id_write}
 /// An explicit record id write produced by [Writes.id]. the database generates
 /// a `[a-z0-9]{15}` id when a put omits it; patch/patchAll reject this write
 /// because record ids are immutable.
+/// {@endtemplate}
 final class IdWrite<S extends StoreDef<S>> extends Write<S> {
+  /// {@macro localpocket.id_write}
   const IdWrite(this.id);
 
   /// The record id.
   final String id;
 }
 
+/// {@template localpocket.extra_write}
 /// An undeclared `extra` key write produced by [Writes.extra]. Keys are
 /// validated against the target store when the write is applied.
+/// {@endtemplate}
 final class ExtraWrite<S extends StoreDef<S>> extends Write<S> {
+  /// {@macro localpocket.extra_write}
   const ExtraWrite(this.key, this.value);
 
   /// The extra key.

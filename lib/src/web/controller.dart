@@ -21,10 +21,14 @@ import 'open_options.dart';
 import 'protocol.dart';
 import 'worker_engine.dart';
 
+/// {@template localpocket.local_pocket_database_controller}
 /// Database controller that opens the SQLite connection in the dedicated worker
 /// and boots the existing [LocalPocket] engine around it.
+/// {@endtemplate}
 final class LocalPocketDatabaseController extends DatabaseController {
   /// Creates the web database controller.
+  ///
+  /// {@macro localpocket.local_pocket_database_controller}
   const LocalPocketDatabaseController();
 
   @override
@@ -119,6 +123,7 @@ final class LocalPocketDatabaseController extends DatabaseController {
   }
 }
 
+/// {@template localpocket.local_pocket_worker_database}
 /// The worker database wrapping [CommonDatabase] and hosting the full
 /// [LocalPocket] engine.
 ///
@@ -128,8 +133,11 @@ final class LocalPocketDatabaseController extends DatabaseController {
 /// [WorkerReply] back into a wire [WebResponse]. All request handling lives
 /// in `worker_engine.dart` so it is unit-testable on the VM against a real
 /// in-memory engine.
+/// {@endtemplate}
 final class LocalPocketWorkerDatabase extends WorkerDatabase {
   /// Creates a worker database around an initialized [LocalPocket] engine.
+  ///
+  /// {@macro localpocket.local_pocket_worker_database}
   LocalPocketWorkerDatabase({
     required this.rawDatabase,
     required this.databaseAdapter,
@@ -218,9 +226,12 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
   }
 }
 
+/// {@template localpocket.__connection_sink}
 /// Adapts a [ClientConnection] (JS-interop) to the pure-Dart
 /// [WorkerEventSink] the engine emits through.
+/// {@endtemplate}
 final class _ConnectionSink implements WorkerEventSink {
+  /// {@macro localpocket.__connection_sink}
   _ConnectionSink(this.connection);
 
   final ClientConnection connection;

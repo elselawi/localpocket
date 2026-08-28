@@ -12,9 +12,12 @@ import 'dart:async';
 import '../../core/capabilities.dart';
 import 'web_storage_capabilities.dart';
 
+/// {@template localpocket.resolved_asset}
 /// An asset resolved to a URL by [resolveAssetAsBlobUrl].
+/// {@endtemplate}
 class ResolvedAsset {
 
+  /// {@macro localpocket.resolved_asset}
   const ResolvedAsset({required this.url, required this.fetched});
   /// The URL to use (a blob URL when a fetch succeeded, otherwise the
   /// [lastResort] plain path).

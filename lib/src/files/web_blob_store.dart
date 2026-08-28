@@ -8,6 +8,7 @@ import 'package:web/web.dart' show DOMException, FileSystemDirectoryHandle;
 
 import 'blob_store.dart';
 
+/// {@template localpocket.web_blob_store}
 /// Web implementation of [BlobStore] backed by async OPFS, with an in-memory
 /// fallback when OPFS is unavailable.
 ///
@@ -27,6 +28,7 @@ import 'blob_store.dart';
 /// original error. The `Blob not found` [StateError] is reserved exclusively
 /// for the true missing-blob case, so the files API and file-sync lane can
 /// distinguish "storage is broken" from "blob is missing".
+/// {@endtemplate}
 class WebBlobStore extends BlobStore {
   /// Creates a [WebBlobStore] backed by OPFS when available.
   ///
@@ -35,6 +37,8 @@ class WebBlobStore extends BlobStore {
   /// handles are unavailable). Production callers leave [opfsDir] unset and
   /// let the store resolve the real OPFS directory via the worker-safe
   /// `storageManager` probe.
+  ///
+  /// {@macro localpocket.web_blob_store}
   WebBlobStore({
     String rootPrefix = 'localpocket_blobs',
     @visibleForTesting this.opfsDir,
@@ -244,12 +248,15 @@ class WebBlobStore extends BlobStore {
       (error.name == 'NotFoundError' || error.name == 'TypeMismatchError');
 }
 
+/// {@template localpocket.__real_opfs_dir}
 /// Real OPFS backend: adapts a `FileSystemDirectoryHandle` to [OpfsDir].
 ///
 /// Lives behind the public [OpfsDir] interface so [WebBlobStore] never touches
 /// `dart:js_interop` directly outside this adapter, keeping the store logic
 /// unit-testable under the VM.
+/// {@endtemplate}
 class _RealOpfsDir implements OpfsDir {
+  /// {@macro localpocket.__real_opfs_dir}
   _RealOpfsDir(this._handle);
 
   final FileSystemDirectoryHandle _handle;

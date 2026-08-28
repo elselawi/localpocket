@@ -137,9 +137,13 @@ abstract class CryptoProvider {
   FieldCipher? getFieldCipher(String storeName, String fieldName);
 }
 
+/// {@template localpocket.single_key_crypto_provider}
 /// Simple [CryptoProvider] wrapping a single default [FieldCipher].
+/// {@endtemplate}
 class SingleKeyCryptoProvider implements CryptoProvider {
   /// Creates a provider backed by one cipher.
+  ///
+  /// {@macro localpocket.single_key_crypto_provider}
   SingleKeyCryptoProvider(this.cipher);
 
   /// Cipher returned for every requested field.
@@ -149,6 +153,7 @@ class SingleKeyCryptoProvider implements CryptoProvider {
   FieldCipher? getFieldCipher(String storeName, String fieldName) => cipher;
 }
 
+/// {@template localpocket.aes_gcm_field_cipher}
 /// Standard AES-256-GCM field cipher with a fresh 12-byte random IV per value.
 ///
 /// Encrypts through `package:cryptography`'s AES-256-GCM: on browsers this is
@@ -159,7 +164,9 @@ class SingleKeyCryptoProvider implements CryptoProvider {
 /// Output is the versioned v1 format documented at the top of this library:
 /// `0x01 ‖ nonce(12) ‖ ciphertext ‖ tag(16)`. The codec binds each value to
 /// `store \x00 field \x00 recordId` via [fieldAad].
+/// {@endtemplate}
 class AesGcmFieldCipher extends FieldCipher {
+  /// {@macro localpocket.aes_gcm_field_cipher}
   AesGcmFieldCipher(List<int> keyBytes, {Random? random})
       : _key = _validatedKey(keyBytes),
         _random = random ?? Random.secure(),

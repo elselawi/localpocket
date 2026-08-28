@@ -6,14 +6,18 @@ import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
+/// {@template localpocket.web_conflicts}
 /// Main-thread conflicts API over the worker-owned engine.
 ///
 /// Mirrors the native `Conflicts` surface exactly: listing, point reads,
 /// a broadcast watch stream, and the three resolution paths. Every method
 /// dispatches a typed wire op that delegates to `pocket.conflicts` in the
 /// worker.
+/// {@endtemplate}
 class WebConflicts {
   /// Creates a web conflicts facade bound to [pocket].
+  ///
+  /// {@macro localpocket.web_conflicts}
   WebConflicts.ins(this._pocket);
 
   final WebFacadeHost _pocket;

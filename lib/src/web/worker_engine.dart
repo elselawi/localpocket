@@ -95,27 +95,39 @@ abstract interface class WorkerEventSink {
   void emit(Map<String, Object?> event);
 }
 
+/// {@template localpocket.worker_reply}
 /// Outcome of handling one worker request envelope.
+/// {@endtemplate}
 sealed class WorkerReply {
   /// Creates a reply for [requestId].
+  ///
+  /// {@macro localpocket.worker_reply}
   const WorkerReply(this.requestId);
 
   /// The request identifier from the incoming envelope.
   final int requestId;
 }
 
+/// {@template localpocket.worker_success}
 /// The request completed; [result] is the structured-clone-safe success value.
+/// {@endtemplate}
 final class WorkerSuccess extends WorkerReply {
   /// Creates a successful reply.
+  ///
+  /// {@macro localpocket.worker_success}
   const WorkerSuccess(super.requestId, this.result);
 
   /// The structured-clone-safe success value.
   final Object? result;
 }
 
+/// {@template localpocket.worker_error}
 /// The request failed; [code]/[message]/[details] mirror [WebError].
+/// {@endtemplate}
 final class WorkerError extends WorkerReply {
   /// Creates a failed reply.
+  ///
+  /// {@macro localpocket.worker_error}
   const WorkerError(
     super.requestId,
     this.code,
@@ -166,6 +178,7 @@ Map<String, Object?> deepStringMap(Map<Object?, Object?> raw) {
   return out;
 }
 
+/// {@template localpocket.worker_engine_host}
 /// Shared engine state + cross-area helpers (library-internal base).
 ///
 /// Holds the real [LocalPocket] engine, the worker-owned session state
@@ -178,8 +191,11 @@ Map<String, Object?> deepStringMap(Map<Object?, Object?> raw) {
 /// from the `part` files; those mixins are `on WorkerEngineHost`, so they can
 /// touch this state directly (same library) without exposing any of it
 /// through the public type.
+/// {@endtemplate}
 abstract class WorkerEngineHost {
   /// Creates a worker engine host backed by [pocket].
+  ///
+  /// {@macro localpocket.worker_engine_host}
   WorkerEngineHost({
     required this.rawDatabase,
     required this.databaseAdapter,
@@ -437,6 +453,7 @@ abstract class WorkerEngineHost {
   }
 }
 
+/// {@template localpocket.worker_engine}
 /// The full request-execution core of the engine worker.
 ///
 /// This is the only public type of this library (tests and the JS boundary
@@ -446,6 +463,7 @@ abstract class WorkerEngineHost {
 /// parse/version check ([handleRequest]) and the op → handler dispatch table
 /// (`_handlers`), which need the complete method set assembled from every
 /// mixin.
+/// {@endtemplate}
 final class WorkerEngine extends WorkerEngineHost
     with
         WorkerCrudHandlers,
@@ -456,6 +474,8 @@ final class WorkerEngine extends WorkerEngineHost
         WorkerFilesHandlers,
         WorkerConflictsHandlers {
   /// Creates a worker request-execution engine.
+  ///
+  /// {@macro localpocket.worker_engine}
   WorkerEngine({
     required super.rawDatabase,
     required super.databaseAdapter,

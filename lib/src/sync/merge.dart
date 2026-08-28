@@ -78,9 +78,13 @@ Map<String, Object?> conservativeReviewMerge({
   return result;
 }
 
+/// {@template localpocket.merge_context}
 /// Context passed to a [ConflictResolver].
+/// {@endtemplate}
 class MergeContext {
   /// Creates the context supplied to a conflict resolver.
+  ///
+  /// {@macro localpocket.merge_context}
   MergeContext({
     required this.store,
     required this.recordId,
@@ -114,9 +118,13 @@ class MergeContext {
   final Set<String> dirtyRemote;
 }
 
+/// {@template localpocket.merge_result}
 /// Result of a resolver or 3-way merge operation.
+/// {@endtemplate}
 class MergeResult {
   /// Creates the result of a resolver or 3-way merge operation.
+  ///
+  /// {@macro localpocket.merge_result}
   const MergeResult({
     required this.merged,
     this.needsReview = false,
@@ -144,18 +152,26 @@ class MergeResult {
 /// Alias for backwards compatibility.
 typedef MergeOutcome = MergeResult;
 
+/// {@template localpocket.conflict_resolver}
 /// Abstract interface for whole-record or field-level conflict resolution.
+/// {@endtemplate}
 abstract class ConflictResolver {
   /// Creates a conflict resolver.
+  ///
+  /// {@macro localpocket.conflict_resolver}
   const ConflictResolver();
 
   /// Given the shared base and both sides' divergence, produces the merged record or field.
   FutureOr<MergeResult?> resolve(MergeContext ctx);
 }
 
+/// {@template localpocket.remote_wins_resolver}
 /// Remote wins (default): for concurrently modified fields, take remote.
+/// {@endtemplate}
 class RemoteWinsResolver extends ConflictResolver {
   /// Creates a remote-wins resolver.
+  ///
+  /// {@macro localpocket.remote_wins_resolver}
   const RemoteWinsResolver();
 
   @override
@@ -169,9 +185,13 @@ class RemoteWinsResolver extends ConflictResolver {
   }
 }
 
+/// {@template localpocket.local_wins_resolver}
 /// Local wins: for concurrently modified fields, take local.
+/// {@endtemplate}
 class LocalWinsResolver extends ConflictResolver {
   /// Creates a local-wins resolver.
+  ///
+  /// {@macro localpocket.local_wins_resolver}
   const LocalWinsResolver();
 
   @override
@@ -185,6 +205,7 @@ class LocalWinsResolver extends ConflictResolver {
   }
 }
 
+/// {@template localpocket.set_union_with_deletion_wins_resolver}
 /// Set union with deletion wins:
 /// `base ∪ (local − base) ∪ (remote − base)` minus deletions from either side.
 /// For list/set fields.
@@ -196,8 +217,11 @@ class LocalWinsResolver extends ConflictResolver {
 /// structurally equal nested objects stay distinct elements. (The merge
 /// engine itself compares with deep equality; this resolver deliberately
 /// does not — see the pinned tests.)
+/// {@endtemplate}
 class SetUnionWithDeletionWinsResolver extends ConflictResolver {
   /// Creates a deletion-wins set-union resolver.
+  ///
+  /// {@macro localpocket.set_union_with_deletion_wins_resolver}
   const SetUnionWithDeletionWinsResolver();
 
   @override
@@ -240,6 +264,7 @@ class SetUnionWithDeletionWinsResolver extends ConflictResolver {
     'union, not a true OR-set.')
 typedef SetUnionResolver = SetUnionWithDeletionWinsResolver;
 
+/// {@template localpocket.counter_resolver}
 /// Counter resolver:
 /// `base + (local − base) + (remote − base)`.
 ///
@@ -247,8 +272,11 @@ typedef SetUnionResolver = SetUnionWithDeletionWinsResolver;
 /// inventory when both sides decrement, or a quantity above a cap). Optional
 /// [min]/[max] bounds clamp the result into a valid range; without them the
 /// result is unconstrained (default behavior).
+/// {@endtemplate}
 class CounterResolver extends ConflictResolver {
   /// Creates a counter resolver with optional [min]/[max] clamps.
+  ///
+  /// {@macro localpocket.counter_resolver}
   const CounterResolver({this.min, this.max});
 
   /// Lower bound for the resolved value, when provided.
@@ -277,14 +305,18 @@ class CounterResolver extends ConflictResolver {
   }
 }
 
+/// {@template localpocket.append_only_list_resolver}
 /// Append-only LIST resolver: `base + local + remote` with deduplication.
 ///
 /// By default items are deduplicated by deep content equality. Pass an
 /// [identity] function to key items instead (e.g. an event id) when two
 /// identical-looking entries are distinct events and must both survive, or
 /// when equal content with different keys must stay distinct.
+/// {@endtemplate}
 class AppendOnlyListResolver extends ConflictResolver {
   /// Creates an append-only list resolver.
+  ///
+  /// {@macro localpocket.append_only_list_resolver}
   const AppendOnlyListResolver({this.identity});
 
   /// Optional per-item identity key: two items sharing a key are duplicates
@@ -319,14 +351,18 @@ class AppendOnlyListResolver extends ConflictResolver {
   }
 }
 
+/// {@template localpocket.append_only_lines_resolver}
 /// Append-only LINES resolver for string fields.
 ///
 /// Concatenates the base, local, and remote strings line by line: each line
 /// is trimmed, empty/whitespace-only lines are skipped, and identical lines
 /// are deduplicated; the result joins with `\n`. This is NOT a generic text
 /// append — it normalizes whitespace and drops duplicate lines by design.
+/// {@endtemplate}
 class AppendOnlyLinesResolver extends ConflictResolver {
   /// Creates an append-only lines resolver.
+  ///
+  /// {@macro localpocket.append_only_lines_resolver}
   const AppendOnlyLinesResolver();
 
   @override
@@ -370,9 +406,13 @@ class AppendOnlyLinesResolver extends ConflictResolver {
     'AppendOnlyLinesResolver (string values).')
 typedef AppendOnlyResolver = AppendOnlyListResolver;
 
+/// {@template localpocket.custom_resolver}
 /// Custom resolver wrapping a user-supplied function.
+/// {@endtemplate}
 class CustomResolver extends ConflictResolver {
   /// Creates a resolver backed by [fn].
+  ///
+  /// {@macro localpocket.custom_resolver}
   const CustomResolver(this.fn);
 
   /// User callback used to resolve a merge context.
@@ -382,10 +422,14 @@ class CustomResolver extends ConflictResolver {
   FutureOr<MergeResult?> resolve(MergeContext ctx) => fn(ctx);
 }
 
+/// {@template localpocket.merge_policy}
 /// MergePolicy holding resolver overrides at collection and field levels.
 /// Resolver precedence and archive behavior for a three-way merge.
+/// {@endtemplate}
 class MergePolicy {
   /// Creates a merge policy.
+  ///
+  /// {@macro localpocket.merge_policy}
   const MergePolicy({
     this.collectionResolver,
     this.fieldOverrides = const {},

@@ -5,9 +5,13 @@ import 'sync_config.dart';
 import 'sync_store.dart';
 import 'sync_tables.dart';
 
+/// {@template localpocket.sweep_report}
 /// Results from sweeping one store bucket.
+/// {@endtemplate}
 class SweepReport {
   /// Creates a sweep report.
+  ///
+  /// {@macro localpocket.sweep_report}
   const SweepReport(this.store, this.scanned, this.hidden, this.fetched);
 
   /// Store that was swept.
@@ -23,10 +27,14 @@ class SweepReport {
   final int fetched;
 }
 
+/// {@template localpocket.sweeper}
 /// Anti-entropy id-range sweep — the only mechanism trusted to
 /// detect visibility changes. Never deletes; only toggles the `hidden` bit.
+/// {@endtemplate}
 class Sweeper {
   /// Creates a sweeper for [pocket] and its synchronization [backend].
+  ///
+  /// {@macro localpocket.sweeper}
   Sweeper(this.pocket, this.backend, this.config, this.syncStore, this.puller);
 
   /// Local database and collection access.

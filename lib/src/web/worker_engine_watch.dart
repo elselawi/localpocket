@@ -12,9 +12,12 @@
 /// identically.
 part of 'worker_engine.dart';
 
+/// {@template localpocket.__active_watcher}
 /// Active watcher registration in the worker (§7.2).
+/// {@endtemplate}
 class _ActiveWatcher {
 
+  /// {@macro localpocket.__active_watcher}
   _ActiveWatcher(this.cancel);
   final Future<void> Function() cancel;
 }

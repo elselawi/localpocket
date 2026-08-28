@@ -99,6 +99,7 @@ abstract class Database extends DatabaseExecutor {
   });
 }
 
+/// {@template localpocket.direct_sqlite_database}
 /// A direct synchronous-backed implementation of [Database] wrapping [CommonDatabase].
 ///
 /// On native platforms all SQLite work executes SYNCHRONOUSLY on the calling
@@ -106,7 +107,9 @@ abstract class Database extends DatabaseExecutor {
 /// `LocalPocket` API) provide API-level asynchrony only — they do NOT move
 /// work to a background isolate. Large scans or heavy maintenance should be
 /// run from a dedicated isolate to avoid blocking the UI isolate.
+/// {@endtemplate}
 class DirectSqliteDatabase implements Database {
+  /// {@macro localpocket.direct_sqlite_database}
   DirectSqliteDatabase(this._db);
   final Map<String, CommonPreparedStatement> _statementCache = {};
   final CommonDatabase _db;

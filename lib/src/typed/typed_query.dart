@@ -10,11 +10,15 @@ library;
 import 'store_def.dart';
 import 'typed_row.dart';
 
+/// {@template localpocket.typed_page}
 /// One page of typed rows returned by `TypedCollection.query` and
 /// `TypedCollection.queryAfter`.
+/// {@endtemplate}
 final class TypedPage<S extends StoreDef<S>> {
   /// Creates a typed page from wrapped [items] and the database's opaque page
   /// metadata.
+  ///
+  /// {@macro localpocket.typed_page}
   const TypedPage({
     required this.items,
     required this.nextCursor,

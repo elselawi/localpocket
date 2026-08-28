@@ -4,6 +4,7 @@ library;
 
 import 'dart:math';
 
+/// {@template localpocket.sync_config}
 /// Configuration for pull, push, retry, sweep, and sync scheduling.
 ///
 /// The constructor is `const` and therefore does not validate or throw;
@@ -12,9 +13,12 @@ import 'dart:math';
 /// - jitter results are clamped to the documented `0.5..1.5` range,
 /// - negative `backoffBase`/`backoffCap` behave as zero,
 /// - exponential growth is integer and overflow-safe (capped at `backoffCap`).
+/// {@endtemplate}
 class SyncConfig {
 
   /// Creates synchronization configuration with conservative defaults.
+  ///
+  /// {@macro localpocket.sync_config}
   const SyncConfig({
     this.maxPage = 200,
     this.maxPagesPerPass = 100,

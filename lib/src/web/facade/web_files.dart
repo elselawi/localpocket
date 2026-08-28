@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
+/// {@template localpocket.web_local_pocket_files}
 /// Page-facing file attachment and blob lifecycle API over the worker-owned
 /// store. Mirrors the native `LocalPocketFiles` public surface; every method
 /// dispatches a metadata RPC (or bounded-chunk upload) that delegates to the
@@ -10,8 +11,11 @@ import 'package:localpocket/src/web/protocol.dart';
 ///
 /// Object-URL materialization is intentionally NOT here: `URL.createObjectURL`
 /// is window-only work (see `web_blob_object_url.dart`).
+/// {@endtemplate}
 class WebLocalPocketFiles {
   /// Creates the web files facade over [_pocket].
+  ///
+  /// {@macro localpocket.web_local_pocket_files}
   WebLocalPocketFiles.ins(this._pocket);
 
   final WebFacadeHost _pocket;

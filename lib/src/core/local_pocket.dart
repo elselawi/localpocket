@@ -45,10 +45,14 @@ enum DurabilityClass {
   full,
 }
 
+/// {@template localpocket.test_hooks}
 /// Test-only hooks for crash injection and statement tracing.
+/// {@endtemplate}
 @visibleForTesting
 class TestHooks {
   /// Creates a collection of optional test hooks.
+  ///
+  /// {@macro localpocket.test_hooks}
   TestHooks({
     this.migrationCrashPoint,
     this.mutationCrashPoint,
@@ -91,9 +95,13 @@ class TestHooks {
   void Function(String sql)? onQuery;
 }
 
+/// {@template localpocket.store_table}
 /// The compiled per-store table descriptor.
+/// {@endtemplate}
 class StoreTable {
   /// Creates a table descriptor from a schema and its compiled SQL.
+  ///
+  /// {@macro localpocket.store_table}
   StoreTable(this.schema, this.compiled) : warnings = compiled.warnings;
 
   /// The collection schema represented by this table.
@@ -963,11 +971,14 @@ class LocalPocket with ChangeBusAwareLP {
   }
 }
 
+/// {@template localpocket.__commit_group}
 /// One group-commit unit: mutations submitted in the same event-loop turn
 /// share a single SQLite transaction (one fsync). Members run under the
 /// group-level Tx; in a multi-member group each member additionally runs
 /// inside a SAVEPOINT so one failing member rolls back only itself.
+/// {@endtemplate}
 class _CommitGroup {
+  /// {@macro localpocket.__commit_group}
   _CommitGroup(this.pocket, this.durability);
   final LocalPocket pocket;
   final DurabilityClass durability;

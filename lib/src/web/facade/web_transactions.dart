@@ -17,9 +17,13 @@ import 'package:localpocket/src/web/facade/search/web_search_forwarder.dart';
 import 'package:localpocket/src/web/facade/web_collection_mixin.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
+/// {@template localpocket.web_tx}
 /// A transaction session on the web worker.
+/// {@endtemplate}
 class WebTx {
   /// Creates a transaction facade for [sessionId].
+  ///
+  /// {@macro localpocket.web_tx}
   WebTx.ins(this._pocket, this.sessionId);
 
   final WebFacadeHost _pocket;
@@ -158,10 +162,13 @@ class WebTxCollection with WireCollectionMixin {
   String get mutateOp => WireOp.txMutateBatch;
 }
 
+/// {@template localpocket.__web_tx_typed_surface}
 /// Web transaction adapter for the typed layer's map-level seam. The worker
 /// transaction surface has no `watchOne` — reading through a typed
 /// transaction-bound handle mirrors the raw `WebTxCollection` exactly.
+/// {@endtemplate}
 final class _WebTxTypedSurface implements TypedStoreSurface {
+  /// {@macro localpocket.__web_tx_typed_surface}
   _WebTxTypedSurface(this._collection);
 
   final WebTxCollection _collection;

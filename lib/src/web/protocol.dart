@@ -240,8 +240,11 @@ String stableWireErrorType(Object error) {
   return WireErrorCode.unknown;
 }
 
+/// {@template localpocket.web_request}
 /// A request envelope sent from the facade to the worker.
+/// {@endtemplate}
 class WebRequest {
+  /// {@macro localpocket.web_request}
   const WebRequest({
     required this.version,
     required this.requestId,
@@ -290,14 +293,18 @@ class WebRequest {
   }
 }
 
+/// {@template localpocket.web_response}
 /// A response envelope sent from the worker back to the facade.
+/// {@endtemplate}
 class WebResponse {
+  /// {@macro localpocket.web_response}
   const WebResponse.success({
     required this.version,
     required this.requestId,
     this.result,
   }) : error = null;
 
+  /// {@macro localpocket.web_response}
   const WebResponse.error({
     required this.version,
     required this.requestId,
@@ -362,8 +369,11 @@ class WebResponse {
   }
 }
 
+/// {@template localpocket.web_error}
 /// Structured error payload carried inside a [WebResponse].
+/// {@endtemplate}
 class WebError {
+  /// {@macro localpocket.web_error}
   const WebError({
     required this.code,
     required this.message,
@@ -404,9 +414,12 @@ class WebError {
   }
 }
 
+/// {@template localpocket.database_worker_closed_exception}
 /// The worker or tab hosting the database is gone. Maps to the upstream
 /// `Channel to database worker is closed` condition.
+/// {@endtemplate}
 final class DatabaseWorkerClosedException implements Exception {
+  /// {@macro localpocket.database_worker_closed_exception}
   DatabaseWorkerClosedException(
       [this.message = 'The database worker is closed.']);
 
@@ -416,12 +429,15 @@ final class DatabaseWorkerClosedException implements Exception {
   String toString() => 'DatabaseWorkerClosedException: $message';
 }
 
+/// {@template localpocket.database_worker_timeout_exception}
 /// A request to the worker did not complete within the sender's configured
 /// per-request timeout.
 ///
 /// The sender stays usable: the worker may still eventually respond, but that
 /// response is abandoned and the caller has already failed.
+/// {@endtemplate}
 final class DatabaseWorkerTimeoutException implements Exception {
+  /// {@macro localpocket.database_worker_timeout_exception}
   DatabaseWorkerTimeoutException({
     required this.requestId,
     required this.op,
@@ -437,8 +453,11 @@ final class DatabaseWorkerTimeoutException implements Exception {
       '$requestId) did not complete within ${timeout.inMilliseconds} ms.';
 }
 
+/// {@template localpocket.protocol_mismatch_exception}
 /// The other end speaks a different protocol version.
+/// {@endtemplate}
 final class ProtocolMismatchException implements Exception {
+  /// {@macro localpocket.protocol_mismatch_exception}
   ProtocolMismatchException({required this.expected, required this.actual});
 
   final int expected;
@@ -449,8 +468,11 @@ final class ProtocolMismatchException implements Exception {
       'ProtocolMismatchException: expected version $expected, got $actual';
 }
 
+/// {@template localpocket.protocol_envelope_exception}
 /// A malformed envelope, an unknown operation, or an invalid field.
+/// {@endtemplate}
 final class ProtocolEnvelopeException implements Exception {
+  /// {@macro localpocket.protocol_envelope_exception}
   ProtocolEnvelopeException(this.message);
 
   final String message;
@@ -459,8 +481,11 @@ final class ProtocolEnvelopeException implements Exception {
   String toString() => 'ProtocolEnvelopeException: $message';
 }
 
+/// {@template localpocket.remote_local_pocket_exception}
 /// A typed LocalPocket error that crossed the wire from the worker.
+/// {@endtemplate}
 final class RemoteLocalPocketException implements Exception {
+  /// {@macro localpocket.remote_local_pocket_exception}
   RemoteLocalPocketException({
     required this.code,
     required this.message,

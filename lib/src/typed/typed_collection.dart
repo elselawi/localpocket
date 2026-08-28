@@ -59,8 +59,11 @@ abstract interface class TypedStoreSurface {
   TypedSearchSurface search(String term);
 }
 
+/// {@template localpocket.__native_surface}
 /// Native adapter: delegates verbatim to a [Collection].
+/// {@endtemplate}
 final class _NativeSurface implements TypedStoreSurface {
+  /// {@macro localpocket.__native_surface}
   _NativeSurface(this._collection);
 
   final Collection _collection;
@@ -242,6 +245,7 @@ final class _NativeCollectionSearchSurface implements TypedSearchSurface {
   (String, List<Object?>) debugCompile() => _builder.debugCompile();
 }
 
+/// {@template localpocket.typed_collection}
 /// Typed CRUD access to one store definition instance.
 ///
 /// Obtained from `db.store(Tasks.instance)` or `tx.store(Tasks.instance)`;
@@ -251,13 +255,19 @@ final class _NativeCollectionSearchSurface implements TypedSearchSurface {
 /// condition values built beside the descriptors — everything is then
 /// handled by the database exactly as hand-written maps are: storage,
 /// validation, encryption, outbox, and sync behavior are unchanged.
+/// {@endtemplate}
 final class TypedCollection<S extends StoreDef<S>> {
   /// Creates a typed collection over a custom [surface]. The web facade
   /// uses this constructor directly; native callers use [TypedCollection.native].
+  ///
+  /// {@macro localpocket.typed_collection}
   TypedCollection(this.def, TypedStoreSurface surface) : _surface = surface;
 
   /// Wraps a native database [Collection].
+  ///
+  /// {@macro localpocket.typed_collection}
   factory TypedCollection.native(S def, Collection collection) =>
+      /// {@macro localpocket.typed_collection}
       TypedCollection<S>(def, _NativeSurface(collection));
 
   /// The canonical store definition this handle is bound to.

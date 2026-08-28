@@ -5,6 +5,7 @@ import 'package:localpocket/src/core/errors.dart';
 import 'package:localpocket/src/typed/field_def.dart';
 import 'package:localpocket/src/typed/store_def.dart';
 
+/// {@template localpocket.typed_row}
 /// A typed view over one decoded record.
 ///
 /// Wraps the database's logical map **by reference** — no copy, no
@@ -15,6 +16,7 @@ import 'package:localpocket/src/typed/store_def.dart';
 /// It deliberately does **not** implement `Map`: the untyped
 /// `Object? operator [](Object?)` signature would blur the typed boundary.
 /// Use [asMap] for the raw logical map.
+/// {@endtemplate}
 final class TypedRow<S extends StoreDef<S>> {
   /// Creates a row over [map]. Rows are normally obtained from
   /// `TypedCollection.get`; this constructor exists for advanced use (POJO
@@ -23,6 +25,8 @@ final class TypedRow<S extends StoreDef<S>> {
   /// [projected], when non-null, records the set of field names included by
   /// a `select` projection; reading a field outside the set throws a
   /// [ValidationException] naming the field.
+  ///
+  /// {@macro localpocket.typed_row}
   TypedRow(this.def, Map<String, Object?> map, {Set<String>? projected})
       : _map = map,
         _projected = projected;

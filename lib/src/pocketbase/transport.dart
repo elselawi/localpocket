@@ -8,9 +8,13 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+/// {@template localpocket.http_request}
 /// Buffered HTTP request used by [HttpTransport].
+/// {@endtemplate}
 class HttpRequest {
   /// Creates an HTTP request.
+  ///
+  /// {@macro localpocket.http_request}
   const HttpRequest({
     required this.method,
     required this.url,
@@ -31,10 +35,14 @@ class HttpRequest {
   final String? body;
 }
 
+/// {@template localpocket.http_multipart_file}
 /// A streamed multipart file. The length is required by package:http so the
 /// multipart body can be sent without buffering the file contents.
+/// {@endtemplate}
 class HttpMultipartFile {
   /// Creates a streamed multipart file.
+  ///
+  /// {@macro localpocket.http_multipart_file}
   const HttpMultipartFile({
     required this.field,
     required this.filename,
@@ -55,9 +63,13 @@ class HttpMultipartFile {
   final Future<Stream<List<int>>> Function() streamFactory;
 }
 
+/// {@template localpocket.http_multipart_request}
 /// Multipart HTTP request with replayable streamed files.
+/// {@endtemplate}
 class HttpMultipartRequest {
   /// Creates a multipart request.
+  ///
+  /// {@macro localpocket.http_multipart_request}
   const HttpMultipartRequest({
     required this.method,
     required this.url,
@@ -82,9 +94,13 @@ class HttpMultipartRequest {
   final List<HttpMultipartFile> files;
 }
 
+/// {@template localpocket.http_response}
 /// Buffered HTTP response.
+/// {@endtemplate}
 class HttpResponse {
   /// Creates an HTTP response value.
+  ///
+  /// {@macro localpocket.http_response}
   const HttpResponse(this.status, this.headers, this.body);
 
   /// HTTP status code.
@@ -97,9 +113,13 @@ class HttpResponse {
   final String body;
 }
 
+/// {@template localpocket.http_transport_exception}
 /// A network failure at the transport level (DNS, connection reset, timeout).
+/// {@endtemplate}
 class HttpTransportException implements Exception {
   /// Creates a transport exception with an optional underlying cause.
+  ///
+  /// {@macro localpocket.http_transport_exception}
   HttpTransportException(this.message, [this.cause]);
 
   /// Human-readable description of the failed operation.
@@ -112,10 +132,14 @@ class HttpTransportException implements Exception {
   String toString() => 'HttpTransportException: $message';
 }
 
+/// {@template localpocket.streamed_http_response}
 /// A streaming response (for SSE). The byte stream delivers the body without
 /// buffering; it ends when the server closes the connection.
+/// {@endtemplate}
 class StreamedHttpResponse {
   /// Creates a streaming HTTP response.
+  ///
+  /// {@macro localpocket.streamed_http_response}
   StreamedHttpResponse(this.status, this.headers, this.stream);
 
   /// HTTP status code.
@@ -165,11 +189,15 @@ abstract class HttpTransport {
   void close();
 }
 
+/// {@template localpocket.package_http_transport}
 /// Default transport backed by `package:http` (persistent connection, gzip,
 /// per-request [timeout] in seconds).
 /// `package:http` implementation of [HttpTransport].
+/// {@endtemplate}
 class PackageHttpTransport implements HttpTransport {
   /// Creates an HTTP transport, optionally using [client].
+  ///
+  /// {@macro localpocket.package_http_transport}
   PackageHttpTransport(
       {http.Client? client, this.timeout = const Duration(seconds: 30)})
       : _client = client ?? http.Client();

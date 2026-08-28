@@ -9,9 +9,13 @@ import 'package:localpocket/src/web/facade/search/web_search_builder.dart';
 import 'package:localpocket/src/web/facade/web_collection_mixin.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
+/// {@template localpocket.web_collection}
 /// Main-thread collection proxy.
+/// {@endtemplate}
 class WebCollection with ChangeBusAwareStore, WireCollectionMixin {
   /// Creates a collection facade bound to [pocket] for [schema].
+  ///
+  /// {@macro localpocket.web_collection}
   WebCollection.ins(this._pocket, this.schema);
 
   final WebFacadeHost _pocket;

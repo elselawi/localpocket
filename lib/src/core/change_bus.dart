@@ -38,8 +38,11 @@ enum ChangeAction {
 
 const Object _sentinelUnset = Object();
 
+/// {@template localpocket.record_change_event}
 /// A post-commit notification of a specific record state transition.
+/// {@endtemplate}
 class RecordChangeEvent {
+  /// {@macro localpocket.record_change_event}
   const RecordChangeEvent({
     required this.store,
     required this.id,
@@ -51,7 +54,10 @@ class RecordChangeEvent {
   });
 
   /// Constructs a [RecordChangeEvent] from a JSON map.
+  ///
+  /// {@macro localpocket.record_change_event}
   factory RecordChangeEvent.fromJson(Map<String, Object?> json) =>
+      /// {@macro localpocket.record_change_event}
       RecordChangeEvent(
         store: json['store']! as String,
         id: json['id']! as String,
@@ -259,12 +265,16 @@ extension RecordChangeEventStreamExtension on Stream<RecordChangeEvent> {
       );
 }
 
+/// {@template localpocket.change_set}
 /// A post-commit change notification for one store.
 ///
 /// `ids` is the set of affected record ids; an empty set means "unknown /
 /// external change — be conservative".
+/// {@endtemplate}
 class ChangeSet {
   /// Creates a committed change notification for a store.
+  ///
+  /// {@macro localpocket.change_set}
   const ChangeSet(this.store, this.ids);
 
   /// Store whose committed state changed.

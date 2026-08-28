@@ -238,9 +238,13 @@ class WatchSubscriptionTracker {
       _inFlightUnregistrations.contains(watchId);
 }
 
+/// {@template localpocket.upload_session}
 /// Active bounded-chunk upload session (§ file upload).
+/// {@endtemplate}
 class UploadSession {
   /// Creates an upload session for the worker-owned file upload stream.
+  ///
+  /// {@macro localpocket.upload_session}
   UploadSession({
     required this.uploadId,
     required this.store,
@@ -313,13 +317,17 @@ const Duration defaultUploadSessionTtl = Duration(minutes: 30);
 /// injected for deterministic tests.
 DateTime _systemClock() => DateTime.now();
 
+/// {@template localpocket.upload_session_registry}
 /// Registry that manages upload sessions and guarantees memory cleanup
 /// on session error, abort, or completion.
+/// {@endtemplate}
 class UploadSessionRegistry {
   /// Creates a bounded upload registry for the worker file upload path.
   ///
   /// Every limit is constructor-injectable so tests and embedders can tune
   /// the memory envelope without touching the production defaults.
+  ///
+  /// {@macro localpocket.upload_session_registry}
   UploadSessionRegistry({
     this.maxConcurrentUploads = defaultMaxConcurrentUploads,
     this.maxFileBytes = defaultMaxUploadFileBytes,

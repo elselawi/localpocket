@@ -10,9 +10,13 @@ import '../sync/sync_backend.dart';
 import '../sync/sync_config.dart';
 import '../sync/sync_tables.dart';
 
+/// {@template localpocket.file_sync_report}
 /// A summary of the work performed by a file synchronization pass.
+/// {@endtemplate}
 class FileSyncReport {
   /// Creates a report for a file synchronization pass.
+  ///
+  /// {@macro localpocket.file_sync_report}
   const FileSyncReport({
     this.uploaded = 0,
     this.downloaded = 0,
@@ -33,11 +37,15 @@ class FileSyncReport {
   final bool hadError;
 }
 
+/// {@template localpocket.file_sync_lane}
 /// The dedicated file synchronization lane.
 ///
 /// Runs after the record push lane (record-first ordering).
+/// {@endtemplate}
 class FileSyncLane {
   /// Creates a file synchronization lane.
+  ///
+  /// {@macro localpocket.file_sync_lane}
   FileSyncLane({
     required this.pocket,
     required this.backend,

@@ -10,9 +10,13 @@ import 'package:localpocket/src/core/query/search_builder/search_dsl.dart';
 import 'package:localpocket/src/core/schema.dart';
 import 'package:sqlite3/common.dart';
 
+/// {@template localpocket.search_result}
 /// A ranked search result from an FTS5 full-text search.
+/// {@endtemplate}
 class SearchResult {
   /// Creates a ranked search result.
+  ///
+  /// {@macro localpocket.search_result}
   const SearchResult({required this.id, required this.score});
 
   /// ID of the matching record.
@@ -33,9 +37,13 @@ class SearchResult {
   int get hashCode => Object.hash(id, score);
 }
 
+/// {@template localpocket.search_builder}
 /// Search builder for FTS5 full-text search.
+/// {@endtemplate}
 class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
   /// Internal constructor used by [Collection.search].
+  ///
+  /// {@macro localpocket.search_builder}
   SearchBuilder.internal(this._pocket, this._schema, this._term) {
     if (_schema.fts == null) {
       throw FtsUnavailableError(
@@ -48,6 +56,8 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
   }
 
   /// Compile-only constructor used by the web search-plan transport.
+  ///
+  /// {@macro localpocket.search_builder}
   SearchBuilder.compileOnly(CollectionSchema<Object?> schema, String term)
       : _pocket = null,
         _schema = schema,

@@ -21,14 +21,18 @@ import '../core/schema.dart';
 /// Tag identifying the AES-256-GCM cipher envelope.
 const String cipherEnvelopeTypeAesGcm = 'aes-gcm';
 
+/// {@template localpocket.web_cipher_unsupported_error}
 /// Thrown when a cipher configuration cannot be honored on the web platform.
 ///
 /// A `fieldCipher` / `cryptoProvider` argument that cannot be honored must
 /// never be silently ignored: the web open fails loudly instead. This is a
 /// web-only typed error (like the protocol exceptions in `protocol.dart`),
 /// not part of the native [LocalPocketError] hierarchy.
+/// {@endtemplate}
 final class WebCipherUnsupportedError implements Exception {
   /// Creates an error for an unsupported web cipher configuration.
+  ///
+  /// {@macro localpocket.web_cipher_unsupported_error}
   const WebCipherUnsupportedError(this.message);
 
   /// Human-readable explanation of why the web cipher configuration is unsupported.

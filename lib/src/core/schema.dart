@@ -54,7 +54,9 @@ enum FieldKind {
   ref,
 }
 
+/// {@template localpocket.field}
 /// Declares one typed field in a [CollectionSchema].
+/// {@endtemplate}
 class Field {
   const Field._({
     required this.name,
@@ -68,6 +70,8 @@ class Field {
   });
 
   /// Declares a text field.
+  ///
+  /// {@macro localpocket.field}
   factory Field.text(
     String name, {
     bool required = false,
@@ -83,6 +87,8 @@ class Field {
       );
 
   /// Declares an integer field.
+  ///
+  /// {@macro localpocket.field}
   factory Field.int(
     String name, {
     bool required = false,
@@ -96,6 +102,8 @@ class Field {
       );
 
   /// Declares a real-number field.
+  ///
+  /// {@macro localpocket.field}
   factory Field.real(
     String name, {
     bool required = false,
@@ -109,14 +117,20 @@ class Field {
       );
 
   /// Declares a boolean field stored as SQLite `0` or `1`.
+  ///
+  /// {@macro localpocket.field}
   factory Field.bool(String name, {bool required = false}) =>
       Field._(name: name, kind: FieldKind.bool, required: required);
 
   /// Declares a date/time field stored as epoch milliseconds.
+  ///
+  /// {@macro localpocket.field}
   factory Field.date(String name, {bool required = false}) =>
       Field._(name: name, kind: FieldKind.date, required: required);
 
   /// Declares a string field restricted to [values].
+  ///
+  /// {@macro localpocket.field}
   factory Field.enumValue(
     String name,
     List<String> values, {
@@ -130,14 +144,20 @@ class Field {
       );
 
   /// Declares a JSON object or array field.
+  ///
+  /// {@macro localpocket.field}
   factory Field.json(String name, {bool encrypted = false}) =>
       Field._(name: name, kind: FieldKind.json, encrypted: encrypted);
 
   /// Declares a JSON array field.
+  ///
+  /// {@macro localpocket.field}
   factory Field.jsonList(String name, {bool encrypted = false}) =>
       Field._(name: name, kind: FieldKind.jsonList, encrypted: encrypted);
 
   /// Declares a reference to collection [to].
+  ///
+  /// {@macro localpocket.field}
   factory Field.ref(
     String name, {
     required String to,
@@ -275,9 +295,13 @@ enum IndexScope {
   notArchived,
 }
 
+/// {@template localpocket.index_spec}
 /// Declares a SQLite index for one or more fields.
+/// {@endtemplate}
 class IndexSpec {
   /// Creates an index declaration.
+  ///
+  /// {@macro localpocket.index_spec}
   const IndexSpec(
     this.columns, {
     this.unique = false,
@@ -384,6 +408,7 @@ class FtsSpec {
   int get hashCode => Object.hash(Object.hashAll(fields), fuzzy, normalize);
 }
 
+/// {@template localpocket.fts_normalization}
 /// Consumer-declared character parity rules for full-text search.
 ///
 /// Each rule maps one source character to its replacement string (usually a
@@ -399,13 +424,18 @@ class FtsSpec {
 /// ```dart
 /// const FtsNormalization(rules: {'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ة': 'ه'})
 /// ```
+/// {@endtemplate}
 class FtsNormalization {
   /// Creates parity rules from a character → replacement map. Prefer
   /// [FtsNormalization.fromMap] for user input (it validates and copies);
   /// this const constructor trusts its arguments.
+  ///
+  /// {@macro localpocket.fts_normalization}
   const FtsNormalization({this.rules = const {}});
 
   /// Builds a validated, unmodifiable copy of [rules].
+  ///
+  /// {@macro localpocket.fts_normalization}
   factory FtsNormalization.fromMap(Map<String, String> rules) {
     for (final e in rules.entries) {
       validateRule(e.key, e.value);
@@ -487,14 +517,18 @@ class FtsNormalization {
   String toString() => 'FtsNormalization(${rules.length} rules)';
 }
 
+/// {@template localpocket.store_migration}
 /// A store schema migration step.
 ///
 /// - Additive (`destructive: false`): `ADD COLUMN` for each of [addedFields],
 ///   then (optionally) a chunked backfill driven by [transform].
 /// - Destructive (`destructive: true`): the 12-step table rebuild. Rows are
 ///   copied through [transform] (old logical row -> new logical row).
+/// {@endtemplate}
 class StoreMigration {
   /// Creates a forward store migration.
+  ///
+  /// {@macro localpocket.store_migration}
   const StoreMigration({
     required this.toVersion,
     this.destructive = false,
@@ -563,10 +597,14 @@ enum MissingRemotePolicy {
   discardLocal,
 }
 
+/// {@template localpocket.conflict_policy}
 /// Conflict resolution policy. Resolver implementations are provided by the
 /// sync layer; this type exists now so `CollectionSchema` can carry it.
+/// {@endtemplate}
 class ConflictPolicy {
   /// Creates a conflict policy.
+  ///
+  /// {@macro localpocket.conflict_policy}
   const ConflictPolicy({
     this.collectionResolver,
     this.fieldOverrides = const {},
@@ -575,12 +613,15 @@ class ConflictPolicy {
   });
 
   /// Creates the default policy with optional resolver overrides.
+  ///
+  /// {@macro localpocket.conflict_policy}
   factory ConflictPolicy.defaults({
     Object? collectionResolver,
     Map<String, Object> fieldOverrides = const {},
     bool editsUnarchive = false,
     MissingRemotePolicy missingRemote = MissingRemotePolicy.conflict,
   }) =>
+      /// {@macro localpocket.conflict_policy}
       ConflictPolicy(
         collectionResolver: collectionResolver,
         fieldOverrides: fieldOverrides,
@@ -601,9 +642,13 @@ class ConflictPolicy {
   final MissingRemotePolicy missingRemote;
 }
 
+/// {@template localpocket.collection_schema}
 /// Runtime schema for one LocalPocket collection.
+/// {@endtemplate}
 class CollectionSchema<T> {
   /// Creates a collection schema.
+  ///
+  /// {@macro localpocket.collection_schema}
   const CollectionSchema({
     required this.name,
     required this.version,
@@ -619,6 +664,8 @@ class CollectionSchema<T> {
   });
 
   /// Reconstructs a schema from a JSON-compatible map.
+  ///
+  /// {@macro localpocket.collection_schema}
   factory CollectionSchema.fromJson(Map<String, Object?> j) => _parseSchemaJson(
         () => CollectionSchema<T>(
           name: j['name']! as String,

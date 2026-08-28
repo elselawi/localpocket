@@ -3,8 +3,11 @@ import 'database_adapter.dart';
 /// Platform profile. The core never imports `dart:io`; the app tells us which
 enum PlatformProfile { native, web }
 
+/// {@template localpocket.sqlite_capabilities}
 /// Probing result of the SQLite engine.
+/// {@endtemplate}
 class SqliteCapabilities {
+  /// {@macro localpocket.sqlite_capabilities}
   const SqliteCapabilities({
     required this.sqliteVersion,
     required this.hasStrict,
@@ -56,6 +59,7 @@ class SqliteCapabilities {
     PlatformProfile platform = PlatformProfile.native,
     bool hasFts5 = true,
   }) =>
+      /// {@macro localpocket.sqlite_capabilities}
       SqliteCapabilities(
         sqliteVersion: v,
         hasStrict: versionAtLeast(v, 3, 37),

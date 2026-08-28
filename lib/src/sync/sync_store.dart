@@ -7,8 +7,11 @@ import '../core/database_adapter.dart';
 import '../core/local_pocket.dart';
 import '../core/sql_utils.dart';
 
+/// {@template localpocket.pull_cursor}
 /// Identity-scoped pull cursor.
+/// {@endtemplate}
 class PullCursor {
+  /// {@macro localpocket.pull_cursor}
   const PullCursor(this.updated, this.id);
 
   /// Last remote update timestamp.
@@ -18,8 +21,11 @@ class PullCursor {
   final String id;
 }
 
+/// {@template localpocket.sweep_state}
 /// Rotating anti-entropy sweep state.
+/// {@endtemplate}
 class SweepState {
+  /// {@macro localpocket.sweep_state}
   const SweepState(this.bucket, this.lastSweepAt);
 
   /// Last bucket visited, or `-1` before the first sweep.
@@ -29,8 +35,11 @@ class SweepState {
   final int? lastSweepAt;
 }
 
+/// {@template localpocket.sync_store}
 /// Persists pull cursors, sweep progress, and aggregate sync status.
+/// {@endtemplate}
 class SyncStore {
+  /// {@macro localpocket.sync_store}
   SyncStore(this.pocket, this.scope);
   final LocalPocket pocket;
   final String scope;

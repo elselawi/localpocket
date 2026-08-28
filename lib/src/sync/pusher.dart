@@ -49,12 +49,16 @@ class PushReport {
   final bool hadError;
 }
 
+/// {@template localpocket.pusher}
 /// The pusher: GET-before-write optimistic concurrency, 3-way merge
 /// on divergence, batch upsert when the backend enables it, persisted
 /// backoff, and dead letters. The outbox op is re-read at push time so the
 /// latest coalesced state is always pushed.
+/// {@endtemplate}
 class Pusher {
   /// Creates a pusher for [pocket] and its remote [backend].
+  ///
+  /// {@macro localpocket.pusher}
   Pusher(
     this.pocket,
     this.backend,

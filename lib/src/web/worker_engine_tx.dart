@@ -12,8 +12,11 @@
 /// file) so the action vocabulary matches `mutate_batch` exactly.
 part of 'worker_engine.dart';
 
+/// {@template localpocket.__tx_session}
 /// Active interactive transaction session state in the worker (§7.1).
+/// {@endtemplate}
 class _TxSession {
+  /// {@macro localpocket.__tx_session}
   _TxSession({
     required this.sessionId,
     required this.completer,

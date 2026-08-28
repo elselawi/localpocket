@@ -15,8 +15,11 @@ import 'sync_tables.dart';
 /// until the app resolves the conflict.
 const String remoteDeletedKey = '__lp_deleted__';
 
+/// {@template localpocket.conflict_record}
 /// Representation of a conflict row in `lp_conflicts`.
+/// {@endtemplate}
 class ConflictRecord {
+  /// {@macro localpocket.conflict_record}
   ConflictRecord({
     required this.store,
     required this.recordId,
@@ -87,9 +90,13 @@ class ConflictRecord {
       );
 }
 
+/// {@template localpocket.conflicts}
 /// Conflicts management and watch API.
+/// {@endtemplate}
 class Conflicts {
   /// Internal constructor used by [LocalPocket].
+  ///
+  /// {@macro localpocket.conflicts}
   Conflicts.internal(this._pocket);
 
   final LocalPocket _pocket;

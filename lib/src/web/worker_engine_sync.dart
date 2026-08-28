@@ -8,10 +8,13 @@
 /// implementation, no drift.
 part of 'worker_engine.dart';
 
+/// {@template localpocket.__web_token_provider}
 /// Minimal worker-owned token bridge. The page remains responsible for
 /// refresh; the current bearer value is replaced through sync_update_auth.
+/// {@endtemplate}
 final class _WebTokenProvider implements TokenProvider {
 
+  /// {@macro localpocket.__web_token_provider}
   _WebTokenProvider(this.value, this.identityValue);
   String? value;
   final String identityValue;

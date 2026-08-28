@@ -14,6 +14,7 @@ import 'sync_config.dart';
 import 'sync_store.dart';
 import '../files/file_sync_lane.dart';
 
+/// {@template localpocket.sync_engine}
 /// Coordinates pull, visibility sweep, push, realtime hints, and file sync.
 ///
 /// A typical application creates one engine for an open [LocalPocket]:
@@ -33,12 +34,15 @@ import '../files/file_sync_lane.dart';
 /// - Pull-before-push: remote state lands first, so pushes work from the
 ///   freshest base.
 /// - Auth loss pauses; connectivity loss parks; everything stays local-first.
+/// {@endtemplate}
 class SyncEngine {
   /// Creates a synchronization engine for [pocket] and [backend].
   ///
   /// When [config] is omitted the engine inherits the pocket's injected clock
   /// ([LocalPocket.now]) so persistence bookkeeping and engine scheduling stay
   /// on one clock.
+  ///
+  /// {@macro localpocket.sync_engine}
   SyncEngine({
     required this.pocket,
     required this.backend,

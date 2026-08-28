@@ -5,10 +5,14 @@
 /// realtime subscribe POST body.
 library;
 
+/// {@template localpocket.token}
 /// A bearer token with an optional expiry. [expiresAt] may be null when the
 /// token has no server-declared lifetime.
+/// {@endtemplate}
 class Token {
   /// Creates a bearer token value with optional lifetime metadata.
+  ///
+  /// {@macro localpocket.token}
   Token(this.value, {this.expiresAt, DateTime? issuedAt})
       : issuedAt = issuedAt ?? DateTime.now();
 
@@ -79,13 +83,17 @@ abstract class TokenProvider {
   String? get identity => null;
 }
 
+/// {@template localpocket.auth_manager}
 /// Wraps [TokenProvider] with single-flight refresh + proactive refresh.
 /// Manages cached tokens and single-flight refresh operations.
+/// {@endtemplate}
 class AuthManager {
   /// Creates an authentication manager around [provider].
   ///
   /// Reuse one manager for the lifetime of a backend so concurrent requests
   /// share the same single-flight refresh operation.
+  ///
+  /// {@macro localpocket.auth_manager}
   AuthManager(this.provider);
 
   /// Application token provider.

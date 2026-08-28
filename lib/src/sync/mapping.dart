@@ -12,9 +12,13 @@ import '../core/hashing.dart';
 import '../core/schema.dart';
 import 'sync_backend.dart';
 
+/// {@template localpocket.map_failure}
 /// A failure encountered while mapping a remote record.
+/// {@endtemplate}
 class MapFailure implements Exception {
   /// Creates a mapping failure with [message].
+  ///
+  /// {@macro localpocket.map_failure}
   MapFailure(this.message);
 
   /// Description of the mapping failure.
@@ -24,9 +28,13 @@ class MapFailure implements Exception {
   String toString() => 'MapFailure: $message';
 }
 
+/// {@template localpocket.normalized_remote_record}
 /// Precomputed normalization outcome for a remote record.
+/// {@endtemplate}
 class NormalizedRemoteRecord {
   /// Creates a normalization outcome.
+  ///
+  /// {@macro localpocket.normalized_remote_record}
   const NormalizedRemoteRecord({
     required this.remote,
     this.logical,

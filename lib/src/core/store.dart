@@ -36,12 +36,16 @@ enum MutationAction {
   restore,
 }
 
+/// {@template localpocket.page}
 /// The result of a paginated query.
 ///
 /// Use [nextCursor] with [QueryBuilder.keysetAfter] to fetch the next page.
 /// When [hasMore] is false, [nextCursor] is normally `null`.
+/// {@endtemplate}
 class Page {
   /// Creates a query page.
+  ///
+  /// {@macro localpocket.page}
   const Page({
     required this.items,
     required this.hasMore,
@@ -58,14 +62,18 @@ class Page {
   final bool hasMore;
 }
 
+/// {@template localpocket.collection}
 /// Typed CRUD access to one store.
 ///
 /// Records are plain `Map<String, Object?>`: declared fields map to typed
 /// columns, undeclared keys round-trip losslessly through `extra`, and
 /// `archived` is a boolean. Mutations are atomic with their outbox intent
 /// (the local-first invariant).
+/// {@endtemplate}
 class Collection with ChangeBusAwareStore {
   /// Internal constructor used by [LocalPocket.collection] and [Tx.collection].
+  ///
+  /// {@macro localpocket.collection}
   Collection.internal(
     this._pocket,
     this._table, {

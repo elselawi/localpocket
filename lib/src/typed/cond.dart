@@ -12,12 +12,15 @@ library;
 
 import 'field_def.dart';
 
+/// {@template localpocket.cond}
 /// One typed predicate operator over one field of one store.
 ///
 /// [owner] provides the runtime cross-store backstop when a cast defeats the
 /// phantom type [S]. [args] have already passed through the descriptor's
 /// boundary encoder.
+/// {@endtemplate}
 final class Cond<S> {
+  /// {@macro localpocket.cond}
   const Cond(this.owner, this.field, this.operator, this.args);
 
   /// The canonical store definition instance that owns the field.
@@ -33,6 +36,7 @@ final class Cond<S> {
   final List<Object?> args;
 }
 
+/// {@template localpocket.eq_cond}
 /// An equality condition — the only condition kind an OR group accepts
 /// (`TypedCollection.query(anyOf: ...)`).
 ///
@@ -40,15 +44,20 @@ final class Cond<S> {
 /// narrowing the static type from [Cond] to [EqCond] moves that restriction
 /// from a runtime error to a compile error: a range condition can never
 /// enter an OR group in the first place.
+/// {@endtemplate}
 final class EqCond<S> extends Cond<S> {
   // Not const: conditions are runtime values built beside the descriptor.
+  /// {@macro localpocket.eq_cond}
   EqCond(S owner, String field, Object? value)
       : super(owner, field, 'eq', <Object?>[value]);
 }
 
+/// {@template localpocket.order_term}
 /// One ordering term, built through a descriptor's `asc`/`desc` getters.
 /// the database supplies its normal id tiebreaker.
+/// {@endtemplate}
 final class OrderTerm<S> {
+  /// {@macro localpocket.order_term}
   const OrderTerm(this.field, {required this.desc});
 
   /// The field descriptor itself, so owner checks stay exact.

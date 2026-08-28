@@ -10,15 +10,19 @@ import 'package:localpocket/src/web/protocol.dart';
 
 import 'web_query_forwarder.dart';
 
+/// {@template localpocket.web_query_builder}
 /// Main-thread query builder that forwards the full native query language to
 /// the engine compiler. The core [QueryBuilder] is the single hand-maintained
 /// copy of the query language; the web facade holds a compile-only instance and
 /// sends the resulting plans to the worker.
+/// {@endtemplate}
 class WebQueryBuilder
     with
         QueryForwarder<WebQueryBuilder>,
         WebCompiledQueryForwarder<WebQueryBuilder> {
   /// Creates a web query builder bound to [pocket] for [schema].
+  ///
+  /// {@macro localpocket.web_query_builder}
   WebQueryBuilder(this._pocket, this.schema)
       : _core = QueryBuilder.compileOnly(schema);
 

@@ -10,9 +10,13 @@ import '../core/sql_utils.dart';
 import 'blob_store.dart';
 import '../sync/sync_tables.dart';
 
+/// {@template localpocket.file_ref}
 /// Representation of a file ref in `lp_file_refs`.
+/// {@endtemplate}
 class FileRef {
   /// Creates a file-reference value.
+  ///
+  /// {@macro localpocket.file_ref}
   const FileRef({
     required this.refId,
     required this.store,
@@ -74,10 +78,14 @@ class FileRef {
       );
 }
 
+/// {@template localpocket.local_pocket_files}
 /// App-facing Files API on LocalPocket.
 /// Application-facing attachment and blob lifecycle API.
+/// {@endtemplate}
 class LocalPocketFiles {
   /// Internal constructor used by [LocalPocket].
+  ///
+  /// {@macro localpocket.local_pocket_files}
   LocalPocketFiles.internal(this._pocket, {this.blobStore});
 
   final LocalPocket _pocket;

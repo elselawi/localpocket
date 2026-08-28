@@ -5,8 +5,11 @@ import 'errors.dart';
 import 'fts_normalizer.dart';
 import 'schema.dart';
 
+/// {@template localpocket.compiled_schema}
 /// The compiled artifact of a [CollectionSchema]: DDL statements plus warnings.
+/// {@endtemplate}
 class CompiledSchema {
+  /// {@macro localpocket.compiled_schema}
   const CompiledSchema({
     required this.schema,
     required this.tableDdl,
@@ -31,9 +34,13 @@ class CompiledSchema {
   final List<String> warnings;
 }
 
+/// {@template localpocket.ddl_compiler}
 /// Compiles a [CollectionSchema] into per-store DDL.
+/// {@endtemplate}
 class DdlCompiler {
   /// Creates a compiler for [capabilities].
+  ///
+  /// {@macro localpocket.ddl_compiler}
   DdlCompiler(this.capabilities);
 
   /// SQLite capabilities used to select compatible DDL features.

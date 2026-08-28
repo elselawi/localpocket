@@ -22,6 +22,7 @@ bool isWorkerClosedMessage(String message) =>
     message.contains('worker is closed') ||
     message.contains('Worker closed');
 
+/// {@template localpocket.web_sender}
 /// Sends typed [WebRequest] envelopes over an injectable transport and
 /// decodes the [WebResponse].
 ///
@@ -36,7 +37,9 @@ bool isWorkerClosedMessage(String message) =>
 ///   with [ProtocolEnvelopeException].
 /// - A response carrying an error is decoded through [decodeError] so wire
 ///   errors surface as their closest typed local exception.
+/// {@endtemplate}
 class WebSender {
+  /// {@macro localpocket.web_sender}
   WebSender({
     required Future<Object?> Function(WebRequest request) transport,
     void Function()? onWorkerClosed,

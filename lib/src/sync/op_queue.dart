@@ -4,11 +4,15 @@ import 'dart:math';
 import '../core/local_pocket.dart';
 import 'sync_tables.dart';
 
+/// {@template localpocket.op_queue}
 /// Durable queue for operations that are not expressible as row state, such
 /// as file uploads and removals.
+/// {@endtemplate}
 class OpQueue {
 
   /// Internal: constructed by [LocalPocket].
+  ///
+  /// {@macro localpocket.op_queue}
   OpQueue.internal(this.pocket);
   /// Database owning this queue.
   final LocalPocket pocket;

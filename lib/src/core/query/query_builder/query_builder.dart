@@ -14,9 +14,13 @@ import 'package:localpocket/src/core/store.dart';
 import 'package:localpocket/src/core/watch.dart';
 import 'package:collection/collection.dart';
 
+/// {@template localpocket.where_clause}
 /// A SQL predicate and its bound arguments.
+/// {@endtemplate}
 class WhereClause {
   /// Creates a clause with parameterized SQL and its arguments.
+  ///
+  /// {@macro localpocket.where_clause}
   const WhereClause(this.sql, this.args);
 
   /// The parameterized SQL fragment.
@@ -26,8 +30,11 @@ class WhereClause {
   final List<Object?> args;
 }
 
+/// {@template localpocket.order_clause}
 /// A field ordering term.
+/// {@endtemplate}
 class OrderClause {
+  /// {@macro localpocket.order_clause}
   const OrderClause(this.field, {this.desc = false});
 
   /// The field to order by.
@@ -43,11 +50,15 @@ class _CursorData {
   final List<Object?> values;
 }
 
+/// {@template localpocket.query_builder}
 /// Parameterized query builder. No user input is ever string
 /// interpolated into SQL; values travel as bound parameters.
+/// {@endtemplate}
 class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// Internal: constructed by [Collection].
   /// Internal constructor used by [Collection.query].
+  ///
+  /// {@macro localpocket.query_builder}
   QueryBuilder.internal(this._pocket, StoreTable table)
       : _schema = table.schema,
         _where = [],
@@ -62,6 +73,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         _suppressIdTiebreak = false;
 
   /// Compile-only constructor used by the web query-plan spike.
+  ///
+  /// {@macro localpocket.query_builder}
   QueryBuilder.compileOnly(CollectionSchema<Object?> schema)
       : _pocket = null,
         _schema = schema,

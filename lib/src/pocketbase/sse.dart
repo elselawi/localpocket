@@ -20,9 +20,13 @@ import 'auth.dart';
 import 'pb_client.dart';
 import 'transport.dart';
 
+/// {@template localpocket.pb_realtime_event}
 /// A parsed realtime event carrying the full embedded record.
+/// {@endtemplate}
 class PbRealtimeEvent {
   /// Creates a realtime event with an [action] and its associated [record].
+  ///
+  /// {@macro localpocket.pb_realtime_event}
   const PbRealtimeEvent(this.action, this.record);
 
   /// The event action (`create`, `update`, or `delete`).
@@ -32,17 +36,24 @@ class PbRealtimeEvent {
   final RemoteRecord record;
 }
 
+/// {@template localpocket.__sse_frame}
 /// Raw SSE text events decoded from the byte stream.
+/// {@endtemplate}
 class _SseFrame {
+  /// {@macro localpocket.__sse_frame}
   _SseFrame({this.clientId, this.data});
 
   final String? clientId; // PB_CONNECT handshake
   final Map<String, Object?>? data; // parsed event data
 }
 
+/// {@template localpocket.pb_realtime}
 /// Realtime SSE connection manager to PocketBase.
+/// {@endtemplate}
 class PbRealtime {
   /// Creates a new realtime SSE client.
+  ///
+  /// {@macro localpocket.pb_realtime}
   PbRealtime({
     required this.client,
     required this.collectionNames,
