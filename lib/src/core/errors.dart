@@ -100,16 +100,13 @@ class ReadOnlyTxError extends LocalPocketError {
       : super(message ?? 'This Tx is read-only.');
 }
 
-/// A typed store definition was bound under a name already owned by a
-/// different definition instance.
+/// A store definition was bound under a name already owned by a different
+/// definition instance.
 ///
-/// The typed layer's registry keys stores by name and enforces uniqueness
-/// by **reference identity**: every bind of a given name must pass the
-/// identical definition instance, or this error is thrown naming the
-/// store. Sharing the one canonical definition instance (the
-/// `StoreDef` private-constructor + static-instance convention) makes the
-/// mismatch unconstructible in practice; this error is the runtime
-/// backstop for definitions that ignore the convention.
+/// Declare one canonical instance per store (the `StoreDef`
+/// private-constructor + static-`instance` convention) and share it across
+/// the whole app. Binding a second instance under the same store name
+/// throws this error naming the store.
 class TypedStoreMismatchError extends LocalPocketError {
   TypedStoreMismatchError(super.message);
 }

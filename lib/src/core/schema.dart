@@ -290,8 +290,6 @@ class IndexSpec {
   /// or one of the engine-owned columns (`id`, `archived`, `hidden`, or
   /// `extra`); an unknown name throws [SchemaRegistrationError]. An empty
   /// list remains valid and produces an index over the implicit `id` column.
-  /// The typed layer's `indexSpec([...])` helper derives these names from field
-  /// descriptors.
   final List<String> columns;
 
   /// Whether indexed values must be unique within [scope].
@@ -319,10 +317,6 @@ class IndexSpec {
 
 /// {@template localpocket.fts_spec}
 /// Enables FTS5 over the declared text fields in [fields].
-///
-/// The typed layer's `ftsSpec([...])` helper derives [fields] from
-/// store-owned descriptors while preserving this raw engine-level
-/// constructor for dynamic and boundary schemas.
 ///
 /// Two optional, independently toggleable extensions:
 ///
@@ -451,9 +445,7 @@ class FtsNormalization {
     return result;
   }
 
-  /// Serializes these rules to a JSON-compatible map (structured-clone-safe,
-  /// so they persist in `lp_stores.definition_json` and cross the web worker
-  /// boundary).
+  /// Serializes these rules to a JSON-compatible map.
   Map<String, Object?> toJson() => {'rules': rules};
 
   /// Reconstructs parity rules from a JSON-compatible map.

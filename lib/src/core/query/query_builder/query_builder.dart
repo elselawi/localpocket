@@ -167,8 +167,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// [between] is INCLUSIVE on both ends (`>= start AND <= end`), matching
   /// SQL `BETWEEN` and most query DSLs. Records whose value equals `end` ARE
   /// matched. For a half-open `[start, end)` window, use `gte:`/`lt:`
-  /// explicitly. (Breaking change in the unreleased version: previously
-  /// half-open, silently dropping records stamped exactly at `end`.)
+  /// explicitly.
   @override
   QueryBuilder where(
     String field, {
