@@ -2,8 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/pocketbase.dart';
-import 'package:localpocket/sync.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 

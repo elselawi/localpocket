@@ -2,8 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/pocketbase.dart';
-import 'package:localpocket/sync.dart';
 
 import '../sync_status.dart';
 import 'sync_driver.dart';

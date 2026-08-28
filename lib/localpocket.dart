@@ -1,7 +1,24 @@
-/// localpocket — a local-first SQLite database with eventually-consistent
+/// LocalPocket — a local-first SQLite database with eventually-consistent
 /// PocketBase sync.
 ///
-/// Core (`localpocket.dart`) must not import `dart:io` or any HTTP client.
+/// One import gives you the whole package: the typed data-model layer
+/// (schema declaration + strictly typed CRUD, queries, and search), the raw
+/// map API underneath it, the sync engine, the PocketBase adapter, and the
+/// files layer:
+///
+/// ```dart
+/// import 'package:localpocket/localpocket.dart';
+///
+/// final db = await openTyped(path: 'app.db', stores: [Tasks.instance]);
+/// await db.store(Tasks.instance).put([Tasks.title.set('Ship it')]);
+/// ```
+///
+/// Narrower entry points exist if you want a single slice only —
+/// `typed.dart`, `sync.dart`, `pocketbase.dart` — and everything they
+/// export is already included here.
+///
+/// The same import compiles on mobile, desktop, and web: the conditional
+/// exports below pick the right implementation per target.
 library;
 
 export 'src/core/canonical_json.dart' show canonicalize;
@@ -67,35 +84,11 @@ export 'src/core/change_bus.dart'
         ChangeAction,
         RecordChangeEventStreamExtension;
 export 'src/core/watch.dart';
-export 'src/sync/sync_tables.dart'
-    show
-        SyncState,
-        AccessState,
-        OutboxKind,
-        OpQueueKind,
-        OutboxOp,
-        SyncRowState,
-        OpQueueRow;
-export 'src/sync/outbox.dart'
-    show Outbox, LocalWriteResult, BaseSnapshot, PushSettlement;
-export 'src/sync/sync_backend.dart' show StreamFileUpload;
-export 'src/sync/op_queue.dart' show OpQueue;
-export 'src/sync/conflicts.dart' show Conflicts, ConflictRecord;
-export 'src/files/blob_store.dart'
-    show BlobStore, MemoryBlobStore, EncryptingBlobStore;
-export 'src/files/native_blob_store_platform.dart' show NativeBlobStore;
-export 'src/files/files_api.dart' show LocalPocketFiles, FileRef;
-export 'src/sync/merge.dart'
-    show
-        ConflictResolver,
-        RemoteWinsResolver,
-        LocalWinsResolver,
-        SetUnionWithDeletionWinsResolver,
-        CounterResolver,
-        AppendOnlyListResolver,
-        AppendOnlyLinesResolver,
-        CustomResolver,
-        MergeContext,
-        MergeResult,
-        MergeOutcome,
-        computeDirtyFields;
+
+// ---------------------------------------------------------------------------
+// the rest of the package: typed layer, sync engine, PocketBase adapter
+// (each domain's barrel is the single source of truth for its exports)
+// ---------------------------------------------------------------------------
+export 'typed.dart';
+export 'sync.dart';
+export 'pocketbase.dart';

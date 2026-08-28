@@ -1,5 +1,16 @@
 ## Unreleased
 
+- **One import for the whole package.**
+  `import 'package:localpocket/localpocket.dart';` now gives you everything:
+  the typed data-model layer, the raw map API underneath it, the sync
+  engine, the PocketBase adapter, and the files layer. The narrower
+  entrypoints (`typed.dart`, `sync.dart`, `pocketbase.dart`) remain valid
+  slices, and every symbol is exported from exactly one barrel — the sync
+  state types (`SyncState`, `OutboxOp`, …), the merge engine, and the files
+  API that used to be re-listed in two places now flow through `sync.dart`
+  alone. The raw record-map seam interfaces stay package-internal by
+  design.
+
 - **Typed queries: one grammar, zero chaining.** Conditions and order terms
   are values built beside the descriptors — `Tasks.done.eq(false)`,
   `Tasks.priority.gt(0)`, `Tasks.dueAt.desc` — and every terminal lives on

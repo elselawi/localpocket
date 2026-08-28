@@ -1,6 +1,5 @@
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/src/core/local_pocket.dart' show PointReadCache;
-import 'package:localpocket/src/sync/merge.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 

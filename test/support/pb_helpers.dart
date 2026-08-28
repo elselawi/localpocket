@@ -2,8 +2,6 @@
 library;
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/pocketbase.dart';
-import 'package:localpocket/sync.dart';
 
 import 'helpers.dart';
 import 'mock_pb_server.dart';

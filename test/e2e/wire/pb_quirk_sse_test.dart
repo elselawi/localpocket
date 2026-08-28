@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
 import '../../secret.dart' show testPBServer;

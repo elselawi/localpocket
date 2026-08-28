@@ -7,7 +7,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/sync.dart';
 
 class MockRecord {
   MockRecord({

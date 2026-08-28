@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
 import '../sync/engine/engine_helpers.dart';

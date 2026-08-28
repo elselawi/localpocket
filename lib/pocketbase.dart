@@ -1,6 +1,6 @@
-/// PocketBase adapter: a [SyncBackend]
-/// implementation over the real PocketBase wire contract. Confined here — core
-/// and sync never import it (layering rule 3).
+/// The PocketBase adapter: a [SyncBackend] implementation over the real
+/// PocketBase wire contract. Pair it with the sync engine (`SyncEngine`,
+/// exported by `sync.dart` and the main `localpocket.dart` barrel):
 ///
 /// ```dart
 /// final backend = PocketBaseBackend(

@@ -1,11 +1,24 @@
-/// Sync layer exports: the engine, the backend
-/// seam, the 3-way merge, and the status model.
+/// The sync slice: the engine, the backend seam, the 3-way merge, the
+/// status model, and the files layer.
 ///
-/// The sync layer never imports `dart:io` or any HTTP client; it talks to
-/// [SyncBackend] and to core's `LocalPocket`/`Tx` APIs.
+/// Tip: `package:localpocket/localpocket.dart` already includes everything
+/// exported here — prefer that single import unless you want the sync
+/// slice only.
 library;
 
 export 'src/sync/sync_backend.dart';
+export 'src/sync/sync_tables.dart'
+    show
+        SyncState,
+        AccessState,
+        OutboxKind,
+        OpQueueKind,
+        OutboxOp,
+        SyncRowState,
+        OpQueueRow;
+export 'src/sync/outbox.dart'
+    show Outbox, LocalWriteResult, BaseSnapshot, PushSettlement;
+export 'src/sync/op_queue.dart' show OpQueue;
 export 'src/sync/mapping.dart'
     show
         MapFailure,

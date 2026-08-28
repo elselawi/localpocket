@@ -34,13 +34,9 @@ dependencies:
 
 ### Step 1: Define your schemas and store types
 
-Use one canonical `StoreDef` instance. Each descriptor is both the engine schema declaration and the typed accessor. The `indexSpec([...])` and `ftsSpec([...])` helpers derive schema-extra names from those descriptors; they are intentionally non-`const` because descriptors are runtime objects. When a declaration combines different field kinds, an explicit list type such as `<FieldDef<Tasks, Object?>>[...]` may be needed under strict inference.
-
 <!-- localpocket-compile: typed-readme -->
 ```dart
-
-import '../localpocket/lib/localpocket.dart';
-import '../localpocket/lib/typed.dart';
+import 'package:localpocket/localpocket.dart';
 
 enum TaskStatus { todo, inProgress, done }
 
@@ -51,7 +47,7 @@ final class Tasks extends StoreDef<Tasks> {
 
   // ------  define the schema ------ //
   // Text field can be:
-  late final _title = f
+  late final _title = schema
       .text(
         // field title
         'title',
@@ -66,7 +62,7 @@ final class Tasks extends StoreDef<Tasks> {
       .req();
 
   // Enum field can be:
-  late final _status = f.enumOf(
+  late final _status = schema.enumOf(
     // field title
     'status',
     // enum values
@@ -79,9 +75,9 @@ final class Tasks extends StoreDef<Tasks> {
   );
 
   // ... rest of the fields ...
-  late final _priority = f.integer('priority');
-  late final _done = f.boolean('done');
-  late final _dueAt = f.dateTime('due_at');
+  late final _priority = schema.integer('priority');
+  late final _done = schema.boolean('done');
+  late final _dueAt = schema.dateTime('due_at');
 
   // ------  define static accessors ------ //
   // P.S. forgive the redundancy but this will
@@ -108,8 +104,8 @@ final class Tasks extends StoreDef<Tasks> {
   // for faster querying
   @override
   List<IndexSpec> get indexes => [
-    index<Tasks>([status, priority]),
-    index<Tasks>([title], unique: true),
+    indexSpec<Tasks>([status, priority]),
+    indexSpec<Tasks>([title], unique: true),
   ];
 
   @override
@@ -124,45 +120,82 @@ final class Tasks extends StoreDef<Tasks> {
     ),
   );
 }
-
 ```
-
 
 #### Supported Typed Field Types
 
 | Descriptor factory | Typed value | SQLite storage |
 |---|---|---|
-| `f.text` | `String?` / `String` after `.req()` | `TEXT` |
-| `f.integer` | `int?` / `int` after `.req()` | `INTEGER` |
-| `f.real` | `num?` / `num` after `.req()` | `REAL` |
-| `f.boolean` | `bool?` / `bool` after `.req()` | `INTEGER` (`0`/`1`) |
-| `f.date` | epoch-millisecond `int?` | `INTEGER` |
-| `f.dateTime` | UTC `DateTime?` | `INTEGER` |
-| `f.enumOf` | Dart enum value | wire `TEXT` |
-| `f.json` | `Map<String, Object?>?` | canonical JSON `TEXT` |
-| `f.jsonList<T>` | `List<T>?` | canonical JSON `TEXT` |
-| `f.ref` | record-id `String?` | `TEXT` |
+| `schema.text` | `String?` / `String` after `.req()` | `TEXT` |
+| `schema.integer` | `int?` / `int` after `.req()` | `INTEGER` |
+| `schema.real` | `num?` / `num` after `.req()` | `REAL` |
+| `schema.boolean` | `bool?` / `bool` after `.req()` | `INTEGER` (`0`/`1`) |
+| `schema.date` | epoch-millisecond `int?` | `INTEGER` |
+| `schema.dateTime` | UTC `DateTime?` | `INTEGER` |
+| `schema.enumOf` | Dart enum value | wire `TEXT` |
+| `schema.json` | `Map<String, Object?>?` | canonical JSON `TEXT` |
+| `schema.jsonList<T>` | `List<T>?` | canonical JSON `TEXT` |
+| `schema.ref` | record-id `String?` | `TEXT` |
 
 #### Field Type Notes
 
 - Enums are stored as strings. Unmapped values use `Enum.name`; the optional `wire` map pins stable alternatives such as `in_progress`.
-- **`f.date` vs `f.dateTime`** — Both store the same epoch-**milliseconds** integer in an `INTEGER` column; only the boundary codec differs. `f.date` is a pass-through adapter typed as `int?` (raw epoch ms, no conversion — you manage timezones) and supports numeric aggregates. `f.dateTime` is typed as `DateTime?` and is **UTC-pinned in both directions**: local inputs are converted to UTC before storage and decoded values always have `isUtc == true`. The two adapters share the same column and are interchangeable on the wire. Prefer `f.dateTime` for timestamps; use `f.date` when you already hold epoch-ms integers or want `sum`/`min`/`max` over a date column.
-- **`f.integer` vs `f.real`** — `f.integer` is typed `int?` and stored as `INTEGER`; `f.real` is typed `num?` (not `double` — Dart `int` values are accepted) and stored as `REAL`. Both support `.req()`, comparison operators, and numeric aggregates. Use `f.integer` for counts/ids/whole numbers and `f.real` for fractional measurements and percentages.
-- **`f.ref`** — Stores a **record id** (`String?`) pointing at a record in another collection. There is no `.req()` (always optional) and no join/fetch API: read the id and fetch the target row from its own store.
+- **`schema.date` vs `schema.dateTime`** — Both store the same epoch-**milliseconds** integer in an `INTEGER` column; only the boundary codec differs. `schema.date` is a pass-through adapter typed as `int?` (raw epoch ms, no conversion — you manage timezones) and supports numeric aggregates. `schema.dateTime` is typed as `DateTime?` and is **UTC-pinned in both directions**: local inputs are converted to UTC before storage and decoded values always have `isUtc == true`. The two adapters share the same column and are interchangeable on the wire. Prefer `schema.dateTime` for timestamps; use `schema.date` when you already hold epoch-ms integers or want `sum`/`min`/`max` over a date column.
+- **`schema.integer` vs `schema.real`** — `schema.integer` is typed `int?` and stored as `INTEGER`; `schema.real` is typed `num?` (not `double` — Dart `int` values are accepted) and stored as `REAL`. Both support `.req()`, comparison operators, and numeric aggregates. Use `schema.integer` for counts/ids/whole numbers and `schema.real` for fractional measurements and percentages.
+- **`schema.ref`** — Stores a **record id** (`String?`) pointing at a record in another collection. There is no `.req()` (always optional) and no join/fetch API: read the id and fetch the target row from its own store.
 - `enforceFk: true` adds a SQLite `REFERENCES` constraint on the column; ref fields not covered by a declared index are auto-indexed for lookups.
+
+---
+
+### Step 2: Define your models and operations
+
+While this step is optional, it is recommended to have a cleaner and more concise API.
+
+```dart
+// READS: typed getters on the row.
+final class Task extends TypedModel<Tasks> {
+  Task(super.row);
+
+  String get title => row(Tasks.title);
+  TaskStatus? get status => row(Tasks.status);
+  bool get isDone => row(Tasks.done) ?? false;
+  DateTime? get dueAt => row(Tasks.dueAt);
+
+  // you can also define whatever computations you like
+  String get taskColor => status == TaskStatus.todo ? 'red' : 'blue';
+}
+
+extension TaskOperations on TypedCollection<Tasks> {
+  Future<Task?> readTask(String id) async {
+    final row = await get(id);
+    return row == null ? null : Task(row);
+  }
+
+  // WRITES are field-native values — no per-store write layer needed.
+  Future<void> markDone(String id) => patch(id, [Tasks.done.set(true)]);
+
+  Future<void> rename(String id, String newTitle) =>
+      patch(id, [Tasks.title.set(newTitle)]);
+}
+```
+
+### Step 3: Wire the store schema to the Database
+
+
 
 ---
 
 ### Step 2: Open and Bind
 
-Open with the compiled schema, then bind the same canonical definition instance:
+Open straight from the canonical definitions — `openTyped` registers every listed store
+(created or migrated) up front, on every platform — then bind the same definition instance:
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
 Future<void> typedReadmeExample() async {
-  final db = await LocalPocket.open(
+  final db = await openTyped(
     path: ':memory:',
-    stores: [Tasks.instance.schema],
+    stores: [Tasks.instance],
   );
   final tasks = db.store(Tasks.instance);
 ```
@@ -177,18 +210,18 @@ Future<void> typedReadmeExample() async {
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
-  await tasks.put((draft) => draft
-    ..setId('tsk1234567890ab')
-    ..set(Tasks.title)('Ship version 1.0')
-    ..set(Tasks.status)(TaskStatus.inProgress)
-    ..set(Tasks.priority)(1)
-    ..set(Tasks.done)(false)
-    ..set(Tasks.dueAt)(DateTime.utc(2026, 9, 1)));
+  await tasks.put([
+    Writes.id('tsk1234567890ab'), // optional: the engine generates an id
+    Tasks.title.set('Ship version 1.0'),
+    Tasks.status.set(TaskStatus.inProgress),
+    Tasks.priority.set(1),
+    Tasks.done.set(false),
+    Tasks.dueAt.set(DateTime.utc(2026, 9, 1)),
+  ]);
 
-  await tasks.patch(
-    'tsk1234567890ab',
-    (draft) => draft..set(Tasks.title)('Ship version 1.0.1'),
-  );
+  await tasks.patch('tsk1234567890ab', [
+    Tasks.title.set('Ship version 1.0.1'),
+  ]);
 
   // Reads are the call form row(Tasks.title), or the .get alias.
   final task = await tasks.get('tsk1234567890ab');
@@ -201,61 +234,72 @@ Future<void> typedReadmeExample() async {
   await tasks.purge('tsk1234567890ab');
 ```
 
-Draft setters and predicates are intentionally **curried** — `draft.set(Tasks.title)('value')`,
-`query.where(Tasks.done)(eq: false)` — so a wrong value type or a foreign store's descriptor
-fails at compile time instead of silently widening the generic parameter.
+Writes are **field-native values** — `Tasks.title.set('Ship it')` — built beside
+ the descriptors, so a wrong value type or a foreign store's field fails at compile
+ time. `null` clears an optional field, and the same values build single writes
+ and batches (`putAll`, `patchAll`). Query conditions work exactly the same way:
+ `Tasks.done.eq(false)`.
 
 ---
 
 ### Step 4: Typed Queries
 
-Equality-family predicates work on every descriptor; kind-scoped operators exist only where they make sense; everything compiles to the engine's parameterized SQL.
+One entry point per terminal, named arguments, no builder, nothing to chain:
+`query(...)` returns its page directly, and every other terminal (`count`, `ids`,
+`sum`, `watch`, ...) accepts the same condition slots.
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
-  // Equality family: eq, neq, inValues, between, isNull, isNotNull.
-  final donePage = await tasks
-      .query()
-      .where(Tasks.done)(eq: false)
-      .where(Tasks.status)(inValues: [TaskStatus.todo, TaskStatus.done])
-      .where(Tasks.priority)(between: (1, 5))
-      .where(Tasks.title)(isNotNull: true)
-      .fetch();
+  // Equality family on every descriptor: eq, neq, inValues, between —
+  // plus isNull/isNotNull on optional descriptors.
+  final donePage = await tasks.query(
+    where: [
+      Tasks.done.eq(false),
+      Tasks.status.inValues([TaskStatus.todo, TaskStatus.done]),
+      Tasks.priority.between(1, 5),
+      Tasks.dueAt.isNull(),
+    ],
+    limit: 20,
+  );
 
   // Kind-scoped operators: .gt/.gte/.lt/.lte on comparable descriptors,
-  // .startsWith/.endsWith/.contains on text. whereCond consumes them.
-  final urgentPage = await tasks
-      .query()
-      .whereCond(Tasks.priority.gte(4))
-      .whereCond(Tasks.title.startsWith('Ship'))
-      .orderBy(Tasks.dueAt, desc: true)
-      .limit(20)
-      .fetch();
+  // .startsWith/.endsWith/.contains on text — the same grammar, same slot.
+  final urgentPage = await tasks.query(
+    where: [Tasks.priority.gte(4), Tasks.title.startsWith('Ship')],
+    orderBy: [Tasks.dueAt.desc],
+    limit: 20,
+  );
 
-  // OR groups and projections. Reading an unselected descriptor throws.
-  final firstPage = await tasks
-      .query()
-      .orWhere([eqCond(Tasks.done, true), eqCond(Tasks.priority, 5)])
-      .select(<FieldDef<Tasks, Object?>>[Tasks.title, Tasks.priority])
-      .fetch();
+  // OR groups accept equality conditions only — enforced at compile time
+  // (their static type is EqCond). Reading an unselected descriptor throws.
+  final firstPage = await tasks.query(
+    anyOf: [Tasks.done.eq(true), Tasks.priority.eq(5)],
+    select: [Tasks.title, Tasks.priority],
+    limit: 20,
+  );
 
   // Keyset pagination with the engine's opaque cursor.
   final nextPage = firstPage.hasMore
-      ? await tasks
-          .query()
-          .orderBy(Tasks.priority)
-          .keysetAfter(firstPage.nextCursor!)
+      ? await tasks.queryAfter(
+          firstPage.nextCursor!,
+          orderBy: [Tasks.priority.asc],
+          limit: 20,
+        )
       : null;
 
   // Aggregates: sum/min/max/avg accept numeric descriptors only.
-  final activeCount = await tasks.query().where(Tasks.done)(eq: false).count();
-  final priorityCount = await tasks.query().countDistinct(Tasks.priority);
-  final priorities = await tasks.query().distinct(Tasks.priority);
-  final priorityTotal = await tasks.query().sum(Tasks.priority);
+  final activeCount = await tasks.count(where: [Tasks.done.eq(false)]);
+  final priorityCount = await tasks.countDistinct(Tasks.priority);
+  final priorities = await tasks.distinct(Tasks.priority);
+  final priorityTotal = await tasks.sum(Tasks.priority);
 ```
 
-Set the page size with `limit(n)` or opt out with `all()`; `includeArchived()`/`includeHidden()` widen
-the default visibility scope; `ids()` and `explain()` mirror the raw builder verbatim.
+Set the page size with `limit:` or opt out with `all:`; `includeArchived:`/`includeHidden:` widen
+the default visibility scope; `ids()`, `explain()`, and `debugCompile(...)` mirror the raw
+builder verbatim. The `where:` predicates are ANDed and every multi-value slot is a list —
+the same slots (`where:`, `anyOf:`, `orderBy:`, `limit:`, `all:`, `includeArchived:`,
+`includeHidden:`) repeat across `query`, `queryAfter`, `ids`, `explain`, and `watch`, so the
+predicate shape is identical everywhere.
 
 ---
 
@@ -265,7 +309,7 @@ Search requires an `FtsSpec` on the store. Hits carry `id`/`score` plus `fetch()
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
-  final hits = await tasks.search('ship version').limit(10).fetch();
+  final hits = await tasks.search('ship version', limit: 10);
   for (final hit in hits) {
     final TypedRow<Tasks>? current = await hit.fetch();
     if (current != null) {
@@ -274,10 +318,7 @@ Search requires an `FtsSpec` on the store. Hits carry `id`/`score` plus `fetch()
   }
 
   final querySub = tasks
-      .query()
-      .where(Tasks.done)(eq: false)
-      .limit(50)
-      .watch()
+      .watch(where: [Tasks.done.eq(false)], limit: 50)
       .listen((List<TypedRow<Tasks>> rows) {});
 
   final rowSub =
@@ -303,7 +344,9 @@ Search requires an `FtsSpec` on the store. Hits carry `id`/`score` plus `fetch()
 
 ### Domain Models Without Code Generation
 
-`TypedRow` intentionally uses descriptor access instead of generated properties. Consumers can restore domain-oriented dot reads with a small wrapper, and can hide generic drafts behind intent-named mutations. These are application recipes, not new LocalPocket APIs.
+`TypedRow` intentionally uses descriptor access instead of generated properties. Consumers
+can restore domain-oriented dot reads with a small wrapper and hide the write values behind
+intent-named mutations. These are application recipes, not new LocalPocket APIs.
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
@@ -325,37 +368,41 @@ extension TaskOperations on TypedCollection<Tasks> {
     return row == null ? null : Task(row);
   }
 
-  Future<void> markDone(String id) =>
-      patch(id, (draft) => draft..set(Tasks.done)(true));
+  // WRITES are field-native values — `Tasks.done.set(true)` is typed by the
+  // field: wrong values and wrong stores are compile errors. `null` clears
+  // an optional field.
+  Future<void> markDone(String id) => patch(id, [Tasks.done.set(true)]);
 
-  Future<void> rename(String id, String title) =>
-      patch(id, (draft) => draft..set(Tasks.title)(title));
+  Future<void> rename(String id, String newTitle) =>
+      patch(id, [Tasks.title.set(newTitle)]);
 }
 ```
 
 Changing a descriptor type makes incompatible wrapper getters and helpers fail analysis. No mirrors, macros, extension types, or package code generation are involved.
 
 The principal typed building blocks are `StoreDef`, `Fields`, `FieldDef`,
-`Draft`, `TypedRow`, `TypedCollection`, `Cond`, `TypedQuery`, `TypedPage`,
-`TypedSearch`, `TypedSearchHit`, and the identity-enforcing
-`TypedStoreRegistry`. Identity failures surface as `TypedStoreMismatchError`.
+`Write`, `Writes`, `TypedRow`, `TypedCollection`, `Cond`, `EqCond`,
+`OrderTerm`, `TypedPage`, `TypedSearchHit`, and the identity-enforcing
+`TypedStoreRegistry`. Identity failures surface as
+`TypedStoreMismatchError`.
 
 ### Typed Best Practices
 
 - **One definition instance per store, ever.** The private constructor plus static accessors (`Tasks.instance`, `Tasks.title`) is the canonical pattern; sharing that single object is how every file gets the same typed handle. A second instance with the same name throws `TypedStoreMismatchError`.
 - **Typed handles for application code.** Use `db.store(...)` everywhere; keep raw maps for engine-boundary surfaces only — migrations, `DocumentMigration`, conflict records/resolvers, and codecs.
 - **Wrap rows in a domain class** (see above) and express mutations as intent-named helpers, so call sites read like business operations instead of builder chains.
+- **Writes are values too.** `Tasks.title.set('x')` collected into `put([...])` / `patch(id, [...])` keeps every write compile-checked against its field — the same values build single writes and batches.
 - **Never cast descriptors across stores or through `dynamic`.** The runtime identity check still throws, but the compile-time check is the product.
 - **Use `indexSpec([...])` and `ftsSpec([...])` for typed schema extras.** They derive names from descriptors, remain non-`const`, and leave raw `IndexSpec`/`FtsSpec` available at engine boundaries.
-- **Prefer `f.dateTime` for timestamps** (UTC-pinned in both directions) and give enums explicit `wire:` names when a persisted value must survive enum renames.
+- **Prefer `schema.dateTime` for timestamps** (UTC-pinned in both directions) and give enums explicit `wire:` names when a persisted value must survive enum renames.
 - **Use `select` projections only on hot paths** — reading an unselected descriptor throws by design.
 - **`setExtra` accepts only undeclared keys**; declared and system names (`id`, `archived`, `hidden`, `extra`) are rejected so legacy keys cannot shadow schema fields.
 
 ### Typed Model Limits
 
-- Required descriptor **types** are non-nullable, but a draft cannot prove that every required field was set. Required-field presence remains engine-enforced at runtime.
+- Required descriptor **types** are non-nullable, but a write list cannot prove that every required field was set. Required-field presence remains engine-enforced at runtime.
 - `TypedRow` is a thin wrapper, not a `Map`; it wraps one engine map without copying. `extra` exposes undeclared read values and `asMap()` is the advanced escape hatch.
-- `f.json` intentionally narrows the typed value to `Map<String, Object?>?`; raw `Field.json` also accepts lists. `jsonList<T>` validates/casts elements while decoding.
+- `schema.json` intentionally narrows the typed value to `Map<String, Object?>?`; raw `Field.json` also accepts lists. `jsonList<T>` validates/casts elements while decoding.
 - `.req()`, encryption, and uniqueness exist only for field kinds supported by the engine schema factories.
 - Normal cross-store descriptor misuse fails at compile time. Casts or `dynamic` can defeat that protection, in which case runtime identity checks throw `TypedStoreMismatchError`.
 - The typed v1 API has no create-only operation or per-write durability argument; use `put` for upsert and transactions for durability selection.
@@ -436,8 +483,7 @@ db.events.whereLocal().whereField('priority').listen((event) {
 Connect your database to a remote PocketBase server:
 
 ```dart
-import 'package:localpocket/pocketbase.dart';
-import 'package:localpocket/sync.dart';
+import 'package:localpocket/localpocket.dart';
 
 // Configure PocketBase wire backend
 final backend = PocketBaseBackend(

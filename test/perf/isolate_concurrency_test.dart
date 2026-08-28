@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

@@ -1,6 +1,5 @@
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/src/sync/mapping.dart' show parsePayloadJson;
-import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

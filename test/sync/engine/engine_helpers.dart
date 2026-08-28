@@ -3,7 +3,6 @@
 library;
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/sync.dart';
 
 import '../../support/helpers.dart';
 import 'mock_backend.dart';

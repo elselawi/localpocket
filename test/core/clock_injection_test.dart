@@ -1,5 +1,4 @@
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/sync.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

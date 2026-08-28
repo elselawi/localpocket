@@ -2,6 +2,7 @@
 # Format: <entrypoint> -> <export lines sorted>
 
 === lib/localpocket.dart ===
+export 'pocketbase.dart';
 export 'src/core/canonical_json.dart' show canonicalize;
 export 'src/core/capabilities.dart' show SqliteCapabilities, PlatformProfile;
 export 'src/core/change_bus.dart'
@@ -26,15 +27,8 @@ export 'src/core/schema.dart'
 export 'src/core/store.dart' show Collection, Page, MutationAction;
 export 'src/core/transaction.dart' show Tx;
 export 'src/core/watch.dart';
-export 'src/files/blob_store.dart'
-export 'src/files/files_api.dart' show LocalPocketFiles, FileRef;
-export 'src/files/native_blob_store_platform.dart' show NativeBlobStore;
-export 'src/sync/conflicts.dart' show Conflicts, ConflictRecord;
-export 'src/sync/merge.dart'
-export 'src/sync/op_queue.dart' show OpQueue;
-export 'src/sync/outbox.dart'
-export 'src/sync/sync_backend.dart' show StreamFileUpload;
-export 'src/sync/sync_tables.dart'
+export 'sync.dart';
+export 'typed.dart';
 
 === lib/pocketbase.dart ===
 export 'src/pocketbase/auth.dart' show AuthManager, Token, TokenProvider;
@@ -53,6 +47,8 @@ export 'src/sync/conflicts.dart'
 export 'src/sync/engine.dart' show SyncEngine;
 export 'src/sync/mapping.dart'
 export 'src/sync/merge.dart'
+export 'src/sync/op_queue.dart' show OpQueue;
+export 'src/sync/outbox.dart'
 export 'src/sync/puller.dart' show PullReport, Puller;
 export 'src/sync/pusher.dart' show PushReport, Pusher;
 export 'src/sync/status.dart' show SyncEngineState, SyncReport, SyncStatus;
@@ -60,6 +56,7 @@ export 'src/sync/sweeper.dart' show SweepReport, Sweeper;
 export 'src/sync/sync_backend.dart';
 export 'src/sync/sync_config.dart' show SyncConfig;
 export 'src/sync/sync_store.dart' show PullCursor, SweepState, SyncStore;
+export 'src/sync/sync_tables.dart'
 
 === lib/typed.dart ===
 export 'src/typed/typed.dart';

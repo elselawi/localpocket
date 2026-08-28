@@ -19,6 +19,9 @@ import 'find_repo_root.dart';
 ///    - `lib/src/typed/` (and `lib/typed.dart`) must never import from
 ///      `lib/src/pocketbase/` or `package:localpocket/pocketbase.dart` — the
 ///      typed layer imports only the public core surface.
+///    - `lib/localpocket.dart` is the composition root: it may EXPORT the
+///      pocketbase barrel (the single-import requirement) but must never
+///      IMPORT pocketbase internals.
 void main(List<String> args) {
   final root = findRepoRoot();
   final libDir = Directory(p.join(root.path, 'lib'));
