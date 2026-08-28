@@ -1,0 +1,30 @@
+{
+    // Local RAM/CPU reduction: stop VS Code's file watcher and search from
+    // scanning build-artifact, generated-output, and vendored folders.
+    // (This file is gitignored via .vscode/ in the root .gitignore.)
+    "files.watcherExclude": {
+        "**/.dart_tool/**": true,
+        "**/build/**": true,
+        "**/coverage/**": true,
+        "**/node_modules/**": true,
+        "**/.idea/**": true,
+        "example/windows/**": true,
+        "_site/**": true
+    },
+    "search.exclude": {
+        "**/.dart_tool/**": true,
+        "**/build/**": true,
+        "**/coverage/**": true,
+        "**/node_modules/**": true,
+        "**/.idea/**": true,
+        "example/windows/**": true,
+        "_site/**": true,
+        "benchmark/results/**": true
+    },
+    "files.exclude": {
+        "**/.dart_tool/**": true,
+        "**/node_modules/**": true,
+        "**/.idea/**": true
+    },
+    "search.useIgnoreFiles": true
+}
