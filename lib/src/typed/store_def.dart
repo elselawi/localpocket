@@ -64,8 +64,12 @@ final class Fields<S> {
   final Set<FieldDef<S, Object?>> _created = Set.identity();
 
   /// Declares an optional text field.
-  TextFieldOpt<S> text(String name,
-      {bool uniqueWhenActive = false, bool encrypted = false}) {
+  TextFieldOpt<S> text(
+    String name, {
+    /// [uniqueWhenActive] is the field unique
+    bool uniqueWhenActive = false,
+    bool encrypted = false,
+  }) {
     final fd = TextFieldOpt<S>(_owner, name,
         uniqueWhenActive: uniqueWhenActive, encrypted: encrypted);
     _created.add(fd);
@@ -201,12 +205,8 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// Monotonically increasing local schema version.
   final int version;
 
-  /// The bound field factory. Descriptors are declared as
-  /// `static final title = instance.schema.text('title').req();` —
-  /// `schema.` avoids shadowing the `int`/`bool` type names inside the
-  /// class body and binds each descriptor's owner without writing `this`
-  /// per declaration. Statics initialize lazily, after `instance` has
-  /// settled, so declaration order above `fields` is irrelevant.
+  /// Descriptors are declared as:
+  /// `static final title = instance.schema.text('title').req();`
   late final Fields<S> schema = Fields<S>(this as S);
 
   /// The ordered registry of user fields. Descriptors are referenced, not

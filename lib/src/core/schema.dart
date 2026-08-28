@@ -621,6 +621,7 @@ class ConflictPolicy {
     bool editsUnarchive = false,
     MissingRemotePolicy missingRemote = MissingRemotePolicy.conflict,
   }) =>
+
       /// {@macro localpocket.conflict_policy}
       ConflictPolicy(
         collectionResolver: collectionResolver,
