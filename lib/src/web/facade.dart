@@ -337,9 +337,12 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     final registered = schemaFor(def.name);
     def.verifyRegisteredSchema(registered);
     typedRegistry.bind(def);
-    return TypedCollection<S>(
+    return typedRegistry.cachedCollection<S>(
       def,
-      _WebTypedSurface(WebCollection.ins(this, registered)),
+      () => TypedCollection<S>(
+        def,
+        _WebTypedSurface(WebCollection.ins(this, registered)),
+      ),
     );
   }
 
@@ -621,6 +624,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
     } catch (_) {}
     _sender.markClosedLocal();
     changeBus.close();
+    typedRegistry.clearHandles();
     await _syncStatusController.close();
     await _authRequiredController.close();
     for (final url in _blobUrlsToRevoke) {

@@ -1,10 +1,10 @@
-// Case 147: set(Users.email)('x') in a Draft<Tasks> — cross-store write.
+// Case 147: Users.email.set('x') inside a tasks patch — cross-store write.
 import 'package:localpocket/typed.dart';
 
 import '../support/tasks.dart';
 import '../support/users.dart';
 
-void f(Draft<Tasks> w) {
+Future<void> f(TypedCollection<Tasks> tasks) {
   // expect: argument_type_not_assignable
-  w.set(Users.email)('x');
+  return tasks.patch('id', [Users.email.set('x')]);
 }

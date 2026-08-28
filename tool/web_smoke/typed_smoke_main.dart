@@ -3,7 +3,6 @@ import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/typed.dart';
 
 enum _WebRole { admin, member }
 
@@ -125,11 +124,12 @@ Future<void> main() async {
 
     mark('required-guard');
     try {
-      await tasks.put((draft) => draft
-        ..setId('typedweb0000001')
-        ..set(_WebTasks.role)(_WebRole.member)
-        ..set(_WebTasks.dueAt)(DateTime.utc(2026, 8, 26))
-        ..set(_WebTasks.done)(false));
+      await tasks.put([
+        Writes.id('typedweb0000001'),
+        _WebTasks.role.set(_WebRole.member),
+        _WebTasks.dueAt.set(DateTime.utc(2026, 8, 26)),
+        _WebTasks.done.set(false),
+      ]);
       throw StateError('Worker accepted a missing required title.');
     } on Object catch (error) {
       if (error is StateError) rethrow;
@@ -142,12 +142,13 @@ Future<void> main() async {
     const id = 'typedweb0000002';
     final dueAt = DateTime.utc(2026, 8, 26, 14, 15, 16, 789);
     mark('typed-put');
-    await tasks.put((draft) => draft
-      ..setId(id)
-      ..set(_WebTasks.title)('Ship typed worker')
-      ..set(_WebTasks.role)(_WebRole.admin)
-      ..set(_WebTasks.dueAt)(dueAt)
-      ..set(_WebTasks.done)(false));
+    await tasks.put([
+      Writes.id(id),
+      _WebTasks.title.set('Ship typed worker'),
+      _WebTasks.role.set(_WebRole.admin),
+      _WebTasks.dueAt.set(dueAt),
+      _WebTasks.done.set(false),
+    ]);
 
     // The raw web facade sees logical primitives. Typed objects never cross
     // the worker boundary.
@@ -161,18 +162,17 @@ Future<void> main() async {
     }
 
     mark('typed-query');
-    final page = await tasks
-        .query()
-        .where(_WebTasks.done)(eq: false)
-        .select(<FieldDef<_WebTasks, Object?>>[
-          def.id,
-          _WebTasks.title,
-          _WebTasks.role,
-          _WebTasks.dueAt,
-        ])
-        .orderBy(_WebTasks.dueAt, desc: true)
-        .limit(10)
-        .fetch();
+    final page = await tasks.query(
+      where: [_WebTasks.done.eq(false)],
+      select: <FieldDef<_WebTasks, Object?>>[
+        def.id,
+        _WebTasks.title,
+        _WebTasks.role,
+        _WebTasks.dueAt,
+      ],
+      orderBy: [_WebTasks.dueAt.desc],
+      limit: 10,
+    );
     final row = page.items.single;
     if (row.id != id ||
         row(_WebTasks.title) != 'Ship typed worker' ||
@@ -185,13 +185,11 @@ Future<void> main() async {
     mark('query-watch');
     final watchReady = Completer<void>();
     final watchUpdated = Completer<void>();
-    watchSub = tasks
-        .query()
-        .where(_WebTasks.done)(eq: false)
-        .orderBy(_WebTasks.dueAt)
-        .limit(10)
-        .watch()
-        .listen((rows) {
+    watchSub = tasks.watch(
+      where: [_WebTasks.done.eq(false)],
+      orderBy: [_WebTasks.dueAt.asc],
+      limit: 10,
+    ).listen((rows) {
       if (rows.any((value) => value.id == id) && !watchReady.isCompleted) {
         watchReady.complete();
       }
@@ -200,11 +198,11 @@ Future<void> main() async {
       }
     });
     await watchReady.future.timeout(const Duration(seconds: 10));
-    await tasks.patch(id, (draft) => draft..set(_WebTasks.done)(true));
+    await tasks.patch(id, [_WebTasks.done.set(true)]);
     await watchUpdated.future.timeout(const Duration(seconds: 10));
 
     mark('typed-search');
-    final hits = await tasks.search('Ship').limit(5).fetch();
+    final hits = await tasks.search('Ship', limit: 5);
     if (hits.length != 1 || hits.single.id != id) {
       throw StateError('Typed worker FTS mismatch: $hits');
     }

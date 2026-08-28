@@ -2,17 +2,16 @@
 ///
 /// These helpers derive schema column names from the store-owned [FieldDef]
 /// descriptors instead of accepting raw strings. Each helper mirrors its raw
-/// engine type by name — `IndexSpec` → [indexSpec], `FtsSpec` → [ftsSpec] —
-/// while the raw constructors remain available for engine-level schemas.
+/// database type by name — `IndexSpec` → [indexSpec], `FtsSpec` → [ftsSpec] —
+/// while the raw constructors remain available for database-level schemas.
 library;
 
-import 'package:localpocket/src/core/schema.dart';
-import 'field_def.dart';
+import 'package:localpocket/localpocket.dart';
 
 /// Builds an index declaration from store-owned field descriptors.
 ///
 /// The descriptor names are copied into the same raw [IndexSpec] shape used by
-/// the engine. Supplying a foreign store's descriptor is rejected by the
+/// the database. Supplying a foreign store's descriptor is rejected by the
 /// static type checker when the call's type argument is the intended store
 /// type. This helper is intentionally not `const`: descriptors are runtime
 /// objects, so helper-based declarations trade const construction for
@@ -34,7 +33,7 @@ IndexSpec indexSpec<S>(
 /// exposes an `fts` getter, and an instance member would shadow a top-level
 /// helper with that name inside a store definition. This helper is also not
 /// `const` because its descriptor inputs are runtime objects. Its output is
-/// the same raw [FtsSpec] shape used by the engine.
+/// the same raw [FtsSpec] shape used by the database.
 ///
 /// When the descriptor list is empty, pass the owner explicitly, for example
 /// `ftsSpec<MyStore>([])`, so the intended store type is documented at the

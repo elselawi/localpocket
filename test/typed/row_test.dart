@@ -7,15 +7,14 @@ library;
 import 'dart:async';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/typed.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
 import 'support/secrets.dart';
 import 'support/tasks.dart';
 
-Future<LocalPocket> openTasks() =>
-    LocalPocket.open(path: ':memory:', stores: [Tasks.instance.schema]);
+Future<LocalPocket> openTasks() => LocalPocket.open(
+    path: ':memory:', stores: [Tasks.instance.collectionSchema]);
 
 /// Creates a file-backed `tasks` v1 table with an OPTIONAL title, inserts a
 /// row with a null title (impossible through a NOT NULL column), and
@@ -36,7 +35,8 @@ Future<LocalPocket> pocketWithNullTitle() async {
   );
   await raw.collection('tasks').put({'id': 'rowcase58000001', 'title': null});
   await raw.close();
-  return LocalPocket.open(path: t.path, stores: [Tasks.instance.schema]);
+  return LocalPocket.open(
+      path: t.path, stores: [Tasks.instance.collectionSchema]);
 }
 
 void main() {
@@ -332,8 +332,8 @@ void main() {
         'dueAt': '2026-09-01T00:00:00Z'
       });
       await raw.close();
-      final db =
-          await LocalPocket.open(path: t.path, stores: [Tasks.instance.schema]);
+      final db = await LocalPocket.open(
+          path: t.path, stores: [Tasks.instance.collectionSchema]);
       addTearDown(db.close);
 
       final rec = (await db.store(Tasks.instance).get('rowcase65000001'))!;
@@ -391,7 +391,7 @@ void main() {
       final key2 = List<int>.generate(32, (i) => (i * 5 + 3) % 256);
       final a = await LocalPocket.open(
         path: t.path,
-        stores: [SecretNotes.instance.schema],
+        stores: [SecretNotes.instance.collectionSchema],
         fieldCipher: AesGcmFieldCipher(key1),
       );
       await a
@@ -401,7 +401,7 @@ void main() {
 
       final b = await LocalPocket.open(
         path: t.path,
-        stores: [SecretNotes.instance.schema],
+        stores: [SecretNotes.instance.collectionSchema],
         fieldCipher: AesGcmFieldCipher(key2),
       );
       addTearDown(b.close);

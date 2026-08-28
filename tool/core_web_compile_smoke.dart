@@ -1,6 +1,4 @@
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/sync.dart';
-import 'package:localpocket/typed.dart';
 
 enum _SmokeRole { author, reader }
 
@@ -41,27 +39,27 @@ final class _SmokeNotes extends StoreDef<_SmokeNotes> {
 Future<void> _retainTypedWebSurface(LocalPocket pocket) async {
   final notes = pocket.store(_SmokeNotes.instance);
   const id = 'typedcompile001';
-  await notes.put((draft) => draft
-    ..setId(id)
-    ..set(_SmokeNotes.title)('Typed compiler smoke')
-    ..set(_SmokeNotes.role)(_SmokeRole.author)
-    ..set(_SmokeNotes.createdAt)(DateTime.utc(2026, 8, 26))
-    ..set(_SmokeNotes.published)(false));
-  await notes.patch(id, (draft) => draft..set(_SmokeNotes.published)(true));
+  await notes.put([
+    Writes.id(id),
+    _SmokeNotes.title.set('Typed compiler smoke'),
+    _SmokeNotes.role.set(_SmokeRole.author),
+    _SmokeNotes.createdAt.set(DateTime.utc(2026, 8, 26)),
+    _SmokeNotes.published.set(false),
+  ]);
+  await notes.patch(id, [_SmokeNotes.published.set(true)]);
   await notes.get(id);
-  await notes
-      .query()
-      .where(_SmokeNotes.published)(eq: true)
-      .select(<FieldDef<_SmokeNotes, Object?>>[
-        _SmokeNotes.title,
-        _SmokeNotes.role,
-      ])
-      .orderBy(_SmokeNotes.createdAt, desc: true)
-      .limit(5)
-      .fetch();
-  final querySub = notes.query().limit(5).watch().listen((_) {});
+  await notes.query(
+    where: [_SmokeNotes.published.eq(true)],
+    select: <FieldDef<_SmokeNotes, Object?>>[
+      _SmokeNotes.title,
+      _SmokeNotes.role,
+    ],
+    orderBy: [_SmokeNotes.createdAt.desc],
+    limit: 5,
+  );
+  final querySub = notes.watch(limit: 5).listen((_) {});
   final oneSub = notes.watchOne(id).listen((_) {});
-  await notes.search('Typed').limit(5).fetch();
+  await notes.search('Typed', limit: 5);
   await querySub.cancel();
   await oneSub.cancel();
 }

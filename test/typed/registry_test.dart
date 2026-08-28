@@ -3,7 +3,6 @@
 library;
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/typed.dart';
 import 'package:test/test.dart';
 
 import 'support/tasks.dart';
@@ -36,7 +35,7 @@ final class _Missing extends StoreDef<_Missing> {
 final class _WrongTasks extends StoreDef<_WrongTasks> {
   _WrongTasks() : super(name: 'tasks', version: 1);
 
-  late final _different = f.integer('different');
+  late final _different = schema.integer('different');
 
   @override
   List<FieldDef<_WrongTasks, Object?>> get fields => [_different];
@@ -110,9 +109,10 @@ void main() {
   });
 
   group('db.store / tx.store wiring', () {
-    Future<LocalPocket> open() => LocalPocket.open(
-        path: ':memory:',
-        stores: [Tasks.instance.schema, Users.instance.schema]);
+    Future<LocalPocket> open() => LocalPocket.open(path: ':memory:', stores: [
+          Tasks.instance.collectionSchema,
+          Users.instance.collectionSchema
+        ]);
 
     test('case 41: db.store returns a handle whose def is the instance',
         () async {
@@ -158,7 +158,7 @@ void main() {
       addTearDown(db.close);
       final missing = _Missing();
       expect(() => db.store(missing), throwsStateError);
-      await db.registerStore(missing.schema);
+      await db.registerStore(missing.collectionSchema);
       expect(identical(db.store(missing).def, missing), isTrue);
     });
 

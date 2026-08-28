@@ -26,7 +26,7 @@ List<RecordMapInput> scanTypedSurface(Directory root) {
 
 List<String> typedSurfaceViolations(List<RecordMapInput> inputs) => [
       for (final input in inputs)
-        '${input.location}: typed entrypoint exposes record-map write input ${input.key}; use descriptors and Draft builders instead.',
+        '${input.location}: typed entrypoint exposes record-map write input ${input.key}; use descriptors and field-native writes instead.',
     ]..sort();
 
 void main() {

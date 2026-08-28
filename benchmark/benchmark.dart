@@ -7,8 +7,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/sync.dart';
-import 'package:localpocket/typed.dart';
 
 import 'persist.dart';
 import 'typed_benchmark_models.dart';
@@ -494,8 +492,9 @@ Future<void> main() async {
   }
 
   // ---------------------------------------------------------------- B14 ---
-  // §4.11 case 171: one Draft map per row followed by the same engine putAll
-  // path. Separate equivalent databases avoid update/create asymmetry.
+  // §4.11 case 171: one field-native write list per row followed by the
+  // same engine putAll path. Separate equivalent databases avoid
+  // update/create asymmetry.
   {
     const count = 10000;
     final rawDb = await LocalPocket.open(
@@ -510,23 +509,24 @@ Future<void> main() async {
       for (var i = 0; i < count; i++)
         rec('rawb${i.toString().padLeft(11, '0')}', i),
     ];
-    final typedBuilds = <void Function(Draft<BenchmarkWidgets>)>[
+    final typedRecords = <List<Write<BenchmarkWidgets>>>[
       for (var i = 0; i < count; i++)
-        (draft) => draft
-          ..setId('typb${i.toString().padLeft(11, '0')}')
-          ..set(BenchmarkWidgets.widgetName)('name-$i')
-          ..set(BenchmarkWidgets.qty)(i)
-          ..set(BenchmarkWidgets.phone)('p$i')
-          ..set(BenchmarkWidgets.body)(
+        [
+          Writes.id('typb${i.toString().padLeft(11, '0')}'),
+          BenchmarkWidgets.widgetName.set('name-$i'),
+          BenchmarkWidgets.qty.set(i),
+          BenchmarkWidgets.phone.set('p$i'),
+          BenchmarkWidgets.body.set(
             'body content description for item number $i with search terms',
           ),
+        ],
     ];
 
     final rawWatch = Stopwatch()..start();
     await rawDb.collection('widgets').putAll(rawRecords);
     rawWatch.stop();
     final typedWatch = Stopwatch()..start();
-    await typedDb.store(BenchmarkWidgets.instance).putAll(typedBuilds);
+    await typedDb.store(BenchmarkWidgets.instance).putAll(typedRecords);
     typedWatch.stop();
 
     final rawCount = await rawDb.collection('widgets').query().count();
@@ -547,7 +547,7 @@ Future<void> main() async {
       'typedMs': typedMs,
       'overheadUsPerRow': double.parse(overheadUsPerRow.toStringAsFixed(3)),
       'rows': count,
-      'draftMaps': count,
+      'writeLists': count,
       'ok': ok,
     });
     if (!ok) {

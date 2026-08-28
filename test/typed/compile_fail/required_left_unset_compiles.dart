@@ -5,7 +5,7 @@ import 'package:localpocket/typed.dart';
 
 import '../support/tasks.dart';
 
-void f(Draft<Tasks> w) {
-  w.set(Tasks.priority)(Priority.low);
-  w.setExtra('note', 'title intentionally unset');
-}
+Future<void> f(TypedCollection<Tasks> tasks) => tasks.put([
+      Tasks.priority.set(Priority.low),
+      Writes.extra('note', 'title intentionally unset'),
+    ]);

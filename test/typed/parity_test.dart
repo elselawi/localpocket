@@ -5,7 +5,6 @@ library;
 import 'dart:convert';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/typed.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
@@ -88,13 +87,14 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('partcase', 83);
-      await db.store(Tasks.instance).put((w) => w
-        ..setId(id)
-        ..set(Tasks.title)('parity')
-        ..set(Tasks.role)(Role.member)
-        ..set(Tasks.count)(3)
-        ..set(Tasks.dueAt)(DateTime.utc(2026, 9, 1))
-        ..setExtra('legacy', true));
+      await db.store(Tasks.instance).put([
+        Writes.id(id),
+        Tasks.title.set('parity'),
+        Tasks.role.set(Role.member),
+        Tasks.count.set(3),
+        Tasks.dueAt.set(DateTime.utc(2026, 9, 1)),
+        Writes.extra('legacy', true),
+      ]);
 
       final raw = await db.collection('tasks').get(id);
       expect(raw, {
@@ -165,10 +165,11 @@ void main() {
       );
       addTearDown(db.close);
       final id = rid('partcase', 85);
-      await db.store(SecretNotes.instance).put((w) => w
-        ..setId(id)
-        ..set(SecretNotes.label)('n')
-        ..set(SecretNotes.note)('plaintext'));
+      await db.store(SecretNotes.instance).put([
+        Writes.id(id),
+        SecretNotes.label.set('n'),
+        SecretNotes.note.set('plaintext'),
+      ]);
 
       final rec = (await db.store(SecretNotes.instance).get(id))!;
       expect(rec(SecretNotes.note), 'plaintext');
@@ -195,10 +196,11 @@ void main() {
         'unicode': 'héllo ✓',
       };
       final id = rid('partcase', 861);
-      await db.store(Tasks.instance).put((w) => w
-        ..setId(id)
-        ..set(Tasks.title)('x')
-        ..setExtra('deep', payload['deep']));
+      await db.store(Tasks.instance).put([
+        Writes.id(id),
+        Tasks.title.set('x'),
+        Writes.extra('deep', payload['deep']),
+      ]);
       await db
           .collection('tasks')
           .patch(id, {'nul': null, 'unicode': 'héllo ✓'});
@@ -218,10 +220,11 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('partcase', 87);
-      await db.store(Tasks.instance).put((w) => w
-        ..setId(id)
-        ..set(Tasks.title)('x')
-        ..set(Tasks.role)(Role.admin));
+      await db.store(Tasks.instance).put([
+        Writes.id(id),
+        Tasks.title.set('x'),
+        Tasks.role.set(Role.admin),
+      ]);
 
       final op = await db.outbox.readOp(db.db, 'tasks', id);
       expect(op, isNotNull);
@@ -234,14 +237,13 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('partcase', 88);
-      await db.store(Tasks.instance).put((w) => w
-        ..setId(id)
-        ..set(Tasks.title)('typed')
-        ..set(Tasks.count)(1));
+      await db.store(Tasks.instance).put([
+        Writes.id(id),
+        Tasks.title.set('typed'),
+        Tasks.count.set(1),
+      ]);
       await db.collection('tasks').patch(id, {'count': 2});
-      await db
-          .store(Tasks.instance)
-          .patch(id, (w) => w..set(Tasks.role)(Role.admin));
+      await db.store(Tasks.instance).patch(id, [Tasks.role.set(Role.admin)]);
 
       final rec = (await db.store(Tasks.instance).get(id))!;
       expect(rec(Tasks.title), 'typed');
@@ -264,18 +266,30 @@ void main() {
     });
 
     test(
-        'case 90: encodeDbRow bytes are identical for Draft- and hand-built '
-        'maps', () async {
+        'case 90: encodeDbRow bytes are identical for field-native and '
+        'hand-built maps', () async {
       final id = rid('partcase', 90);
-      final draft = Draft<Tasks>(Tasks.instance)
-        ..setId(id)
-        ..set(Tasks.title)('bytes')
-        ..set(Tasks.role)(Role.admin)
-        ..setExtra('k', 1);
-      final fromDraft = encodeDbRow(
+      final List<Write<Tasks>> writes = [
+        Writes.id(id),
+        Tasks.title.set('bytes'),
+        Tasks.role.set(Role.admin),
+        Writes.extra('k', 1),
+      ];
+      final record = <String, Object?>{};
+      for (final write in writes) {
+        switch (write) {
+          case final FieldWrite<Tasks> f:
+            record[f.name] = f.encoded;
+          case final IdWrite<Tasks> i:
+            record['id'] = i.id;
+          case final ExtraWrite<Tasks> e:
+            record[e.key] = e.value;
+        }
+      }
+      final fromWrites = encodeDbRow(
         Tasks.instance.collectionSchema,
         id: id,
-        logical: draft.build(),
+        logical: record,
         archived: false,
       );
       final fromHand = encodeDbRow(
@@ -284,7 +298,7 @@ void main() {
         logical: {'id': id, 'title': 'bytes', 'role': 'admin', 'k': 1},
         archived: false,
       );
-      expect(fromDraft, fromHand);
+      expect(fromWrites, fromHand);
     });
 
     test(

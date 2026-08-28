@@ -1,14 +1,11 @@
-/// Typed data-model layer for localpocket.
+/// The typed data-model slice: declare each store's fields once as typed
+/// descriptors that are simultaneously the schema declaration and the
+/// compile-time-typed accessor, so wrong-type and wrong-store usage become
+/// compile errors.
 ///
-/// Declares each store's fields once as typed descriptors that are
-/// simultaneously the schema declaration and the compile-time-typed
-/// accessor, so wrong-type and wrong-store usage become compile errors.
-///
-/// This entrypoint is additive: the raw map API (`localpocket.dart`) is
-/// unchanged, and both layers can access the same stores.
-///
-/// The typed layer never imports `dart:io` or any HTTP client; it talks to
-/// core's public `LocalPocket`/`Tx`/`Collection` APIs only.
+/// Tip: `package:localpocket/localpocket.dart` already includes everything
+/// exported here, plus the raw map API, sync, and the PocketBase adapter —
+/// prefer that single import unless you want the typed slice only.
 library;
 
 export 'src/typed/typed.dart';

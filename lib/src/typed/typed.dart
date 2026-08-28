@@ -1,9 +1,4 @@
 /// Typed data-model layer implementation.
-///
-/// Layering: this directory imports only the public core surface
-/// (`package:localpocket/localpocket.dart`), never `dart:io`,
-/// `package:http`, or the pocketbase adapter — enforced by
-/// `tool/offline_lint.dart`.
 library;
 
 export 'field_def.dart';
@@ -16,9 +11,15 @@ export 'registry.dart';
 // custom index scopes and FTS normalization without a second import.
 export 'package:localpocket/localpocket.dart'
     show FtsNormalization, FtsSpec, IndexScope, IndexSpec;
-export 'draft.dart';
+export 'write.dart';
 export 'typed_row.dart';
+export 'typed_model.dart';
+export 'typed_pocket.dart';
 export 'cond.dart';
 export 'typed_query.dart';
+// The raw record-map seam interfaces (TypedStoreSurface / TypedQuerySurface /
+// TypedSearchSurface) stay hidden: the public typed surface is
+// descriptor-based, and the seams are implemented by the package's own
+// native/web adapters, not by applications.
 export 'typed_search.dart' hide TypedSearchSurface;
 export 'typed_collection.dart' hide TypedStoreSurface;

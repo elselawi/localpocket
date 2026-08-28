@@ -68,20 +68,19 @@ class _CrudPageState extends State<CrudPage> {
     final sw = Stopwatch()..start();
     try {
       final tasks = db.store(PlaygroundTasks.instance);
-      await tasks.put(
-        (draft) => draft
-          ..set(PlaygroundTasks.title)(title)
-          ..set(PlaygroundTasks.description)(
-            _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
-          )
-          ..set(PlaygroundTasks.status)(_status)
-          ..set(PlaygroundTasks.priority)(_priority)
-          ..set(PlaygroundTasks.completed)(false)
-          ..set(PlaygroundTasks.dueAt)(
-            DateTime.now().toUtc().add(Duration(days: _priority * 2)),
-          )
-          ..set(PlaygroundTasks.tags)(<String>['demo']),
-      );
+      await tasks.put([
+        PlaygroundTasks.title.set(title),
+        PlaygroundTasks.description.set(
+          _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
+        ),
+        PlaygroundTasks.status.set(_status),
+        PlaygroundTasks.priority.set(_priority),
+        PlaygroundTasks.completed.set(false),
+        PlaygroundTasks.dueAt.set(
+          DateTime.now().toUtc().add(Duration(days: _priority * 2)),
+        ),
+        PlaygroundTasks.tags.set(<String>['demo']),
+      ]);
       _titleCtrl.clear();
       _descCtrl.clear();
       sw.stop();
@@ -108,12 +107,9 @@ class _CrudPageState extends State<CrudPage> {
     if (db == null) return;
     final sw = Stopwatch()..start();
     try {
-      await db
-          .store(PlaygroundTasks.instance)
-          .patch(
-            id,
-            (draft) => draft..set(PlaygroundTasks.completed)(completed),
-          );
+      await db.store(PlaygroundTasks.instance).patch(id, [
+        PlaygroundTasks.completed.set(completed),
+      ]);
       sw.stop();
       setState(() {
         _result =

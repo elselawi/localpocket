@@ -3,7 +3,7 @@ import 'package:localpocket/typed.dart';
 
 import '../support/tasks.dart';
 
-void f(TypedQuery<Tasks> query) {
+Future<num?> f(TypedCollection<Tasks> tasks) {
   // expect: argument_type_not_assignable
-  query.sum(Tasks.title);
+  return tasks.sum(Tasks.title);
 }

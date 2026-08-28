@@ -605,7 +605,9 @@ class LocalPocket with ChangeBusAwareLP {
   /// schema must have been registered at [LocalPocket.open] (`stores:`);
   /// otherwise the engine's "no store registered" error surfaces unchanged.
   ///
-  /// Inside a transaction, use `tx.store(def)` instead.
+  /// The returned wrapper is cached per pocket: repeated calls with the
+  /// same canonical definition return the identical object until
+  /// [close]. Inside a transaction, use `tx.store(def)` instead.
   TypedCollection<S> store<S extends StoreDef<S>>(S def) {
     _guardOutsideTx();
     // Verify structure and existence BEFORE binding so a failed lookup leaves
@@ -613,7 +615,13 @@ class LocalPocket with ChangeBusAwareLP {
     final table = requireTable(def.name);
     def.verifyRegisteredSchema(table.schema);
     typedRegistry.bind(def);
-    return TypedCollection<S>.native(def, Collection.internal(this, table));
+    return typedRegistry.cachedCollection<S>(
+      def,
+      () => TypedCollection<S>.native(
+        def,
+        Collection.internal(this, table),
+      ),
+    );
   }
 
   /// Runs [action] in a serialized, single-writer transaction.
@@ -946,6 +954,7 @@ class LocalPocket with ChangeBusAwareLP {
     if (_closed) return;
     _closed = true;
     changeBus.close();
+    typedRegistry.clearHandles();
     try {
       await db.execute('PRAGMA optimize');
       optimizeRanOnClose = true;

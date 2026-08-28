@@ -1,15 +1,31 @@
 /// Store definitions: the `Fields` factory object and the `StoreDef` base
-/// class that compiles descriptors into an engine `CollectionSchema`.
+/// class that compiles descriptors into an database `CollectionSchema`.
 library;
 
 import 'dart:collection';
 
 import 'package:localpocket/localpocket.dart';
 
-import 'field_def.dart';
 import 'schema_helpers.dart' as schema_helpers;
 
-/// A system field descriptor: engine-owned column (`id`/`archived`) exposed
+/// The cross-store mismatch thrown when an identity check finds a foreign
+/// definition — the runtime backstop behind the compile-time phantom types.
+///
+/// [targetKind] names what was touched (`row`, `handle`); [target] is its
+/// store type.
+TypedStoreMismatchError typedStoreMismatch({
+  required Object? owner,
+  required String name,
+  required Object? target,
+  required String targetKind,
+}) =>
+    TypedStoreMismatchError(
+      'Field "$name" belongs to store ${owner.runtimeType}, but this '
+      '$targetKind belongs to $target. Cross-store usage is a compile '
+      'error; a cast has defeated the type system.',
+    );
+
+/// A system field descriptor: database-owned column (`id`/`archived`) exposed
 /// for typed reads, never settable through the typed write path and never
 /// part of the schema `fields` list.
 final class _SystemFieldDef<S, T> extends FieldDef<S, T> {
@@ -61,7 +77,7 @@ final class Fields<S> {
   }
 
   /// Declares an optional boolean field. There is deliberately no
-  /// `encrypted` parameter — the engine's `Field.bool` does not support it.
+  /// `encrypted` parameter — the database's `Field.bool` does not support it.
   BoolFieldOpt<S> boolean(String name) {
     final fd = BoolFieldOpt<S>(_owner, name);
     _created.add(fd);
@@ -77,7 +93,7 @@ final class Fields<S> {
   }
 
   /// Declares an optional date-time field (logical type [DateTime], UTC
-  /// epoch milliseconds on the wire; same engine column as [date]).
+  /// epoch milliseconds on the wire; same database column as [date]).
   DateTimeFieldOpt<S> dateTime(String name) {
     final fd = DateTimeFieldOpt<S>(_owner, name);
     _created.add(fd);
@@ -88,7 +104,7 @@ final class Fields<S> {
   ///
   /// The default wire codec is `E.name` / name-based decoding; [wire]
   /// overrides the wire string per value (unmapped values fall back to
-  /// `.name`). The engine's `Field.enumValue` receives the wire strings.
+  /// `.name`). the database's `Field.enumValue` receives the wire strings.
   EnumFieldOpt<S, E> enumOf<E extends Enum>(
     String name,
     List<E> values, {
@@ -100,7 +116,7 @@ final class Fields<S> {
   }
 
   /// Declares a JSON-object field (`Map<String, Object?>`, optional). There
-  /// is no `.req()` — the engine's `Field.json` has no `required`.
+  /// is no `.req()` — the database's `Field.json` has no `required`.
   JsonField<S> json(String name, {bool encrypted = false}) {
     final fd = JsonField<S>(_owner, name, encrypted: encrypted);
     _created.add(fd);
@@ -108,7 +124,7 @@ final class Fields<S> {
   }
 
   /// Declares a JSON-array field (`List<T>`, optional). There is no
-  /// `.req()` — the engine's `Field.jsonList` has no `required`.
+  /// `.req()` — the database's `Field.jsonList` has no `required`.
   JsonListField<S, T> jsonList<T>(String name, {bool encrypted = false}) {
     final fd = JsonListField<S, T>(_owner, name, encrypted: encrypted);
     _created.add(fd);
@@ -116,7 +132,7 @@ final class Fields<S> {
   }
 
   /// Declares a reference field (a record id, optional). There is no
-  /// `.req()` — the engine's `Field.ref` has no `required`.
+  /// `.req()` — the database's `Field.ref` has no `required`.
   RefField<S> ref(String name, {required String to, bool enforceFk = false}) {
     final fd = RefField<S>(_owner, name, to: to, enforceFk: enforceFk);
     _created.add(fd);
@@ -152,10 +168,8 @@ final class Fields<S> {
 /// `instance` has settled, so every file reaches the same definition —
 /// and the same typed descriptor objects — through `Tasks.title` with
 /// zero plumbing. The private constructor makes a second instance
-/// unconstructible outside the class; the name-keyed
-/// [TypedStoreRegistry] enforces uniqueness by **reference identity** at
-/// bind time as the backstop for any definition that ignores the
-/// convention.
+/// unconstructible outside the class; binding a second instance under a
+/// used name throws [TypedStoreMismatchError].
 ///
 /// [fields] is the single, explicit, ordered registry of user fields: it
 /// *references* the descriptor objects — it never restates their metadata —
@@ -186,13 +200,12 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// member initialized through [schema].
   List<FieldDef<S, Object?>> get fields;
 
-  /// Builds an index for this store from its field descriptors.
+  /// Builds an index for this store from its field descriptors — the typed
+  /// twin of a raw [IndexSpec], with column names derived from the
+  /// descriptors instead of hand-typed strings.
   ///
   /// The receiver fixes the owner type [S], so a foreign descriptor is an
-  /// analysis error. Use the top-level `indexSpec` helper from
-  /// `schema_helpers.dart` outside a [StoreDef]. When a list combines
-  /// different descriptor subtypes, use an explicit list type such as
-  /// `indexSpec(<FieldDef<S, Object?>>[first, second])`.
+  /// analysis error. Outside a [StoreDef] use the top-level `indexSpec`.
   IndexSpec indexSpec(
     List<FieldDef<S, Object?>> fields, {
     bool unique = false,
@@ -200,13 +213,12 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   }) =>
       schema_helpers.indexSpec<S>(fields, unique: unique, scope: scope);
 
-  /// Builds an FTS declaration for this store from its field descriptors.
+  /// Builds an FTS declaration for this store from its field descriptors —
+  /// the typed twin of a raw [FtsSpec], with field names derived from the
+  /// descriptors. Named `ftsSpec` because this class's FTS getter already
+  /// occupies the `fts` name.
   ///
-  /// The receiver fixes the owner type [S], so a foreign descriptor is an
-  /// analysis error. Use the top-level `ftsSpec` helper from
-  /// `schema_helpers.dart` outside a [StoreDef]. It is named `ftsSpec`
-  /// rather than `fts` because that name is already occupied by this class's
-  /// FTS getter.
+  /// Outside a [StoreDef] use the top-level `ftsSpec`.
   FtsSpec ftsSpec(
     List<FieldDef<S, Object?>> fields, {
     bool fuzzy = false,
@@ -214,15 +226,15 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   }) =>
       schema_helpers.ftsSpec<S>(fields, fuzzy: fuzzy, normalize: normalize);
 
-  /// Schema indexes, forwarded verbatim to the engine.
+  /// Schema indexes, forwarded verbatim to the database.
   ///
   /// Prefer the typed [indexSpec] helper so column names come from this store's
   /// field descriptors. Raw [IndexSpec] values remain supported for dynamic
-  /// declarations and engine-boundary schemas. Helper-based declarations are
+  /// declarations and boundary schemas. Helper-based declarations are
   /// non-const because descriptors are runtime objects.
   List<IndexSpec> get indexes => const [];
 
-  /// Optional FTS5 configuration, forwarded verbatim to the engine.
+  /// Optional FTS5 configuration, forwarded verbatim to the database.
   ///
   /// Prefer [ftsSpec] to derive FTS field names from this store's descriptors.
   /// The helper is intentionally named `ftsSpec`, not `fts`, because this
@@ -230,45 +242,45 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// supported, and helper-based declarations are non-const.
   FtsSpec? get fts => null;
 
-  /// Forward store migrations, forwarded verbatim to the engine.
+  /// Forward store migrations, forwarded verbatim to the database.
   List<StoreMigration> get migrations => const [];
 
-  /// Conflict resolution policy; `null` means the engine's default
+  /// Conflict resolution policy; `null` means the database's default
   /// `ConflictPolicy()`.
   ConflictPolicy? get conflictPolicy => null;
 
   /// Lazy document-format migrations keyed by target version, forwarded
-  /// verbatim to the engine.
+  /// verbatim to the database.
   Map<int, DocumentMigration> get documentMigrations => const {};
 
   /// Optional application-level validation callback, forwarded verbatim to
-  /// the engine.
+  /// the database.
   List<String> Function(Map<String, Object?> record)? get validator => null;
 
   /// Whether archived records that never existed remotely stay archived
   /// locally (soft archive) instead of vanishing on [Collection.archive].
   ///
-  /// The engine drops archived rows whose server-side existence was never
+  /// the database drops archived rows whose server-side existence was never
   /// confirmed — there is no network operation to record. Override this to
   /// keep such rows locally; forward-verbatim like every other schema extra.
   bool get keepUnsyncedArchives => false;
 
   /// Whether remote file references on this store should be prefetched
   /// during sync pulls. Forwarded verbatim like every other schema extra;
-  /// engine default is false.
+  /// database default is false.
   bool get prefetchFiles => false;
 
-  /// The system `id` descriptor (engine-owned record id column). Readable
+  /// The system `id` descriptor (database-owned record id column). Readable
   /// and queryable, never settable through the typed write path.
   late final FieldDef<S, String> id =
       _SystemFieldDef<S, String>(this as S, 'id');
 
-  /// The system `archived` descriptor (engine-owned archive flag). Readable
+  /// The system `archived` descriptor (database-owned archive flag). Readable
   /// and queryable; `archive()`/`restore()` own that state transition.
   late final FieldDef<S, bool> archived =
       _SystemFieldDef<S, bool>(this as S, 'archived');
 
-  /// The compiled engine schema, memoized: repeated reads return the
+  /// The compiled database schema, memoized: repeated reads return the
   /// identical instance. Compilation forces [fields] first (deterministic
   /// column order), runs [verify], then maps each descriptor through its
   /// [FieldDef.toField].
@@ -292,7 +304,7 @@ abstract base class StoreDef<S extends StoreDef<S>> {
     );
   }
 
-  /// Verifies that [registered] is exactly the engine schema compiled by
+  /// Verifies that [registered] is exactly the database schema compiled by
   /// this definition. A typed handle must never interpret a same-name raw
   /// schema with different fields, constraints, codecs, or versions.
   void verifyRegisteredSchema(CollectionSchema<Object?> registered) {
@@ -317,7 +329,7 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// - a **foreign descriptor** whose [FieldDef.owner] is not this store;
   /// - a **duplicate column name**.
   ///
-  /// Reserved-name and identifier checks stay with the engine
+  /// Reserved-name and identifier checks stay with the database
   /// (`DdlCompiler`/`Field.validateName`) and fire unchanged at
   /// registration; the nullability guard (`required: true` + nullable `T`)
   /// fires at descriptor construction, before [verify] can observe it.

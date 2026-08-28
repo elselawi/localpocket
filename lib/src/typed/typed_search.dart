@@ -1,14 +1,12 @@
-/// Typed full-text search results over the engine's `SearchBuilder`.
+/// Typed full-text search results.
 ///
-/// Search compilation and execution remain engine-owned. The typed layer
-/// wraps `SearchResult` metadata and provides an explicit `fetch()` point read
-/// on each hit.
+/// Search compilation and execution stay with the database. The typed layer
+/// wraps the hit metadata and provides an explicit `fetch()` point read on
+/// each hit. The single entry point is `TypedCollection.search(term,
+/// limit: ..., ...)` — there is no search builder in the typed layer.
 library;
 
 import 'package:localpocket/localpocket.dart';
-
-import 'store_def.dart';
-import 'typed_row.dart';
 
 /// Delegating search surface implemented by native and web facade adapters.
 abstract interface class TypedSearchSurface {
@@ -31,7 +29,7 @@ abstract interface class TypedSearchSurface {
   (String, List<Object?>) debugCompile();
 }
 
-/// A typed FTS hit: the engine's id/score plus an explicit point-read.
+/// A typed FTS hit: the database's id/score plus an explicit point-read.
 final class TypedSearchHit<S extends StoreDef<S>> {
   TypedSearchHit._(this.id, this.score, this._fetch);
 
@@ -48,44 +46,30 @@ final class TypedSearchHit<S extends StoreDef<S>> {
   Future<TypedRow<S>?> fetch() => _fetch(id);
 }
 
-/// Typed delegating FTS builder for store [S].
-final class TypedSearch<S extends StoreDef<S>> {
-  /// Creates a typed search over [surface].
-  TypedSearch(this._surface, this._fetchOne);
-
-  final TypedSearchSurface _surface;
-  final Future<TypedRow<S>?> Function(String id) _fetchOne;
-
-  /// Limits ranked matches.
-  TypedSearch<S> limit(int n) {
-    _surface.limit(n);
-    return this;
+/// Runs one typed FTS search through [surface] — the implementation behind
+/// `TypedCollection.search`.
+Future<List<TypedSearchHit<S>>> executeSearch<S extends StoreDef<S>>(
+  TypedSearchSurface surface,
+  Future<TypedRow<S>?> Function(String id) fetchOne, {
+  int? limit,
+  bool all = false,
+  bool includeArchived = false,
+  bool includeHidden = false,
+}) async {
+  if (limit != null) {
+    surface.limit(limit);
   }
-
-  /// Returns all ranked matches.
-  TypedSearch<S> all() {
-    _surface.all();
-    return this;
+  if (all) {
+    surface.all();
   }
-
-  /// Includes archived matches.
-  TypedSearch<S> includeArchived() {
-    _surface.includeArchived();
-    return this;
+  if (includeArchived) {
+    surface.includeArchived();
   }
-
-  /// Includes sync-hidden matches.
-  TypedSearch<S> includeHidden() {
-    _surface.includeHidden();
-    return this;
+  if (includeHidden) {
+    surface.includeHidden();
   }
-
-  /// Executes the search and wraps each engine [SearchResult].
-  Future<List<TypedSearchHit<S>>> fetch() async => <TypedSearchHit<S>>[
-        for (final hit in await _surface.fetch())
-          TypedSearchHit<S>._(hit.id, hit.score, _fetchOne),
-      ];
-
-  /// Exposes the engine search compiler verbatim for parity tests.
-  (String, List<Object?>) debugCompile() => _surface.debugCompile();
+  return <TypedSearchHit<S>>[
+    for (final hit in await surface.fetch())
+      TypedSearchHit<S>._(hit.id, hit.score, fetchOne),
+  ];
 }

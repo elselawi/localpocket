@@ -9,7 +9,6 @@
 library;
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/typed.dart';
 import 'package:test/test.dart';
 
 import 'support/tasks.dart';

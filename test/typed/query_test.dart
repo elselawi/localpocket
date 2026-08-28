@@ -4,7 +4,6 @@ library;
 import 'dart:async';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/typed.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
@@ -48,37 +47,40 @@ void expectCompiledEqual(
   expect(actual.$2, expected.$2);
 }
 
-void expectCompileParity(TypedQuery<Tasks> typed, QueryBuilder raw) {
-  expectCompiledEqual(typed.debugCompile(), raw.debugCompile());
+void expectCompileParity((String, List<Object?>) typed, QueryBuilder raw) {
+  expectCompiledEqual(typed, raw.debugCompile());
 }
 
 Future<void> seedTasks(LocalPocket db) async {
   final tasks = db.store(Tasks.instance);
-  await tasks.putAll(<void Function(Draft<Tasks>)>[
-    (w) => w
-      ..setId(rid('qt', 1))
-      ..set(Tasks.title)('Ship alpha')
-      ..set(Tasks.priority)(Priority.high)
-      ..set(Tasks.role)(Role.admin)
-      ..set(Tasks.done)(false)
-      ..set(Tasks.dueDay)(10)
-      ..set(Tasks.dueAt)(DateTime.utc(2026, 1, 2))
-      ..set(Tasks.estimate)(2.5)
-      ..set(Tasks.count)(2),
-    (w) => w
-      ..setId(rid('qt', 2))
-      ..set(Tasks.title)('Ship beta')
-      ..set(Tasks.priority)(Priority.low)
-      ..set(Tasks.role)(Role.member)
-      ..set(Tasks.done)(true)
-      ..set(Tasks.dueDay)(20)
-      ..set(Tasks.dueAt)(DateTime.utc(2026, 1, 3))
-      ..set(Tasks.estimate)(4)
-      ..set(Tasks.count)(4),
-    (w) => w
-      ..setId(rid('qt', 3))
-      ..set(Tasks.title)('Review gamma')
-      ..set(Tasks.done)(false),
+  await tasks.putAll([
+    [
+      Writes.id(rid('qt', 1)),
+      Tasks.title.set('Ship alpha'),
+      Tasks.priority.set(Priority.high),
+      Tasks.role.set(Role.admin),
+      Tasks.done.set(false),
+      Tasks.dueDay.set(10),
+      Tasks.dueAt.set(DateTime.utc(2026, 1, 2)),
+      Tasks.estimate.set(2.5),
+      Tasks.count.set(2),
+    ],
+    [
+      Writes.id(rid('qt', 2)),
+      Tasks.title.set('Ship beta'),
+      Tasks.priority.set(Priority.low),
+      Tasks.role.set(Role.member),
+      Tasks.done.set(true),
+      Tasks.dueDay.set(20),
+      Tasks.dueAt.set(DateTime.utc(2026, 1, 3)),
+      Tasks.estimate.set(4),
+      Tasks.count.set(4),
+    ],
+    [
+      Writes.id(rid('qt', 3)),
+      Tasks.title.set('Review gamma'),
+      Tasks.done.set(false),
+    ],
   ]);
 }
 
@@ -94,22 +96,23 @@ void main() {
 
     test('cases 92–99 and 113: predicate/order matrix matches raw SQL+args',
         () {
-      final typed = db
-          .store(Tasks.instance)
-          .query()
-          .where(Tasks.done)(eq: false)
-          .where(Tasks.role)(inValues: <Role>[Role.admin, Role.member])
-          .whereCond(Tasks.estimate.gt(2))
-          .whereCond(Tasks.title.startsWith('Ship'))
-          .where(Tasks.dueDay)(between: (5, 30))
-          .whereCond(Tasks.count.lt(9))
-          .whereCond(Tasks.dueDay.gte(10))
-          .where(Tasks.priority)(isNotNull: true)
-          .where(Tasks.ownerId)(isNull: true)
-          .where(Tasks.role)(eq: Role.admin)
-          .whereCond(Tasks.dueAt.gt(DateTime.utc(2026)))
-          .orderBy(Tasks.dueAt, desc: true)
-          .limit(20);
+      final typed = db.store(Tasks.instance).debugCompile(
+        where: [
+          Tasks.done.eq(false),
+          Tasks.role.inValues(<Role>[Role.admin, Role.member]),
+          Tasks.estimate.gt(2),
+          Tasks.title.startsWith('Ship'),
+          Tasks.dueDay.between(5, 30),
+          Tasks.count.lt(9),
+          Tasks.dueDay.gte(10),
+          Tasks.priority.isNotNull(),
+          Tasks.ownerId.isNull(),
+          Tasks.role.eq(Role.admin),
+          Tasks.dueAt.gt(DateTime.utc(2026)),
+        ],
+        orderBy: [Tasks.dueAt.desc],
+        limit: 20,
+      );
       final raw = db
           .collection('tasks')
           .query()
@@ -127,19 +130,16 @@ void main() {
           .orderBy('dueAt', desc: true)
           .limit(20);
       expectCompileParity(typed, raw);
-      expect(typed.debugCompile().$2, contains('admin'));
-      expect(typed.debugCompile().$2,
-          contains(DateTime.utc(2026).millisecondsSinceEpoch));
+      expect(typed.$2, contains('admin'));
+      expect(typed.$2, contains(DateTime.utc(2026).millisecondsSinceEpoch));
     });
 
     test('case 100: select wraps projection and rejects unselected reads',
         () async {
-      final page = await db
-          .store(Tasks.instance)
-          .query()
-          .select(<FieldDef<Tasks, Object?>>[Tasks.title, Tasks.done])
-          .limit(1)
-          .fetch();
+      final page = await db.store(Tasks.instance).query(
+        select: <FieldDef<Tasks, Object?>>[Tasks.title, Tasks.done],
+        limit: 1,
+      );
       expect(page.items.single(Tasks.title), isNotEmpty);
       expect(page.items.single(Tasks.done), isA<bool>());
       expect(
@@ -150,47 +150,49 @@ void main() {
 
     test('case 101: limit/all and visibility flags compile like raw', () {
       expectCompileParity(
-        db
-            .store(Tasks.instance)
-            .query()
-            .includeArchived()
-            .includeHidden()
-            .all(),
+        db.store(Tasks.instance).debugCompile(
+              includeArchived: true,
+              includeHidden: true,
+              all: true,
+            ),
         db.collection('tasks').query().includeArchived().includeHidden().all(),
       );
       expectCompileParity(
-        db.store(Tasks.instance).query().limit(3),
+        db.store(Tasks.instance).debugCompile(limit: 3),
         db.collection('tasks').query().limit(3),
       );
     });
 
     test('cases 102–103: typed page/keyset cursor metadata is unchanged',
         () async {
-      final typed =
-          db.store(Tasks.instance).query().orderBy(Tasks.title).limit(1);
       final raw = db.collection('tasks').query().orderBy('title').limit(1);
-      final TypedPage<Tasks> typedFirst = await typed.fetch();
+      final TypedPage<Tasks> typedFirst = await db
+          .store(Tasks.instance)
+          .query(orderBy: [Tasks.title.asc], limit: 1);
       final rawFirst = await raw.fetch();
       expect(typedFirst.items.single.id, rawFirst.items.single['id']);
       expect(typedFirst.hasMore, rawFirst.hasMore);
       expect(typedFirst.nextCursor, rawFirst.nextCursor);
-      final typedSecond = await typed.keysetAfter(typedFirst.nextCursor!);
+      final typedSecond = await db.store(Tasks.instance).queryAfter(
+            typedFirst.nextCursor!,
+            orderBy: [Tasks.title.asc],
+            limit: 1,
+          );
       final rawSecond = await raw.keysetAfter(rawFirst.nextCursor!);
       expect(typedSecond.items.single.id, rawSecond.items.single['id']);
       expect(
-        () => db
-            .store(Tasks.instance)
-            .query()
-            .orderBy(Tasks.dueDay)
-            .limit(1)
-            .keysetAfter(typedFirst.nextCursor!),
+        () => db.store(Tasks.instance).queryAfter(
+              typedFirst.nextCursor!,
+              orderBy: [Tasks.dueDay.asc],
+              limit: 1,
+            ),
         throwsA(isA<StaleCursorError>()),
       );
     });
 
     test('cases 104–107: count/distinct/aggregates/ids/explain delegate',
         () async {
-      final typed = db.store(Tasks.instance).query().all();
+      final typed = db.store(Tasks.instance);
       final raw = db.collection('tasks').query().all();
       expect(await typed.count(), await raw.count());
       expect(await typed.countDistinct(Tasks.priority),
@@ -201,30 +203,32 @@ void main() {
       expect(await typed.min(Tasks.estimate), await raw.min('estimate'));
       expect(await typed.max(Tasks.estimate), await raw.max('estimate'));
       expect(await typed.avg(Tasks.estimate), await raw.avg('estimate'));
-      expect(await typed.ids(), await raw.ids());
-      expect(await typed.explain(), await raw.explain());
+      expect(await typed.ids(all: true), await raw.ids());
+      expect(await typed.explain(all: true), await raw.explain());
     });
 
-    test('case 108: typed orWhere equality group compiles like raw', () {
-      final typed = db.store(Tasks.instance).query().orWhere(<Cond<Tasks>>[
-        eqCond(Tasks.role, Role.admin),
-        eqCond(Tasks.done, false),
-      ]).limit(5);
-      final raw = db.collection('tasks').query().orWhere(<Map<String, Object?>>[
-        <String, Object?>{'role': 'admin'},
-        <String, Object?>{'done': false},
-      ]).limit(5);
-      expectCompileParity(typed, raw);
+    test('case 108: typed anyOf equality group compiles like raw', () {
+      expectCompileParity(
+        db.store(Tasks.instance).debugCompile(
+          anyOf: <EqCond<Tasks>>[
+            Tasks.role.eq(Role.admin),
+            Tasks.done.eq(false),
+          ],
+          limit: 5,
+        ),
+        db.collection('tasks').query().orWhere(<Map<String, Object?>>[
+          <String, Object?>{'role': 'admin'},
+          <String, Object?>{'done': false},
+        ]).limit(5),
+      );
     });
 
-    test('case 109: encrypted predicate rejection is engine-owned', () {
-      expect(
-        () => db
-            .store(SecretNotes.instance)
-            .query()
-            .where(SecretNotes.note)(eq: 'x')
-            .limit(1)
-            .debugCompile(),
+    test('case 109: encrypted predicate rejection is engine-owned', () async {
+      await expectLater(
+        db.store(SecretNotes.instance).query(
+          where: [SecretNotes.note.eq('x')],
+          limit: 1,
+        ),
         throwsA(isA<SchemaRegistrationError>()),
       );
     });
@@ -233,12 +237,13 @@ void main() {
         () {
       final needle = r'a%_\b';
       expectCompileParity(
-        db
-            .store(Tasks.instance)
-            .query()
-            .whereCond(Tasks.title.startsWith(needle))
-            .whereCond(Tasks.title.contains(needle))
-            .limit(2),
+        db.store(Tasks.instance).debugCompile(
+          where: [
+            Tasks.title.startsWith(needle),
+            Tasks.title.contains(needle),
+          ],
+          limit: 2,
+        ),
         db
             .collection('tasks')
             .query()
@@ -247,50 +252,45 @@ void main() {
             .limit(2),
       );
       expectCompileParity(
-        db.store(Tasks.instance).query().limit(2),
+        db.store(Tasks.instance).debugCompile(limit: 2),
         db.collection('tasks').query().limit(2),
       );
+      // eq(null) is the IS NULL shorthand.
       expectCompileParity(
-        db
-            .store(Tasks.instance)
-            .query()
-            .where(Tasks.done)(eq: null, isNull: true)
-            .limit(2),
-        db
-            .collection('tasks')
-            .query()
-            .where('done', eq: null, isNull: true)
-            .limit(2),
+        db.store(Tasks.instance).debugCompile(
+          where: [Tasks.done.eq(null)],
+          limit: 2,
+        ),
+        db.collection('tasks').query().where('done', isNull: true).limit(2),
       );
-      expectCompileParity(
-        db
-            .store(Tasks.instance)
-            .query()
-            .where(Tasks.role)(inValues: <Role>[])
-            .limit(2),
-        db
-            .collection('tasks')
-            .query()
-            .where('role', inValues: <Object?>[]).limit(2),
-      );
+      // An empty IN list is rejected at construction on the typed side;
+      // the raw builder's `IN ()` fragment is the raw API's own quirk.
     });
 
     test('cases 118–122: cursor/distinct/aggregate/null ordering edges',
         () async {
-      final typedShape =
-          db.store(Tasks.instance).query().orderBy(Tasks.dueDay).limit(1);
-      final first = await typedShape.fetch();
+      final first = await db
+          .store(Tasks.instance)
+          .query(orderBy: [Tasks.dueDay.asc], limit: 1);
       final rawSecond = await db
           .collection('tasks')
           .query()
           .orderBy('dueDay')
           .limit(1)
           .keysetAfter(first.nextCursor!);
-      expect((await typedShape.keysetAfter(first.nextCursor!)).items.single.id,
+      expect(
+          (await db.store(Tasks.instance).queryAfter(
+                    first.nextCursor!,
+                    orderBy: [Tasks.dueDay.asc],
+                    limit: 1,
+                  ))
+              .items
+              .single
+              .id,
           rawSecond.items.single['id']);
 
       final typedDistinct =
-          await db.store(Tasks.instance).query().all().distinct(Tasks.priority);
+          await db.store(Tasks.instance).distinct(Tasks.priority);
       final rawDistinct =
           await db.collection('tasks').query().all().distinct('priority');
       expect(typedDistinct.whereType<Priority>().map((e) => e.name).toSet(),
@@ -298,12 +298,10 @@ void main() {
       expect(typedDistinct, contains(null));
 
       expect(
-        await db
-            .store(Tasks.instance)
-            .query()
-            .where(Tasks.title)(eq: 'missing')
-            .all()
-            .sum(Tasks.estimate),
+        await db.store(Tasks.instance).sum(
+          Tasks.estimate,
+          where: [Tasks.title.eq('missing')],
+        ),
         await db
             .collection('tasks')
             .query()
@@ -312,12 +310,10 @@ void main() {
             .sum('estimate'),
       );
       expect(
-        await db
-            .store(Tasks.instance)
-            .query()
-            .where(Tasks.estimate)(isNull: true)
-            .all()
-            .sum(Tasks.estimate),
+        await db.store(Tasks.instance).sum(
+          Tasks.estimate,
+          where: [Tasks.estimate.isNull()],
+        ),
         await db
             .collection('tasks')
             .query()
@@ -327,14 +323,171 @@ void main() {
       );
       final typedOrdered = await db
           .store(Tasks.instance)
-          .query()
-          .orderBy(Tasks.dueDay)
-          .all()
-          .fetch();
+          .query(orderBy: [Tasks.dueDay.asc], all: true);
       final rawOrdered =
           await db.collection('tasks').query().orderBy('dueDay').all().fetch();
       expect(typedOrdered.items.map((e) => e.id),
           rawOrdered.items.map((e) => e['id']));
+    });
+  });
+
+  group('universal condition family (descriptor-side grammar)', () {
+    late LocalPocket db;
+
+    setUp(() async {
+      db = await openTyped();
+      await seedTasks(db);
+    });
+    tearDown(() => db.close());
+
+    test('v3: descriptor conditions compile exactly like the raw builder', () {
+      final tasks = db.store(Tasks.instance);
+      expectCompileParity(
+        tasks.debugCompile(where: [Tasks.done.eq(false)], limit: 2),
+        db.collection('tasks').query().where('done', eq: false).limit(2),
+      );
+      expectCompileParity(
+        tasks.debugCompile(where: [Tasks.done.neq(true)], limit: 2),
+        db.collection('tasks').query().where('done', neq: true).limit(2),
+      );
+      expectCompileParity(
+        tasks.debugCompile(
+          where: [
+            Tasks.role.inValues(<Role>[Role.admin, Role.member])
+          ],
+          limit: 2,
+        ),
+        db
+            .collection('tasks')
+            .query()
+            .where('role', inValues: <Object?>['admin', 'member']).limit(2),
+      );
+      expectCompileParity(
+        tasks.debugCompile(where: [Tasks.dueDay.between(5, 30)], limit: 2),
+        db
+            .collection('tasks')
+            .query()
+            .where('dueDay', between: (5, 30)).limit(2),
+      );
+      expectCompileParity(
+        tasks.debugCompile(where: [Tasks.estimate.isNull()], limit: 2),
+        db.collection('tasks').query().where('estimate', isNull: true).limit(2),
+      );
+      expectCompileParity(
+        tasks.debugCompile(where: [Tasks.estimate.isNotNull()], limit: 2),
+        db
+            .collection('tasks')
+            .query()
+            .where('estimate', isNotNull: true)
+            .limit(2),
+      );
+      expectCompileParity(
+        tasks.debugCompile(where: [Tasks.count.lte(9)], limit: 2),
+        db.collection('tasks').query().where('count', lte: 9).limit(2),
+      );
+      expectCompileParity(
+        tasks.debugCompile(where: [Tasks.title.contains('hip')], limit: 2),
+        db.collection('tasks').query().where('title', contains: 'hip').limit(2),
+      );
+    });
+
+    test('v3: eq(null) is IS NULL and neq(null) is IS NOT NULL', () {
+      final tasks = db.store(Tasks.instance);
+      expectCompileParity(
+        tasks.debugCompile(where: [Tasks.estimate.eq(null)], limit: 2),
+        db.collection('tasks').query().where('estimate', isNull: true).limit(2),
+      );
+      expectCompileParity(
+        tasks.debugCompile(where: [Tasks.estimate.neq(null)], limit: 2),
+        db
+            .collection('tasks')
+            .query()
+            .where('estimate', isNotNull: true)
+            .limit(2),
+      );
+    });
+
+    test('v3: routed conditions actually filter (the silent no-op fix)',
+        () async {
+      final tasks = db.store(Tasks.instance);
+      expect(
+        await tasks.count(where: [Tasks.done.neq(true)]),
+        2,
+      ); // qt1 and qt3 are not done.
+      expect(
+        await tasks.count(
+          anyOf: [Tasks.role.eq(Role.admin), Tasks.done.eq(true)],
+        ),
+        2, // qt1 is admin, qt2 is done.
+      );
+      expect(
+        await tasks.count(where: [Tasks.estimate.isNull()]),
+        1, // only qt3 omits estimate.
+      );
+    });
+
+    test('v3: anyOf accepts only EqCond values and compiles like raw', () {
+      final List<EqCond<Tasks>> alternatives = [
+        Tasks.role.eq(Role.admin),
+        Tasks.done.eq(true),
+      ];
+      final typed = db.store(Tasks.instance).debugCompile(
+            anyOf: alternatives,
+            limit: 5,
+          );
+      expect(typed.$1, contains(' OR '));
+      expectCompileParity(
+        typed,
+        db.collection('tasks').query().orWhere(<Map<String, Object?>>[
+          <String, Object?>{'role': 'admin'},
+          <String, Object?>{'done': true},
+        ]).limit(5),
+      );
+    });
+
+    test('v3: the named-argument query entry compiles like the raw builder',
+        () {
+      final List<Cond<Tasks>> where = [
+        Tasks.done.eq(false),
+        Tasks.priority.eq(Priority.high),
+        Tasks.count.gt(1),
+      ];
+      final List<OrderTerm<Tasks>> order = [
+        Tasks.dueDay.desc,
+        Tasks.title.asc,
+      ];
+      expectCompileParity(
+        db.store(Tasks.instance).debugCompile(
+              where: where,
+              anyOf: [Tasks.title.eq('Ship alpha'), Tasks.role.eq(Role.admin)],
+              orderBy: order,
+              limit: 10,
+            ),
+        db
+            .collection('tasks')
+            .query()
+            .where('done', eq: false)
+            .where('priority', eq: 'high')
+            .where('count', gt: 1)
+            .orWhere(<Map<String, Object?>>[
+              <String, Object?>{'title': 'Ship alpha'},
+              <String, Object?>{'role': 'admin'},
+            ])
+            .orderBy('dueDay', desc: true)
+            .orderBy('title')
+            .limit(10),
+      );
+    });
+
+    test('v3: inValues rejects an empty list at construction', () {
+      expect(() => Tasks.role.inValues(const <Role>[]), throwsArgumentError);
+    });
+
+    test('v3: an eq(null) alternative cannot enter an OR group', () async {
+      await expectLater(
+        db.store(Tasks.instance).query(anyOf: [Tasks.done.eq(null)]),
+        throwsArgumentError,
+      );
     });
   });
 
@@ -351,9 +504,10 @@ void main() {
       final values = <TypedRow<Tasks>?>[];
       final sub = db.store(Tasks.instance).watchOne(id).listen(values.add);
       addTearDown(sub.cancel);
-      await db.store(Tasks.instance).put((w) => w
-        ..setId(id)
-        ..set(Tasks.title)('watched'));
+      await db.store(Tasks.instance).put([
+        Writes.id(id),
+        Tasks.title.set('watched'),
+      ]);
       await Future<void>.delayed(const Duration(milliseconds: 25));
       await db.store(Tasks.instance).purge(id);
       await Future<void>.delayed(const Duration(milliseconds: 40));
@@ -368,20 +522,17 @@ void main() {
       final emissions = <List<TypedRow<Tasks>>>[];
       final sub = db
           .store(Tasks.instance)
-          .query()
-          .orderBy(Tasks.title)
-          .limit(20)
-          .watch()
-          .listen(emissions.add);
+          .watch(orderBy: [Tasks.title.asc], limit: 20).listen(emissions.add);
       addTearDown(sub.cancel);
       await Future<void>.delayed(const Duration(milliseconds: 25));
       final before = emissions.length;
       await db.transaction((tx) async {
         final tasks = tx.store(Tasks.instance);
         for (var i = 0; i < 3; i++) {
-          await tasks.put((w) => w
-            ..setId(rid('burst', i))
-            ..set(Tasks.title)('burst $i'));
+          await tasks.put([
+            Writes.id(rid('burst', i)),
+            Tasks.title.set('burst $i'),
+          ]);
         }
       });
       await Future<void>.delayed(const Duration(milliseconds: 45));
@@ -395,19 +546,35 @@ void main() {
       final db = await openTyped(includeSearch: true);
       addTearDown(db.close);
       final id = rid('search', 1);
-      await db.store(SearchTasks.instance).put((w) => w
-        ..setId(id)
-        ..set(SearchTasks.title)('ship searchable'));
-      final TypedSearch<SearchTasks> search =
-          db.store(SearchTasks.instance).search('ship').limit(5);
-      final raw = db.collection('searchtasks').search('ship').limit(5);
-      expectCompiledEqual(search.debugCompile(), raw.debugCompile());
-      final TypedSearchHit<SearchTasks> hit = (await search.fetch()).single;
+      await db.store(SearchTasks.instance).put([
+        Writes.id(id),
+        SearchTasks.title.set('ship searchable'),
+      ]);
+      final hits =
+          await db.store(SearchTasks.instance).search('ship', limit: 5);
+      final TypedSearchHit<SearchTasks> hit = hits.single;
       expect(hit.id, id);
       expect(hit.score, isA<double>());
       expect((await hit.fetch())!(SearchTasks.title), 'ship searchable');
       await db.store(SearchTasks.instance).purge(id);
       expect(await hit.fetch(), isNull);
+    });
+
+    test('v3: search returns its hits directly and matches the raw builder',
+        () async {
+      final db = await openTyped(includeSearch: true);
+      addTearDown(db.close);
+      final id = rid('search', 2);
+      await db.store(SearchTasks.instance).put([
+        Writes.id(id),
+        SearchTasks.title.set('ship searchable'),
+      ]);
+      final hits =
+          await db.store(SearchTasks.instance).search('ship', limit: 5);
+      final raw =
+          await db.collection('searchtasks').search('ship').limit(5).fetch();
+      expect(hits.map((h) => h.id), raw.map((r) => r.id));
+      expect(hits.map((h) => h.id), contains(id));
     });
 
     test('case 125: FtsUnavailableError passes through unchanged', () async {

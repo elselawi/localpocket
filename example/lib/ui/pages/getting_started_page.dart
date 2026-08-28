@@ -98,18 +98,18 @@ final tasks = db.store(Tasks.instance);
 ''';
 
   static const _queryCode = '''
-final page = await tasks.query()
-    .where(Tasks.completed)(eq: false)
-    .orderBy(Tasks.priority)
-    .limit(20)
-    .fetch();
+final page = await tasks.query(
+  where: [Tasks.completed.eq(false)],
+  orderBy: [Tasks.priority.asc],
+  limit: 20,
+);
 
 if (page.hasMore) {
-  final next = await tasks.query()
-      .where(Tasks.completed)(eq: false)
-      .orderBy(Tasks.priority)
-      .limit(20)
-      .keysetAfter(page.nextCursor!);
+  final next = await tasks.queryAfter(
+    page.nextCursor!,
+    orderBy: [Tasks.priority.asc],
+    limit: 20,
+  );
 }
 ''';
 }

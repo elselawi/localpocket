@@ -1,14 +1,11 @@
-/// Typed row reads: a view over the engine's decoded logical map.
+/// Typed row reads: a view over the database's decoded logical map.
 library;
 
 import 'package:localpocket/localpocket.dart';
 
-import 'field_def.dart';
-import 'store_def.dart';
-
 /// A typed view over one decoded record.
 ///
-/// Wraps the engine's logical map **by reference** — no copy, no
+/// Wraps the database's logical map **by reference** — no copy, no
 /// revalidation — so reads are one map lookup plus a cast. The row is a
 /// snapshot: fetching it once and reading it repeatedly returns the same
 /// decoded values even if the underlying store changes afterwards.
@@ -72,9 +69,12 @@ final class TypedRow<S extends StoreDef<S>> {
   /// - a field excluded by `select` → [ValidationException] naming it.
   V get<V>(FieldDef<S, V> field) {
     if (!identical(field.owner, def)) {
-      throw TypedStoreMismatchError('Field "${field.name}" belongs to store '
-          '${field.owner.runtimeType}, but this row is a $S. Cross-store '
-          'reads are compile errors; a cast has defeated the type system.');
+      throw typedStoreMismatch(
+        owner: field.owner,
+        name: field.name,
+        target: S,
+        targetKind: 'row',
+      );
     }
     final projected = _projected;
     if (projected != null && !projected.contains(field.name)) {
@@ -88,16 +88,7 @@ final class TypedRow<S extends StoreDef<S>> {
       throw ValidationException('Field "${field.name}" is required.',
           field: field.name);
     }
-    try {
-      return field.decode(raw);
-    } on ValidationException {
-      rethrow;
-    } catch (e) {
-      throw ValidationException(
-          'Field "${field.name}" could not be decoded from its stored '
-          'value: $e',
-          field: field.name);
-    }
+    return decodeStored(field, raw);
   }
 
   T _readSystem<T>(String name) {

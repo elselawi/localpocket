@@ -2,15 +2,13 @@
 /// simultaneously the schema declaration and the compile-time-typed
 /// accessor.
 ///
-/// Each descriptor **wraps** the engine's public `Field` factories — it
-/// never extends `Field` (the engine class has a private constructor).
-/// The engine continues to see plain maps and plain `Field`s; typing lives
+/// Each descriptor **wraps** the database's public `Field` factories — it
+/// never extends `Field` (the database class has a private constructor).
+/// the database continues to see plain maps and plain `Field`s; typing lives
 /// entirely at this consumer-facing boundary.
 library;
 
 import 'package:localpocket/localpocket.dart';
-
-import 'cond.dart';
 
 /// Decodes a raw stored value into a value of type `T`.
 typedef FieldDecodeFn<T> = T Function(Object? raw);
@@ -70,11 +68,54 @@ abstract base class FieldDef<S, T> {
   /// Encodes a value of type [T] into its raw logical-map form.
   Object? encode(T value) => _encode == null ? value : _encode!(value);
 
-  /// Builds the engine [Field] this descriptor maps to.
+  /// Builds the database [Field] this descriptor maps to.
   ///
   /// This is the single place the kind → `Field` factory mapping lives, so
-  /// a descriptor can never disagree with the engine about constraints.
+  /// a descriptor can never disagree with the database about constraints.
   Field toField();
+
+  // ---------------------------------------------------------------------
+  // Universal query family: conditions and order terms are VALUES built
+  // beside the descriptor — this call site is where the field's value type
+  // is enforced. Query entry points accept them as plain named-argument
+  // lists (`TypedCollection.query(where: [...])`) and stay fully typed.
+  // ---------------------------------------------------------------------
+
+  /// `field == value` — also the only condition kind an OR group accepts
+  /// (its static type is [EqCond], so a range condition cannot enter
+  /// `anyOf`).
+  ///
+  /// For an optional field, `eq(null)` reads as SQL `IS NULL` (the typed
+  /// layer routes it there; SQL `= NULL` never matches). On a required
+  /// field the null case is a compile error because the value type is
+  /// non-nullable.
+  EqCond<S> eq(T value) => EqCond<S>(owner, name, encode(value));
+
+  /// `field <> value`.
+  ///
+  /// For an optional field, `neq(null)` reads as SQL `IS NOT NULL`.
+  Cond<S> neq(T value) => Cond<S>(owner, name, 'neq', <Object?>[encode(value)]);
+
+  /// `field IN (values)`. The list must not be empty — the database would
+  /// otherwise emit invalid SQL.
+  Cond<S> inValues(List<T> values) {
+    if (values.isEmpty) {
+      throw ArgumentError.value(values, 'values', 'inValues cannot be empty.');
+    }
+    return Cond<S>(owner, name, 'inValues',
+        <Object?>[for (final value in values) encode(value)]);
+  }
+
+  /// `field BETWEEN a AND b` — inclusive on both ends, matching SQL
+  /// `BETWEEN`. For a half-open window use `gte(a)` with `lt(b)`.
+  Cond<S> between(T a, T b) =>
+      Cond<S>(owner, name, 'between', <Object?>[encode(a), encode(b)]);
+
+  /// Ascending order term for this field.
+  OrderTerm<S> get asc => OrderTerm<S>(this, desc: false);
+
+  /// Descending order term for this field.
+  OrderTerm<S> get desc => OrderTerm<S>(this, desc: true);
 
   /// For an optional descriptor: the required counterpart returned by the
   /// most recent `req()` call, or `null` if `req()` was never called.
@@ -89,11 +130,29 @@ abstract base class FieldDef<S, T> {
   String toString() => 'FieldDef<$T>("$name")';
 }
 
-/// Marker for descriptors whose values are settable through `Draft.set`.
+/// Decodes [raw] through [field] and wraps any failure other than a
+/// [ValidationException] in one naming the field — a corrupt stored value
+/// never surfaces as a bare cast error.
+V decodeStored<V>(FieldDef<Object?, V> field, Object? raw) {
+  try {
+    return field.decode(raw);
+  } on ValidationException {
+    rethrow;
+  } catch (error) {
+    throw ValidationException(
+      'Field "${field.name}" could not be decoded from its stored value: '
+      '$error',
+      field: field.name,
+    );
+  }
+}
+
+/// Marker for descriptors whose values are writable through field-native
+/// writes (`field.set(value)` collected into `put([...])` / `patch(...)`).
 ///
 /// Every user-field descriptor implements this; the system descriptors
 /// (`StoreDef.id`, `StoreDef.archived`) deliberately do not — so
-/// `set(Tasks.instance.id, ...)` is a compile error, while typed reads
+/// `Tasks.instance.id.set(...)` is a compile error, while typed reads
 /// remain available on every [FieldDef].
 abstract base class SettableFieldDef<S, T> implements FieldDef<S, T> {}
 
@@ -103,7 +162,7 @@ abstract interface class NumericFieldDef<S> {
   /// The canonical store definition instance that owns the field.
   S get owner;
 
-  /// The engine field name.
+  /// the database field name.
   String get name;
 }
 
@@ -113,7 +172,7 @@ abstract interface class NumericFieldDef<S> {
 
 /// Optional (nullable [String]) text descriptor.
 base class TextFieldOpt<S> extends FieldDef<S, String?>
-    with TextFieldDef<S, String?>
+    with TextFieldDef<S, String?>, NullableFieldCond<S, String?>
     implements SettableFieldDef<S, String?> {
   /// Creates an optional text descriptor.
   TextFieldOpt(
@@ -177,7 +236,7 @@ final class TextFieldReq<S> extends FieldDef<S, String>
 
 /// Optional (nullable [int]) integer descriptor.
 base class IntFieldOpt<S> extends FieldDef<S, int?>
-    with ComparableFieldDef<S, int?>
+    with ComparableFieldDef<S, int?>, NullableFieldCond<S, int?>
     implements SettableFieldDef<S, int?>, NumericFieldDef<S> {
   /// Creates an optional integer descriptor.
   IntFieldOpt(super.owner, super.name, {this.encrypted = false})
@@ -220,7 +279,7 @@ final class IntFieldReq<S> extends FieldDef<S, int>
 
 /// Optional (nullable [num]) real-number descriptor.
 base class RealFieldOpt<S> extends FieldDef<S, num?>
-    with ComparableFieldDef<S, num?>
+    with ComparableFieldDef<S, num?>, NullableFieldCond<S, num?>
     implements SettableFieldDef<S, num?>, NumericFieldDef<S> {
   /// Creates an optional real descriptor.
   RealFieldOpt(super.owner, super.name, {this.encrypted = false})
@@ -263,10 +322,11 @@ final class RealFieldReq<S> extends FieldDef<S, num>
 
 /// Optional (nullable [bool]) boolean descriptor.
 ///
-/// `schema.boolean` deliberately has **no** `encrypted` parameter: the engine's
+/// `schema.boolean` deliberately has **no** `encrypted` parameter: the database's
 /// `Field.bool` does not support encryption, so the impossible constraint
 /// is unspellable rather than a runtime error.
 base class BoolFieldOpt<S> extends FieldDef<S, bool?>
+    with NullableFieldCond<S, bool?>
     implements SettableFieldDef<S, bool?> {
   /// Creates an optional boolean descriptor.
   BoolFieldOpt(super.owner, super.name) : super(required: false);
@@ -299,11 +359,11 @@ final class BoolFieldReq<S> extends FieldDef<S, bool>
 
 /// Optional (nullable [int]) date descriptor.
 ///
-/// The logical type is epoch milliseconds — the engine's type for
+/// The logical type is epoch milliseconds — the database's type for
 /// `Field.date`. This adapter is pass-through (no `DateTime` conversion);
 /// use `schema.dateTime` for a `DateTime` boundary codec over the same column.
 base class DateFieldOpt<S> extends FieldDef<S, int?>
-    with ComparableFieldDef<S, int?>
+    with ComparableFieldDef<S, int?>, NullableFieldCond<S, int?>
     implements SettableFieldDef<S, int?>, NumericFieldDef<S> {
   /// Creates an optional date descriptor.
   DateFieldOpt(super.owner, super.name) : super(required: false);
@@ -335,6 +395,25 @@ final class DateFieldReq<S> extends FieldDef<S, int>
 // dateTime
 // ---------------------------------------------------------------------------
 
+/// Shared UTC boundary codec for the date-time descriptor pair. Decode
+/// produces an `isUtc: true` value; encode converts through
+/// [DateTime.toUtc] before extracting epoch milliseconds, so the two
+/// adapters are interchangeable on the wire over the same column.
+DateTime? _decodeUtcOpt(String name, Object? raw) =>
+    raw == null ? null : _decodeUtcReq(name, raw);
+
+DateTime _decodeUtcReq(String name, Object? raw) {
+  if (raw is! int) {
+    throw ValidationException(
+      'Field "$name" requires an epoch-milliseconds integer value.',
+      field: name,
+    );
+  }
+  return DateTime.fromMillisecondsSinceEpoch(raw, isUtc: true);
+}
+
+Object? _encodeUtc(DateTime? value) => value?.toUtc().millisecondsSinceEpoch;
+
 /// Optional (nullable [DateTime]) date-time descriptor.
 ///
 /// Maps to the same `Field.date` column as [DateFieldOpt] — only the
@@ -343,22 +422,15 @@ final class DateFieldReq<S> extends FieldDef<S, int>
 /// [DateTime.toUtc] before extracting epoch milliseconds, so the two
 /// adapters are interchangeable on the wire over the same column.
 base class DateTimeFieldOpt<S> extends FieldDef<S, DateTime?>
-    with ComparableFieldDef<S, DateTime?>
+    with ComparableFieldDef<S, DateTime?>, NullableFieldCond<S, DateTime?>
     implements SettableFieldDef<S, DateTime?> {
   /// Creates an optional date-time descriptor.
   DateTimeFieldOpt(super.owner, super.name)
       : super(
           required: false,
-          decode: _decodeUtc,
+          decode: (raw) => _decodeUtcOpt(name, raw),
           encode: _encodeUtc,
         );
-
-  static DateTime? _decodeUtc(Object? raw) => raw == null
-      ? null
-      : DateTime.fromMillisecondsSinceEpoch(raw as int, isUtc: true);
-
-  static Object? _encodeUtc(DateTime? value) =>
-      value?.toUtc().millisecondsSinceEpoch;
 
   DateTimeFieldReq<S>? _req;
 
@@ -380,18 +452,10 @@ final class DateTimeFieldReq<S> extends FieldDef<S, DateTime>
   DateTimeFieldReq(super.owner, super.name) : super(required: true);
 
   @override
-  DateTime decode(Object? raw) {
-    if (raw is! int) {
-      throw ValidationException(
-        'Field "$name" requires an epoch-milliseconds integer value.',
-        field: name,
-      );
-    }
-    return DateTime.fromMillisecondsSinceEpoch(raw, isUtc: true);
-  }
+  DateTime decode(Object? raw) => _decodeUtcReq(name, raw);
 
   @override
-  Object? encode(DateTime value) => value.toUtc().millisecondsSinceEpoch;
+  Object? encode(DateTime value) => _encodeUtc(value);
 
   @override
   Field toField() => Field.date(name, required: true);
@@ -401,14 +465,58 @@ final class DateTimeFieldReq<S> extends FieldDef<S, DateTime>
 // enum
 // ---------------------------------------------------------------------------
 
+/// Shared enum codec members for the optional/required enum descriptor
+/// pair: the value snapshot, the wire mapping, and the raw decode.
+base mixin EnumCodec<E extends Enum> {
+  /// The database field name this codec is bound to (from the descriptor).
+  String get name;
+
+  /// The accepted enum values. This snapshot cannot diverge after schema
+  /// compilation even if the caller later mutates its source list.
+  abstract final List<E> values;
+
+  /// Per-value wire-string overrides; unmapped values use [Enum.name].
+  abstract final Map<E, String> wire;
+
+  /// The wire string for [value].
+  String wireOf(E value) => wire[value] ?? value.name;
+
+  /// Shared raw decode: `null` passes through when [nullable], otherwise it
+  /// is a required-field error; a non-string or unknown wire string fails
+  /// with a [ValidationException] naming the field.
+  E? decodeEnumRaw(String name, Object? raw, {required bool nullable}) {
+    if (raw == null) {
+      if (nullable) return null;
+      throw ValidationException('Field "$name" is required.', field: name);
+    }
+    if (raw is! String) {
+      throw ValidationException(
+          'Value "$raw" is not a string for enum field "$name".',
+          field: name);
+    }
+    for (final value in values) {
+      if (wireOf(value) == raw) return value;
+    }
+    throw ValidationException(
+        'Value "$raw" is not a member of enum field "$name".',
+        field: name);
+  }
+
+  /// Builds the database enum field over this descriptor's wire strings, so
+  /// its CHECK constraint can never disagree with the enum's members.
+  Field toEnumField({required bool required}) => Field.enumValue(
+        name,
+        [for (final v in values) wireOf(v)],
+        required: required,
+      );
+}
+
 /// Optional (nullable [E]) enum descriptor.
 ///
 /// Encodes to the wire string by default (`E.name`) with optional per-value
-/// [wire] overrides (unmapped values fall back to `.name`). The engine's
-/// `Field.enumValue` receives the wire strings, so its CHECK constraint and
-/// `fieldKindViolation` stay string-based and can never disagree with the
-/// enum's members.
+/// [wire] overrides (unmapped values fall back to `.name`).
 base class EnumFieldOpt<S, E extends Enum> extends FieldDef<S, E?>
+    with NullableFieldCond<S, E?>, EnumCodec<E>
     implements SettableFieldDef<S, E?> {
   /// Creates an optional enum descriptor.
   EnumFieldOpt(super.owner, super.name, List<E> values, {Map<E, String>? wire})
@@ -418,31 +526,14 @@ base class EnumFieldOpt<S, E extends Enum> extends FieldDef<S, E?>
     _verifyEnumCodec(name, this.values, this.wire);
   }
 
-  /// The accepted enum values. This snapshot cannot diverge after schema
-  /// compilation even if the caller later mutates its source list.
+  @override
   final List<E> values;
 
-  /// Per-value wire-string overrides; unmapped values use [Enum.name].
+  @override
   final Map<E, String> wire;
 
-  /// The wire string for [value].
-  String wireOf(E value) => wire[value] ?? value.name;
-
   @override
-  E? decode(Object? raw) {
-    if (raw == null) return null;
-    if (raw is! String) {
-      throw ValidationException(
-          'Value "$raw" is not a string for enum field "$name".',
-          field: name);
-    }
-    for (final v in values) {
-      if (wireOf(v) == raw) return v;
-    }
-    throw ValidationException(
-        'Value "$raw" is not a member of enum field "$name".',
-        field: name);
-  }
+  E? decode(Object? raw) => decodeEnumRaw(name, raw, nullable: true);
 
   @override
   Object? encode(E? value) => value == null ? null : wireOf(value);
@@ -454,11 +545,7 @@ base class EnumFieldOpt<S, E extends Enum> extends FieldDef<S, E?>
       _req ??= EnumFieldReq<S, E>(owner, name, values, wire: wire);
 
   @override
-  Field toField() => Field.enumValue(
-        name,
-        [for (final v in values) wireOf(v)],
-        required: false,
-      );
+  Field toField() => toEnumField(required: false);
 
   @override
   FieldDef<S, Object?>? get reqCounterpart => _req;
@@ -466,6 +553,7 @@ base class EnumFieldOpt<S, E extends Enum> extends FieldDef<S, E?>
 
 /// Required (non-nullable [E]) enum descriptor.
 final class EnumFieldReq<S, E extends Enum> extends FieldDef<S, E>
+    with EnumCodec<E>
     implements SettableFieldDef<S, E> {
   /// Creates a required enum descriptor.
   EnumFieldReq(super.owner, super.name, List<E> values, {Map<E, String>? wire})
@@ -475,38 +563,20 @@ final class EnumFieldReq<S, E extends Enum> extends FieldDef<S, E>
     _verifyEnumCodec(name, this.values, this.wire);
   }
 
-  /// The accepted enum values. This snapshot cannot diverge after schema
-  /// compilation even if the caller later mutates its source list.
+  @override
   final List<E> values;
 
-  /// Per-value wire-string overrides; unmapped values use [Enum.name].
+  @override
   final Map<E, String> wire;
 
-  /// The wire string for [value].
-  String wireOf(E value) => wire[value] ?? value.name;
-
   @override
-  E decode(Object? raw) {
-    if (raw is! String) {
-      throw ValidationException('Field "$name" is required.', field: name);
-    }
-    for (final v in values) {
-      if (wireOf(v) == raw) return v;
-    }
-    throw ValidationException(
-        'Value "$raw" is not a member of enum field "$name".',
-        field: name);
-  }
+  E decode(Object? raw) => decodeEnumRaw(name, raw, nullable: false)!;
 
   @override
   Object? encode(E value) => wireOf(value);
 
   @override
-  Field toField() => Field.enumValue(
-        name,
-        [for (final v in values) wireOf(v)],
-        required: true,
-      );
+  Field toField() => toEnumField(required: true);
 }
 
 void _verifyEnumCodec<E extends Enum>(
@@ -542,11 +612,12 @@ void _verifyEnumCodec<E extends Enum>(
 
 /// JSON-object descriptor (`Map<String, Object?>`), optional by definition.
 ///
-/// There is no `.req()` and no `required` flag: the engine's `Field.json`
+/// There is no `.req()` and no `required` flag: the database's `Field.json`
 /// has no `required` parameter, so the impossible constraint is
 /// unspellable. (The raw path also admits a `List` here — a documented
 /// asymmetry; the typed surface is the stricter one.)
 final class JsonField<S> extends FieldDef<S, Map<String, Object?>?>
+    with NullableFieldCond<S, Map<String, Object?>?>
     implements SettableFieldDef<S, Map<String, Object?>?> {
   /// Creates a JSON-object descriptor.
   JsonField(super.owner, super.name, {this.encrypted = false})
@@ -561,6 +632,7 @@ final class JsonField<S> extends FieldDef<S, Map<String, Object?>?>
 
 /// JSON-array descriptor (`List<T>`), optional by definition.
 final class JsonListField<S, T> extends FieldDef<S, List<T>?>
+    with NullableFieldCond<S, List<T>?>
     implements SettableFieldDef<S, List<T>?> {
   /// Creates a JSON-array descriptor.
   JsonListField(super.owner, super.name, {this.encrypted = false})
@@ -588,9 +660,10 @@ final class JsonListField<S, T> extends FieldDef<S, List<T>?>
 /// Reference descriptor (a record id of type [String]), optional by
 /// definition.
 ///
-/// There is no `.req()` and no `required` flag: the engine's `Field.ref`
+/// There is no `.req()` and no `required` flag: the database's `Field.ref`
 /// has no `required` parameter.
 final class RefField<S> extends FieldDef<S, String?>
+    with NullableFieldCond<S, String?>
     implements SettableFieldDef<S, String?> {
   /// Creates a reference descriptor.
   RefField(

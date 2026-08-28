@@ -1,16 +1,14 @@
 /// Typed query surface seam: the delegated builder interface every concrete
-/// adapter (native `Collection.query()`, the web facade builder, a worker-bound
-/// session) implements so `TypedQuery` stays builder-free.
+/// adapter (the native collection, the web facade, a worker-bound session)
+/// implements.
 library;
 
 import 'package:localpocket/localpocket.dart';
 
-/// The delegating query surface `TypedQuery` forwards to. Each concrete
-/// adapter wraps one builder flavor and mutates it in place.
-///
-/// The typed layer delegates to the engine; it never re-implements
-/// execution, planning, or validation. It is public only because the web
-/// facade implements it from another library.
+/// The delegating query surface `TypedCollection`'s terminals forward to.
+/// Each concrete adapter wraps one builder and mutates it in place; the
+/// typed layer never re-implements execution, planning, or validation.
+/// Implement it to adapt another backend (the package's web facade does).
 abstract interface class TypedQuerySurface {
   /// Executes the query and returns one page of decoded logical rows.
   Future<Page> fetch({String? cursor});
@@ -34,7 +32,7 @@ abstract interface class TypedQuerySurface {
   Future<String> explain();
 
   /// Executes one numeric aggregate ([fn] is `sum`/`min`/`max`/`avg`) over
-  /// [field]. The engine's validation runs unchanged.
+  /// [field]. the database's validation runs unchanged.
   Future<num?> aggregate(String fn, String field);
 
   /// Applies equality operators for [field].
@@ -49,7 +47,8 @@ abstract interface class TypedQuerySurface {
   });
 
   /// Applies range and text operators for [field]. Kind-scoped descriptor
-  /// methods create these values and `TypedQuery.whereCond` forwards them.
+  /// operators create these values and `TypedCollection`'s composer
+  /// forwards them.
   void whereRange(
     String field, {
     Object? gt,

@@ -1,5 +1,82 @@
 ## Unreleased
 
+- **Typed queries: one grammar, zero chaining.** Conditions and order terms
+  are values built beside the descriptors — `Tasks.done.eq(false)`,
+  `Tasks.priority.gt(0)`, `Tasks.dueAt.desc` — and every terminal lives on
+  `TypedCollection` with the same named-argument slots: `query(where:,
+  anyOf:, orderBy:, limit:, all:, includeArchived:, includeHidden:,
+  select:)` returns its page directly, and `queryAfter`, `count`,
+  `countDistinct`, `distinct`, `ids`, `explain`, `sum`/`min`/`max`/`avg`,
+  `watch`, and `debugCompile` accept the same predicate shape. There is no
+  query builder to lose or double-apply; the previous curried
+  `query().where(field)(...)` form and the `TypedQuery`/`TypedSearch`
+  builder classes are gone. OR groups take `EqCond` values only, so the
+  engine's equality-only lowering is enforced at compile time.
+
+- **Typed writes: field-native values.** Writes are built beside the
+  descriptors — `Tasks.title.set('Ship it')` — and collected into
+  `put([...])`, `putAll([[...]])`, `patch(id, [...])`, and
+  `patchAll({...})`. Wrong types, wrong stores, and writes to engine-owned
+  columns are compile errors; `null` clears an optional field and cannot be
+  spelled on a `.req()` field; explicit ids travel through `Writes.id` and
+  undeclared keys through `Writes.extra`. The `Draft` builder and the
+  curried `set(field)(value)` form are removed — there is exactly one write
+  path.
+
+- **Fixed: unrouted typed operators silently dropped their predicate.**
+  `TypedQuery.whereCond` only routed `eq` and the range/text operators; a
+  condition with operator `neq`, `inValues`, `between`, `isNull`, or
+  `isNotNull` fell through to the raw builder as an all-null no-op and the
+  predicate vanished from the compiled SQL. Every operator the descriptors
+  can build now has an explicit route with a per-operator compile parity
+  test, and an unknown operator throws instead of silently no-oping.
+
+- **Descriptor-side condition family.** Every field descriptor now carries
+  the full equality family — `eq`, `neq`, `inValues`, `between` (plus
+  `asc`/`desc` order terms) — and optional descriptors additionally expose
+  `isNull()`/`isNotNull()`; required (`NOT NULL`) columns make those
+  unspellable. `field.eq(null)` reads as SQL `IS NULL` and
+  `field.neq(null)` as `IS NOT NULL` (SQL `= NULL` never matches, so the
+  null forms never reach the builder as equality bindings); on required
+  fields the null case is a compile error. `eqCond(...)` is deprecated in
+  favor of `field.eq(...)`.
+
+- **Engine-level typed-wrapper caching.** `TypedStoreRegistry` now memoizes
+  the non-transactional wrappers it hands out: repeated `db.store(def)` /
+  `facade.store(def)` calls return the identical `TypedCollection`, so any
+  call site can grab handles once and hold them. Keys are definition
+  instances (identity), failed builds are never memoized, and name bindings
+  deliberately outlive close — `close()` on either facade expires only the
+  dead connection's wrappers (`clearHandles`). `tx.store` bypasses the
+  cache as before: transaction surfaces stay scoped to their transaction.
+
+- **`openTyped(...)`: defs-first opening sugar.** Forwards each canonical
+  definition's memoized schema to `LocalPocket.open`, so step-one wiring
+  reads `stores: [Tasks.instance]` without `.collectionSchema` ceremony on
+  every platform (the conditional exports route the call to the right
+  facade). The new `StoreDefs` list typedef keeps those declarations short
+  and carries the manifest-role documentation (fresh-install creation,
+  migrations, web worker pre-registration).
+
+- **`TypedPocket`: application wiring as a base class.** Subclass once,
+  override `path` (+ `stores`) and declare one-line typed getters through
+  `handle(def)`; the base owns the hand-rolled mechanics:
+  future-memoized `open()` that never double-opens under concurrency,
+  failure-retryable opens, a guarded `pocket` getter with an actionable
+  error instead of a crashing null assertion, idempotent `close()` with
+  clean re-opening, and engine-backed handle sharing (handles expire on
+  close; pre-close captures remain valid immutable snapshots). Advanced
+  knobs stay one override away via `doOpen()` (worker assets, cipher, blob
+  store, clocks). Both native and web facades are covered — the class sits
+  on top of the public core seam only.
+
+- **`StoreDef.keepUnsyncedArchives` + `StoreDef.prefetchFiles`.** The typed
+  layer now mirrors the engine's last two schema-extra knobs: both overrides
+  flow into the compiled schema verbatim (JSON-identical to a raw
+  `CollectionSchema`), so every engine knob is now reachable without
+  dropping to a raw declaration — soft-archived rows and file-ref
+  prefetching included.
+
 - **Typed index and FTS declarations.** The typed layer now provides
   `indexSpec([...])` and `ftsSpec([...])` helpers that derive column names from
   store-owned descriptors, preventing typos and cross-store declarations at
@@ -16,7 +93,7 @@
   `BoolFieldOpt`/`BoolFieldReq`, `DateFieldOpt`/`DateFieldReq`,
   `DateTimeFieldOpt`/`DateTimeFieldReq`, `EnumFieldOpt`/`EnumFieldReq`,
   `JsonField`, `JsonListField`, `RefField`), the per-store `Fields` factory
-  (`f.text('title').req()`), and `StoreDef` — the store definition base with
+  (`schema.text('title').req()`), and `StoreDef` — the store definition base with
   an explicit ordered `fields` list, schema extras overrides
   (`indexes`/`fts`/`migrations`/`conflictPolicy`/`documentMigrations`/
   `validator`), built-in `id`/`archived` system descriptors, a memoized
