@@ -25,14 +25,14 @@ Add `localpocket` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  localpocket: ^0.1.0
+  localpocket: ^0.1.1
 ```
 
 ---
 
-## Step-by-Step Usage Guide
+## Quick Start
 
-### Step 1: Define your schemas and store types
+### Step 1: Store & Schema
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
@@ -101,7 +101,8 @@ final class Tasks extends StoreDef<Tasks> {
 
 
   // if an archived record hasn't syched yet
-  // keep it in the local store? or purge it?
+  // true: keep it in the local store.
+  // false: delete it from the local store.
   // default: false
   @override
   bool get keepUnsyncedArchives => true;
@@ -139,7 +140,7 @@ final class Tasks extends StoreDef<Tasks> {
 
 ---
 
-### Step 2: Define your models and operations
+### Step 2: Models & Operations
 
 While this step is optional, it is recommended to have a cleaner and more concise API.
 
@@ -219,7 +220,7 @@ extension TaskStore on TypedCollection<Tasks> {
         notDone,
       ],
       orderBy: [Tasks.dueAt.asc],
-      all: true,
+      limit: Limits.unbounded
     ))
         .items;
   }
@@ -335,7 +336,7 @@ extension TaskStore on TypedCollection<Tasks> {
 }
 ```
 
-### Step 3: Wire the store schema to the Database
+### Step 3: Opening the database
 
 ```dart
 
@@ -356,8 +357,8 @@ final class AppDb extends TypedPocket {
 Now you can use the stores in your app:
 
 ```dart
-void main(List<String> args) async {
-  final db = AppDb('whatever');
+void main() async {
+  final db = AppDb('path/to/mydb.db');
   await db.open();
   await db.tasks.seed(['Draft it', 'Ship it', 'File taxes']);
   await db.tasks.markDone('task00000000002');
@@ -367,122 +368,332 @@ void main(List<String> args) async {
 }
 ```
 
----
+You can also open the database and wire the stores to it this way:
 
-### Step 2: Open and Bind
-
-Open straight from the canonical definitions — `openTyped` registers every listed store
-(created or migrated) up front, on every platform — then bind the same definition instance:
-
-<!-- localpocket-compile: typed-readme -->
 ```dart
-Future<void> typedReadmeExample() async {
+void main() async {
   final db = await openTyped(
-    path: ':memory:',
-    stores: [Tasks.instance],
+    path: ':memory:', // memory, not persisted
+    stores: [Tasks.store],
   );
-  final tasks = db.store(Tasks.instance);
+  final tasks = db.store(Tasks.store);
+
+  final n = await tasks.count(where: [
+    ~Tasks.done.eq(true),
+    Tasks.dueAt.lt(DateTime.now()),
+  ]);
+  print('There are $n tasks left to do');
+}
 ```
 
-`StoreDef.schema` is memoized. Binding is name-keyed and checked by **reference identity**, not structural equality: `Tasks.instance` must be the same object used throughout the application. A second definition object with the same fields and name throws `TypedStoreMismatchError` rather than silently sharing a typed registry entry.
+> **Note**: The schema is built once and reused (memoized), and stores are registered by name. But LocalPocket also verifies you're passing the exact same object every time — not just an object with the same name and fields. So you must share a single `Tasks.store` everywhere in your app. If you ever create a second `Tasks.store` definition that merely looks identical, the database refuses to guess and throws `TypedStoreMismatchError`, instead of quietly treating the two look-alikes as one store.
 
----
 
-### Step 3: Typed CRUD
+Your quickstart is over. **What you now have is:**
+- A cross platform database that is durable and fast
+- An ergonomic API
+- strict type safety
+- Watchable queries that you can consume
+- Full text search
 
-`put` is an upsert (the engine generates an id when `setId` is omitted), `patch` touches only the listed fields, and lifecycle state stays on `archive`/`restore`/`purge`.
+follow along the rest of the doumentation to learn more about:
+
+- Encryption
+- Synchronization
+- Change hooks
+- Conflict resolution
+- Binary and file attachements
+
+and more...
+
+
+## Typed CRUD
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
-  await tasks.put([
-    Writes.id('tsk1234567890ab'), // optional: the engine generates an id
-    Tasks.title.set('Ship version 1.0'),
-    Tasks.status.set(TaskStatus.inProgress),
-    Tasks.priority.set(1),
-    Tasks.done.set(false),
-    Tasks.dueAt.set(DateTime.utc(2026, 9, 1)),
-  ]);
+await tasks.put([
+  // Put operations are upserts but
+  // if an ID is defined and the record exists, it is updated
+  // if it's not found it will be inserted
+  // if it's not defined, it will be generated
+  Writes.id('my15charlongid0'),
 
-  await tasks.patch('tsk1234567890ab', [
-    Tasks.title.set('Ship version 1.0.1'),
-  ]);
+  // field writes syntax goes like this:
+  Tasks.title.set('My new task'),
+  Tasks.done.set(true),
+  Tasks.priority.set(1),
+  Tasks.status.set(TaskStatus.todo),
+  Tasks.dueAt.set(DateTime.now().add(const Duration(days: 14))),
 
-  // Reads are the call form row(Tasks.title), or the .get alias.
-  final task = await tasks.get('tsk1234567890ab');
-  final String? title = task?.call(Tasks.title);
+  // extra fields are allowed, but not typed
+  Writes.extra('extra key', 'extra value')
+]);
 
-  await tasks.archive('tsk1234567890ab');
-  await tasks.restore('tsk1234567890ab');
+// same as put, but with a list of writes
+await tasks.putAll([
+  [
+    Writes.id('my15charlongid1'),
+    Tasks.title.set('task 1'),
+  ],
+  [
+    Writes.id('my15charlongid2'),
+    Tasks.title.set('task 1'),
+  ]
+]);
 
-  // Hard purge: permanently removes the local row and its blob references.
-  await tasks.purge('tsk1234567890ab');
+// same as put, but it doesn't clear
+// the fields that were not defined
+// i.e. it doesn't set them to null
+// i.e. updates only provided fields
+await tasks.upsert([
+  Writes.id('my15charlongid0'),
+  Tasks.title.set('My new task'),
+  Tasks.done.set(true),
+  Tasks.priority.set(1),
+  Tasks.status.set(TaskStatus.todo),
+  Tasks.dueAt.set(DateTime.now().add(const Duration(days: 14))),
+  Writes.extra('extra key', 'extra value')
+]);
+
+// same as upsert, but in batches
+await tasks.upsertAll([
+  [
+    Writes.id('my15charlongid1'),
+    Tasks.title.set('task 1'),
+  ],
+  [
+    Writes.id('my15charlongid2'),
+    Tasks.title.set('task 1'),
+  ]
+]);
+
+
+// updates the existing record with id
+// without replacing unspecified fields.
+// Throws [RecordNotFoundException] when
+// the record does not exist;
+// a [Writes.id] value inside [writes] is rejected
+// since record ids are immutable.
+await tasks.patch('my15charlongid1', [
+  Writes.id('my15charlongid2'), // <- throws
+  Tasks.title.set('title gets updated')
+]);
+
+// Same as patch, but accepts a map of id -> [writes]
+await tasks.patchAll({
+  'my15charlongid1': [Tasks.title.set('title gets updated')],
+  'my15charlongid2': [Tasks.title.set('title gets updated')],
+});
+
+// Soft deletes the record with id
+// However, if it hasn't been synched yet,
+// the record will be deleted permanently.
+// unless `keepUnsyncedArchives` is set to true.
+// (see step 1 above)
+await tasks.archive('my15charlongid1');
+
+// Restores the record with id from the archive.
+await tasks.restore('my15charlongid1');
+
+// hard local deletes a record and all of its metadata
+// the remote copy (if it ever existed) will survive
+// if it ever gets updated by some other client,
+// the record will be pulled and resurrected again
+await tasks.purge('my15charlongid1');
 ```
 
-Writes are **field-native values** — `Tasks.title.set('Ship it')` — built beside
- the descriptors, so a wrong value type or a foreign store's field fails at compile
- time. `null` clears an optional field, and the same values build single writes
- and batches (`putAll`, `patchAll`). Query conditions work exactly the same way:
- `Tasks.done.eq(false)`.
+**Gotchas:**
+
+1. **`put` replaces the whole record — not just the fields you list.** On a
+   record that already exists, every field you don't include is __cleared__.
+
+2. **`upsert` replaces the defined fields only — and insert if the record doesn't exist.**
+   On a record that already exists, every field you don't include is kept __untouched__.
+
+3. **`patch` throws if the record doesn't exist; `put` silently upserts.**
+   `patch`/`patchAll` raise `RecordNotFoundException` for a missing id, while
+   `put` creates or replaces without complaining. So a `patch` right after a
+   `purge` (or for an id that was never created) will throw.
+
+| Op | Record missing? | Record exists? | Named-axis |
+|---|---|---|---|
+| `put` | inserts | **replaces the whole record** | create-or-**replace** |
+| `upsert` | inserts | **merges only listed fields** | create-or-**merge** |
+| `patch` | **throws** | merges only listed fields | update-only (strict) |
+
+3. **Record ids can't change once created.** A `Writes.id` inside a `patch` is
+   rejected. To "change" an id, create a new record with the new id and purge
+   the old one.
+
+4. **Custom ids must be exactly 15 lowercase letters/numbers.** Anything else
+   is rejected — including PocketBase-style ids that contain uppercase letters.
+   Leave the id out and the engine generates a valid one.
+
+5. **Batches are all-or-nothing.** `putAll` and `patchAll` each commit as one
+   transaction. In `patchAll`, the first entry that fails (missing record, bad
+   value) throws and rolls back the whole batch. Duplicate ids inside a
+   `putAll` resolve last-write-wins.
+
+6. **Archiving a record that never synced deletes it for good — by default.**
+   If you create a record and archive it before it ever reaches the server, it
+   is removed permanently (no undo). Turn on `keepUnsyncedArchives: true` to
+   keep it as a soft-deleted local row instead.
+
+7. **`archive`/`restore` throw on a missing record**. `purge` is a silent
+   no-op. Archiving or restoring an id that isn't there throws
+   `RecordNotFoundException`. Purging a missing id does nothing and doesn't
+   throw.
+
+8. **`purge` only deletes on your device — the server copy survives.** The
+   remote copy is untouched, and if another device updates it later it gets
+   pulled back and reappears. To delete it everywhere, delete the record in
+   PocketBase.
+
+9. **Setting a field to `null` clears it.** On optional fields, this works in
+   both `put` and `patch`; on a required (schema: `.req()`) field it won't compile. And
+   remember: in `put`, simply *omitting* a field also clears it (see #1).
+
+
+
+## Typed Queries
+
+<!-- localpocket-compile: typed-readme -->
+```dart
+final donePage = await tasks.query(
+  where: [
+    Tasks.done.eq(false), // not done
+    Tasks.status.inValues([TaskStatus.todo, TaskStatus.done]), // one of these
+    Tasks.priority.between(1, 5), // priority in range
+    Tasks.dueAt.isNull(), // no due date set
+  ],
+  orderBy: [Tasks.priority.desc], // sort, then take the page
+  limit: 20,
+);
+
+final allDone = await tasks.query(
+  // to make the query return all the results
+  // although not recommended
+  // but you can explicitly use `Limits.unbounded`
+  limit: Limits.unbounded,
+  where: [Tasks.done.eq(true)],
+);
+
+// conditions compose into bigger ones with
+// & (and), | (or) and ~ (not). parentheses
+// decide the order, like in arithmetic
+final matching = await tasks.query(
+  where: [
+    (Tasks.done.eq(true) | Tasks.priority.eq(5)) &
+        ~Tasks.title.startsWith('Draft'),
+  ],
+  // select trims every row down to these fields.
+  // reading anything else from these rows throws
+  select: [Tasks.title, Tasks.priority],
+  limit: 20,
+);
+
+// queryAfter continues a listing from the cursor
+// the previous page returned. same `where`, same
+// `orderBy` — just the next slice of results.
+// check hasMore before asking for the next page
+final firstPage = await tasks.query(
+  where: [Tasks.done.eq(false)],
+  orderBy: [Tasks.priority.desc],
+  limit: 20,
+);
+final nextPage = firstPage.hasMore
+    ? await tasks.queryAfter(
+        firstPage.nextCursor!,
+        where: [Tasks.done.eq(false)], // same shape as firstPage
+        orderBy: [Tasks.priority.desc],
+        limit: 20,
+      )
+    : null;
+
+// get reads one record by id.
+// null when there is no such record — it doesn't throw
+final oneTask = await tasks.get('tsk1234567890ab');
+
+// fields are read through the descriptor: row(Tasks.field)
+final oneTitle = oneTask?.call(Tasks.title);
+
+// count returns how many rows match. nothing else
+final activeCount = await tasks.count(where: [Tasks.done.eq(false)]);
+
+// ids returns the matching record ids
+// instead of whole rows
+final openIds = await tasks.ids(
+  where: [Tasks.done.eq(false)],
+  orderBy: [Tasks.priority.desc],
+  limit: 100,
+);
+
+// sum / min / max / avg work on number fields only
+// (integer, real, date) — anything else won't compile.
+// they return null when no rows match
+final priorityTotal = await tasks.sum(Tasks.priority);
+final heaviest = await tasks.max(Tasks.priority);
+final lightest = await tasks.min(Tasks.priority);
+final average =
+    await tasks.avg(Tasks.priority, where: [Tasks.done.eq(false)]);
+
+// distinct lists the unique values a field holds
+final priorities = await tasks.distinct(Tasks.priority);
+
+// countDistinct counts them instead of listing them
+final priorityCount = await tasks.countDistinct(Tasks.priority);
+```
+
+**Gotchas:**
+
+1. **`limit` is required on `query`, `queryAfter` and `ids`.** A read without
+   `limit` doesn't compile. If you want to get all rows, pass `limit: Limits.unbounded`.
+
+2. **The `where` list is an AND list.** Every element must hold for a row to
+   match. To say "or", build one tree with `|` and pass it as a single
+   element. `&` binds tighter than `|` — parentheses decide, like in
+   arithmetic. Every operator (`between`, `startsWith`, `inValues`, ...) may
+   appear anywhere inside the tree.
+
+3. **"Field is empty" is `.isNull()` (or `.eq(null)`).** A raw SQL `= NULL`
+   comparison never matches anything, so the typed layer rewrites `eq(null)`
+   into a proper IS NULL check for you. `.isNull()` exists on optional fields
+   only — required fields can never be null.
+
+4. **A pagination cursor is locked to the query shape it came from.**
+   `queryAfter` must repeat the same `where`, `orderBy` and `select` as the
+   page that produced the cursor — anything different throws
+   `StaleCursorError` instead of returning a wrong page. `limit` may change
+   between pages. `nextCursor` is `null` on the last page, so check `hasMore`.
+
+5. **`get` is the odd one out.** It returns the row even when it is archived
+   or hidden (every other read excludes them by default), and a missing id
+   gives `null` instead of a throw — unlike `patch`, `archive` and `restore`.
+
+6. **Aggregates take number fields only.** `sum`/`min`/`max`/`avg` accept
+   `integer`, `real` and `date` descriptors; anything else won't compile.
+   They return `null` when no rows match — there is nothing to add up.
+
+7. **`distinct` quietly caps at 1000 values** unless you pass `limit:` yourself. `countDistinct` has no cap — it counts in the database.
+
+8. **A projected row only carries what you selected.** After `select:`,
+   reading any other field throws — including `row.id` — so list every field
+   the call site needs. Projections are for hot paths, not everyday reads.
+
+9. **The same slots repeat on every read.** `where`, `orderBy`, `limit`,
+  `includeArchived:` and `includeHidden:` mean the same thing across
+   `query`, `queryAfter`, `ids`, `count`, `distinct`, the aggregates and
+   `watch` — build a condition once and reuse it on all of them (`count`
+   simply has no ordering or paging slots).
+
+
+
+
 
 ---
 
 ### Step 4: Typed Queries
 
-One entry point per terminal, named arguments, no builder, nothing to chain:
-`query(...)` returns its page directly, and every other terminal (`count`, `ids`,
-`sum`, `watch`, ...) accepts the same condition slots.
-
-<!-- localpocket-compile: typed-readme -->
-```dart
-  // Equality family on every descriptor: eq, inValues, between —
-  // plus isNull() on optional descriptors.
-  final donePage = await tasks.query(
-    where: [
-      Tasks.done.eq(false),
-      Tasks.status.inValues([TaskStatus.todo, TaskStatus.done]),
-      Tasks.priority.between(1, 5),
-      Tasks.dueAt.isNull(),
-    ],
-    limit: 20,
-  );
-
-  // Kind-scoped operators: .gt/.gte/.lt/.lte on comparable descriptors,
-  // .startsWith/.endsWith/.contains on text — the same grammar, same slot.
-  // Compose any of them into boolean trees with & (AND), | (OR), and
-  // ~ (NOT): every operator participates in every position. Reading an
-  // unselected descriptor throws.
-  final firstPage = await tasks.query(
-    where: [
-      (Tasks.done.eq(true) | Tasks.priority.eq(5)) &
-          ~Tasks.title.startsWith('Draft'),
-    ],
-    select: [Tasks.title, Tasks.priority],
-    limit: 20,
-  );
-
-  // Keyset pagination with the engine's opaque cursor.
-  final nextPage = firstPage.hasMore
-      ? await tasks.queryAfter(
-          firstPage.nextCursor!,
-          orderBy: [Tasks.priority.asc],
-          limit: 20,
-        )
-      : null;
-
-  // Aggregates: sum/min/max/avg accept numeric descriptors only.
-  final activeCount = await tasks.count(where: [Tasks.done.eq(false)]);
-  final priorityCount = await tasks.countDistinct(Tasks.priority);
-  final priorities = await tasks.distinct(Tasks.priority);
-  final priorityTotal = await tasks.sum(Tasks.priority);
-```
-
-Set the page size with `limit:` or opt out with `all:`; `includeArchived:`/`includeHidden:` widen
-the default visibility scope; `ids()`, `explain()`, and `debugCompile(...)` mirror the raw
-builder verbatim. The `where:` slot is an AND-list of condition trees — the list elements AND
-together and each element may itself be any `&`/`|`/`~` expression — and the same slots
-(`where:`, `orderBy:`, `limit:`, `all:`, `includeArchived:`, `includeHidden:`) repeat across
-`query`, `queryAfter`, `ids`, `explain`, and `watch`, so the predicate shape is identical
-everywhere.
 
 ---
 
@@ -512,15 +723,20 @@ Search requires an `FtsSpec` on the store. Hits carry `id`/`score` plus `fetch()
   await db.close();
 
   // Keep analyzed values live in this complete documentation fixture.
-  title;
+  Tasks.title;
   donePage;
+  matching;
   firstPage;
   nextPage;
+  oneTitle;
   activeCount;
+  openIds;
+  heaviest;
+  lightest;
+  average;
   priorityCount;
   priorities;
   priorityTotal;
-}
 ```
 
 ---
@@ -572,7 +788,7 @@ The principal typed building blocks are `StoreDef`, `Fields`, `FieldDef`,
 
 ### Typed Best Practices
 
-- **One definition instance per store, ever.** The private constructor plus static accessors (`Tasks.instance`, `Tasks.title`) is the canonical pattern; sharing that single object is how every file gets the same typed handle. A second instance with the same name throws `TypedStoreMismatchError`.
+- **One definition instance per store, ever.** The private constructor plus static accessors (`Tasks.store`, `Tasks.title`) is the canonical pattern; sharing that single object is how every file gets the same typed handle. A second instance with the same name throws `TypedStoreMismatchError`.
 - **Typed handles for application code.** Use `db.store(...)` everywhere; keep raw maps for engine-boundary surfaces only — migrations, `DocumentMigration`, conflict records/resolvers, and codecs.
 - **Wrap rows in a domain class** (see above) and express mutations as intent-named helpers, so call sites read like business operations instead of builder chains.
 - **Writes are values too.** `Tasks.title.set('x')` collected into `put([...])` / `patch(id, [...])` keeps every write compile-checked against its field — the same values build single writes and batches.
@@ -597,7 +813,7 @@ The principal typed building blocks are `StoreDef`, `Fields`, `FieldDef`,
 Typed and raw access can coexist over the same registered store. Both use the same SQLite rows, validation, encryption, outbox, synchronization, and worker wire operations; adopting typed models changes neither storage nor wire formats.
 
 ```dart
-final typedTasks = db.store(Tasks.instance);
+final typedTasks = db.store(Tasks.store);
 final rawTasks = db.collection('tasks');
 
 await rawTasks.patch('tsk1234567890ab', {'done': false});
