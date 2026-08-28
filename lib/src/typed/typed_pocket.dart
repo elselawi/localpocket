@@ -17,9 +17,9 @@
 ///   String get path => 'app.db';
 ///
 ///   @override
-///   StoreDefs get stores => [Tasks.instance];
+///   StoreDefs get stores => [Tasks.store];
 ///
-///   TypedCollection<Tasks> get tasks => handle(Tasks.instance);
+///   TypedCollection<Tasks> get tasks => handle(Tasks.store);
 /// }
 ///
 /// // Bootstrap once:  await AppDb.i.open();
@@ -36,7 +36,7 @@ import 'package:localpocket/src/typed/typed_collection.dart';
 /// This is the schema **manifest**, not boilerplate: opening a fresh file
 /// creates each listed store's table (+ indexes/FTS), a newer definition
 /// version triggers its migrations, and the web worker builds its side from
-/// the same upfront list. Declare each canonical `Def.instance` exactly
+/// the same upfront list. Declare each canonical `Def.store` exactly
 /// once here.
 typedef StoreDefs = List<StoreDef<Object?>>;
 
@@ -160,8 +160,8 @@ abstract class TypedPocket {
 /// yourself — this sugar exists so first-step wiring reads without noise.
 ///
 /// ```dart
-/// final db = await openTyped(path: ':memory:', stores: [Tasks.instance]);
-/// final tasks = db.store(Tasks.instance); // cached wrapper, reusable everywhere
+/// final db = await openTyped(path: ':memory:', stores: [Tasks.store]);
+/// final tasks = db.store(Tasks.store); // cached wrapper, reusable everywhere
 /// ```
 Future<LocalPocket> openTyped({
   required String? path,

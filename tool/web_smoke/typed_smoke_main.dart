@@ -9,7 +9,7 @@ enum _WebRole { admin, member }
 final class _WebTasks extends StoreDef<_WebTasks> {
   _WebTasks._() : super(name: 'typedtasks', version: 1);
 
-  static final _WebTasks instance = _WebTasks._();
+  static final _WebTasks store = _WebTasks._();
 
   late final _title = schema.text('title').req();
   late final _role = schema.enumOf(
@@ -20,10 +20,10 @@ final class _WebTasks extends StoreDef<_WebTasks> {
   late final _dueAt = schema.dateTime('dueAt').req();
   late final _done = schema.boolean('done').req();
 
-  static TextFieldReq<_WebTasks> get title => instance._title;
-  static EnumFieldReq<_WebTasks, _WebRole> get role => instance._role;
-  static DateTimeFieldReq<_WebTasks> get dueAt => instance._dueAt;
-  static BoolFieldReq<_WebTasks> get done => instance._done;
+  static TextFieldReq<_WebTasks> get title => store._title;
+  static EnumFieldReq<_WebTasks, _WebRole> get role => store._role;
+  static DateTimeFieldReq<_WebTasks> get dueAt => store._dueAt;
+  static BoolFieldReq<_WebTasks> get done => store._done;
 
   @override
   List<FieldDef<_WebTasks, Object?>> get fields => [
@@ -77,7 +77,7 @@ Future<void> main() async {
     // Access descriptors out of order before schema compilation. The explicit
     // fields list, not lazy initialization order, must own column order.
     mark('descriptor-order');
-    final def = _WebTasks.instance;
+    final def = _WebTasks.store;
     final touchedDone = _WebTasks.done;
     final touchedTitle = _WebTasks.title;
     if (touchedDone.name != 'done' || touchedTitle.name != 'title') {

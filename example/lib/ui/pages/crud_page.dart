@@ -67,7 +67,7 @@ class _CrudPageState extends State<CrudPage> {
     setState(() => _loading = true);
     final sw = Stopwatch()..start();
     try {
-      final tasks = db.store(PlaygroundTasks.instance);
+      final tasks = db.store(PlaygroundTasks.store);
       await tasks.put([
         PlaygroundTasks.title.set(title),
         PlaygroundTasks.description.set(
@@ -107,7 +107,7 @@ class _CrudPageState extends State<CrudPage> {
     if (db == null) return;
     final sw = Stopwatch()..start();
     try {
-      await db.store(PlaygroundTasks.instance).patch(id, [
+      await db.store(PlaygroundTasks.store).patch(id, [
         PlaygroundTasks.completed.set(completed),
       ]);
       sw.stop();
@@ -361,7 +361,7 @@ class _CrudPageState extends State<CrudPage> {
   }
 
   static const _createCode = '''
-final tasks = db.store(PlaygroundTasks.instance);
+final tasks = db.store(PlaygroundTasks.store);
 await tasks.put((draft) => draft
   ..set(PlaygroundTasks.title)('Write release notes')
   ..set(PlaygroundTasks.priority)(3)

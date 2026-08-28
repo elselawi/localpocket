@@ -14,11 +14,11 @@ import 'support/users.dart';
 final class SearchTasks extends StoreDef<SearchTasks> {
   SearchTasks._() : super(name: 'searchtasks');
 
-  static final SearchTasks instance = SearchTasks._();
+  static final SearchTasks store = SearchTasks._();
 
   late final _title = schema.text('title').req();
 
-  static TextFieldReq<SearchTasks> get title => instance._title;
+  static TextFieldReq<SearchTasks> get title => store._title;
 
   @override
   List<FieldDef<SearchTasks, Object?>> get fields => [_title];
@@ -34,10 +34,10 @@ Future<LocalPocket> openTyped({
     LocalPocket.open(
       path: ':memory:',
       stores: <CollectionSchema<Object?>>[
-        Tasks.instance.collectionSchema,
-        Users.instance.collectionSchema,
-        if (includeSecrets) SecretNotes.instance.collectionSchema,
-        if (includeSearch) SearchTasks.instance.collectionSchema,
+        Tasks.store.collectionSchema,
+        Users.store.collectionSchema,
+        if (includeSecrets) SecretNotes.store.collectionSchema,
+        if (includeSearch) SearchTasks.store.collectionSchema,
       ],
     );
 
@@ -52,7 +52,7 @@ void expectCompileParity((String, List<Object?>) typed, QueryBuilder raw) {
 }
 
 Future<void> seedTasks(LocalPocket db) async {
-  final tasks = db.store(Tasks.instance);
+  final tasks = db.store(Tasks.store);
   await tasks.putAll([
     [
       Writes.id(rid('qt', 1)),
@@ -96,7 +96,7 @@ void main() {
 
     test('cases 92–99 and 113: predicate/order matrix matches raw SQL+args',
         () {
-      final typed = db.store(Tasks.instance).debugCompile(
+      final typed = db.store(Tasks.store).debugCompile(
         where: [
           Tasks.done.eq(false),
           Tasks.role.inValues(<Role>[Role.admin, Role.member]),
@@ -134,7 +134,7 @@ void main() {
 
     test('case 100: select wraps projection and rejects unselected reads',
         () async {
-      final page = await db.store(Tasks.instance).query(
+      final page = await db.store(Tasks.store).query(
         select: <FieldDef<Tasks, Object?>>[Tasks.title, Tasks.done],
         limit: 1,
       );
@@ -148,7 +148,7 @@ void main() {
 
     test('case 101: limit/all and visibility flags compile like raw', () {
       expectCompileParity(
-        db.store(Tasks.instance).debugCompile(
+        db.store(Tasks.store).debugCompile(
               includeArchived: true,
               includeHidden: true,
               all: true,
@@ -156,7 +156,7 @@ void main() {
         db.collection('tasks').query().includeArchived().includeHidden().all(),
       );
       expectCompileParity(
-        db.store(Tasks.instance).debugCompile(limit: 3),
+        db.store(Tasks.store).debugCompile(limit: 3),
         db.collection('tasks').query().limit(3),
       );
     });
@@ -165,13 +165,13 @@ void main() {
         () async {
       final raw = db.collection('tasks').query().orderBy('title').limit(1);
       final TypedPage<Tasks> typedFirst = await db
-          .store(Tasks.instance)
+          .store(Tasks.store)
           .query(orderBy: [Tasks.title.asc], limit: 1);
       final rawFirst = await raw.fetch();
       expect(typedFirst.items.single.id, rawFirst.items.single['id']);
       expect(typedFirst.hasMore, rawFirst.hasMore);
       expect(typedFirst.nextCursor, rawFirst.nextCursor);
-      final typedSecond = await db.store(Tasks.instance).queryAfter(
+      final typedSecond = await db.store(Tasks.store).queryAfter(
             typedFirst.nextCursor!,
             orderBy: [Tasks.title.asc],
             limit: 1,
@@ -179,7 +179,7 @@ void main() {
       final rawSecond = await raw.keysetAfter(rawFirst.nextCursor!);
       expect(typedSecond.items.single.id, rawSecond.items.single['id']);
       expect(
-        () => db.store(Tasks.instance).queryAfter(
+        () => db.store(Tasks.store).queryAfter(
               typedFirst.nextCursor!,
               orderBy: [Tasks.dueDay.asc],
               limit: 1,
@@ -190,7 +190,7 @@ void main() {
 
     test('cases 104–107: count/distinct/aggregates/ids/explain delegate',
         () async {
-      final typed = db.store(Tasks.instance);
+      final typed = db.store(Tasks.store);
       final raw = db.collection('tasks').query().all();
       expect(await typed.count(), await raw.count());
       expect(await typed.countDistinct(Tasks.priority),
@@ -207,7 +207,7 @@ void main() {
 
     test('case 108: an OR element compiles like the raw OR group', () {
       expectCompileParity(
-        db.store(Tasks.instance).debugCompile(
+        db.store(Tasks.store).debugCompile(
           where: <Cond<Tasks>>[
             Tasks.role.eq(Role.admin) | Tasks.done.eq(false),
           ],
@@ -222,7 +222,7 @@ void main() {
 
     test('case 109: encrypted predicate rejection is engine-owned', () async {
       await expectLater(
-        db.store(SecretNotes.instance).query(
+        db.store(SecretNotes.store).query(
           where: [SecretNotes.note.eq('x')],
           limit: 1,
         ),
@@ -234,7 +234,7 @@ void main() {
         () {
       final needle = r'a%_\b';
       expectCompileParity(
-        db.store(Tasks.instance).debugCompile(
+        db.store(Tasks.store).debugCompile(
           where: [
             Tasks.title.startsWith(needle),
             Tasks.title.contains(needle),
@@ -249,12 +249,12 @@ void main() {
             .limit(2),
       );
       expectCompileParity(
-        db.store(Tasks.instance).debugCompile(limit: 2),
+        db.store(Tasks.store).debugCompile(limit: 2),
         db.collection('tasks').query().limit(2),
       );
       // eq(null) is the IS NULL shorthand.
       expectCompileParity(
-        db.store(Tasks.instance).debugCompile(
+        db.store(Tasks.store).debugCompile(
           where: [Tasks.done.eq(null)],
           limit: 2,
         ),
@@ -267,7 +267,7 @@ void main() {
     test('cases 118–122: cursor/distinct/aggregate/null ordering edges',
         () async {
       final first = await db
-          .store(Tasks.instance)
+          .store(Tasks.store)
           .query(orderBy: [Tasks.dueDay.asc], limit: 1);
       final rawSecond = await db
           .collection('tasks')
@@ -276,7 +276,7 @@ void main() {
           .limit(1)
           .keysetAfter(first.nextCursor!);
       expect(
-          (await db.store(Tasks.instance).queryAfter(
+          (await db.store(Tasks.store).queryAfter(
                     first.nextCursor!,
                     orderBy: [Tasks.dueDay.asc],
                     limit: 1,
@@ -287,7 +287,7 @@ void main() {
           rawSecond.items.single['id']);
 
       final typedDistinct =
-          await db.store(Tasks.instance).distinct(Tasks.priority);
+          await db.store(Tasks.store).distinct(Tasks.priority);
       final rawDistinct =
           await db.collection('tasks').query().all().distinct('priority');
       expect(typedDistinct.whereType<Priority>().map((e) => e.name).toSet(),
@@ -295,7 +295,7 @@ void main() {
       expect(typedDistinct, contains(null));
 
       expect(
-        await db.store(Tasks.instance).sum(
+        await db.store(Tasks.store).sum(
           Tasks.estimate,
           where: [Tasks.title.eq('missing')],
         ),
@@ -307,7 +307,7 @@ void main() {
             .sum('estimate'),
       );
       expect(
-        await db.store(Tasks.instance).sum(
+        await db.store(Tasks.store).sum(
           Tasks.estimate,
           where: [Tasks.estimate.isNull()],
         ),
@@ -319,7 +319,7 @@ void main() {
             .sum('estimate'),
       );
       final typedOrdered = await db
-          .store(Tasks.instance)
+          .store(Tasks.store)
           .query(orderBy: [Tasks.dueDay.asc], all: true);
       final rawOrdered =
           await db.collection('tasks').query().orderBy('dueDay').all().fetch();
@@ -338,7 +338,7 @@ void main() {
     tearDown(() => db.close());
 
     test('v3: descriptor conditions compile exactly like the raw builder', () {
-      final tasks = db.store(Tasks.instance);
+      final tasks = db.store(Tasks.store);
       expectCompileParity(
         tasks.debugCompile(where: [Tasks.done.eq(false)], limit: 2),
         db.collection('tasks').query().where('done', eq: false).limit(2),
@@ -377,7 +377,7 @@ void main() {
     });
 
     test('v3: eq(null) is IS NULL and ~eq(null) is IS NOT NULL', () {
-      final tasks = db.store(Tasks.instance);
+      final tasks = db.store(Tasks.store);
       expectCompileParity(
         tasks.debugCompile(where: [Tasks.estimate.eq(null)], limit: 2),
         db.collection('tasks').query().where('estimate', isNull: true).limit(2),
@@ -392,7 +392,7 @@ void main() {
 
     test('v3: routed conditions actually filter (the silent no-op fix)',
         () async {
-      final tasks = db.store(Tasks.instance);
+      final tasks = db.store(Tasks.store);
       expect(
         // ~eq replaces the old not-equal operator: not-done tasks.
         await tasks.count(where: [~Tasks.done.eq(true)]),
@@ -411,7 +411,7 @@ void main() {
     });
 
     test('v3: OR elements accept every operator kind and compile like raw', () {
-      final tasks = db.store(Tasks.instance);
+      final tasks = db.store(Tasks.store);
       // Equality alternatives still compile exactly like the raw OR group.
       expectCompileParity(
         tasks.debugCompile(
@@ -444,7 +444,7 @@ void main() {
         Tasks.title.asc,
       ];
       expectCompileParity(
-        db.store(Tasks.instance).debugCompile(
+        db.store(Tasks.store).debugCompile(
           where: [
             ...where,
             Tasks.title.eq('Ship alpha') | Tasks.role.eq(Role.admin),
@@ -479,19 +479,19 @@ void main() {
       final db = await openTyped();
       addTearDown(db.close);
       final missing =
-          await db.store(Tasks.instance).watchOne(rid('missing', 1)).first;
+          await db.store(Tasks.store).watchOne(rid('missing', 1)).first;
       expect(missing, isNull);
 
       final id = rid('watch', 1);
       final values = <TypedRow<Tasks>?>[];
-      final sub = db.store(Tasks.instance).watchOne(id).listen(values.add);
+      final sub = db.store(Tasks.store).watchOne(id).listen(values.add);
       addTearDown(sub.cancel);
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('watched'),
       ]);
       await Future<void>.delayed(const Duration(milliseconds: 25));
-      await db.store(Tasks.instance).purge(id);
+      await db.store(Tasks.store).purge(id);
       await Future<void>.delayed(const Duration(milliseconds: 40));
       expect(values, contains(isA<TypedRow<Tasks>>()));
       expect(values.last, isNull);
@@ -503,13 +503,13 @@ void main() {
       addTearDown(db.close);
       final emissions = <List<TypedRow<Tasks>>>[];
       final sub = db
-          .store(Tasks.instance)
+          .store(Tasks.store)
           .watch(orderBy: [Tasks.title.asc], limit: 20).listen(emissions.add);
       addTearDown(sub.cancel);
       await Future<void>.delayed(const Duration(milliseconds: 25));
       final before = emissions.length;
       await db.transaction((tx) async {
-        final tasks = tx.store(Tasks.instance);
+        final tasks = tx.store(Tasks.store);
         for (var i = 0; i < 3; i++) {
           await tasks.put([
             Writes.id(rid('burst', i)),
@@ -528,17 +528,16 @@ void main() {
       final db = await openTyped(includeSearch: true);
       addTearDown(db.close);
       final id = rid('search', 1);
-      await db.store(SearchTasks.instance).put([
+      await db.store(SearchTasks.store).put([
         Writes.id(id),
         SearchTasks.title.set('ship searchable'),
       ]);
-      final hits =
-          await db.store(SearchTasks.instance).search('ship', limit: 5);
+      final hits = await db.store(SearchTasks.store).search('ship', limit: 5);
       final TypedSearchHit<SearchTasks> hit = hits.single;
       expect(hit.id, id);
       expect(hit.score, isA<double>());
       expect((await hit.fetch())!(SearchTasks.title), 'ship searchable');
-      await db.store(SearchTasks.instance).purge(id);
+      await db.store(SearchTasks.store).purge(id);
       expect(await hit.fetch(), isNull);
     });
 
@@ -547,12 +546,11 @@ void main() {
       final db = await openTyped(includeSearch: true);
       addTearDown(db.close);
       final id = rid('search', 2);
-      await db.store(SearchTasks.instance).put([
+      await db.store(SearchTasks.store).put([
         Writes.id(id),
         SearchTasks.title.set('ship searchable'),
       ]);
-      final hits =
-          await db.store(SearchTasks.instance).search('ship', limit: 5);
+      final hits = await db.store(SearchTasks.store).search('ship', limit: 5);
       final raw =
           await db.collection('searchtasks').search('ship').limit(5).fetch();
       expect(hits.map((h) => h.id), raw.map((r) => r.id));
@@ -564,28 +562,29 @@ void main() {
       final db = await openTyped(includeSearch: true);
       addTearDown(db.close);
       final id = rid('search', 3);
-      await db.store(SearchTasks.instance).put([
+      await db.store(SearchTasks.store).put([
         Writes.id(id),
         SearchTasks.title.set('ship scope flags'),
       ]);
 
       // `all: true` opts out of the result limit; the archived/hidden flags
       // pass through to the underlying FTS surface and the hit still fetches.
-      final hits = await db.store(SearchTasks.instance).search(
-        'ship',
-        all: true,
-        includeArchived: true,
-        includeHidden: true,
-      );
+      final hits = await db.store(SearchTasks.store).search(
+            'ship',
+            all: true,
+            includeArchived: true,
+            includeHidden: true,
+          );
       expect(hits.map((h) => h.id), contains(id));
-      expect((await hits.single.fetch())!(SearchTasks.title), 'ship scope flags');
+      expect(
+          (await hits.single.fetch())!(SearchTasks.title), 'ship scope flags');
     });
 
     test('case 125: FtsUnavailableError passes through unchanged', () async {
       final db = await openTyped();
       addTearDown(db.close);
       expect(
-        () => db.store(Users.instance).search('x'),
+        () => db.store(Users.store).search('x'),
         throwsA(isA<FtsUnavailableError>()),
       );
     });

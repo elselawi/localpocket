@@ -9,8 +9,8 @@ import 'package:test/test.dart';
 import '../support/helpers.dart';
 import 'support/tasks.dart';
 
-Future<LocalPocket> openTasks() => LocalPocket.open(
-    path: ':memory:', stores: [Tasks.instance.collectionSchema]);
+Future<LocalPocket> openTasks() =>
+    LocalPocket.open(path: ':memory:', stores: [Tasks.store.collectionSchema]);
 
 Future<List<String>> allIds(LocalPocket db) =>
     db.collection('tasks').query().all().ids();
@@ -21,7 +21,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('upsert', 1);
-      await db.store(Tasks.instance).upsert([
+      await db.store(Tasks.store).upsert([
         Writes.id(id),
         Tasks.title.set('created'),
       ]);
@@ -31,7 +31,7 @@ void main() {
     test('generates an id when Writes.id is omitted', () async {
       final db = await openTasks();
       addTearDown(db.close);
-      await db.store(Tasks.instance).upsert([Tasks.title.set('gen')]);
+      await db.store(Tasks.store).upsert([Tasks.title.set('gen')]);
       final ids = await allIds(db);
       expect(ids, hasLength(1));
       expect(ids.single, matches(RegExp(r'^[a-z0-9]{15}$')));
@@ -41,7 +41,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('upsert', 2);
-      final tasks = db.store(Tasks.instance);
+      final tasks = db.store(Tasks.store);
       await tasks.put([
         Writes.id(id),
         Tasks.title.set('original'),
@@ -64,7 +64,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('upsert', 3);
-      final tasks = db.store(Tasks.instance);
+      final tasks = db.store(Tasks.store);
       await expectLater(tasks.patch(id, [Tasks.title.set('x')]),
           throwsA(isA<RecordNotFoundException>()));
       await tasks.upsert([Writes.id(id), Tasks.title.set('x')]);
@@ -76,7 +76,7 @@ void main() {
       addTearDown(db.close);
       final id = rid('upsert', 4);
       await expectLater(
-        () => db.store(Tasks.instance).upsert([
+        () => db.store(Tasks.store).upsert([
           Writes.id(id),
           Tasks.priority.set(Priority.normal), // title is required
         ]),
@@ -91,7 +91,7 @@ void main() {
       addTearDown(db.close);
       await expectLater(
         () => db
-            .store(Tasks.instance)
+            .store(Tasks.store)
             .upsert([Writes.id('BAD'), Tasks.title.set('x')]),
         throwsA(isA<ValidationException>()
             .having((e) => e.field, 'field', 'id')
@@ -105,7 +105,7 @@ void main() {
       addTearDown(db.close);
       final id = rid('upsert', 5);
       final local = DateTime(2026, 9, 1, 12, 0, 0);
-      await db.store(Tasks.instance).upsert([
+      await db.store(Tasks.store).upsert([
         Writes.id(id),
         Tasks.title.set('x'),
         Tasks.role.set(Role.admin),
@@ -123,7 +123,7 @@ void main() {
       addTearDown(db.close);
       final a = rid('upsert', 6);
       final b = rid('upsert', 7);
-      final tasks = db.store(Tasks.instance);
+      final tasks = db.store(Tasks.store);
       await tasks
           .put([Writes.id(a), Tasks.title.set('a'), Tasks.done.set(false)]);
 
@@ -142,7 +142,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('upsert', 8);
-      await db.store(Tasks.instance).upsert([
+      await db.store(Tasks.store).upsert([
         Writes.id(id),
         Tasks.title.set('typed'),
       ]);
@@ -157,7 +157,7 @@ void main() {
       addTearDown(db.close);
       final id = rid('upsert', 9);
       await db.transaction((tx) async {
-        final tTasks = tx.store(Tasks.instance);
+        final tTasks = tx.store(Tasks.store);
         await tTasks.put([Writes.id(id), Tasks.title.set('tx')]);
         await tTasks.upsert([
           Writes.id(id),

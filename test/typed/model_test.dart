@@ -22,8 +22,8 @@ final class Task extends TypedModel<Tasks> {
   String get upperTitle => '${id.substring(0, 2)}:${title.toUpperCase()}';
 }
 
-Future<LocalPocket> openTasks() => LocalPocket.open(
-    path: ':memory:', stores: [Tasks.instance.collectionSchema]);
+Future<LocalPocket> openTasks() =>
+    LocalPocket.open(path: ':memory:', stores: [Tasks.store.collectionSchema]);
 
 void main() {
   group('TypedModel', () {
@@ -32,13 +32,13 @@ void main() {
       addTearDown(db.close);
       final id = rid('mdlcase', 1);
 
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('Ship it'),
         Tasks.done.set(false),
       ]);
 
-      final task = Task((await db.store(Tasks.instance).get(id))!);
+      final task = Task((await db.store(Tasks.store).get(id))!);
       expect(task.id, id);
       expect(task.archived, isFalse);
       expect(task.title, 'Ship it');
@@ -51,7 +51,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('mdlcase', 2);
-      final c = db.store(Tasks.instance);
+      final c = db.store(Tasks.store);
 
       await c.put([Writes.id(id), Tasks.title.set('before')]);
       final stale = Task((await c.get(id))!);
@@ -70,14 +70,14 @@ void main() {
       addTearDown(db.close);
       final id = rid('mdlcase', 3);
 
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('with extras'),
         Writes.extra('customKey', 7),
         Writes.extra('note', 'kept'),
       ]);
 
-      final task = Task((await db.store(Tasks.instance).get(id))!);
+      final task = Task((await db.store(Tasks.store).get(id))!);
       // `extra` exposes only the undeclared keys — never id/archived/fields.
       expect(task.extra['customKey'], 7);
       expect(task.extra['note'], 'kept');

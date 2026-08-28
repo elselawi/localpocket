@@ -9,8 +9,8 @@
 /// ```dart
 /// import 'package:localpocket/localpocket.dart';
 ///
-/// final db = await openTyped(path: 'app.db', stores: [Tasks.instance]);
-/// await db.store(Tasks.instance).put([Tasks.title.set('Ship it')]);
+/// final db = await openTyped(path: 'app.db', stores: [Tasks.store]);
+/// await db.store(Tasks.store).put([Tasks.title.set('Ship it')]);
 /// ```
 ///
 /// Narrower entry points exist if you want a single slice only —

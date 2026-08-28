@@ -45,19 +45,19 @@ void main() {
   group('TypedStoreRegistry', () {
     test('first bind stores the instance and returns it (case 41)', () {
       final registry = TypedStoreRegistry();
-      final bound = registry.bind(Tasks.instance);
-      expect(identical(bound, Tasks.instance), isTrue);
+      final bound = registry.bind(Tasks.store);
+      expect(identical(bound, Tasks.store), isTrue);
     });
 
     test('re-binding the same instance is idempotent (case 42)', () {
       final registry = TypedStoreRegistry();
-      registry.bind(Tasks.instance);
-      expect(identical(registry.bind(Tasks.instance), Tasks.instance), isTrue);
+      registry.bind(Tasks.store);
+      expect(identical(registry.bind(Tasks.store), Tasks.store), isTrue);
     });
 
     test('same name + non-identical instance throws mismatch (case 43)', () {
       final registry = TypedStoreRegistry();
-      registry.bind(Tasks.instance);
+      registry.bind(Tasks.store);
       final imposter = _Imposter();
       expect(
         () => registry.bind(imposter),
@@ -65,7 +65,7 @@ void main() {
             .having((e) => e.message, 'message', contains('tasks'))),
       );
       // A failed bind does not disturb the canonical binding:
-      expect(identical(registry.bind(Tasks.instance), Tasks.instance), isTrue);
+      expect(identical(registry.bind(Tasks.store), Tasks.store), isTrue);
     });
 
     test(
@@ -74,7 +74,7 @@ void main() {
       // _Imposter bypasses the private-constructor convention entirely —
       // the registry, not the convention, is the enforcement point.
       final registry = TypedStoreRegistry();
-      registry.bind(Tasks.instance);
+      registry.bind(Tasks.store);
       expect(() => registry.bind(_Imposter()),
           throwsA(isA<TypedStoreMismatchError>()));
       expect(() => registry.bind(_Imposter()),
@@ -83,12 +83,12 @@ void main() {
 
     test('two distinct stores bind independently (case 45)', () {
       final registry = TypedStoreRegistry();
-      final tasks = registry.bind(Tasks.instance);
+      final tasks = registry.bind(Tasks.store);
       final users = registry.bind(_Users());
-      expect(identical(tasks, Tasks.instance), isTrue);
+      expect(identical(tasks, Tasks.store), isTrue);
       expect(users.name, 'users');
       // Both remain reachable through their canonical instances:
-      expect(identical(registry.bind(Tasks.instance), Tasks.instance), isTrue);
+      expect(identical(registry.bind(Tasks.store), Tasks.store), isTrue);
       expect(identical(registry.bind(users), users), isTrue);
     });
 
@@ -97,11 +97,11 @@ void main() {
         '(case 46)', () async {
       final registry = TypedStoreRegistry();
       final results = await Future.wait([
-        Future<Tasks>(() => registry.bind(Tasks.instance)),
-        Future<Tasks>(() => registry.bind(Tasks.instance)),
+        Future<Tasks>(() => registry.bind(Tasks.store)),
+        Future<Tasks>(() => registry.bind(Tasks.store)),
       ]);
-      expect(results[0], same(Tasks.instance));
-      expect(results[1], same(Tasks.instance));
+      expect(results[0], same(Tasks.store));
+      expect(results[1], same(Tasks.store));
       // And a non-identical same-name bind still fails afterwards:
       expect(() => registry.bind(_Imposter()),
           throwsA(isA<TypedStoreMismatchError>()));
@@ -109,37 +109,36 @@ void main() {
   });
 
   group('db.store / tx.store wiring', () {
-    Future<LocalPocket> open() => LocalPocket.open(path: ':memory:', stores: [
-          Tasks.instance.collectionSchema,
-          Users.instance.collectionSchema
-        ]);
+    Future<LocalPocket> open() => LocalPocket.open(
+        path: ':memory:',
+        stores: [Tasks.store.collectionSchema, Users.store.collectionSchema]);
 
     test('case 41: db.store returns a handle whose def is the instance',
         () async {
       final db = await open();
       addTearDown(db.close);
-      final handle = db.store(Tasks.instance);
-      expect(identical(handle.def, Tasks.instance), isTrue);
+      final handle = db.store(Tasks.store);
+      expect(identical(handle.def, Tasks.store), isTrue);
       // Re-binding the same instance is idempotent:
-      expect(identical(db.store(Tasks.instance).def, Tasks.instance), isTrue);
+      expect(identical(db.store(Tasks.store).def, Tasks.store), isTrue);
     });
 
     test('case 43/44: db.store rejects a non-identical same-name definition',
         () async {
       final db = await open();
       addTearDown(db.close);
-      db.store(Tasks.instance);
+      db.store(Tasks.store);
       expect(
           () => db.store(_Imposter()), throwsA(isA<TypedStoreMismatchError>()));
-      expect(identical(db.store(Tasks.instance).def, Tasks.instance), isTrue);
+      expect(identical(db.store(Tasks.store).def, Tasks.store), isTrue);
     });
 
     test('case 45: two distinct stores bind independently through db.store',
         () async {
       final db = await open();
       addTearDown(db.close);
-      expect(identical(db.store(Tasks.instance).def, Tasks.instance), isTrue);
-      expect(identical(db.store(Users.instance).def, Users.instance), isTrue);
+      expect(identical(db.store(Tasks.store).def, Tasks.store), isTrue);
+      expect(identical(db.store(Users.store).def, Users.store), isTrue);
     });
 
     test('typed definition must match the registered engine schema', () async {
@@ -150,7 +149,7 @@ void main() {
         throwsA(isA<TypedStoreMismatchError>()
             .having((e) => e.message, 'message', contains('registered'))),
       );
-      expect(identical(db.store(Tasks.instance).def, Tasks.instance), isTrue);
+      expect(identical(db.store(Tasks.store).def, Tasks.store), isTrue);
     });
 
     test('failed missing-store lookup does not poison the registry', () async {
@@ -168,11 +167,11 @@ void main() {
       final db = await open();
       addTearDown(db.close);
       final handles = await Future.wait([
-        Future<TypedCollection<Tasks>>(() => db.store(Tasks.instance)),
-        Future<TypedCollection<Tasks>>(() => db.store(Tasks.instance)),
+        Future<TypedCollection<Tasks>>(() => db.store(Tasks.store)),
+        Future<TypedCollection<Tasks>>(() => db.store(Tasks.store)),
       ]);
-      expect(identical(handles[0].def, Tasks.instance), isTrue);
-      expect(identical(handles[1].def, Tasks.instance), isTrue);
+      expect(identical(handles[0].def, Tasks.store), isTrue);
+      expect(identical(handles[1].def, Tasks.store), isTrue);
       expect(
           () => db.store(_Imposter()), throwsA(isA<TypedStoreMismatchError>()));
     });
@@ -181,10 +180,10 @@ void main() {
         'case 47: binding after close surfaces the engine closed error, '
         'not a registry inconsistency', () async {
       final db = await open();
-      db.store(Tasks.instance);
+      db.store(Tasks.store);
       await db.close();
       // The registry is untouched by close: binding is still consistent…
-      expect(() => db.store(Tasks.instance), returnsNormally);
+      expect(() => db.store(Tasks.store), returnsNormally);
       // …and operations surface the same error as the raw path.
       Object? rawError;
       try {
@@ -194,7 +193,7 @@ void main() {
       }
       Object? typedError;
       try {
-        await db.store(Tasks.instance).get('regcase47000001');
+        await db.store(Tasks.store).get('regcase47000001');
       } catch (e) {
         typedError = e;
       }
@@ -206,15 +205,15 @@ void main() {
         () async {
       final db = await open();
       addTearDown(db.close);
-      db.store(Tasks.instance);
+      db.store(Tasks.store);
       await db.transaction((tx) async {
-        final handle = tx.store(Tasks.instance);
-        expect(identical(handle.def, Tasks.instance), isTrue);
+        final handle = tx.store(Tasks.store);
+        expect(identical(handle.def, Tasks.store), isTrue);
         // A tx can never shadow the canonical instance:
         expect(() => tx.store(_Imposter()),
             throwsA(isA<TypedStoreMismatchError>()));
       });
-      expect(identical(db.store(Tasks.instance).def, Tasks.instance), isTrue);
+      expect(identical(db.store(Tasks.store).def, Tasks.store), isTrue);
     });
 
     test('case 49: two independent LocalPocket opens bind independently',
@@ -223,8 +222,8 @@ void main() {
       addTearDown(a.close);
       final b = await open();
       addTearDown(b.close);
-      expect(identical(a.store(Tasks.instance).def, Tasks.instance), isTrue);
-      expect(identical(b.store(Tasks.instance).def, Tasks.instance), isTrue);
+      expect(identical(a.store(Tasks.store).def, Tasks.store), isTrue);
+      expect(identical(b.store(Tasks.store).def, Tasks.store), isTrue);
     });
   });
 }

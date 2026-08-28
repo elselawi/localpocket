@@ -154,7 +154,7 @@ V decodeStored<V>(FieldDef<Object?, V> field, Object? raw) {
 ///
 /// Every user-field descriptor implements this; the system descriptors
 /// (`StoreDef.id`, `StoreDef.archived`) deliberately do not — so
-/// `Tasks.instance.id.set(...)` is a compile error, while typed reads
+/// `Tasks.store.id.set(...)` is a compile error, while typed reads
 /// remain available on every [FieldDef].
 abstract base class SettableFieldDef<S, T> implements FieldDef<S, T> {}
 

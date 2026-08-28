@@ -74,13 +74,13 @@ class GettingStartedPage extends StatelessWidget {
 
   static const _schemaCode = '''
 final class Tasks extends StoreDef<Tasks> {
-  static final Tasks instance = Tasks._();
+  static final Tasks store = Tasks._();
   Tasks._() : super(name: 'tasks', version: 1);
 
-  static final title = instance.schema.text('title').req();
-  static final status = instance.schema.enumOf('status', TaskStatus.values);
-  static final priority = instance.schema.integer('priority');
-  static final completed = instance.schema.boolean('completed');
+  static final title = store.schema.text('title').req();
+  static final status = store.schema.enumOf('status', TaskStatus.values);
+  static final priority = store.schema.integer('priority');
+  static final completed = store.schema.boolean('completed');
 
   @override
   List<FieldDef<Tasks, Object?>> get fields =>
@@ -91,10 +91,10 @@ final class Tasks extends StoreDef<Tasks> {
   static const _openCode = '''
 final db = await LocalPocket.open(
   path: ':memory:',          // or a real file path
-  stores: [Tasks.instance.collectionSchema, ...],
+  stores: [Tasks.store.collectionSchema, ...],
   fieldCipher: myCipher,     // optional: encrypt sensitive fields
 );
-final tasks = db.store(Tasks.instance);
+final tasks = db.store(Tasks.store);
 ''';
 
   static const _queryCode = '''

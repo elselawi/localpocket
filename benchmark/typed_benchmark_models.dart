@@ -3,17 +3,17 @@ import 'package:localpocket/typed.dart';
 final class BenchmarkWidgets extends StoreDef<BenchmarkWidgets> {
   BenchmarkWidgets._() : super(name: 'widgets', version: 1);
 
-  static final BenchmarkWidgets instance = BenchmarkWidgets._();
+  static final BenchmarkWidgets store = BenchmarkWidgets._();
 
   late final _name = schema.text('name').req();
   late final _qty = schema.integer('qty');
   late final _phone = schema.text('phone', uniqueWhenActive: true);
   late final _body = schema.text('body');
 
-  static TextFieldReq<BenchmarkWidgets> get widgetName => instance._name;
-  static IntFieldOpt<BenchmarkWidgets> get qty => instance._qty;
-  static TextFieldOpt<BenchmarkWidgets> get phone => instance._phone;
-  static TextFieldOpt<BenchmarkWidgets> get body => instance._body;
+  static TextFieldReq<BenchmarkWidgets> get widgetName => store._name;
+  static IntFieldOpt<BenchmarkWidgets> get qty => store._qty;
+  static TextFieldOpt<BenchmarkWidgets> get phone => store._phone;
+  static TextFieldOpt<BenchmarkWidgets> get body => store._body;
 
   @override
   List<FieldDef<BenchmarkWidgets, Object?>> get fields => [

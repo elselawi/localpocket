@@ -227,7 +227,7 @@ final class _NativeCollectionSearchSurface implements TypedSearchSurface {
 /// {@template localpocket.typed_collection}
 /// Typed CRUD access to one store definition instance.
 ///
-/// Obtained from `db.store(Tasks.instance)` or `tx.store(Tasks.instance)`;
+/// Obtained from `db.store(Tasks.store)` or `tx.store(Tasks.store)`;
 /// the registry guarantees the canonical instance (reference identity).
 /// Reads return [TypedRow]s; writes are field-native [Write] values
 /// (`Tasks.title.set('x')`) and every query terminal accepts the same

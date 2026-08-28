@@ -13,11 +13,11 @@ import 'support/fake_facade_host.dart';
 final class _FtsTasks extends StoreDef<_FtsTasks> {
   _FtsTasks() : super(name: 'ftstasks');
 
-  static final _FtsTasks instance = _FtsTasks();
+  static final _FtsTasks store = _FtsTasks();
 
   late final _title = schema.text('title').req();
 
-  static TextFieldReq<_FtsTasks> get title => instance._title;
+  static TextFieldReq<_FtsTasks> get title => store._title;
 
   @override
   List<FieldDef<_FtsTasks, Object?>> get fields => [_title];
@@ -160,16 +160,17 @@ void main() {
     setUp(() {
       fake = FakeFacadeHost({
         'widgets': schema,
-        'tasks': Tasks.instance.collectionSchema,
-        'ftstasks': _FtsTasks.instance.collectionSchema,
+        'tasks': Tasks.store.collectionSchema,
+        'ftstasks': _FtsTasks.store.collectionSchema,
       });
       tx = WebTx.ins(fake, 42);
     });
 
-    test('store binds the canonical definition and reads through the typed '
+    test(
+        'store binds the canonical definition and reads through the typed '
         'row', () async {
-      final col = tx.store(Tasks.instance);
-      expect(col.def, same(Tasks.instance));
+      final col = tx.store(Tasks.store);
+      expect(col.def, same(Tasks.store));
 
       fake.responses[WireOp.txGet] =
           encodeWireValue({'id': 'a', 'title': 'Ship'});
@@ -184,9 +185,10 @@ void main() {
       expect(fake.sent.single.$2['sessionId'], 42);
     });
 
-    test('put/putAll/patch/patchAll/archive/restore/purge route through '
+    test(
+        'put/putAll/patch/patchAll/archive/restore/purge route through '
         'txMutateBatch with the session id', () async {
-      final col = tx.store(Tasks.instance);
+      final col = tx.store(Tasks.store);
       await col.put([Tasks.title.set('x')]);
       await col.putAll([
         [Writes.id('a'), Tasks.title.set('y')],
@@ -210,13 +212,14 @@ void main() {
     });
 
     test('watchOne is unsupported inside a transaction session', () {
-      final col = tx.store(Tasks.instance);
+      final col = tx.store(Tasks.store);
       expect(() => col.watchOne('a'), throwsA(isA<UnsupportedError>()));
     });
 
-    test('typed query surface terminals forward to the worker with the '
+    test(
+        'typed query surface terminals forward to the worker with the '
         'session id', () async {
-      final col = tx.store(Tasks.instance);
+      final col = tx.store(Tasks.store);
 
       fake.responses[WireOp.compiledQuery] = {'value': 3};
       expect(await col.count(where: [Tasks.done.eq(false)]), 3);
@@ -231,7 +234,9 @@ void main() {
           reason: 'the typed layer decodes distinct values through the '
               'descriptor, so an enum wire string becomes the enum value');
 
-      fake.responses[WireOp.compiledQuery] = {'ids': ['a', 'b']};
+      fake.responses[WireOp.compiledQuery] = {
+        'ids': ['a', 'b']
+      };
       expect(await col.ids(limit: 5), ['a', 'b']);
 
       fake.responses[WireOp.compiledQuery] = {'plan': 'SCAN tasks'};
@@ -246,9 +251,10 @@ void main() {
       expect(fake.sent.every((s) => s.$2['sessionId'] == 42), isTrue);
     });
 
-    test('typed query() runs the full compose path (select, pageOptions, '
+    test(
+        'typed query() runs the full compose path (select, pageOptions, '
         'fetch)', () async {
-      final col = tx.store(Tasks.instance);
+      final col = tx.store(Tasks.store);
       fake.responses[WireOp.compiledQuery] = {
         'items': <Object?>[],
         'hasMore': false,
@@ -273,7 +279,7 @@ void main() {
     });
 
     test('typed query surface keyset, debugCompile, and watch', () async {
-      final col = tx.store(Tasks.instance);
+      final col = tx.store(Tasks.store);
 
       final (sql, args) =
           col.debugCompile(where: [Tasks.done.eq(false)], limit: 5);
@@ -282,7 +288,7 @@ void main() {
 
       // Build a real cursor with the same query shape the typed terminal
       // composes (orderBy title asc, limit 5).
-      final core = QueryBuilder.compileOnly(Tasks.instance.collectionSchema)
+      final core = QueryBuilder.compileOnly(Tasks.store.collectionSchema)
           .orderBy('title')
           .limit(5);
       final cursor = core.cursorForCompiledRow({'title': 'Ship', 'id': 'a'});
@@ -291,8 +297,8 @@ void main() {
         'items': <Object?>[],
         'hasMore': false,
       };
-      final page = await col.queryAfter(cursor,
-          orderBy: [Tasks.title.asc], limit: 5);
+      final page =
+          await col.queryAfter(cursor, orderBy: [Tasks.title.asc], limit: 5);
       expect(page.items, isEmpty);
       expect(fake.sent.last.$2['sessionId'], 42);
 
@@ -303,13 +309,14 @@ void main() {
       );
     });
 
-    test('typed search surface forwards flags and fetches hits through the '
+    test(
+        'typed search surface forwards flags and fetches hits through the '
         'transaction', () async {
-      final col = tx.store(_FtsTasks.instance);
+      final col = tx.store(_FtsTasks.store);
 
       fake.responses[WireOp.compiledQuery] = {'results': <Object?>[]};
-      final empty =
-          await col.search('engines', all: true, includeArchived: true, includeHidden: true);
+      final empty = await col.search('engines',
+          all: true, includeArchived: true, includeHidden: true);
       expect(empty, isEmpty);
       final (op, args) = fake.sent.single;
       expect(op, WireOp.compiledQuery);

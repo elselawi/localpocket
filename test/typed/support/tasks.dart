@@ -21,7 +21,7 @@ final class Tasks extends StoreDef<Tasks> {
 
   /// The single instance. The private constructor makes a second `Tasks()`
   /// unconstructible outside this class — uniqueness by construction.
-  static final Tasks instance = Tasks._();
+  static final Tasks store = Tasks._();
 
   late final _title = schema.text('title').req();
   late final _priority = schema.enumOf('priority', Priority.values);
@@ -40,17 +40,17 @@ final class Tasks extends StoreDef<Tasks> {
   /// Static accessors: any file writes `Tasks.title` with zero plumbing.
   /// The concrete descriptor types keep `Draft.set` (and the Phase-3
   /// kind-scoped query operators) available through the accessor.
-  static TextFieldReq<Tasks> get title => instance._title;
-  static EnumFieldOpt<Tasks, Priority> get priority => instance._priority;
-  static EnumFieldOpt<Tasks, Role> get role => instance._role;
-  static BoolFieldOpt<Tasks> get done => instance._done;
-  static DateFieldOpt<Tasks> get dueDay => instance._dueDay;
-  static DateTimeFieldOpt<Tasks> get dueAt => instance._dueAt;
-  static RealFieldOpt<Tasks> get estimate => instance._estimate;
-  static IntFieldOpt<Tasks> get count => instance._count;
-  static JsonListField<Tasks, String> get tags => instance._tags;
-  static JsonField<Tasks> get meta => instance._meta;
-  static RefField<Tasks> get ownerId => instance._ownerId;
+  static TextFieldReq<Tasks> get title => store._title;
+  static EnumFieldOpt<Tasks, Priority> get priority => store._priority;
+  static EnumFieldOpt<Tasks, Role> get role => store._role;
+  static BoolFieldOpt<Tasks> get done => store._done;
+  static DateFieldOpt<Tasks> get dueDay => store._dueDay;
+  static DateTimeFieldOpt<Tasks> get dueAt => store._dueAt;
+  static RealFieldOpt<Tasks> get estimate => store._estimate;
+  static IntFieldOpt<Tasks> get count => store._count;
+  static JsonListField<Tasks, String> get tags => store._tags;
+  static JsonField<Tasks> get meta => store._meta;
+  static RefField<Tasks> get ownerId => store._ownerId;
 
   @override
   List<FieldDef<Tasks, Object?>> get fields => [

@@ -457,7 +457,7 @@ Future<void> main() async {
 
     final typedWatch = Stopwatch()..start();
     for (final map in maps) {
-      final row = TypedRow<BenchmarkWidgets>(BenchmarkWidgets.instance, map);
+      final row = TypedRow<BenchmarkWidgets>(BenchmarkWidgets.store, map);
       if (!identical(row.asMap(), map)) {
         throw StateError('TypedRow copied its backing map in B13.');
       }
@@ -499,11 +499,11 @@ Future<void> main() async {
     const count = 10000;
     final rawDb = await LocalPocket.open(
       path: ':memory:',
-      stores: [BenchmarkWidgets.instance.collectionSchema],
+      stores: [BenchmarkWidgets.store.collectionSchema],
     );
     final typedDb = await LocalPocket.open(
       path: ':memory:',
-      stores: [BenchmarkWidgets.instance.collectionSchema],
+      stores: [BenchmarkWidgets.store.collectionSchema],
     );
     final rawRecords = [
       for (var i = 0; i < count; i++)
@@ -526,7 +526,7 @@ Future<void> main() async {
     await rawDb.collection('widgets').putAll(rawRecords);
     rawWatch.stop();
     final typedWatch = Stopwatch()..start();
-    await typedDb.store(BenchmarkWidgets.instance).putAll(typedRecords);
+    await typedDb.store(BenchmarkWidgets.store).putAll(typedRecords);
     typedWatch.stop();
 
     final rawCount = await rawDb.collection('widgets').query().count();

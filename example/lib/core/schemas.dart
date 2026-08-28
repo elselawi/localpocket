@@ -26,7 +26,7 @@ class PlaygroundSchemas {
 
   /// Tasks: the canonical typed definition compiles to the same engine schema.
   static CollectionSchema<Object?> get tasks =>
-      PlaygroundTasks.instance.collectionSchema;
+      PlaygroundTasks.store.collectionSchema;
 
   /// Posts col with numeric counters + jsonList tags + conflict resolvers.
   static final posts = CollectionSchema(

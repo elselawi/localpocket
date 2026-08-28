@@ -5,17 +5,17 @@ enum _SmokeRole { author, reader }
 final class _SmokeNotes extends StoreDef<_SmokeNotes> {
   _SmokeNotes._() : super(name: 'typednotes', version: 1);
 
-  static final _SmokeNotes instance = _SmokeNotes._();
+  static final _SmokeNotes store = _SmokeNotes._();
 
   late final _title = schema.text('title').req();
   late final _role = schema.enumOf('role', _SmokeRole.values).req();
   late final _createdAt = schema.dateTime('createdAt').req();
   late final _published = schema.boolean('published').req();
 
-  static TextFieldReq<_SmokeNotes> get title => instance._title;
-  static EnumFieldReq<_SmokeNotes, _SmokeRole> get role => instance._role;
-  static DateTimeFieldReq<_SmokeNotes> get createdAt => instance._createdAt;
-  static BoolFieldReq<_SmokeNotes> get published => instance._published;
+  static TextFieldReq<_SmokeNotes> get title => store._title;
+  static EnumFieldReq<_SmokeNotes, _SmokeRole> get role => store._role;
+  static DateTimeFieldReq<_SmokeNotes> get createdAt => store._createdAt;
+  static BoolFieldReq<_SmokeNotes> get published => store._published;
 
   @override
   List<FieldDef<_SmokeNotes, Object?>> get fields => [
@@ -37,7 +37,7 @@ final class _SmokeNotes extends StoreDef<_SmokeNotes> {
 /// Retains representative typed CRUD/query/search/watch calls in both web
 /// compiler outputs. It is not executed by the compile-only smoke.
 Future<void> _retainTypedWebSurface(LocalPocket pocket) async {
-  final notes = pocket.store(_SmokeNotes.instance);
+  final notes = pocket.store(_SmokeNotes.store);
   const id = 'typedcompile001';
   await notes.put([
     Writes.id(id),
@@ -72,7 +72,7 @@ void main() {
   // Touch a representative slice so tree-shaking retains the symbols.
   final id = generateRecordId();
   final hash = sha256Hex('smoke-$id');
-  final schema = _SmokeNotes.instance.collectionSchema;
+  final schema = _SmokeNotes.store.collectionSchema;
   final ts = formatPbTimestamp(DateTime.utc(2026, 8, 15, 10, 0, 0, 123));
   final parsed = pbTimestampToDateTime(ts);
 

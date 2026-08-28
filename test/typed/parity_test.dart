@@ -11,7 +11,7 @@ import '../support/helpers.dart';
 import 'support/secrets.dart';
 import 'support/tasks.dart';
 
-/// The hand-built twin of `Tasks.instance.schema` — the worker contract.
+/// The hand-built twin of `Tasks.store.schema` — the worker contract.
 CollectionSchema<Object?> rawTasksSchema() => CollectionSchema<Object?>(
       name: 'tasks',
       version: 1,
@@ -36,7 +36,7 @@ CollectionSchema<Object?> rawTasksSchema() => CollectionSchema<Object?>(
 final class _ParityHelpers extends StoreDef<_ParityHelpers> {
   _ParityHelpers._() : super(name: 'parity_helpers', version: 1);
 
-  static final _ParityHelpers instance = _ParityHelpers._();
+  static final _ParityHelpers store = _ParityHelpers._();
 
   late final _title = schema.text('title');
   late final _priority = schema.integer('priority');
@@ -54,12 +54,12 @@ final class _ParityHelpers extends StoreDef<_ParityHelpers> {
   FtsSpec get fts => ftsSpec([_title]);
 }
 
-Future<LocalPocket> openTasks() => LocalPocket.open(
-    path: ':memory:', stores: [Tasks.instance.collectionSchema]);
+Future<LocalPocket> openTasks() =>
+    LocalPocket.open(path: ':memory:', stores: [Tasks.store.collectionSchema]);
 
 void main() {
   test('typed index and FTS helpers preserve schema JSON and DDL parity', () {
-    final typedSchema = _ParityHelpers.instance.collectionSchema;
+    final typedSchema = _ParityHelpers.store.collectionSchema;
     final rawSchema = CollectionSchema<Object?>(
       name: 'parity_helpers',
       version: 1,
@@ -87,7 +87,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('partcase', 83);
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('parity'),
         Tasks.role.set(Role.member),
@@ -138,7 +138,7 @@ void main() {
         'legacy': [1, null, 'x'],
       });
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec(Tasks.title), 'raw');
       expect(rec(Tasks.role), Role.guest);
       expect(rec(Tasks.priority), Priority.urgent);
@@ -160,18 +160,18 @@ void main() {
       final keyBytes = List<int>.generate(32, (i) => (i * 7 + 13) % 256);
       final db = await LocalPocket.open(
         path: ':memory:',
-        stores: [SecretNotes.instance.collectionSchema],
+        stores: [SecretNotes.store.collectionSchema],
         fieldCipher: AesGcmFieldCipher(keyBytes),
       );
       addTearDown(db.close);
       final id = rid('partcase', 85);
-      await db.store(SecretNotes.instance).put([
+      await db.store(SecretNotes.store).put([
         Writes.id(id),
         SecretNotes.label.set('n'),
         SecretNotes.note.set('plaintext'),
       ]);
 
-      final rec = (await db.store(SecretNotes.instance).get(id))!;
+      final rec = (await db.store(SecretNotes.store).get(id))!;
       expect(rec(SecretNotes.note), 'plaintext');
       final rows = await db.db
           .rawQuery('SELECT note FROM secretnotes WHERE id = ?', [id]);
@@ -196,7 +196,7 @@ void main() {
         'unicode': 'héllo ✓',
       };
       final id = rid('partcase', 861);
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('x'),
         Writes.extra('deep', payload['deep']),
@@ -205,13 +205,13 @@ void main() {
           .collection('tasks')
           .patch(id, {'nul': null, 'unicode': 'héllo ✓'});
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec.extra, payload);
 
       // Reverse direction: raw write, typed read.
       final id2 = rid('partcase', 862);
       await db.collection('tasks').put({'id': id2, 'title': 'x', ...payload});
-      final rec2 = (await db.store(Tasks.instance).get(id2))!;
+      final rec2 = (await db.store(Tasks.store).get(id2))!;
       expect(rec2.extra, payload);
     });
 
@@ -220,7 +220,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('partcase', 87);
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('x'),
         Tasks.role.set(Role.admin),
@@ -237,15 +237,15 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('partcase', 88);
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('typed'),
         Tasks.count.set(1),
       ]);
       await db.collection('tasks').patch(id, {'count': 2});
-      await db.store(Tasks.instance).patch(id, [Tasks.role.set(Role.admin)]);
+      await db.store(Tasks.store).patch(id, [Tasks.role.set(Role.admin)]);
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec(Tasks.title), 'typed');
       expect(rec(Tasks.count), 2);
       expect(rec(Tasks.role), Role.admin);
@@ -287,13 +287,13 @@ void main() {
         }
       }
       final fromWrites = encodeDbRow(
-        Tasks.instance.collectionSchema,
+        Tasks.store.collectionSchema,
         id: id,
         logical: record,
         archived: false,
       );
       final fromHand = encodeDbRow(
-        Tasks.instance.collectionSchema,
+        Tasks.store.collectionSchema,
         id: id,
         logical: {'id': id, 'title': 'bytes', 'role': 'admin', 'k': 1},
         archived: false,
@@ -307,11 +307,11 @@ void main() {
       final t = await tempDbPath();
       addTearDown(t.cleanup);
       final first = await LocalPocket.open(
-          path: t.path, stores: [Tasks.instance.collectionSchema]);
+          path: t.path, stores: [Tasks.store.collectionSchema]);
       await first.close();
 
       final db = await LocalPocket.open(
-          path: t.path, stores: [Tasks.instance.collectionSchema]);
+          path: t.path, stores: [Tasks.store.collectionSchema]);
       addTearDown(db.close);
       final rows = await db.db.query('lp_stores',
           columns: ['definition_json', 'schema_ver'],

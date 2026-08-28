@@ -23,7 +23,7 @@ import 'support/tasks.dart';
 
 late LocalPocket db;
 
-TypedCollection<Tasks> get tasks => db.store(Tasks.instance);
+TypedCollection<Tasks> get tasks => db.store(Tasks.store);
 
 void expectCompileParity((String, List<Object?>) typed, QueryBuilder raw) {
   final compiled = raw.debugCompile();
@@ -33,7 +33,7 @@ void expectCompileParity((String, List<Object?>) typed, QueryBuilder raw) {
 
 Future<LocalPocket> openAlgebra() => LocalPocket.open(
       path: ':memory:',
-      stores: <CollectionSchema<Object?>>[Tasks.instance.collectionSchema],
+      stores: <CollectionSchema<Object?>>[Tasks.store.collectionSchema],
     );
 
 /// Five canonical rows:
@@ -43,7 +43,7 @@ Future<LocalPocket> openAlgebra() => LocalPocket.open(
 /// - a4  '100% special'  done=false, count=0   (LIKE wildcard row)
 /// - a5  '100x plain'    done=false, count=1   (LIKE wildcard decoy)
 Future<void> seedAlgebra(LocalPocket db) async {
-  await db.store(Tasks.instance).putAll([
+  await db.store(Tasks.store).putAll([
     [
       Writes.id(rid('alg', 1)),
       Tasks.title.set('Ship alpha'),
@@ -166,7 +166,7 @@ void main() {
 
     test('conditions carry their store for the runtime identity backstop', () {
       final FieldCond<Tasks> cond = Tasks.done.eq(false);
-      expect(identical(cond.owner, Tasks.instance), isTrue);
+      expect(identical(cond.owner, Tasks.store), isTrue);
     });
 
     test('text descriptors build startsWith and endsWith leaf conditions', () {

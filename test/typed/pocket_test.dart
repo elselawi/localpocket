@@ -19,9 +19,9 @@ final class AppDb extends TypedPocket {
   AppDb(super.path);
 
   @override
-  StoreDefs get stores => [Tasks.instance];
+  StoreDefs get stores => [Tasks.store];
 
-  TypedCollection<Tasks> get tasks => handle(Tasks.instance);
+  TypedCollection<Tasks> get tasks => handle(Tasks.store);
 }
 
 void main() {
@@ -70,18 +70,18 @@ void main() {
       addTearDown(db.close);
       await db.open();
 
-      expect(identical(db.tasks, db.handle(Tasks.instance)), isTrue);
+      expect(identical(db.tasks, db.handle(Tasks.store)), isTrue);
       expect(identical(db.tasks, db.tasks), isTrue);
       // The engine registry backs the guarantee on the raw surface too:
       expect(
         identical(
-          db.pocket.store(Tasks.instance),
-          db.pocket.store(Tasks.instance),
+          db.pocket.store(Tasks.store),
+          db.pocket.store(Tasks.store),
         ),
         isTrue,
       );
       // TypedPocket shares the engine cache rather than shadowing it:
-      expect(identical(db.tasks, db.pocket.store(Tasks.instance)), isTrue);
+      expect(identical(db.tasks, db.pocket.store(Tasks.store)), isTrue);
     });
 
     test('engine wrapper cache expires at close, bindings survive', () async {
@@ -122,11 +122,11 @@ void main() {
     test('openTyped registers definitions directly, no .schema ceremony',
         () async {
       final db =
-          await openTyped(path: inMemoryDatabasePath, stores: [Tasks.instance]);
+          await openTyped(path: inMemoryDatabasePath, stores: [Tasks.store]);
       addTearDown(db.close);
 
       final id = rid('pcktyped', 1);
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('sugar'),
       ]);

@@ -11,7 +11,7 @@ import 'support/tasks.dart';
 
 Future<LocalPocket> openTasks({int maxDocBytes = 1900000}) => LocalPocket.open(
     path: ':memory:',
-    stores: [Tasks.instance.collectionSchema],
+    stores: [Tasks.store.collectionSchema],
     maxDocBytes: maxDocBytes);
 
 Future<List<String>> allIds(LocalPocket db) =>
@@ -23,7 +23,7 @@ void main() {
         () async {
       final db = await openTasks();
       addTearDown(db.close);
-      await db.store(Tasks.instance).put([Tasks.title.set('generated')]);
+      await db.store(Tasks.store).put([Tasks.title.set('generated')]);
       final ids = await allIds(db);
       expect(ids, hasLength(1));
       expect(ids.single, matches(RegExp(r'^[a-z0-9]{15}$')));
@@ -34,9 +34,8 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       await expectLater(
-        () => db
-            .store(Tasks.instance)
-            .put([Writes.id('BAD'), Tasks.title.set('x')]),
+        () =>
+            db.store(Tasks.store).put([Writes.id('BAD'), Tasks.title.set('x')]),
         throwsA(isA<ValidationException>()
             .having((e) => e.field, 'field', 'id')
             .having(
@@ -49,7 +48,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       await expectLater(
-        () => db.store(Tasks.instance).put([Tasks.priority.set(Priority.low)]),
+        () => db.store(Tasks.store).put([Tasks.priority.set(Priority.low)]),
         throwsA(isA<ValidationException>()
             .having((e) => e.message, 'message', 'Field "title" is required.')
             .having((e) => e.field, 'field', 'title')),
@@ -60,7 +59,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       const id = 'wrtcase76000001';
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('x'),
         Tasks.role.set(Role.admin),
@@ -75,14 +74,14 @@ void main() {
       addTearDown(db.close);
       const id = 'wrtcase77000001';
       final local = DateTime(2026, 9, 1, 12, 0, 0); // local zone
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('x'),
         Tasks.dueAt.set(local),
       ]);
       final raw = await db.collection('tasks').get(id);
       expect(raw!['dueAt'], local.toUtc().millisecondsSinceEpoch);
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec(Tasks.dueAt), local.toUtc());
     });
 
@@ -92,14 +91,14 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       const id = 'wrtcase78000001';
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('x'),
         Writes.extra('legacy_key', 'kept'),
       ]);
       final raw = await db.collection('tasks').get(id);
       expect(raw!['legacy_key'], 'kept');
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec.extra['legacy_key'], 'kept');
     });
 
@@ -107,13 +106,13 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       const id = 'wrtcase79000001';
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('x'),
         Tasks.priority.set(Priority.low),
         Tasks.count.set(7),
       ]);
-      await db.store(Tasks.instance).patch(id, [Tasks.done.set(true)]);
+      await db.store(Tasks.store).patch(id, [Tasks.done.set(true)]);
       final raw = await db.collection('tasks').get(id);
       expect(raw!['done'], isTrue);
       expect(raw['title'], 'x');
@@ -127,7 +126,7 @@ void main() {
       addTearDown(db.close);
       await expectLater(
         () => db
-            .store(Tasks.instance)
+            .store(Tasks.store)
             .patch('wrtcase80000001', [Tasks.done.set(true)]),
         throwsA(isA<RecordNotFoundException>()),
       );
@@ -138,7 +137,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       await expectLater(
-        () => db.store(Tasks.instance).putAll([
+        () => db.store(Tasks.store).putAll([
           [Tasks.title.set('a')],
           [Tasks.priority.set(Priority.low)], // title omitted
         ]),
@@ -148,9 +147,9 @@ void main() {
           reason: 'the first record must roll back with the batch');
       // patchAll: same all-or-nothing semantics.
       const id = 'wrtcase81000001';
-      await db.store(Tasks.instance).put([Writes.id(id), Tasks.title.set('a')]);
+      await db.store(Tasks.store).put([Writes.id(id), Tasks.title.set('a')]);
       await expectLater(
-        () => db.store(Tasks.instance).patchAll({
+        () => db.store(Tasks.store).patchAll({
           id: [Tasks.done.set(true)],
           'wrtcase81000002': [Tasks.done.set(true)], // missing
         }),
@@ -165,15 +164,15 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       const id = 'wrtcase82000001';
-      await db.store(Tasks.instance).put([Writes.id(id), Tasks.title.set('x')]);
+      await db.store(Tasks.store).put([Writes.id(id), Tasks.title.set('x')]);
       // Ack so the archive keeps the row locally (engine semantics).
       await db.outbox
           .ack('tasks', id, serverUpdated: '2026-01-01 00:00:00.000Z');
-      await db.store(Tasks.instance).archive(id);
+      await db.store(Tasks.store).archive(id);
       expect((await db.collection('tasks').get(id))!['archived'], isTrue);
-      await db.store(Tasks.instance).restore(id);
+      await db.store(Tasks.store).restore(id);
       expect((await db.collection('tasks').get(id))!['archived'], isFalse);
-      await db.store(Tasks.instance).purge(id);
+      await db.store(Tasks.store).purge(id);
       expect(await db.collection('tasks').get(id), isNull);
     });
 
@@ -183,7 +182,7 @@ void main() {
       final db = await openTasks(maxDocBytes: 128);
       addTearDown(db.close);
       await expectLater(
-        () => db.store(Tasks.instance).put([Tasks.title.set('x' * 500)]),
+        () => db.store(Tasks.store).put([Tasks.title.set('x' * 500)]),
         throwsA(isA<ValidationException>()
             .having((e) => e.message, 'message', contains('max size'))
             .having((e) => e.field, 'field', isNull)),
@@ -194,15 +193,15 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       await db.transaction((tx) async {
-        await tx.store(Tasks.instance).put([Tasks.title.set('tx-a')]);
-        await tx.store(Tasks.instance).put([Tasks.title.set('tx-b')]);
+        await tx.store(Tasks.store).put([Tasks.title.set('tx-a')]);
+        await tx.store(Tasks.store).put([Tasks.title.set('tx-b')]);
       });
       expect(await allIds(db), hasLength(2));
 
       // A failing transaction rolls back its typed writes:
       await expectLater(
         db.transaction((tx) async {
-          await tx.store(Tasks.instance).put([Tasks.title.set('tx-c')]);
+          await tx.store(Tasks.store).put([Tasks.title.set('tx-c')]);
           throw StateError('boom');
         }),
         throwsStateError,
@@ -216,7 +215,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       await expectLater(
-        db.store(Tasks.instance).put([Writes.extra('title', 'sneaky')]),
+        db.store(Tasks.store).put([Writes.extra('title', 'sneaky')]),
         throwsA(isA<ValidationException>()
             .having((e) => e.field, 'field', 'title')),
       );
@@ -228,7 +227,7 @@ void main() {
       addTearDown(db.close);
       for (final key in ['id', 'archived', 'hidden', 'extra']) {
         await expectLater(
-          db.store(Tasks.instance).put([Writes.extra(key, 'sneaky')]),
+          db.store(Tasks.store).put([Writes.extra(key, 'sneaky')]),
           throwsA(
               isA<ValidationException>().having((e) => e.field, 'field', key)),
           reason: key,
@@ -240,10 +239,10 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('wrtec', 74);
-      await db.store(Tasks.instance).put([Writes.id(id), Tasks.title.set('x')]);
+      await db.store(Tasks.store).put([Writes.id(id), Tasks.title.set('x')]);
       await expectLater(
         () => db
-            .store(Tasks.instance)
+            .store(Tasks.store)
             .patch(id, [Writes.id(id), Tasks.done.set(true)]),
         throwsArgumentError,
       );
@@ -254,7 +253,7 @@ void main() {
       addTearDown(db.close);
       final id = rid('wrtec', 745);
       await expectLater(
-        () => db.store(Tasks.instance).put([
+        () => db.store(Tasks.store).put([
           Writes.id(id),
           Writes.id(id),
           Tasks.title.set('x'),
@@ -267,7 +266,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('wrtec', 75);
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('first'),
         Tasks.title.set('second'),
@@ -279,8 +278,8 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('wrtec', 76);
-      await db.store(Tasks.instance).put([Writes.id(id), Tasks.title.set('x')]);
-      await db.store(Tasks.instance).patch(id, []);
+      await db.store(Tasks.store).put([Writes.id(id), Tasks.title.set('x')]);
+      await db.store(Tasks.store).patch(id, []);
       expect((await db.collection('tasks').get(id))!['title'], 'x');
     });
 
@@ -288,12 +287,12 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('wrtec', 77);
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('a'),
         Tasks.priority.set(Priority.low),
       ]);
-      await db.store(Tasks.instance).put([Writes.id(id), Tasks.title.set('b')]);
+      await db.store(Tasks.store).put([Writes.id(id), Tasks.title.set('b')]);
       final raw = await db.collection('tasks').get(id);
       expect(raw!['title'], 'b');
       // The engine's decoded map always carries every declared field; the
@@ -305,13 +304,13 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('wrtec', 78);
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('üñí ✓ ${'z' * 5000}'),
       ]);
       final raw = await db.collection('tasks').get(id);
       expect(raw!['title'], 'üñí ✓ ${'z' * 5000}');
-      await db.store(Tasks.instance).put([Writes.id(id), Tasks.title.set('')]);
+      await db.store(Tasks.store).put([Writes.id(id), Tasks.title.set('')]);
       expect((await db.collection('tasks').get(id))!['title'], '');
     });
 
@@ -321,14 +320,14 @@ void main() {
       addTearDown(db.close);
       final id = rid('wrtec', 79);
       final before = DateTime.utc(1960, 4, 12);
-      await db.store(Tasks.instance).put([
+      await db.store(Tasks.store).put([
         Writes.id(id),
         Tasks.title.set('x'),
         Tasks.dueAt.set(before),
       ]);
       final raw = await db.collection('tasks').get(id);
       expect(raw!['dueAt'], isNegative);
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec(Tasks.dueAt), before);
     });
 
@@ -336,7 +335,7 @@ void main() {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('wrtec', 80);
-      await db.store(Tasks.instance).putAll([
+      await db.store(Tasks.store).putAll([
         [Writes.id(id), Tasks.title.set('first')],
         [Writes.id(id), Tasks.title.set('second')],
       ]);

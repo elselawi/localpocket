@@ -163,10 +163,10 @@ final class Fields<S> {
 ///
 /// ```dart
 /// final class Tasks extends StoreDef<Tasks> {
-///   static final Tasks instance = Tasks._();
+///   static final Tasks store = Tasks._();
 ///   Tasks._() : super(name: 'tasks', version: 1);
 ///
-///   static final title = instance.schema.text('title').req();
+///   static final title = store.schema.text('title').req();
 ///
 ///   @override
 ///   List<FieldDef<Tasks, Object?>> get fields => [title];
@@ -180,7 +180,7 @@ final class Fields<S> {
 /// ```
 ///
 /// Descriptors are public statics: they initialize lazily after
-/// `instance` has settled, so every file reaches the same definition —
+/// `store` has settled, so every file reaches the same definition —
 /// and the same typed descriptor objects — through `Tasks.title` with
 /// zero plumbing. The private constructor makes a second instance
 /// unconstructible outside the class; binding a second instance under a
@@ -206,7 +206,7 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   final int version;
 
   /// Descriptors are declared as:
-  /// `static final title = instance.schema.text('title').req();`
+  /// `static final title = store.schema.text('title').req();`
   late final Fields<S> schema = Fields<S>(this as S);
 
   /// The ordered registry of user fields. Descriptors are referenced, not

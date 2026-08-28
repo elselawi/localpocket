@@ -13,8 +13,8 @@ import '../support/helpers.dart';
 import 'support/secrets.dart';
 import 'support/tasks.dart';
 
-Future<LocalPocket> openTasks() => LocalPocket.open(
-    path: ':memory:', stores: [Tasks.instance.collectionSchema]);
+Future<LocalPocket> openTasks() =>
+    LocalPocket.open(path: ':memory:', stores: [Tasks.store.collectionSchema]);
 
 /// Creates a file-backed `tasks` v1 table with an OPTIONAL title, inserts a
 /// row with a null title (impossible through a NOT NULL column), and
@@ -35,8 +35,7 @@ Future<LocalPocket> pocketWithNullTitle() async {
   );
   await raw.collection('tasks').put({'id': 'rowcase58000001', 'title': null});
   await raw.close();
-  return LocalPocket.open(
-      path: t.path, stores: [Tasks.instance.collectionSchema]);
+  return LocalPocket.open(path: t.path, stores: [Tasks.store.collectionSchema]);
 }
 
 void main() {
@@ -53,7 +52,7 @@ void main() {
         'role': 'admin',
       });
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       final String title = rec(Tasks.title); // statically String
       expect(title, 'Ship it');
       expect(rec(Tasks.role), Role.admin);
@@ -66,7 +65,7 @@ void main() {
       const id = 'rowcase51000001';
       await db.collection('tasks').put({'id': id, 'title': 'x'});
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       final int? count = rec.get(Tasks.count); // statically int?
       expect(count, isNull);
       final Priority? priority = rec.get(Tasks.priority);
@@ -84,7 +83,7 @@ void main() {
           .ack('tasks', id, serverUpdated: '2026-01-01 00:00:00.000Z');
       await db.collection('tasks').archive(id);
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec.id, id);
       expect(rec.archived, isTrue);
     });
@@ -104,7 +103,7 @@ void main() {
         },
       });
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec.extra, {
         'legacy_flag': true,
         'nested': {
@@ -125,7 +124,7 @@ void main() {
           .collection('tasks')
           .put({'id': id, 'title': 'x', 'role': 'admin', 'priority': 'high'});
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec(Tasks.role), Role.admin);
       expect(rec(Tasks.priority), Priority.high);
     });
@@ -150,7 +149,7 @@ void main() {
       final raw = await db.collection('tasks').get(id);
       expect(raw!['role'], 'superuser');
       // …the typed path refuses to default silently.
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(
         () => rec(Tasks.role),
         throwsA(
@@ -167,7 +166,7 @@ void main() {
           .collection('tasks')
           .put({'id': id, 'title': 'x', 'dueDay': epoch, 'dueAt': epoch});
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec(Tasks.dueDay), epoch);
       final DateTime due = rec(Tasks.dueAt)!;
       expect(due, DateTime.fromMillisecondsSinceEpoch(epoch, isUtc: true));
@@ -185,7 +184,7 @@ void main() {
 
       final raw = await db.collection('tasks').get(id);
       final projected =
-          TypedRow<Tasks>(Tasks.instance, raw!, projected: {'title'});
+          TypedRow<Tasks>(Tasks.store, raw!, projected: {'title'});
       expect(projected(Tasks.title), 'x');
       expect(
         () => projected(Tasks.role),
@@ -210,7 +209,7 @@ void main() {
         'package-standard message', () async {
       final db = await pocketWithNullTitle();
       addTearDown(db.close);
-      final rec = (await db.store(Tasks.instance).get('rowcase58000001'))!;
+      final rec = (await db.store(Tasks.store).get('rowcase58000001'))!;
       expect(
         () => rec(Tasks.title),
         throwsA(isA<ValidationException>()
@@ -226,7 +225,7 @@ void main() {
       const id = 'rowcase59000001';
       await db.collection('tasks').put({'id': id, 'title': 'x'});
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec.asMap()['title'], 'x');
       rec.asMap()['count'] = 7;
       expect(rec(Tasks.count), 7);
@@ -238,7 +237,7 @@ void main() {
       const id = 'rowcase60000001';
       await db.collection('tasks').put({'id': id, 'title': 'x'});
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec is! Map, isTrue);
     });
 
@@ -253,10 +252,10 @@ void main() {
       // (engine behavior, untouched); the typed layer's guarantee is that it
       // wraps whatever map it receives by reference.
       final map = await db.collection('tasks').get(id);
-      final row = TypedRow<Tasks>(Tasks.instance, map!);
+      final row = TypedRow<Tasks>(Tasks.store, map!);
       expect(identical(row.asMap(), map), isTrue);
       // And through TypedCollection.get the same wrapping holds:
-      final viaCollection = await db.store(Tasks.instance).get(id);
+      final viaCollection = await db.store(Tasks.store).get(id);
       expect(identical(viaCollection!.asMap(), viaCollection.asMap()), isTrue);
     });
 
@@ -264,7 +263,7 @@ void main() {
         () async {
       final db = await pocketWithNullTitle();
       addTearDown(db.close);
-      final rec = (await db.store(Tasks.instance).get('rowcase58000001'))!;
+      final rec = (await db.store(Tasks.store).get('rowcase58000001'))!;
       expect(() => rec(Tasks.title), throwsA(isA<ValidationException>()));
     });
 
@@ -277,11 +276,11 @@ void main() {
       // Out-of-band SQL bypasses the point-read cache; invalidate it.
       db.notifyExternalChange({'tasks'});
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec(Tasks.done), isTrue);
       await db.db.execute('UPDATE "tasks" SET done = 0 WHERE id = ?', [id]);
       db.notifyExternalChange({'tasks'});
-      final rec2 = (await db.store(Tasks.instance).get(id))!;
+      final rec2 = (await db.store(Tasks.store).get(id))!;
       expect(rec2(Tasks.done), isFalse);
     });
 
@@ -295,13 +294,13 @@ void main() {
         'done': true,
         'dueAt': -1000000,
       });
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec(Tasks.dueAt),
           DateTime.fromMillisecondsSinceEpoch(-1000000, isUtc: true));
 
       const far = 32503680000000; // year 3000
       await db.collection('tasks').patch(id, {'dueAt': far});
-      final rec2 = (await db.store(Tasks.instance).get(id))!;
+      final rec2 = (await db.store(Tasks.store).get(id))!;
       expect(rec2(Tasks.dueAt),
           DateTime.fromMillisecondsSinceEpoch(far, isUtc: true));
     });
@@ -333,10 +332,10 @@ void main() {
       });
       await raw.close();
       final db = await LocalPocket.open(
-          path: t.path, stores: [Tasks.instance.collectionSchema]);
+          path: t.path, stores: [Tasks.store.collectionSchema]);
       addTearDown(db.close);
 
-      final rec = (await db.store(Tasks.instance).get('rowcase65000001'))!;
+      final rec = (await db.store(Tasks.store).get('rowcase65000001'))!;
       expect(
         () => rec(Tasks.dueAt),
         throwsA(isA<ValidationException>()
@@ -354,7 +353,7 @@ void main() {
       await db.db.execute('UPDATE "tasks" SET extra = ? WHERE id = ?',
           ['{"title":"sneaky","other":1}', id]);
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       final raw = await db.collection('tasks').get(id);
       // The typed layer mirrors the raw decoded map bit-for-bit (the codec
       // merges extra last, so the extra value shadows the column value).
@@ -378,7 +377,7 @@ void main() {
       };
       await db.collection('tasks').put({'id': id, 'title': 'x', ...payload});
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(rec.extra, payload);
     });
 
@@ -391,7 +390,7 @@ void main() {
       final key2 = List<int>.generate(32, (i) => (i * 5 + 3) % 256);
       final a = await LocalPocket.open(
         path: t.path,
-        stores: [SecretNotes.instance.collectionSchema],
+        stores: [SecretNotes.store.collectionSchema],
         fieldCipher: AesGcmFieldCipher(key1),
       );
       await a
@@ -401,7 +400,7 @@ void main() {
 
       final b = await LocalPocket.open(
         path: t.path,
-        stores: [SecretNotes.instance.collectionSchema],
+        stores: [SecretNotes.store.collectionSchema],
         fieldCipher: AesGcmFieldCipher(key2),
       );
       addTearDown(b.close);
@@ -413,7 +412,7 @@ void main() {
       }
       Object? typedError;
       try {
-        final rec = await b.store(SecretNotes.instance).get('rowcase68000001');
+        final rec = await b.store(SecretNotes.store).get('rowcase68000001');
         rec!(SecretNotes.note);
       } catch (e) {
         typedError = e;
@@ -428,10 +427,10 @@ void main() {
       const id = 'rowcase69000001';
       await db.collection('tasks').put({'id': id, 'title': 'before'});
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       await db.collection('tasks').patch(id, {'title': 'after'});
       expect(rec(Tasks.title), 'before');
-      final fresh = (await db.store(Tasks.instance).get(id))!;
+      final fresh = (await db.store(Tasks.store).get(id))!;
       expect(fresh(Tasks.title), 'after');
     });
 
@@ -441,13 +440,13 @@ void main() {
       const id = 'rowcase70000001';
       await db.collection('tasks').put({'id': id, 'title': 'x'});
 
-      final stream = db.store(Tasks.instance).watchOne(id);
+      final stream = db.store(Tasks.store).watchOne(id);
       final iterator = StreamIterator<TypedRow<Tasks>?>(stream);
       addTearDown(iterator.cancel);
       expect(await iterator.moveNext(), isTrue);
       expect(iterator.current!.id, id);
 
-      await db.store(Tasks.instance).purge(id);
+      await db.store(Tasks.store).purge(id);
       expect(await iterator.moveNext(), isTrue);
       expect(iterator.current, isNull);
     });
@@ -470,7 +469,7 @@ void main() {
       final raw = await db.collection('tasks').get(id);
       expect(raw!['meta'], ['a', 'b']);
       // …the typed surface is the stricter one.
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(
         () => rec(Tasks.meta),
         throwsA(
@@ -492,7 +491,7 @@ void main() {
       await db.db
           .execute('UPDATE "tasks" SET tags = ? WHERE id = ?', ['[1,2]', id]);
 
-      final rec = (await db.store(Tasks.instance).get(id))!;
+      final rec = (await db.store(Tasks.store).get(id))!;
       expect(
         () => rec(Tasks.tags),
         throwsA(
@@ -503,8 +502,7 @@ void main() {
     test('case 73: a corrupt system column value surfaces a typed error', () {
       // A row whose stored id is not a string (only possible through
       // corruption) must never leak a raw cast.
-      final corrupt =
-          TypedRow<Tasks>(Tasks.instance, {'id': 123, 'title': 'x'});
+      final corrupt = TypedRow<Tasks>(Tasks.store, {'id': 123, 'title': 'x'});
       expect(
         () => corrupt.id,
         throwsA(isA<ValidationException>()

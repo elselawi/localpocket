@@ -76,7 +76,7 @@ final class ExtraWrite<S extends StoreDef<S>> extends Write<S> {
 /// Builds one [Write] per assignment on every settable field descriptor.
 ///
 /// System descriptors (`id`, `archived`) are plain [FieldDef]s, not
-/// [SettableFieldDef]s, so `Tasks.instance.id.set(...)` does not compile —
+/// [SettableFieldDef]s, so `Tasks.store.id.set(...)` does not compile —
 /// ids travel through [Writes.id] and archive state stays owned by
 /// `archive()`/`restore()`.
 extension FieldSet<S extends StoreDef<S>, V> on SettableFieldDef<S, V> {

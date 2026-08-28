@@ -2,9 +2,9 @@
 /// cases, and `StoreDef` assembly (plan §4.1, cases 1–40).
 ///
 /// Descriptor-level cases use fresh local probe stores rather than
-/// `Tasks.instance.f`: every descriptor created through a store's `f.` is
+/// `Tasks.store.schema`: every descriptor created through a store's `schema.` is
 /// recorded for the omitted-field check, so throwaway descriptors on the
-/// canonical `Tasks` instance would make `Tasks.instance.schema` fail
+/// canonical `Tasks` instance would make `Tasks.store.schema` fail
 /// `verify()`.
 library;
 
@@ -140,12 +140,12 @@ final class _Borrower extends StoreDef<_Borrower> {
 final class _Omit extends StoreDef<_Omit> {
   _Omit() : super(name: 'omit', version: 1);
 
-  static final _Omit instance = _Omit();
+  static final _Omit store = _Omit();
 
   late final _kept = schema.text('kept');
   late final _forgotten = schema.text('forgotten');
 
-  static FieldDef<_Omit, String?> get forgotten => instance._forgotten;
+  static FieldDef<_Omit, String?> get forgotten => store._forgotten;
 
   @override
   List<FieldDef<_Omit, Object?>> get fields => [_kept];
@@ -710,11 +710,11 @@ void main() {
 
   group('StoreDef assembly', () {
     test('case 28: schema name/version/order match the fields list', () {
-      final schema = Tasks.instance.collectionSchema;
+      final schema = Tasks.store.collectionSchema;
       expect(schema.name, 'tasks');
       expect(schema.version, 1);
       expect([for (final f in schema.fields) f.name],
-          [for (final d in Tasks.instance.fields) d.name]);
+          [for (final d in Tasks.store.fields) d.name]);
       expect(schema.fields.length, 11);
     });
 
@@ -739,21 +739,20 @@ void main() {
           const IndexSpec(['title'])
         ],
       );
-      expect(Tasks.instance.collectionSchema.toJson(), handBuilt.toJson());
+      expect(Tasks.store.collectionSchema.toJson(), handBuilt.toJson());
     });
 
     test('case 30: fields ordering is stable across repeated reads', () {
-      final expected = [for (final d in Tasks.instance.fields) d.name];
-      expect([for (final d in Tasks.instance.fields) d.name], expected);
-      expect(
-          identical(Tasks.instance.fields.first, Tasks.instance.fields.first),
+      final expected = [for (final d in Tasks.store.fields) d.name];
+      expect([for (final d in Tasks.store.fields) d.name], expected);
+      expect(identical(Tasks.store.fields.first, Tasks.store.fields.first),
           isTrue);
     });
 
     test('case 31: index override reaches schema verbatim', () {
-      expect(Tasks.instance.collectionSchema.indexes.single.columns, ['title']);
-      expect(Tasks.instance.collectionSchema.conflictPolicy,
-          isA<ConflictPolicy>());
+      expect(Tasks.store.collectionSchema.indexes.single.columns, ['title']);
+      expect(
+          Tasks.store.collectionSchema.conflictPolicy, isA<ConflictPolicy>());
     });
 
     test('case 31b: schema-extra overrides reach the schema', () {
@@ -763,8 +762,8 @@ void main() {
       expect(keep.toJson()['keepUnsyncedArchives'], isTrue);
       expect(keep.toJson()['prefetchFiles'], isTrue);
       // Both defaults stay off, matching the engine defaults:
-      expect(Tasks.instance.collectionSchema.keepUnsyncedArchives, isFalse);
-      expect(Tasks.instance.collectionSchema.prefetchFiles, isFalse);
+      expect(Tasks.store.collectionSchema.keepUnsyncedArchives, isFalse);
+      expect(Tasks.store.collectionSchema.prefetchFiles, isFalse);
     });
 
     test('case 32: duplicate column name rejected with StateError', () {
@@ -815,13 +814,13 @@ void main() {
     });
 
     test('case 36: system descriptors are typed and outside fields', () {
-      final FieldDef<Tasks, String> idField = Tasks.instance.id;
-      final FieldDef<Tasks, bool> archivedField = Tasks.instance.archived;
+      final FieldDef<Tasks, String> idField = Tasks.store.id;
+      final FieldDef<Tasks, bool> archivedField = Tasks.store.archived;
       expect(idField.name, 'id');
       expect(archivedField.name, 'archived');
       expect(idField.decode('abc'), 'abc');
       expect(archivedField.decode(true), isTrue);
-      final names = [for (final d in Tasks.instance.fields) d.name];
+      final names = [for (final d in Tasks.store.fields) d.name];
       expect(names, isNot(contains('id')));
       expect(names, isNot(contains('archived')));
       expect(() => idField.toField(), throwsStateError);
@@ -833,19 +832,18 @@ void main() {
       final forgotten = _Omit.forgotten;
       expect(forgotten.name, 'forgotten');
       expect(
-        () => _Omit.instance.collectionSchema,
+        () => _Omit.store.collectionSchema,
         throwsA(isA<StateError>()
             .having((e) => e.message, 'message', contains('forgotten'))),
       );
       // Sanity: forcing a *registered* field first is fine.
       expect(Tasks.title.name, 'title');
-      expect(Tasks.instance.collectionSchema.name, 'tasks');
+      expect(Tasks.store.collectionSchema.name, 'tasks');
     });
 
     test('case 38: schema is memoized (identical on repeat reads)', () {
       expect(
-          identical(
-              Tasks.instance.collectionSchema, Tasks.instance.collectionSchema),
+          identical(Tasks.store.collectionSchema, Tasks.store.collectionSchema),
           isTrue);
     });
 
@@ -912,19 +910,19 @@ void main() {
       expect(d.toField().toJson(), Field.date('d', required: true).toJson());
     });
 
-    test('required dateTime decodes/encodes UTC-pinned and builds a required '
+    test(
+        'required dateTime decodes/encodes UTC-pinned and builds a required '
         'Field', () {
       final DateTimeFieldReq<_Probe> dt = probe.schema.dateTime('due').req();
-      expect(dt.toField().toJson(),
-          Field.date('due', required: true).toJson());
+      expect(dt.toField().toJson(), Field.date('due', required: true).toJson());
       const epoch = 1751366400000;
       expect(dt.decode(epoch),
           DateTime.fromMillisecondsSinceEpoch(epoch, isUtc: true));
       // A non-int stored value is a typed validation error naming the field.
       expect(
         () => dt.decode('not-an-int'),
-        throwsA(isA<ValidationException>()
-            .having((e) => e.field, 'field', 'due')),
+        throwsA(
+            isA<ValidationException>().having((e) => e.field, 'field', 'due')),
       );
       expect(dt.encode(DateTime.utc(2026, 9, 1)),
           DateTime.utc(2026, 9, 1).millisecondsSinceEpoch);
@@ -936,8 +934,7 @@ void main() {
       expect(req.required, isTrue);
       expect(
           req.toField().toJson(),
-          Field.enumValue('role', ['admin', 'member', 'guest'],
-              required: true)
+          Field.enumValue('role', ['admin', 'member', 'guest'], required: true)
               .toJson());
       expect(req.decode('admin'), Role.admin);
       expect(req.encode(Role.member), 'member');
