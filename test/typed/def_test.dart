@@ -892,4 +892,102 @@ void main() {
           {'a': 'x', 'migrated': true});
     });
   });
+
+  group('required-variant descriptors and boundary decode edges', () {
+    test('required real/bool/date twins build required Fields and round-trip',
+        () {
+      final RealFieldReq<_Probe> r = probe.schema.real('r').req();
+      expect(r.required, isTrue);
+      expect(r.toField().toJson(), Field.real('r', required: true).toJson());
+      expect(r.decode(1.5), 1.5);
+      expect(r.encode(1.5), 1.5);
+
+      final BoolFieldReq<_Probe> b = probe.schema.boolean('b').req();
+      expect(b.required, isTrue);
+      expect(b.toField().toJson(), Field.bool('b', required: true).toJson());
+      expect(b.decode(true), isTrue);
+      expect(b.encode(false), isFalse);
+
+      final DateFieldReq<_Probe> d = probe.schema.date('d').req();
+      expect(d.toField().toJson(), Field.date('d', required: true).toJson());
+    });
+
+    test('required dateTime decodes/encodes UTC-pinned and builds a required '
+        'Field', () {
+      final DateTimeFieldReq<_Probe> dt = probe.schema.dateTime('due').req();
+      expect(dt.toField().toJson(),
+          Field.date('due', required: true).toJson());
+      const epoch = 1751366400000;
+      expect(dt.decode(epoch),
+          DateTime.fromMillisecondsSinceEpoch(epoch, isUtc: true));
+      // A non-int stored value is a typed validation error naming the field.
+      expect(
+        () => dt.decode('not-an-int'),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.field, 'field', 'due')),
+      );
+      expect(dt.encode(DateTime.utc(2026, 9, 1)),
+          DateTime.utc(2026, 9, 1).millisecondsSinceEpoch);
+    });
+
+    test('required enum decodes non-nullably and builds a required Field', () {
+      final EnumFieldReq<_Probe, Role> req =
+          probe.schema.enumOf('role', Role.values).req();
+      expect(req.required, isTrue);
+      expect(
+          req.toField().toJson(),
+          Field.enumValue('role', ['admin', 'member', 'guest'],
+              required: true)
+              .toJson());
+      expect(req.decode('admin'), Role.admin);
+      expect(req.encode(Role.member), 'member');
+      // A null stored value on a required enum is a typed error.
+      expect(
+        () => req.decode(null),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.field, 'field', 'role')
+            .having((e) => e.message, 'message', contains('required'))),
+      );
+    });
+
+    test('enum decode of a non-string stored value fails naming the field', () {
+      final fd = probe.schema.enumOf('role', Role.values);
+      expect(
+        () => fd.decode(42),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.field, 'field', 'role')
+            .having((e) => e.message, 'message', contains('not a string'))),
+      );
+    });
+
+    test('enumOf rejects duplicate values in the value list', () {
+      expect(
+        () => probe.schema.enumOf('dup', [Role.admin, Role.admin, Role.guest]),
+        throwsA(isA<StateError>()
+            .having((e) => e.message, 'message', contains('duplicate values'))),
+      );
+    });
+
+    test('jsonList decode rejects a non-list and a mis-typed element', () {
+      final JsonListField<_Probe, String> jl =
+          probe.schema.jsonList<String>('jl');
+      expect(
+        () => jl.decode('not-a-list'),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.field, 'field', 'jl')
+            .having((e) => e.message, 'message', contains('JSON array'))),
+      );
+      // A well-formed list with an off-contract element fails loudly on the
+      // per-element cast rather than silently coercing.
+      expect(() => jl.decode(['ok', 42]), throwsA(isA<TypeError>()));
+      expect(jl.decode(['ok', 'also-ok']), ['ok', 'also-ok']);
+    });
+
+    test('descriptor toString names the generic type and the field', () {
+      final text = probe.schema.text('title');
+      final rendered = text.toString();
+      expect(rendered, contains('FieldDef'));
+      expect(rendered, contains('"title"'));
+    });
+  });
 }

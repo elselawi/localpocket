@@ -168,6 +168,18 @@ void main() {
       final FieldCond<Tasks> cond = Tasks.done.eq(false);
       expect(identical(cond.owner, Tasks.instance), isTrue);
     });
+
+    test('text descriptors build startsWith and endsWith leaf conditions', () {
+      final FieldCond<Tasks> starts = Tasks.title.startsWith('Ship');
+      expect(starts.field, 'title');
+      expect(starts.operator, 'startsWith');
+      expect(starts.args, ['Ship']);
+
+      final FieldCond<Tasks> ends = Tasks.title.endsWith('beta');
+      expect(ends.field, 'title');
+      expect(ends.operator, 'endsWith');
+      expect(ends.args, ['beta']);
+    });
   });
 
   group('algebra compiles exactly like the raw builder', () {

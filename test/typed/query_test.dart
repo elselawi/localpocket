@@ -559,6 +559,28 @@ void main() {
       expect(hits.map((h) => h.id), contains(id));
     });
 
+    test('search forwards all/includeArchived/includeHidden to the surface',
+        () async {
+      final db = await openTyped(includeSearch: true);
+      addTearDown(db.close);
+      final id = rid('search', 3);
+      await db.store(SearchTasks.instance).put([
+        Writes.id(id),
+        SearchTasks.title.set('ship scope flags'),
+      ]);
+
+      // `all: true` opts out of the result limit; the archived/hidden flags
+      // pass through to the underlying FTS surface and the hit still fetches.
+      final hits = await db.store(SearchTasks.instance).search(
+        'ship',
+        all: true,
+        includeArchived: true,
+        includeHidden: true,
+      );
+      expect(hits.map((h) => h.id), contains(id));
+      expect((await hits.single.fetch())!(SearchTasks.title), 'ship scope flags');
+    });
+
     test('case 125: FtsUnavailableError passes through unchanged', () async {
       final db = await openTyped();
       addTearDown(db.close);

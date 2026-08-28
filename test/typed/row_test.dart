@@ -499,5 +499,18 @@ void main() {
             isA<ValidationException>().having((e) => e.field, 'field', 'tags')),
       );
     });
+
+    test('case 73: a corrupt system column value surfaces a typed error', () {
+      // A row whose stored id is not a string (only possible through
+      // corruption) must never leak a raw cast.
+      final corrupt =
+          TypedRow<Tasks>(Tasks.instance, {'id': 123, 'title': 'x'});
+      expect(
+        () => corrupt.id,
+        throwsA(isA<ValidationException>()
+            .having((e) => e.message, 'message', contains('no valid id value'))
+            .having((e) => e.field, 'field', 'id')),
+      );
+    });
   });
 }

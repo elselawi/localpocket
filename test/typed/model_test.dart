@@ -63,5 +63,33 @@ void main() {
       // A fresh wrap sees the committed state:
       expect(Task((await c.get(id))!).title, 'after');
     });
+
+    test('base exposes undeclared extra keys and the live logical map',
+        () async {
+      final db = await openTasks();
+      addTearDown(db.close);
+      final id = rid('mdlcase', 3);
+
+      await db.store(Tasks.instance).put([
+        Writes.id(id),
+        Tasks.title.set('with extras'),
+        Writes.extra('customKey', 7),
+        Writes.extra('note', 'kept'),
+      ]);
+
+      final task = Task((await db.store(Tasks.instance).get(id))!);
+      // `extra` exposes only the undeclared keys — never id/archived/fields.
+      expect(task.extra['customKey'], 7);
+      expect(task.extra['note'], 'kept');
+      expect(task.extra.containsKey('id'), isFalse);
+      expect(task.extra.containsKey('title'), isFalse);
+      expect(task.extra.containsKey('archived'), isFalse);
+
+      // asMap is the full logical map, including declared fields and id.
+      final map = task.asMap();
+      expect(map['id'], id);
+      expect(map['title'], 'with extras');
+      expect(map['customKey'], 7);
+    });
   });
 }
