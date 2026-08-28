@@ -239,6 +239,12 @@
   `tool/dependency_check.dart` now fails any runtime dependency constraint
   that spans more than one major version (policy shared with
   `tool/dependency_policy.dart`).
+- The README installation instructions are now version-gated:
+  `tool/readme_version_check.dart` (release step `readme_version`) fails the
+  release when the `localpocket:` constraint in the README's
+  `## Installation` section does not name exactly the `pubspec.yaml`
+  version, so the documented install snippet can no longer drift from the
+  released package.
 
 ## 0.1.1
 

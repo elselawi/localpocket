@@ -194,6 +194,11 @@ List<ReleaseStep> buildReleaseSteps({
         argv: ['run', 'tool/version_check.dart'],
       ),
       const ReleaseStep(
+        id: 'readme_version',
+        label: 'README installation version',
+        argv: ['run', 'tool/readme_version_check.dart'],
+      ),
+      const ReleaseStep(
         id: 'core_web_smoke',
         label: 'Core web compilation smoke',
         argv: ['run', 'tool/core_web_compile_smoke.dart'],

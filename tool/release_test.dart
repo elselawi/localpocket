@@ -35,6 +35,7 @@ void main() {
             'dependency_bounds',
             'docs_examples',
             'version_check',
+            'readme_version',
             'core_web_smoke',
             'web_gate',
             'local_web_gate',
