@@ -16,13 +16,7 @@ import 'support/tasks.dart';
 /// A wired application database exercising the subclass contract: declare
 /// [path], [stores], and one-line handle getters.
 final class AppDb extends TypedPocket {
-  AppDb(this.dbPath);
-
-  /// Mutable for the failed-open retry test only.
-  String dbPath;
-
-  @override
-  String get path => dbPath;
+  AppDb(super.path);
 
   @override
   StoreDefs get stores => [Tasks.instance];
@@ -120,7 +114,7 @@ void main() {
       await expectLater(badDb.open(), throwsA(anything));
       expect(badDb.isOpen, isFalse);
 
-      badDb.dbPath = temp.path;
+      badDb.path = temp.path;
       final opened = await badDb.open();
       expect(opened, same(badDb.pocket));
     });

@@ -55,7 +55,7 @@ abstract class TypedPocket {
   /// cycles; construct them wherever the app wires its singletons.
   ///
   /// {@macro localpocket.typed_pocket}
-  TypedPocket();
+  TypedPocket(this.path);
 
   /// The already-opened database handle, or `null`.
   LocalPocket? _db;
@@ -65,13 +65,8 @@ abstract class TypedPocket {
   Future<LocalPocket>? _opening;
 
   /// File location for the underlying database (`':memory:'` works on
-  /// native platforms; see the README web notes for web caveats).
-  ///
-  /// Overriding this member is required unless [doOpen] is overridden
-  /// entirely; the default implementation reports an error naming this
-  /// contract.
-  String get path =>
-      throw UnimplementedError('Override "path" (or all of "doOpen").');
+  /// native platforms; see the README web notes for web caveats)
+  String path;
 
   /// All store definitions registered when the database opens — see the
   /// [StoreDefs] contract above for why this manifest cannot be derived:
@@ -169,10 +164,14 @@ abstract class TypedPocket {
 /// final tasks = db.store(Tasks.instance); // cached wrapper, reusable everywhere
 /// ```
 Future<LocalPocket> openTyped({
-  required String path,
+  required String? path,
   required StoreDefs stores,
-}) =>
-    LocalPocket.open(
-      path: path,
-      stores: [for (final def in stores) def.collectionSchema],
-    );
+}) {
+  if (path == null) {
+    throw UnimplementedError('Override "path" (or all of "doOpen").');
+  }
+  return LocalPocket.open(
+    path: path,
+    stores: [for (final def in stores) def.collectionSchema],
+  );
+}
