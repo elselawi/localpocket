@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/web_collections.dart';
 import 'package:localpocket/src/web/protocol.dart';
@@ -163,6 +166,89 @@ void main() {
       expect(events, hasLength(1));
       expect(events.single, isNull);
       await sub.cancel();
+    });
+
+    test('a failing watch_one send surfaces as a stream error', () async {
+      final boom = StateError('worker down');
+      fake.onSend = (op, args) async {
+        if (op == WireOp.watchOne) throw boom;
+        return fake.responses[op];
+      };
+      final events = <Object?>[];
+      final errors = <Object?>[];
+      final sub = col.watchOne('abc').listen(events.add, onError: errors.add);
+      await pumpEventQueue();
+      expect(events, isEmpty);
+      expect(errors, [boom],
+          reason: 'the send failure is delivered as an '
+              'error, never swallowed');
+      await sub.cancel();
+    });
+
+    test(
+        'cancelling before registration completes runs the delayed '
+        'unregister', () async {
+      // Hold the watch_one send open so the registration stays in-flight.
+      final gate = Completer<void>();
+      fake.onSend = (op, args) async {
+        if (op == WireOp.watchOne) await gate.future;
+        return fake.responses[op];
+      };
+      fake.responses[WireOp.watchOne] = {
+        'item': encodeWireValue({'id': 'a'})
+      };
+
+      final sub = col.watchOne('abc').listen((_) {});
+      await sub.cancel();
+      // The unregistration was requested while registration was in-flight, so
+      // it must be deferred and run once the registration settles.
+      gate.complete();
+      await pumpEventQueue();
+
+      final cancels =
+          fake.sent.where((s) => s.$1 == WireOp.watchCancel).toList();
+      expect(cancels, hasLength(1),
+          reason: 'the deferred unregister cancels the watch');
+      expect(cancels.single.$2, {'watchId': fake.nextRequestId - 1});
+    });
+  });
+
+  group('WebCollection misc facade surface', () {
+    test('recordEvents streams the host change-bus events', () async {
+      final events = <RecordChangeEvent>[];
+      final sub = col.recordEvents.listen(events.add);
+      addTearDown(sub.cancel);
+
+      fake.changeBus.emitEvent(RecordChangeEvent(
+        store: 'widgets',
+        id: 'a',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.create,
+        newRecord: {'name': 'x'},
+        changedFields: {'name'},
+      ));
+      await pumpEventQueue();
+      expect(events, hasLength(1),
+          reason: 'recordEvents is backed by the host event stream');
+      expect(events.single.id, 'a');
+    });
+
+    test('query() returns a usable query builder', () async {
+      fake.responses[WireOp.compiledQuery] = {'value': 2};
+      final n = await col.query().count();
+      expect(n, 2);
+      expect(fake.sent.single.$1, WireOp.compiledQuery);
+    });
+
+    test('search() returns a search builder bound to the schema', () async {
+      final fts = widgetsSchema(fts: FtsSpec(['name']));
+      final ftsFake = FakeFacadeHost({'widgets': fts});
+      final ftsCol = WebCollection.ins(ftsFake, fts);
+      ftsFake.responses[WireOp.compiledQuery] = {'results': <Object?>[]};
+
+      final results = await ftsCol.search('engines').limit(5).fetch();
+      expect(results, isEmpty);
+      expect(ftsFake.sent.single.$2['operation'], 'search');
     });
   });
 }

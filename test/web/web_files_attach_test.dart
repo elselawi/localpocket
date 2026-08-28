@@ -116,4 +116,74 @@ void main() {
     fake.responses[WireOp.fileStorageStatus] = null;
     expect(await files.isBlobStorageDurable, isFalse);
   });
+
+  test('list forwards store, recordId, and the field default', () async {
+    final refs = await files.list(store: 'widgets', recordId: 'rec-list');
+    expect(refs, isEmpty);
+    expect(fake.filesListCalls, hasLength(1));
+    final call = fake.filesListCalls.single;
+    expect(call.store, 'widgets');
+    expect(call.recordId, 'rec-list');
+    expect(call.field, 'imgs', reason: 'the default field is imgs');
+
+    await files.list(store: 'widgets', recordId: 'rec-list', field: 'docs');
+    expect(fake.filesListCalls.last.field, 'docs');
+  });
+
+  test('open forwards index/refId and returns the raw bytes', () async {
+    final bytes = await files.open(
+      store: 'widgets',
+      recordId: 'rec-open',
+      field: 'imgs',
+      index: 2,
+      refId: 'ref_abc',
+    );
+    expect(bytes, isEmpty);
+    expect(fake.filesOpenCalls, hasLength(1));
+    final call = fake.filesOpenCalls.single;
+    expect(call.store, 'widgets');
+    expect(call.recordId, 'rec-open');
+    expect(call.index, 2);
+    expect(call.refId, 'ref_abc');
+    expect(call.field, 'imgs');
+  });
+
+  test('remove forwards index/refId and completes', () async {
+    await files.remove(
+      store: 'widgets',
+      recordId: 'rec-remove',
+      index: 1,
+      refId: 'ref_xyz',
+    );
+    expect(fake.filesRemoveCalls, hasLength(1));
+    final call = fake.filesRemoveCalls.single;
+    expect(call.store, 'widgets');
+    expect(call.recordId, 'rec-remove');
+    expect(call.index, 1);
+    expect(call.refId, 'ref_xyz');
+  });
+
+  test('gc forwards the grace durations (defaults and overrides)', () async {
+    await files.gc();
+    expect(fake.filesGcCalls, hasLength(1));
+    var call = fake.filesGcCalls.single;
+    expect(call.blobGrace, const Duration(days: 7));
+    expect(call.tmpGrace, const Duration(hours: 24));
+
+    await files.gc(
+      blobGrace: const Duration(days: 1),
+      tmpGrace: const Duration(minutes: 5),
+    );
+    call = fake.filesGcCalls.last;
+    expect(call.blobGrace, const Duration(days: 1));
+    expect(call.tmpGrace, const Duration(minutes: 5));
+  });
+
+  test('enforceStorageCap forwards maxBytes and returns the evicted count',
+      () async {
+    final evicted = await files.enforceStorageCap(maxBytes: 1024);
+    expect(evicted, 0);
+    expect(fake.filesEnforceStorageCapCalls, hasLength(1));
+    expect(fake.filesEnforceStorageCapCalls.single.maxBytes, 1024);
+  });
 }

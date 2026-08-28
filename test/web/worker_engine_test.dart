@@ -10,6 +10,7 @@ import 'package:localpocket/src/web/worker_engine.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
+import '../support/mock_pb_server.dart';
 import 'support/worker_harness.dart';
 
 /// Waits (polling, deadline-bounded) until [predicate] holds. Watch emissions
@@ -934,6 +935,70 @@ void main() {
       }));
       expect(err.details?['type'], 'ProtocolEnvelopeException');
     });
+
+    test('watch_query execution failure cleans up the watcher registration',
+        () async {
+      final id = generateRecordId();
+      await h.put('widgets', record(name: 'apple', qty: 1), id: id);
+
+      // A plan that passes envelope validation (SELECT prefix, matching
+      // fingerprint) but fails at execution: the referenced column does not
+      // exist. initializeWebWatch must run its cleanup (drop the watcher).
+      final plan = h.pocket
+          .collection('widgets')
+          .query()
+          .where('name', eq: 'apple')
+          .limit(50)
+          .compilePlan();
+      const watchId = 12;
+      final err = await h.sendError(h.req(WireOp.watchQuery, args: {
+        ...planPayload(QueryPlan(
+          operation: plan.operation,
+          compilerVersion: plan.compilerVersion,
+          store: plan.store,
+          schemaVersion: plan.schemaVersion,
+          schemaFingerprint: plan.schemaFingerprint,
+          sql: plan.sql.replaceAll('"name"', '"no_such_column"'),
+          args: plan.args,
+          limit: plan.limit,
+          projection: plan.projection,
+          shape: plan.shape,
+        )),
+        'watchId': watchId,
+      }));
+      expect(err, isA<WorkerError>());
+
+      // The failed registration was cleaned up: cancelling a non-existent
+      // watcher is a no-op success (no leaked watcher remains).
+      final cancel = (await h.sendOk(
+              h.req(WireOp.watchCancel, args: {'watchId': watchId})))!
+          as Map<String, Object?>;
+      expect(cancel['ok'], isTrue);
+    });
+
+    test('watch_one with an undecodable record fails and cleans up', () async {
+      final id = generateRecordId();
+      await h.put('widgets', record(name: 'x', qty: 1), id: id);
+      // Corrupt the meta JSON column out-of-band (valid SQLite TEXT, but
+      // undecodable) so the record decode throws.
+      h.rawDb.execute(
+          'UPDATE "widgets" SET meta = ? WHERE id = ?', ['not-json', id]);
+      h.pocket.notifyExternalChange({'widgets'});
+
+      const watchId = 13;
+      final err = await h.sendError(h.req(WireOp.watchOne, args: {
+        'watchId': watchId,
+        'store': 'widgets',
+        'id': id,
+      }));
+      expect(err, isA<WorkerError>());
+
+      // The failed registration was cleaned up (no leaked watcher).
+      final cancel = (await h.sendOk(
+              h.req(WireOp.watchCancel, args: {'watchId': watchId})))!
+          as Map<String, Object?>;
+      expect(cancel['ok'], isTrue);
+    });
   });
 
   group('WorkerEngine — sync handler validation', () {
@@ -977,6 +1042,117 @@ void main() {
       final result =
           (await h.sendOk(h.req(WireOp.syncStatus)))! as Map<String, Object?>;
       expect(result['state'], 'closed');
+    });
+  });
+
+  group('WorkerEngine — sync lifecycle against a mock server', () {
+    late WorkerHarness h;
+    late MockPbServer server;
+
+    setUp(() async {
+      h = await WorkerHarness.open();
+      addTearDown(() async {
+        await h.close();
+      });
+      server = await MockPbServer().start();
+      addTearDown(server.stop);
+    });
+
+    test('sync_start builds a live engine; every lifecycle op round-trips',
+        () async {
+      final start =
+          (await h.sendOk(h.req(WireOp.syncStart, args: {
+        'baseUrl': server.baseUrl.toString(),
+        'scopeId': 'worker-test',
+        'token': 'jwt',
+      })))! as Map<String, Object?>;
+      expect(start['ok'], isTrue);
+      expect(start['state'], isA<String>());
+
+      // Status reflects the running engine and emits over the sink too.
+      final status =
+          (await h.sendOk(h.req(WireOp.syncStatus)))! as Map<String, Object?>;
+      expect(status['state'], isA<String>());
+      expect(status['pending'], isA<int>());
+      expect(status['conflicts'], isA<int>());
+      expect(status['hidden'], isA<int>());
+      expect(status['blocked'], isA<int>());
+      expect(h.sink.byOp(WireOp.syncStatus), isNotEmpty,
+          reason: 'the engine forwards status events to the client');
+
+      // syncNow returns an encoded report.
+      final report =
+          (await h.sendOk(h.req(WireOp.syncNow)))! as Map<String, Object?>;
+      expect(report['pushed'], isA<int>());
+      expect(report['deadLettered'], isA<int>());
+      expect(report['discarded'], isA<int>());
+      expect(report['hadError'], isA<bool>());
+
+      // Pause/resume/connectivity/auth all succeed once started.
+      Future<Map<String, Object?>> okReply(String op,
+              {Map<String, Object?> args = const {}}) async =>
+          (await h.sendOk(h.req(op, args: args)))! as Map<String, Object?>;
+
+      expect((await okReply(WireOp.syncPause))['ok'], isTrue);
+      expect((await okReply(WireOp.syncResume))['ok'], isTrue);
+      expect(
+          (await okReply(WireOp.syncSetConnectivity,
+              args: {'online': false}))['ok'],
+          isTrue);
+      expect(
+          (await okReply(WireOp.syncSetConnectivity,
+              args: {'online': true}))['ok'],
+          isTrue);
+      expect(
+          (await okReply(WireOp.syncUpdateAuth, args: {
+            'token': 'refreshed-jwt',
+          }))['ok'],
+          isTrue);
+
+      // A second syncStart reuses the same engine path (restart).
+      final restart = (await h.sendOk(h.req(WireOp.syncStart, args: {
+        'baseUrl': server.baseUrl.toString(),
+        'scopeId': 'worker-test',
+      })))! as Map<String, Object?>;
+      expect(restart['ok'], isTrue);
+
+      // syncStop tears the engine down; later ops fail typed again.
+      expect((await okReply(WireOp.syncStop))['ok'], isTrue);
+      final err = await h.sendError(h.req(WireOp.syncNow));
+      expect(err.details?['type'], 'StateError');
+    });
+
+    test('an auth-required server emits authRequired and parks the engine',
+        () async {
+      server.authRequired = true;
+      server.validToken = 'expected-token';
+
+      await h.sendOk(h.req(WireOp.syncStart, args: {
+        'baseUrl': server.baseUrl.toString(),
+        'scopeId': 'auth-test',
+        'token': 'wrong-token',
+      }));
+
+      // The engine's onAuthRequired callback forwards a worker event to the
+      // client (the token refresh retry is exercised on the 401 path too).
+      await waitUntil(() async => h.sink.byOp(WireOp.authRequired).isNotEmpty);
+      final authEvents = h.sink.byOp(WireOp.authRequired);
+      expect(authEvents.last['op'], WireOp.authRequired);
+      expect(authEvents.last['v'], webProtocolVersion);
+    });
+
+    test('sync_start without a token still builds a working engine', () async {
+      final start =
+          (await h.sendOk(h.req(WireOp.syncStart, args: {
+        'baseUrl': server.baseUrl.toString(),
+        'scopeId': 'no-token',
+      })))! as Map<String, Object?>;
+      expect(start['ok'], isTrue);
+      // The empty token is materialized by the worker-owned provider.
+      expect((await h.sendOk(h.req(WireOp.syncStatus)))!, isA<Map>());
+      final stop = (await h.sendOk(h.req(WireOp.syncStop)))!
+          as Map<String, Object?>;
+      expect(stop['ok'], isTrue);
     });
   });
 
@@ -1078,6 +1254,53 @@ void main() {
       expect(err.code, WireErrorCode.localpocket);
       expect(err.details?['type'], 'ValidationException');
     });
+
+    test('file_remove/gc/enforce_storage_cap/storage_status RPCs', () async {
+      final id = generateRecordId();
+      await h.put('widgets', record(name: 'with-file'), id: id);
+      final uploadId = await beginUpload(id, 4);
+      await chunk(uploadId, [1, 2, 3, 4]);
+      await h
+          .sendOk(h.req(WireOp.fileUploadFinish, args: {'uploadId': uploadId}));
+
+      // file_remove by index parks the ref as pending_remove (engine
+      // semantics: the ref row stays until the removal is settled).
+      await h.sendOk(h.req(WireOp.fileRemove, args: {
+        'store': 'widgets',
+        'recordId': id,
+        'index': 0,
+      }));
+      final afterRemove = (await h.sendOk(h.req(WireOp.fileList, args: {
+        'store': 'widgets',
+        'recordId': id,
+      })))! as Map<String, Object?>;
+      final refs = (afterRemove['refs']! as List).cast<Map>();
+      expect(refs, hasLength(1));
+      expect(refs.single['state'], 'pending_remove',
+          reason: 'remove transitions the ref to pending_remove');
+
+      // file_gc with explicit grace windows, and again with the defaults.
+      final gc =
+          (await h.sendOk(h.req(WireOp.fileGc, args: {
+        'blobGraceMs': 0,
+        'tmpGraceMs': 0,
+      })))! as Map<String, Object?>;
+      expect(gc['cleaned'], isA<int>());
+      final gcDefaults =
+          (await h.sendOk(h.req(WireOp.fileGc)))! as Map<String, Object?>;
+      expect(gcDefaults['cleaned'], isA<int>());
+
+      // file_enforce_storage_cap.
+      final cap = (await h.sendOk(
+          h.req(WireOp.fileEnforceStorageCap, args: {'maxBytes': 1024})))!
+          as Map<String, Object?>;
+      expect(cap['evicted'], isA<int>());
+
+      // file_storage_status reports the blob store's durability.
+      final status = (await h.sendOk(h.req(WireOp.fileStorageStatus)))!
+          as Map<String, Object?>;
+      expect(status['durable'], isA<bool>());
+    });
   });
 
   group('WorkerEngine — conflicts', () {
@@ -1113,6 +1336,137 @@ void main() {
         'merged': encodeWireValue({'name': 'x'}),
       }));
       expect(err.details?['type'], 'StateError');
+    });
+  });
+
+  group('WorkerEngine — conflicts with open rows', () {
+    late WorkerHarness h;
+
+    setUp(() async {
+      h = await WorkerHarness.open();
+      addTearDown(() async {
+        await h.close();
+      });
+    });
+
+    /// Creates a domain record plus a directly-inserted open conflict row,
+    /// returning the record id.
+    Future<String> seedConflict({
+      Map<String, Object?> local = const {'name': 'local'},
+      Map<String, Object?> remote = const {'name': 'remote'},
+    }) async {
+      final id = generateRecordId();
+      await h.put('widgets', record(name: 'base'), id: id);
+      h.rawDb.execute(
+        'INSERT INTO lp_conflicts '
+        '(store, record_id, base_json, local_json, remote_json, '
+        'dirty_local, dirty_remote, detected_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          'widgets',
+          id,
+          jsonEncode({'name': 'base'}),
+          jsonEncode(local),
+          jsonEncode(remote),
+          jsonEncode(['name']),
+          jsonEncode(['name']),
+          1000,
+        ],
+      );
+      return id;
+    }
+
+    test('conflicts_list and conflicts_get surface the open row', () async {
+      final id = await seedConflict();
+      final list = (await h.sendOk(
+              h.req(WireOp.conflictsList, args: {'store': 'widgets'})))!
+          as Map<String, Object?>;
+      final conflicts = (list['conflicts']! as List).cast<Map>();
+      expect(conflicts, hasLength(1));
+      expect(conflicts.single['record_id'], id);
+
+      final got = (await h.sendOk(h.req(WireOp.conflictsGet, args: {
+        'store': 'widgets',
+        'id': id,
+      })))! as Map<String, Object?>;
+      expect(got['record_id'], id);
+      expect(got['local'], isNotNull);
+      expect(got['remote'], isNotNull);
+      expect(got['detected_at'], 1000);
+    });
+
+    test('conflicts_resolve clears the row and writes the merged doc',
+        () async {
+      final id = await seedConflict();
+      await h.sendOk(h.req(WireOp.conflictsResolve, args: {
+        'store': 'widgets',
+        'id': id,
+        'merged': encodeWireValue({'name': 'merged'}),
+      }));
+      final list = (await h.sendOk(
+              h.req(WireOp.conflictsList, args: {'store': 'widgets'})))!
+          as Map<String, Object?>;
+      expect((list['conflicts']! as List).cast<Map>(), isEmpty);
+      final rec = await h.get('widgets', id);
+      expect(rec!['name'], 'merged');
+    });
+
+    test('conflicts_accept_local resolves with the local version', () async {
+      final id = await seedConflict();
+      await h.sendOk(h.req(WireOp.conflictsAcceptLocal, args: {
+        'store': 'widgets',
+        'id': id,
+      }));
+      final rec = await h.get('widgets', id);
+      expect(rec!['name'], 'local');
+    });
+
+    test('conflicts_accept_remote resolves with the remote version', () async {
+      final id = await seedConflict();
+      await h.sendOk(h.req(WireOp.conflictsAcceptRemote, args: {
+        'store': 'widgets',
+        'id': id,
+      }));
+      final rec = await h.get('widgets', id);
+      expect(rec!['name'], 'remote');
+    });
+
+    test('conflicts_accept_remote with a remote deletion purges the record',
+        () async {
+      final id = await seedConflict(remote: {'__lp_deleted__': true});
+      await h.sendOk(h.req(WireOp.conflictsAcceptRemote, args: {
+        'store': 'widgets',
+        'id': id,
+      }));
+      expect(await h.get('widgets', id), isNull,
+          reason: 'accepting a remote deletion mirrors the remote');
+    });
+
+    test('conflicts_watch registers a watcher and forwards emissions',
+        () async {
+      final id = await seedConflict();
+      const watchId = 55;
+      final result = (await h.sendOk(
+              h.req(WireOp.conflictsWatch, args: {'watchId': watchId})))!
+          as Map<String, Object?>;
+      expect(result['watchId'], watchId);
+
+      // The initial list is emitted as a worker event.
+      await waitUntil(() async => h.sink.byOp(WireOp.workerEvent).isNotEmpty);
+      final events = h.sink.byOp(WireOp.workerEvent);
+      expect(events.last['watchId'], watchId);
+      expect(events.last['value'], isA<List>());
+
+      // Cancelling the watch stops further emissions.
+      await h.sendOk(h.req(WireOp.watchCancel, args: {'watchId': watchId}));
+      final emitted = h.sink.byOp(WireOp.workerEvent).length;
+      await h.sendOk(h.req(WireOp.conflictsAcceptLocal, args: {
+        'store': 'widgets',
+        'id': id,
+      }));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(h.sink.byOp(WireOp.workerEvent).length, emitted,
+          reason: 'no emissions after watch_cancel');
     });
   });
 

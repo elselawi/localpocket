@@ -126,8 +126,6 @@ class FakeFacadeHost implements WebFacadeHost {
 
   final List<RecordedFileUpload> filesUploadCalls = [];
   Map<String, Object?> filesUploadResult = const {};
-  int filesGcCalls = 0;
-  int filesEnforceStorageCapCalls = 0;
 
   @override
   Future<Map<String, Object?>> filesUpload({
@@ -153,13 +151,41 @@ class FakeFacadeHost implements WebFacadeHost {
     return filesUploadResult;
   }
 
+  /// Records of every `filesList` call.
+  final List<({String store, String recordId, String field})> filesListCalls =
+      [];
+  /// Records of every `filesOpen` call.
+  final List<
+      ({
+        String store,
+        String recordId,
+        String field,
+        int index,
+        String? refId
+      })> filesOpenCalls = [];
+  /// Records of every `filesRemove` call.
+  final List<
+      ({
+        String store,
+        String recordId,
+        String field,
+        int index,
+        String? refId
+      })> filesRemoveCalls = [];
+  /// Records of every `filesGc` call (blobGrace + tmpGrace).
+  final List<({Duration blobGrace, Duration tmpGrace})> filesGcCalls = [];
+  /// Records of every `filesEnforceStorageCap` call (maxBytes).
+  final List<({int maxBytes})> filesEnforceStorageCapCalls = [];
+
   @override
   Future<List<Map<String, Object?>>> filesList({
     required String store,
     required String recordId,
     String field = 'imgs',
-  }) async =>
-      const [];
+  }) async {
+    filesListCalls.add((store: store, recordId: recordId, field: field));
+    return const [];
+  }
 
   @override
   Future<Uint8List> filesOpen({
@@ -168,8 +194,16 @@ class FakeFacadeHost implements WebFacadeHost {
     String field = 'imgs',
     int index = 0,
     String? refId,
-  }) async =>
-      Uint8List(0);
+  }) async {
+    filesOpenCalls.add((
+      store: store,
+      recordId: recordId,
+      field: field,
+      index: index,
+      refId: refId,
+    ));
+    return Uint8List(0);
+  }
 
   @override
   Future<void> filesRemove({
@@ -178,20 +212,28 @@ class FakeFacadeHost implements WebFacadeHost {
     String field = 'imgs',
     int index = 0,
     String? refId,
-  }) async {}
+  }) async {
+    filesRemoveCalls.add((
+      store: store,
+      recordId: recordId,
+      field: field,
+      index: index,
+      refId: refId,
+    ));
+  }
 
   @override
   Future<int> filesGc({
     Duration blobGrace = const Duration(days: 7),
     Duration tmpGrace = const Duration(hours: 24),
   }) async {
-    filesGcCalls++;
+    filesGcCalls.add((blobGrace: blobGrace, tmpGrace: tmpGrace));
     return 0;
   }
 
   @override
   Future<int> filesEnforceStorageCap({required int maxBytes}) async {
-    filesEnforceStorageCapCalls++;
+    filesEnforceStorageCapCalls.add((maxBytes: maxBytes));
     return 0;
   }
 

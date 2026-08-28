@@ -7,7 +7,8 @@ import 'package:test/test.dart';
 import '../support/helpers.dart';
 
 void main() {
-  test('CompiledWatcher forwards refresh error to onError callback without dying',
+  test(
+      'CompiledWatcher forwards refresh error to onError callback without dying',
       () async {
     var failQuery = false;
     final hooks = TestHooks(
@@ -63,6 +64,35 @@ void main() {
     expect(errors, hasLength(1),
         reason: 'No additional errors should have been recorded');
 
+    watcher.dispose();
+  });
+
+  test('CompiledWatcher decodes projected columns and applies the projection',
+      () async {
+    final pocket = await openPocket();
+    addTearDown(pocket.close);
+    final schema = widgetsSchema();
+    final id = generateRecordId();
+    await pocket
+        .collection('widgets')
+        .put(record(id: id, name: 'apple', qty: 3));
+
+    final emissions = <List<Map<String, Object?>>>[];
+    final watcher = CompiledWatcher(
+      pocket,
+      schema,
+      'SELECT "name" FROM "widgets" WHERE "archived" = 0 '
+      'ORDER BY "id" ASC LIMIT 50',
+      const [],
+      ['name'], // projection
+      ['name'], // decodeColumns
+      emissions.add,
+    );
+    watcher.start();
+    final initial = await watcher.initial();
+    expect(initial, [
+      {'name': 'apple'},
+    ]);
     watcher.dispose();
   });
 }

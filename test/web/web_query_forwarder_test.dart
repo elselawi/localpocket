@@ -1,3 +1,4 @@
+import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
 import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/query/web_query_builder.dart';
@@ -173,6 +174,81 @@ void main() {
     test('an int value is preserved as a num', () async {
       fake.responses[WireOp.compiledQuery] = {'value': 42};
       expect(await WebQueryBuilder(fake, widgetsSchema()).sum('qty'), 42);
+    });
+  });
+
+  group('QueryForwarder DSL delegation', () {
+    test('where forwards every operator to the underlying core builder',
+        () async {
+      final builder = WebQueryBuilder(fake, widgetsSchema())
+        ..where('name', eq: 'apple', neq: 'pear', contains: 'pp', isNull: null)
+        ..all();
+      // The where is baked into the core builder, not just sent.
+      final (sql, args) = builder.queryCore.debugCompile();
+      expect(sql, contains('"name" = ?'));
+      expect(sql, contains('"name" <> ?'), reason: 'neq compiles to <>');
+      expect(sql, contains('LIKE ?'));
+      expect(args, containsAll(<Object?>['apple', 'pear', '%pp%']));
+    });
+
+    test('orWhere forwards a group list to the compiled plan', () async {
+      fake.responses[WireOp.compiledQuery] = {
+        'items': <Object?>[],
+        'hasMore': false,
+      };
+      final page = await WebQueryBuilder(fake, widgetsSchema())
+          .orWhere(<Map<String, Object?>>[
+            <String, Object?>{'name': 'apple'},
+            <String, Object?>{'qty': 1},
+          ])
+          .all()
+          .fetch();
+      expect(page.items, isEmpty);
+      final args = planArgs(WireOp.compiledQuery);
+      expect(args['sql'], contains('OR'));
+      expect(args['args'], containsAll(<Object?>['apple', 1]));
+    });
+
+    test('select, includeArchived, includeHidden, and all mutate the core '
+        'builder in place', () {
+      final builder = WebQueryBuilder(fake, widgetsSchema())
+        ..select(['id', 'name'])
+        ..includeArchived()
+        ..includeHidden()
+        ..all()
+        ..orderBy('name', desc: true);
+      final core = builder.queryCore;
+      expect(core.allMode, isTrue, reason: 'all() flips the core to unbounded');
+      final (sql, _) = core.debugCompile();
+      expect(sql, contains('SELECT'), reason: 'select() projects columns');
+      expect(sql, isNot(contains('archived = 0')),
+          reason: 'includeArchived drops the archived scope flag');
+      expect(sql, isNot(contains('hidden = 0')),
+          reason: 'includeHidden drops the hidden scope flag');
+      expect(sql, contains('DESC'), reason: 'orderBy(desc: true) is forwarded');
+    });
+
+    test('wherePredicate forwards a predicate node', () {
+      final builder = WebQueryBuilder(fake, widgetsSchema())
+        ..wherePredicate(
+            const LeafPredicate('name', 'eq', ['apple']))
+        ..all();
+      final (sql, args) = builder.queryCore.debugCompile();
+      expect(sql, contains('"name" = ?'));
+      expect(args, ['apple']);
+    });
+
+    test('the fluent methods return the same builder instance', () {
+      final builder = WebQueryBuilder(fake, widgetsSchema());
+      expect(identical(builder.where('name', eq: 'x'), builder), isTrue);
+      expect(identical(builder.orWhere(<Map<String, Object?>>[]), builder),
+          isTrue);
+      expect(identical(builder.all(), builder), isTrue);
+      expect(identical(builder.select(['id']), builder), isTrue);
+      expect(identical(builder.includeArchived(), builder), isTrue);
+      expect(identical(builder.includeHidden(), builder), isTrue);
+      expect(identical(builder.orderBy('name'), builder), isTrue);
+      expect(identical(builder.limit(10), builder), isTrue);
     });
   });
 }
