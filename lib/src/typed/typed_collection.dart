@@ -35,6 +35,12 @@ abstract interface class TypedStoreSurface {
   /// Inserts or replaces records in one batch.
   Future<void> putAll(List<Map<String, Object?>> records);
 
+  /// Inserts, or merges one record's fields into an existing record.
+  Future<void> upsert(Map<String, Object?> record);
+
+  /// Inserts or merges records in one batch.
+  Future<void> upsertAll(List<Map<String, Object?>> records);
+
   /// Applies partial changes to an existing record.
   Future<void> patch(String id, Map<String, Object?> changes);
 
@@ -78,6 +84,14 @@ final class _NativeSurface implements TypedStoreSurface {
   @override
   Future<void> putAll(List<Map<String, Object?>> records) =>
       _collection.putAll(records);
+
+  @override
+  Future<void> upsert(Map<String, Object?> record) =>
+      _collection.upsert(record);
+
+  @override
+  Future<void> upsertAll(List<Map<String, Object?>> records) =>
+      _collection.upsertAll(records);
 
   @override
   Future<void> patch(String id, Map<String, Object?> changes) =>
@@ -272,6 +286,32 @@ final class TypedCollection<S extends StoreDef<S>> {
     ]);
   }
 
+  /// Creates a record, or merges the field-native [writes] into the existing
+  /// record with the same id, touching only the listed fields — unlike [put],
+  /// fields not mentioned are preserved, and unlike [patch], the record is
+  /// created when it doesn't exist. A [Writes.id] value is optional; the
+  /// database generates an id when absent.
+  ///
+  /// ```dart
+  /// await tasks.upsert([
+  ///   Writes.id('tsk1234567890ab'), // optional
+  ///   Tasks.title.set('Ship it'),
+  /// ]);
+  /// ```
+  Future<void> upsert(List<Write<S>> writes) async {
+    await _surface.upsert(_buildRecord(writes, allowId: true));
+  }
+
+  /// Upserts a batch of records — one [Write] list per record — sequentially,
+  /// in one transaction: duplicate ids merge in order (last write wins) and
+  /// the batch rolls back on the first failure. Each record may pin its id
+  /// with [Writes.id].
+  Future<void> upsertAll(List<List<Write<S>>> records) async {
+    await _surface.upsertAll(<Map<String, Object?>>[
+      for (final record in records) _buildRecord(record, allowId: true),
+    ]);
+  }
+
   /// Applies the field-native [writes] to the existing record with [id]
   /// without replacing unspecified fields. Throws [RecordNotFoundException]
   /// when the record does not exist; a [Writes.id] value inside [writes] is
@@ -291,6 +331,10 @@ final class TypedCollection<S extends StoreDef<S>> {
   }
 
   /// Soft-deletes the record with [id].
+  ///
+  /// A record that was never pushed to the remote is dropped entirely
+  /// instead — there is no remote delete to record — unless
+  /// [StoreDef.keepUnsyncedArchives] keeps it archived locally.
   Future<void> archive(String id) => _surface.archive(id);
 
   /// Removes the archive flag from the record with [id].

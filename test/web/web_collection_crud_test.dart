@@ -62,6 +62,33 @@ void main() {
       });
     });
 
+    test('upsert sends a single upsert mutation with a wire-encoded record',
+        () async {
+      final record = {'id': 'abc', 'name': 'apple', 'qty': 3};
+      await col.upsert(record);
+
+      final (op, args) = fake.sent.single;
+      expect(op, WireOp.mutateBatch);
+      final mutations = (args['mutations']! as List).cast<Map>();
+      expect(mutations.single, {
+        'action': 'upsert',
+        'record': encodeWireValue(record),
+      });
+    });
+
+    test('upsertAll sends one upsert mutation per record', () async {
+      final r1 = {'id': 'a', 'name': 'apple'};
+      final r2 = {'id': 'b', 'name': 'banana'};
+      await col.upsertAll([r1, r2]);
+
+      final (op, args) = fake.sent.single;
+      expect(op, WireOp.mutateBatch);
+      final mutations = (args['mutations']! as List).cast<Map>();
+      expect(mutations, hasLength(2));
+      expect(mutations[0], {'action': 'upsert', 'record': encodeWireValue(r1)});
+      expect(mutations[1], {'action': 'upsert', 'record': encodeWireValue(r2)});
+    });
+
     test('archive/restore/purge send the correct action strings', () async {
       await col.archive('a1');
       await col.restore('a2');

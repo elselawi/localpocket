@@ -193,6 +193,40 @@ void main() {
       expect(await h.get('widgets', id), isNull);
     });
 
+    test('upsert wire action merges into existing and creates when missing',
+        () async {
+      final id = generateRecordId();
+      await h.put('widgets', record(name: 'widget', qty: 1), id: id);
+
+      // Merge: only `qty` changes, `name` survives.
+      await h.sendOk(h.req(WireOp.mutateBatch, args: {
+        'store': 'widgets',
+        'mutations': [
+          {
+            'action': 'upsert',
+            'record': encodeWireValue({'id': id, 'qty': 9})
+          }
+        ],
+      }));
+      final merged = await h.get('widgets', id);
+      expect(merged!['name'], 'widget',
+          reason: 'upsert preserves unspecified fields');
+      expect(merged['qty'], 9);
+
+      // Create-when-missing.
+      final fresh = generateRecordId();
+      await h.sendOk(h.req(WireOp.mutateBatch, args: {
+        'store': 'widgets',
+        'mutations': [
+          {
+            'action': 'upsert',
+            'record': encodeWireValue(record(name: 'fresh', id: fresh))
+          }
+        ],
+      }));
+      expect((await h.get('widgets', fresh))!['name'], 'fresh');
+    });
+
     test('multi-op batches run atomically in one transaction', () async {
       final a = generateRecordId();
       final b = generateRecordId();

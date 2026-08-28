@@ -413,6 +413,8 @@ abstract class WorkerEngineHost {
     switch (action) {
       case 'put':
         await col.put(record!);
+      case 'upsert':
+        await col.upsert(record!);
       case 'patch':
         await col.patch(id!, record!);
       case 'archive':

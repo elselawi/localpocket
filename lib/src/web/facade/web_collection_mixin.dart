@@ -63,6 +63,27 @@ mixin WireCollectionMixin {
           {'action': 'put', 'record': encodeWireValue(record)}
       ], durability: durability);
 
+  /// Inserts or merges [record] into the record with the same id.
+  ///
+  /// Mirrors native `Collection.upsert`: only the fields present in [record]
+  /// change and the record is created when absent (see [put] for
+  /// [durability]).
+  Future<void> upsert(Map<String, Object?> record,
+          {DurabilityClass durability = DurabilityClass.normal}) =>
+      _sendMutations([
+        {'action': 'upsert', 'record': encodeWireValue(record)}
+      ], durability: durability);
+
+  /// Inserts or merges [records] in one batch.
+  ///
+  /// Mirrors native `Collection.upsertAll` (see [put] for [durability]).
+  Future<void> upsertAll(List<Map<String, Object?>> records,
+          {DurabilityClass durability = DurabilityClass.normal}) =>
+      _sendMutations([
+        for (final record in records)
+          {'action': 'upsert', 'record': encodeWireValue(record)}
+      ], durability: durability);
+
   /// Applies a partial update to the record with [id].
   ///
   /// Mirrors native `Collection.patch` (see [put] for [durability]).
@@ -114,7 +135,6 @@ mixin WireCollectionMixin {
       pocket.send(mutateOp, {
         ..._envelope(),
         'mutations': mutations,
-        if (durability != DurabilityClass.normal)
-          'durability': durability.name,
+        if (durability != DurabilityClass.normal) 'durability': durability.name,
       });
 }

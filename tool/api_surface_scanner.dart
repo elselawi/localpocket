@@ -40,6 +40,7 @@ const _writeNames = <String>{
   'submit',
   'update',
   'upsert',
+  'upsertAll',
   'write',
 };
 

@@ -23,6 +23,10 @@ enum MutationAction {
   /// Creates a record when absent, or replaces it when present.
   createOrUpdate,
 
+  /// Creates a record when absent, or merges the given fields into it when
+  /// present (unspecified fields are preserved).
+  createOrUpdateMerge,
+
   /// Inserts a new record.
   create,
 
@@ -125,6 +129,26 @@ class Collection with ChangeBusAwareStore {
         durability: durability);
   }
 
+  /// Creates a record, or merges [record]'s fields into the existing record
+  /// with the same ID without clearing unspecified fields.
+  ///
+  /// Unlike [put] (which replaces the whole record) and [patch] (which throws
+  /// when the record is missing), [upsert] only touches the fields present in
+  /// [record] and creates the record when it doesn't exist. If `record['id']`
+  /// is omitted, a PocketBase-compatible ID is generated.
+  ///
+  /// ```dart
+  /// await users.upsert({'id': userId, 'lastSeenAt': now}); // keeps other fields
+  /// ```
+  Future<void> upsert(Map<String, Object?> record,
+      {DurabilityClass durability = DurabilityClass.normal}) {
+    if (_tx != null) {
+      return _mutate(MutationAction.createOrUpdateMerge, record: record);
+    }
+    return _pocket.transaction((tx) => tx.collection(name).upsert(record),
+        durability: durability);
+  }
+
   /// Atomically inserts or updates a list of records.
   ///
   /// The whole batch commits as a single transaction. Existence and
@@ -137,6 +161,21 @@ class Collection with ChangeBusAwareStore {
       {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return _putAll(records);
     return _pocket.transaction((tx) => tx.collection(name).putAll(records),
+        durability: durability);
+  }
+
+  /// Atomically inserts or merges a list of records.
+  ///
+  /// Each record follows [upsert] semantics (create when absent, merge only
+  /// the listed fields when present) and the whole batch commits as a single
+  /// transaction, mirroring [putAll]'s batch behavior (last-write-wins on
+  /// duplicate ids, all-or-nothing rollback).
+  Future<void> upsertAll(List<Map<String, Object?>> records,
+      {DurabilityClass durability = DurabilityClass.normal}) {
+    if (_tx != null) {
+      return _putAll(records, action: MutationAction.createOrUpdateMerge);
+    }
+    return _pocket.transaction((tx) => tx.collection(name).upsertAll(records),
         durability: durability);
   }
 
@@ -192,7 +231,10 @@ class Collection with ChangeBusAwareStore {
   /// Soft-deletes a record by setting `archived` to `true`.
   ///
   /// Archived records are excluded from default queries but remain available
-  /// with `query().includeArchived()`.
+  /// with `query().includeArchived()`. One exception: a record that was never
+  /// pushed to the remote is dropped entirely on archive — there is no remote
+  /// delete to record — unless the store's schema sets
+  /// `keepUnsyncedArchives`.
   Future<void> archive(String id,
       {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return _mutate(MutationAction.archive, id: id);
@@ -471,6 +513,28 @@ class Collection with ChangeBusAwareStore {
         throw RecordNotFoundException('No record $name/$recordId to update.');
       }
       logical = _logicalFromRecord(record!, recordId);
+    } else if (action == MutationAction.createOrUpdateMerge) {
+      final rid = (record!['id'] as String?) ?? generateRecordId();
+      if (!isValidRecordId(rid)) {
+        throw ValidationException(
+            'Invalid record id "$rid"; expected [a-z0-9]{15}.',
+            field: 'id');
+      }
+      recordId = rid;
+      await probeExisting(recordId);
+      if (existingRow == null) {
+        logical = _logicalFromRecord(record, recordId);
+        action = MutationAction.create;
+      } else {
+        // Upsert: merge only the listed fields onto the existing state so
+        // unspecified fields are preserved.
+        logical = {...existingRow!};
+        for (final e in record.entries) {
+          if (e.key == 'id') continue;
+          logical[e.key] = e.value;
+        }
+        action = MutationAction.update;
+      }
     } else {
       // archive / restore
       recordId = id!;
@@ -591,6 +655,7 @@ class Collection with ChangeBusAwareStore {
     switch (action) {
       case MutationAction.create:
       case MutationAction.createOrUpdate:
+      case MutationAction.createOrUpdateMerge:
         changeAction =
             existingRow == null ? ChangeAction.create : ChangeAction.update;
       case MutationAction.update:
@@ -628,7 +693,8 @@ class Collection with ChangeBusAwareStore {
     return;
   }
 
-  Future<void> _putAll(List<Map<String, Object?>> records) async {
+  Future<void> _putAll(List<Map<String, Object?>> records,
+      {MutationAction action = MutationAction.createOrUpdate}) async {
     _ensureWritable();
     if (records.isEmpty) return;
     final exec = _tx!.executor;
@@ -676,7 +742,13 @@ class Collection with ChangeBusAwareStore {
     // exactly the rows it inserted and throw [_BatchInsertConflict]; the
     // fallback below then probes and applies per-record updates with any
     // pre-existing rows intact.
-    if (!hasDuplicates) {
+    //
+    // The fast path is only sound for full-replace `putAll`. `upsertAll`
+    // records are partial (they may merge into existing rows and legitimately
+    // omit required fields), so they must always go through the existence
+    // probe + per-record merge path below — otherwise the bulk INSERT would
+    // fail on a required field the existing row already satisfies.
+    if (action == MutationAction.createOrUpdate && !hasDuplicates) {
       try {
         await _putAllBatchCreate(exec, resolved);
         _tx!.addChange(ChangeSet(name, {for (final (id, _) in resolved) id}));
@@ -734,10 +806,10 @@ class Collection with ChangeBusAwareStore {
     for (final (rid, record) in resolved) {
       final existing = existingById[rid];
       if (writtenIds.contains(rid)) {
-        await _mutate(MutationAction.createOrUpdate,
+        await _mutate(action,
             record: {...record, 'id': rid}, coalesceChanges: true);
       } else {
-        await _mutate(MutationAction.createOrUpdate,
+        await _mutate(action,
             record: {...record, 'id': rid},
             existing: existing,
             prefetchedSyncRow: existing == null ? null : srById[rid],

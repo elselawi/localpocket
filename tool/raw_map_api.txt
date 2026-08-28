@@ -8,6 +8,8 @@ lib/src/core/store.dart::Collection.patch(Map<String,Object?> changes) # existin
 lib/src/core/store.dart::Collection.patchAll(Map<String,Map<String,Object?>> patches) # existing raw collection batch CRUD
 lib/src/core/store.dart::Collection.put(Map<String,Object?> record) # existing raw collection CRUD
 lib/src/core/store.dart::Collection.putAll(List<Map<String,Object?>> records) # existing raw collection batch CRUD
+lib/src/core/store.dart::Collection.upsert(Map<String,Object?> record) # create-or-merge raw collection CRUD
+lib/src/core/store.dart::Collection.upsertAll(List<Map<String,Object?>> records) # create-or-merge raw collection batch CRUD
 lib/src/sync/conflicts.dart::Conflicts.resolve(String store,String id,Map<String,Object?>merged,) # permanent conflict-resolution boundary
 lib/src/sync/op_queue.dart::OpQueue.enqueue(String store,String recordId,OpQueueKind kind,Map<String,Object?>payload,String?dependsOnOp,) # durable internal effect payload boundary
 lib/src/sync/outbox.dart::Outbox.applyLocalMutation(StoreTable table,DatabaseExecutor exec,String id,MutationAction action,Map<String,Object?>row,Map<String,Object?>?oldRow,Map<String,Object?>logical,List<String>dirtyFields,BaseSnapshot?base,SyncRowState?syncRow,OutboxOp?outboxOp,String?precomputedPayload,) # existing engine mutation boundary
@@ -15,8 +17,12 @@ lib/src/typed/typed_collection.dart::TypedStoreSurface.patch(Map<String,Object?>
 lib/src/typed/typed_collection.dart::TypedStoreSurface.patchAll(Map<String,Map<String,Object?>> patches) # hidden native/web adapter seam, not exported by typed entrypoint
 lib/src/typed/typed_collection.dart::TypedStoreSurface.put(Map<String,Object?> record) # hidden native/web adapter seam, not exported by typed entrypoint
 lib/src/typed/typed_collection.dart::TypedStoreSurface.putAll(List<Map<String,Object?>> records) # hidden native/web adapter seam, not exported by typed entrypoint
+lib/src/typed/typed_collection.dart::TypedStoreSurface.upsert(Map<String,Object?> record) # hidden native/web adapter seam, not exported by typed entrypoint
+lib/src/typed/typed_collection.dart::TypedStoreSurface.upsertAll(List<Map<String,Object?>> records) # hidden native/web adapter seam, not exported by typed entrypoint
 lib/src/web/facade/web_collection_mixin.dart::WireCollectionMixin.patch(Map<String,Object?> changes) # existing web raw CRUD parity
 lib/src/web/facade/web_collection_mixin.dart::WireCollectionMixin.patchAll(Map<String,Map<String,Object?>> patches) # existing web raw batch CRUD parity
 lib/src/web/facade/web_collection_mixin.dart::WireCollectionMixin.put(Map<String,Object?> record) # existing web raw CRUD parity
 lib/src/web/facade/web_collection_mixin.dart::WireCollectionMixin.putAll(List<Map<String,Object?>> records) # existing web raw batch CRUD parity
+lib/src/web/facade/web_collection_mixin.dart::WireCollectionMixin.upsert(Map<String,Object?> record) # create-or-merge web raw CRUD parity
+lib/src/web/facade/web_collection_mixin.dart::WireCollectionMixin.upsertAll(List<Map<String,Object?>> records) # create-or-merge web raw batch CRUD parity
 lib/src/web/facade/web_conflicts.dart::WebConflicts.resolve(String store,String id,Map<String,Object?>merged,) # permanent web conflict-resolution boundary

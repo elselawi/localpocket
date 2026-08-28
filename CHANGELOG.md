@@ -36,6 +36,16 @@
   curried `set(field)(value)` form are removed — there is exactly one write
   path.
 
+- **`upsert` / `upsertAll`: create-or-merge writes.** `upsert` creates the
+  record when it does not exist and, when it does, merges only the listed
+  fields into it — unlike `put` (full replace) and unlike `patch` (throws
+  when the record is missing). `upsertAll` batches the same semantics into
+  one transaction with all-or-nothing rollback and in-order merging on
+  duplicate ids. Available on the raw `Collection`, the typed surface
+  (`tasks.upsert([Writes.id(id), Tasks.done.set(true)])`), and the web
+  facade; sync behavior is unchanged — the outbox op carries the full
+  merged payload, so a merge pushes like any other local edit.
+
 - **Fixed: unrouted typed operators silently dropped their predicate.**
   `TypedQuery.whereCond` only routed `eq` and the range/text operators; a
   condition with operator `inValues`, `between`, or `isNull` fell through

@@ -659,6 +659,14 @@ final class _WebTypedSurface implements TypedStoreSurface {
       _collection.putAll(records);
 
   @override
+  Future<void> upsert(Map<String, Object?> record) =>
+      _collection.upsert(record);
+
+  @override
+  Future<void> upsertAll(List<Map<String, Object?>> records) =>
+      _collection.upsertAll(records);
+
+  @override
   Future<void> patch(String id, Map<String, Object?> changes) =>
       _collection.patch(id, changes);
 
