@@ -151,7 +151,7 @@ void main() {
         db.store(Tasks.store).debugCompile(
               includeArchived: true,
               includeHidden: true,
-              all: true,
+              limit: Limits.unbounded,
             ),
         db.collection('tasks').query().includeArchived().includeHidden().all(),
       );
@@ -201,8 +201,8 @@ void main() {
       expect(await typed.min(Tasks.estimate), await raw.min('estimate'));
       expect(await typed.max(Tasks.estimate), await raw.max('estimate'));
       expect(await typed.avg(Tasks.estimate), await raw.avg('estimate'));
-      expect(await typed.ids(all: true), await raw.ids());
-      expect(await typed.explain(all: true), await raw.explain());
+      expect(await typed.ids(limit: Limits.unbounded), await raw.ids());
+      expect(await typed.explain(limit: Limits.unbounded), await raw.explain());
     });
 
     test('case 108: an OR element compiles like the raw OR group', () {
@@ -320,7 +320,7 @@ void main() {
       );
       final typedOrdered = await db
           .store(Tasks.store)
-          .query(orderBy: [Tasks.dueDay.asc], all: true);
+          .query(orderBy: [Tasks.dueDay.asc], limit: Limits.unbounded);
       final rawOrdered =
           await db.collection('tasks').query().orderBy('dueDay').all().fetch();
       expect(typedOrdered.items.map((e) => e.id),
@@ -567,11 +567,12 @@ void main() {
         SearchTasks.title.set('ship scope flags'),
       ]);
 
-      // `all: true` opts out of the result limit; the archived/hidden flags
-      // pass through to the underlying FTS surface and the hit still fetches.
+      // `Limits.unbounded` opts out of the result limit; the archived/hidden
+      // flags pass through to the underlying FTS surface and the hit still
+      // fetches.
       final hits = await db.store(SearchTasks.store).search(
             'ship',
-            all: true,
+            limit: Limits.unbounded,
             includeArchived: true,
             includeHidden: true,
           );
@@ -584,7 +585,10 @@ void main() {
       final db = await openTyped();
       addTearDown(db.close);
       expect(
-        () => db.store(Users.store).search('x'),
+        () => db.store(Users.store).search(
+              'x',
+              limit: Limits.unbounded,
+            ),
         throwsA(isA<FtsUnavailableError>()),
       );
     });

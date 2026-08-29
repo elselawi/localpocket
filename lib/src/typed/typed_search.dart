@@ -7,6 +7,7 @@
 library;
 
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/typed/limits.dart';
 import 'package:localpocket/src/typed/store_def.dart';
 import 'package:localpocket/src/typed/typed_row.dart';
 
@@ -53,17 +54,18 @@ final class TypedSearchHit<S extends StoreDef<S>> {
 Future<List<TypedSearchHit<S>>> executeSearch<S extends StoreDef<S>>(
   TypedSearchSurface surface,
   Future<TypedRow<S>?> Function(String id) fetchOne, {
-  int? limit,
-  bool all = false,
+  required int limit,
   bool includeArchived = false,
   bool includeHidden = false,
 }) async {
-  if (limit != null) {
+  // The unbounded sentinel expands to the no-LIMIT path here, so the raw
+  // value never reaches the search builder or compiled SQL.
+  if (limit == Limits.unbounded) {
+    surface.all();
+  } else {
     surface.limit(limit);
   }
-  if (all) {
-    surface.all();
-  }
+
   if (includeArchived) {
     surface.includeArchived();
   }

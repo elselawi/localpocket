@@ -12,6 +12,7 @@ export 'registry.dart';
 export 'package:localpocket/localpocket.dart'
     show FtsNormalization, FtsSpec, IndexScope, IndexSpec;
 export 'write.dart';
+export 'limits.dart';
 export 'typed_row.dart';
 export 'typed_model.dart';
 export 'typed_pocket.dart';

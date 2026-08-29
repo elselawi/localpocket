@@ -12,6 +12,7 @@ import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
 import 'package:localpocket/src/core/store.dart';
 import 'package:localpocket/src/typed/cond.dart';
 import 'package:localpocket/src/typed/field_def.dart';
+import 'package:localpocket/src/typed/limits.dart';
 import 'package:localpocket/src/typed/store_def.dart';
 import 'package:localpocket/src/typed/typed_query.dart';
 import 'package:localpocket/src/typed/typed_row.dart';
@@ -143,13 +144,15 @@ final class _NativeCollectionQuerySurface implements TypedQuerySurface {
   }
 
   @override
-  void pageOptions(
-      {int? limit,
-      bool all = false,
-      bool? includeArchived,
-      bool? includeHidden}) {
-    if (limit != null) _builder = _builder.limit(limit);
-    if (all) _builder = _builder.all();
+  void pageOptions({
+    required int limit,
+    bool? includeArchived,
+    bool? includeHidden,
+  }) {
+    // The unbounded sentinel expands to the no-LIMIT path here, so the raw
+    // value never reaches the builder's limit slot or compiled SQL.
+    _builder =
+        limit == Limits.unbounded ? _builder.all() : _builder.limit(limit);
     if (includeArchived ?? false) _builder = _builder.includeArchived();
     if (includeHidden ?? false) _builder = _builder.includeHidden();
   }
@@ -376,8 +379,8 @@ final class TypedCollection<S extends StoreDef<S>> {
   ///   Conditions carry their store, so a foreign store's condition is a
   ///   compile error.
   /// - [orderBy] terms come from a descriptor's `asc`/`desc` getters.
-  /// - [limit] is required unless [all] is set — the database's
-  ///   `MissingLimitError` still applies at execution time.
+  /// - [limit] is required at compile time; pass [Limits.unbounded] to run
+  ///   the read without a page size.
   /// - [select] projects columns; reading an unselected field from the
   ///   resulting rows throws.
   ///
@@ -385,10 +388,9 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// `max`, `avg`, and `watch` accept the same condition slots, so the
   /// predicate shape is identical across every terminal.
   Future<TypedPage<S>> query({
+    required int limit,
     List<Cond<S>> where = const [],
     List<OrderTerm<S>> orderBy = const [],
-    int? limit,
-    bool all = false,
     bool includeArchived = false,
     bool includeHidden = false,
     List<FieldDef<S, Object?>> select = const [],
@@ -398,7 +400,6 @@ final class TypedCollection<S extends StoreDef<S>> {
       where: where,
       orderBy: orderBy,
       limit: limit,
-      all: all,
       includeArchived: includeArchived,
       includeHidden: includeHidden,
       select: select,
@@ -410,10 +411,9 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// previous page's [TypedPage.nextCursor]).
   Future<TypedPage<S>> queryAfter(
     String cursor, {
+    required int limit,
     List<Cond<S>> where = const [],
     List<OrderTerm<S>> orderBy = const [],
-    int? limit,
-    bool all = false,
     bool includeArchived = false,
     bool includeHidden = false,
     List<FieldDef<S, Object?>> select = const [],
@@ -423,7 +423,6 @@ final class TypedCollection<S extends StoreDef<S>> {
       where: where,
       orderBy: orderBy,
       limit: limit,
-      all: all,
       includeArchived: includeArchived,
       includeHidden: includeHidden,
       select: select,
@@ -442,6 +441,7 @@ final class TypedCollection<S extends StoreDef<S>> {
         where: where,
         includeArchived: includeArchived,
         includeHidden: includeHidden,
+        limit: Limits.unbounded,
       ).count();
 
   /// Counts distinct values of [field] under the same predicate slots.
@@ -456,17 +456,17 @@ final class TypedCollection<S extends StoreDef<S>> {
       where: where,
       includeArchived: includeArchived,
       includeHidden: includeHidden,
+      limit: Limits.unbounded,
     ).countDistinct(field.name);
   }
 
   /// Returns distinct values of [field] decoded through its descriptor.
-  /// the database caps unbounded distinct scans at 1000 rows unless [all] or
-  /// [limit] opts out explicitly.
+  /// the database caps unbounded distinct scans at [Limits.distinctDefault]
+  /// rows; pass [Limits.unbounded] to lift the cap.
   Future<List<V>> distinct<V>(
     FieldDef<S, V> field, {
+    int limit = Limits.distinctDefault,
     List<Cond<S>> where = const [],
-    int? limit,
-    bool all = false,
     bool includeArchived = false,
     bool includeHidden = false,
   }) async {
@@ -474,20 +474,18 @@ final class TypedCollection<S extends StoreDef<S>> {
     final raws = await _compose(
       where: where,
       limit: limit,
-      all: all,
       includeArchived: includeArchived,
       includeHidden: includeHidden,
     ).distinct(field.name);
     return <V>[for (final raw in raws) decodeStored(field, raw)];
   }
 
-  /// Returns matching record ids. [limit] (or [all]) is required — the
-  /// database's `MissingLimitError` still applies.
+  /// Returns matching record ids. [limit] is required at compile time;
+  /// pass [Limits.unbounded] to opt out of the page size.
   Future<List<String>> ids({
+    required int limit,
     List<Cond<S>> where = const [],
     List<OrderTerm<S>> orderBy = const [],
-    int? limit,
-    bool all = false,
     bool includeArchived = false,
     bool includeHidden = false,
   }) =>
@@ -495,17 +493,15 @@ final class TypedCollection<S extends StoreDef<S>> {
         where: where,
         orderBy: orderBy,
         limit: limit,
-        all: all,
         includeArchived: includeArchived,
         includeHidden: includeHidden,
       ).ids();
 
   /// Returns the delegated query plan explanation.
   Future<String> explain({
+    required int limit,
     List<Cond<S>> where = const [],
     List<OrderTerm<S>> orderBy = const [],
-    int? limit,
-    bool all = false,
     bool includeArchived = false,
     bool includeHidden = false,
     List<FieldDef<S, Object?>> select = const [],
@@ -514,7 +510,6 @@ final class TypedCollection<S extends StoreDef<S>> {
         where: where,
         orderBy: orderBy,
         limit: limit,
-        all: all,
         includeArchived: includeArchived,
         includeHidden: includeHidden,
         select: select,
@@ -571,10 +566,9 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// Watches the query shape and wraps each raw result row. The underlying
   /// `QueryWatcher` remains the sole invalidation/coalescing mechanism.
   Stream<List<TypedRow<S>>> watch({
+    required int limit,
     List<Cond<S>> where = const [],
     List<OrderTerm<S>> orderBy = const [],
-    int? limit,
-    bool all = false,
     bool includeArchived = false,
     bool includeHidden = false,
     List<FieldDef<S, Object?>> select = const [],
@@ -584,7 +578,6 @@ final class TypedCollection<S extends StoreDef<S>> {
       where: where,
       orderBy: orderBy,
       limit: limit,
-      all: all,
       includeArchived: includeArchived,
       includeHidden: includeHidden,
       select: select,
@@ -596,10 +589,9 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// Exposes the database compiler verbatim for typed/raw SQL+args parity —
   /// the same slots as [query], evaluated without executing.
   (String, List<Object?>) debugCompile({
+    required int limit,
     List<Cond<S>> where = const [],
     List<OrderTerm<S>> orderBy = const [],
-    int? limit,
-    bool all = false,
     bool includeArchived = false,
     bool includeHidden = false,
     List<FieldDef<S, Object?>> select = const [],
@@ -608,7 +600,6 @@ final class TypedCollection<S extends StoreDef<S>> {
         where: where,
         orderBy: orderBy,
         limit: limit,
-        all: all,
         includeArchived: includeArchived,
         includeHidden: includeHidden,
         select: select,
@@ -620,8 +611,7 @@ final class TypedCollection<S extends StoreDef<S>> {
   /// from the raw builder.
   Future<List<TypedSearchHit<S>>> search(
     String term, {
-    int? limit,
-    bool all = false,
+    required int limit,
     bool includeArchived = false,
     bool includeHidden = false,
   }) =>
@@ -629,7 +619,6 @@ final class TypedCollection<S extends StoreDef<S>> {
         _surface.search(term),
         get,
         limit: limit,
-        all: all,
         includeArchived: includeArchived,
         includeHidden: includeHidden,
       );
@@ -640,10 +629,9 @@ final class TypedCollection<S extends StoreDef<S>> {
   // -----------------------------------------------------------------------
 
   TypedQuerySurface _compose({
+    required int limit,
     List<Cond<S>> where = const [],
     List<OrderTerm<S>> orderBy = const [],
-    int? limit,
-    bool all = false,
     bool includeArchived = false,
     bool includeHidden = false,
     List<FieldDef<S, Object?>> select = const [],
@@ -664,7 +652,6 @@ final class TypedCollection<S extends StoreDef<S>> {
     }
     surface.pageOptions(
       limit: limit,
-      all: all,
       includeArchived: includeArchived,
       includeHidden: includeHidden,
     );
@@ -765,6 +752,7 @@ final class TypedCollection<S extends StoreDef<S>> {
       where: where,
       includeArchived: includeArchived,
       includeHidden: includeHidden,
+      limit: Limits.unbounded,
     ).aggregate(fn, field.name);
   }
 

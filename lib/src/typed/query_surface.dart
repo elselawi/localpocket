@@ -49,10 +49,11 @@ abstract interface class TypedQuerySurface {
   void select(List<String> fields);
 
   /// Applies pagination/scope flags (all optional — leave null to keep
-  /// current settings).
+  /// current settings). A [Limits.unbounded] limit means "no page size":
+  /// implementations must expand it to their no-LIMIT path instead of
+  /// passing the raw value to the builder.
   void pageOptions({
-    int? limit,
-    bool all = false,
+    required int limit,
     bool? includeArchived,
     bool? includeHidden,
   });

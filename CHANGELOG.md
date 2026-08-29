@@ -1,5 +1,15 @@
 ## Unreleased
 
+- **Typed reads: `limit` is now required at compile time.** `query`,
+  `queryAfter`, `ids`, `explain`, `watch`, `debugCompile`, and `search`
+  take `required int limit`, and the `all:` flag is gone. Pass
+  `Limits.unbounded` to run a read without a page size — the sentinel
+  expands to the no-LIMIT path at the typed surface boundary, so the raw
+  value never reaches compiled SQL or the worker wire. `distinct` keeps
+  its 1000-value default cap (`Limits.distinctDefault`);
+  `Limits.unbounded` lifts it. The runtime `MissingLimitError` remains
+  reachable only through the raw builder API.
+
 - **One import for the whole package.**
   `import 'package:localpocket/localpocket.dart';` now gives you everything:
   the typed data-model layer, the raw map API underneath it, the sync
@@ -78,7 +88,7 @@
 
 - **`openTyped(...)`: defs-first opening sugar.** Forwards each canonical
   definition's memoized schema to `LocalPocket.open`, so step-one wiring
-  reads `stores: [Tasks.instance]` without `.collectionSchema` ceremony on
+  reads `stores: [Tasks.store]` without `.collectionSchema` ceremony on
   every platform (the conditional exports route the call to the right
   facade). The new `StoreDefs` list typedef keeps those declarations short
   and carries the manifest-role documentation (fresh-install creation,

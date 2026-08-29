@@ -244,13 +244,18 @@ final class _WebTxTypedQuerySurface implements TypedQuerySurface {
   }
 
   @override
-  void pageOptions(
-      {int? limit,
-      bool all = false,
-      bool? includeArchived,
-      bool? includeHidden}) {
-    if (limit != null) _builder.limit(limit);
-    if (all) _builder.all();
+  void pageOptions({
+    required int limit,
+    bool? includeArchived,
+    bool? includeHidden,
+  }) {
+    // The unbounded sentinel expands to the no-LIMIT path here, so the raw
+    // value never crosses the worker wire as a page size.
+    if (limit == Limits.unbounded) {
+      _builder.all();
+    } else {
+      _builder.limit(limit);
+    }
     if (includeArchived ?? false) _builder.includeArchived();
     if (includeHidden ?? false) _builder.includeHidden();
   }

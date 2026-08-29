@@ -262,8 +262,7 @@ void main() {
       final page = await col.query(
         where: [Tasks.done.eq(false)],
         orderBy: [Tasks.title.asc],
-        limit: 3,
-        all: true,
+        limit: Limits.unbounded,
         includeArchived: true,
         includeHidden: true,
         select: [Tasks.title],
@@ -316,7 +315,7 @@ void main() {
 
       fake.responses[WireOp.compiledQuery] = {'results': <Object?>[]};
       final empty = await col.search('engines',
-          all: true, includeArchived: true, includeHidden: true);
+          limit: Limits.unbounded, includeArchived: true, includeHidden: true);
       expect(empty, isEmpty);
       final (op, args) = fake.sent.single;
       expect(op, WireOp.compiledQuery);
