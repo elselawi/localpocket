@@ -466,7 +466,7 @@ void main() {
       expect(result['plan'], isNotEmpty);
     });
 
-    test('pageLimit produces hasMore + lastRow cursor', () async {
+    test('pageLimit produces hasNext + boundary rows', () async {
       final plan = h.pocket
           .collection('widgets')
           .query()
@@ -475,9 +475,63 @@ void main() {
           .compilePlan();
       final result = (await h.sendOk(h.req(WireOp.compiledQuery,
           args: planPayload(plan, pageLimit: 2))))! as Map<String, Object?>;
-      expect(result['hasMore'], isTrue);
+      expect(result['hasNext'], isTrue);
       expect((result['items']! as List), hasLength(2));
       expect(result['lastRow'], isA<Map>());
+      expect(result['firstRow'], isA<Map>(),
+          reason: 'both boundary rows ride the envelope for bidirectional '
+              'cursor minting');
+    });
+
+    test('backward plan walks the flipped order in R-sequence', () async {
+      // Seed (name ASC): apple, banana, cherry — plus apricot inserted here
+      // so four rows exist: apple, apricot, banana, cherry.
+      await h.put('widgets', record(name: 'apricot', qty: 8),
+          id: generateRecordId());
+      final listPlan = h.pocket
+          .collection('widgets')
+          .query()
+          .orderBy('name')
+          .limit(50)
+          .compilePlan();
+      final listed = (await h.sendOk(
+              h.req(WireOp.compiledQuery, args: planPayload(listPlan))))!
+          as Map<String, Object?>;
+      final rows = [
+        for (final i in listed['items']! as List)
+          (i as Map).cast<String, Object?>(),
+      ];
+      expect(
+          rows.map((r) => r['name']), ['apple', 'apricot', 'banana', 'cherry']);
+
+      // Mint a cursor anchored at cherry: `values` = cherry (forward
+      // continuation), `pv` = cherry as the first row of a hypothetical
+      // window — the backward walk starts there.
+      final builder =
+          h.pocket.collection('widgets').query().orderBy('name').limit(1);
+      final cursor = builder.cursorForCompiledRow(rows[3], rows[3]);
+      // The backward window compiles with limit+1 so overflow is observable.
+      final plan = builder.compilePlan(
+        cursor: cursor,
+        backward: true,
+        limitOverride: 2,
+      );
+      final args = planPayload(plan, pageLimit: 1);
+      expect(args['sql'], contains('ORDER BY "name" DESC, "id" DESC'),
+          reason: 'the backward compile flips every direction');
+      expect(args['args'], contains('cherry'),
+          reason: 'the pv tuple seeds the walk');
+      final result = (await h.sendOk(h.req(WireOp.compiledQuery, args: args)))!
+          as Map<String, Object?>;
+      // Walking the flipped order from cherry yields banana (window, R
+      // order) with apricot as the overflow row — hasNext is the exact
+      // "rows exist before this window" flag.
+      expect(result['hasNext'], isTrue);
+      final items = result['items']! as List;
+      expect(items, hasLength(1));
+      expect((items.single as Map)['name'], 'banana');
+      expect((result['firstRow']! as Map)['name'], 'banana');
+      expect((result['lastRow']! as Map)['name'], 'banana');
     });
 
     test('plan validation matrix → ProtocolEnvelopeException (E15)', () async {
@@ -1004,8 +1058,8 @@ void main() {
 
       // The failed registration was cleaned up: cancelling a non-existent
       // watcher is a no-op success (no leaked watcher remains).
-      final cancel = (await h.sendOk(
-              h.req(WireOp.watchCancel, args: {'watchId': watchId})))!
+      final cancel = (await h
+              .sendOk(h.req(WireOp.watchCancel, args: {'watchId': watchId})))!
           as Map<String, Object?>;
       expect(cancel['ok'], isTrue);
     });
@@ -1028,8 +1082,8 @@ void main() {
       expect(err, isA<WorkerError>());
 
       // The failed registration was cleaned up (no leaked watcher).
-      final cancel = (await h.sendOk(
-              h.req(WireOp.watchCancel, args: {'watchId': watchId})))!
+      final cancel = (await h
+              .sendOk(h.req(WireOp.watchCancel, args: {'watchId': watchId})))!
           as Map<String, Object?>;
       expect(cancel['ok'], isTrue);
     });
@@ -1094,8 +1148,7 @@ void main() {
 
     test('sync_start builds a live engine; every lifecycle op round-trips',
         () async {
-      final start =
-          (await h.sendOk(h.req(WireOp.syncStart, args: {
+      final start = (await h.sendOk(h.req(WireOp.syncStart, args: {
         'baseUrl': server.baseUrl.toString(),
         'scopeId': 'worker-test',
         'token': 'jwt',
@@ -1176,16 +1229,15 @@ void main() {
     });
 
     test('sync_start without a token still builds a working engine', () async {
-      final start =
-          (await h.sendOk(h.req(WireOp.syncStart, args: {
+      final start = (await h.sendOk(h.req(WireOp.syncStart, args: {
         'baseUrl': server.baseUrl.toString(),
         'scopeId': 'no-token',
       })))! as Map<String, Object?>;
       expect(start['ok'], isTrue);
       // The empty token is materialized by the worker-owned provider.
       expect((await h.sendOk(h.req(WireOp.syncStatus)))!, isA<Map>());
-      final stop = (await h.sendOk(h.req(WireOp.syncStop)))!
-          as Map<String, Object?>;
+      final stop =
+          (await h.sendOk(h.req(WireOp.syncStop)))! as Map<String, Object?>;
       expect(stop['ok'], isTrue);
     });
   });
@@ -1314,8 +1366,7 @@ void main() {
           reason: 'remove transitions the ref to pending_remove');
 
       // file_gc with explicit grace windows, and again with the defaults.
-      final gc =
-          (await h.sendOk(h.req(WireOp.fileGc, args: {
+      final gc = (await h.sendOk(h.req(WireOp.fileGc, args: {
         'blobGraceMs': 0,
         'tmpGraceMs': 0,
       })))! as Map<String, Object?>;
@@ -1326,7 +1377,7 @@ void main() {
 
       // file_enforce_storage_cap.
       final cap = (await h.sendOk(
-          h.req(WireOp.fileEnforceStorageCap, args: {'maxBytes': 1024})))!
+              h.req(WireOp.fileEnforceStorageCap, args: {'maxBytes': 1024})))!
           as Map<String, Object?>;
       expect(cap['evicted'], isA<int>());
 
@@ -1412,8 +1463,8 @@ void main() {
 
     test('conflicts_list and conflicts_get surface the open row', () async {
       final id = await seedConflict();
-      final list = (await h.sendOk(
-              h.req(WireOp.conflictsList, args: {'store': 'widgets'})))!
+      final list = (await h
+              .sendOk(h.req(WireOp.conflictsList, args: {'store': 'widgets'})))!
           as Map<String, Object?>;
       final conflicts = (list['conflicts']! as List).cast<Map>();
       expect(conflicts, hasLength(1));
@@ -1437,8 +1488,8 @@ void main() {
         'id': id,
         'merged': encodeWireValue({'name': 'merged'}),
       }));
-      final list = (await h.sendOk(
-              h.req(WireOp.conflictsList, args: {'store': 'widgets'})))!
+      final list = (await h
+              .sendOk(h.req(WireOp.conflictsList, args: {'store': 'widgets'})))!
           as Map<String, Object?>;
       expect((list['conflicts']! as List).cast<Map>(), isEmpty);
       final rec = await h.get('widgets', id);

@@ -257,7 +257,7 @@ void main() {
       final col = tx.store(Tasks.store);
       fake.responses[WireOp.compiledQuery] = {
         'items': <Object?>[],
-        'hasMore': false,
+        'hasNext': false,
       };
       final page = await col.query(
         where: [Tasks.done.eq(false)],
@@ -290,14 +290,20 @@ void main() {
       final core = QueryBuilder.compileOnly(Tasks.store.collectionSchema)
           .orderBy('title')
           .limit(5);
-      final cursor = core.cursorForCompiledRow({'title': 'Ship', 'id': 'a'});
+      final cursor = core.cursorForCompiledRow(
+          {'title': 'Ship', 'id': 'a'}, {'title': 'Set', 'id': 'b'});
 
       fake.responses[WireOp.compiledQuery] = {
         'items': <Object?>[],
-        'hasMore': false,
+        'hasNext': false,
+        'firstRow': null,
+        'lastRow': null,
       };
-      final page =
-          await col.queryAfter(cursor, orderBy: [Tasks.title.asc], limit: 5);
+      final page = await col.query(
+        orderBy: [Tasks.title.asc],
+        limit: 5,
+        after: cursor,
+      );
       expect(page.items, isEmpty);
       expect(fake.sent.last.$2['sessionId'], 42);
 

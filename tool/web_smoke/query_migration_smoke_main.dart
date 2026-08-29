@@ -120,7 +120,7 @@ Future<void> main() async {
       await articles.restore('article00000002');
 
       final page = await articles.query().orderBy('title').limit(1).fetch();
-      if (!page.hasMore || page.nextCursor == null) {
+      if (!page.hasNext || page.nextCursor == null) {
         throw StateError('Expected a cursor for stale-cursor test.');
       }
       await articles.patch('article00000002', {'title': 'Changed title'});

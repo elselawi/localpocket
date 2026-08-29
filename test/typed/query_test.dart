@@ -169,21 +169,25 @@ void main() {
           .query(orderBy: [Tasks.title.asc], limit: 1);
       final rawFirst = await raw.fetch();
       expect(typedFirst.items.single.id, rawFirst.items.single['id']);
-      expect(typedFirst.hasMore, rawFirst.hasMore);
+      expect(typedFirst.hasNext, rawFirst.hasNext);
       expect(typedFirst.nextCursor, rawFirst.nextCursor);
-      final typedSecond = await db.store(Tasks.store).queryAfter(
-            typedFirst.nextCursor!,
-            orderBy: [Tasks.title.asc],
-            limit: 1,
-          );
+      final typedSecond = await typedFirst.next();
       final rawSecond = await raw.keysetAfter(rawFirst.nextCursor!);
-      expect(typedSecond.items.single.id, rawSecond.items.single['id']);
+      expect(typedSecond!.items.single.id, rawSecond.items.single['id']);
+      // `after:` resumes a persisted cursor under the re-stated shape; a
+      // shape mismatch is rejected loudly.
+      final resumed = await db.store(Tasks.store).query(
+        orderBy: [Tasks.title.asc],
+        limit: 1,
+        after: typedFirst.nextCursor!,
+      );
+      expect(resumed.items.single.id, rawSecond.items.single['id']);
       expect(
-        () => db.store(Tasks.store).queryAfter(
-              typedFirst.nextCursor!,
-              orderBy: [Tasks.dueDay.asc],
-              limit: 1,
-            ),
+        () => db.store(Tasks.store).query(
+          orderBy: [Tasks.dueDay.asc],
+          limit: 1,
+          after: typedFirst.nextCursor!,
+        ),
         throwsA(isA<StaleCursorError>()),
       );
     });
@@ -276,15 +280,7 @@ void main() {
           .limit(1)
           .keysetAfter(first.nextCursor!);
       expect(
-          (await db.store(Tasks.store).queryAfter(
-                    first.nextCursor!,
-                    orderBy: [Tasks.dueDay.asc],
-                    limit: 1,
-                  ))
-              .items
-              .single
-              .id,
-          rawSecond.items.single['id']);
+          (await first.next())!.items.single.id, rawSecond.items.single['id']);
 
       final typedDistinct =
           await db.store(Tasks.store).distinct(Tasks.priority);

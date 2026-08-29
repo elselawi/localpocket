@@ -1,7 +1,36 @@
 ## Unreleased
 
+- **Pagination is captured, not restated: `next()`/`prev()` on the page,
+  `queryAfter` removed, `hasMore` renamed to `hasNext` end to end.**
+  `TypedPage` now carries `hasNext`/`hasPrev` — snapshot facts about what
+  the database observed on each side of the window when the page was built —
+  plus `next()`/`prev()`, which re-run the exact captured query shape with
+  no slots to re-state, so a shape mismatch cannot happen by construction.
+  `next()`/`prev()` never throw: they return `null` at a terminal page and
+  a terminal empty page when the observed rows vanished in between.
+  `queryAfter` is gone: in-session continuation uses the page methods, and
+  resuming a persisted cursor (app restart, deep link) re-states the shape
+  once via `query(after: cursor)` — a cursor minted by a different shape
+  still throws `StaleCursorError`. The rename goes all the way down: the
+  raw `Page` field, the compiled-query worker envelope key (`hasMore` →
+  `hasNext`, plus `firstRow` alongside `lastRow` for backward cursor
+  minting — **web protocol v3**, stale cached workers fail the version
+  handshake loudly), and every facade, harness, and smoke tool. Cursors are
+  now bidirectional: one payload carries both boundary tuples, and backward
+  pages walk the flipped order with an exact `hasPrev` (limit+1 check)
+  while `hasNext` is answered by a one-row forward probe. Watchable
+  queries are live snapshots and have no pagination surface.
+
+- **Fixed: uniform-DESC continuation pages silently dropped NULL-sorted
+  rows.** The row-value keyset fast path `(a, b) < (?, ?)` evaluates to NULL
+  for rows whose sort value is NULL, so under a uniform-DESC order (e.g.
+  `orderBy('qty', desc: true).orderBy('id', desc: true)`) a nullable sort
+  column's trailing NULL group vanished from every continuation page. The
+  fast path is now uniform-ASC only; uniform-DESC uses the NULL-aware
+  OR-chain, which keeps the trailing NULL group.
+
 - **Typed reads: `limit` is now required at compile time.** `query`,
-  `queryAfter`, `ids`, `explain`, `watch`, `debugCompile`, and `search`
+  `ids`, `explain`, `watch`, `debugCompile`, and `search`
   take `required int limit`, and the `all:` flag is gone. Pass
   `Limits.unbounded` to run a read without a page size — the sentinel
   expands to the no-LIMIT path at the typed surface boundary, so the raw

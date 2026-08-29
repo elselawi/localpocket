@@ -41,7 +41,8 @@ void main() {
     expect(res, {
       'items': <Map<String, Object?>>[],
       'lastRow': null,
-      'hasMore': false,
+      'firstRow': null,
+      'hasNext': false,
     });
   });
 

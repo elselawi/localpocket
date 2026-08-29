@@ -17,6 +17,11 @@ abstract interface class TypedQuerySurface {
   /// Executes the query after [cursor] (keyset pagination).
   Future<Page> keysetAfter(String cursor);
 
+  /// Executes the query immediately before the window [cursor] was minted
+  /// from (backward keyset pagination). Rows come back in the query's
+  /// declared order.
+  Future<Page> keysetBefore(String cursor);
+
   /// Counts matching records.
   Future<int> count();
 

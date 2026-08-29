@@ -43,8 +43,13 @@ enum MutationAction {
 /// {@template localpocket.page}
 /// The result of a paginated query.
 ///
-/// Use [nextCursor] with [QueryBuilder.keysetAfter] to fetch the next page.
-/// When [hasMore] is false, [nextCursor] is normally `null`.
+/// Cursors are bidirectional: [nextCursor] continues forward (keyset-after
+/// the window's last row) and [prevCursor] continues backward (keyset-before
+/// the window's first row). When both are non-null they carry the same
+/// payload — the direction is chosen by the consume call. Use [nextCursor]
+/// with [QueryBuilder.keysetAfter] and [prevCursor] with
+/// [QueryBuilder.keysetBefore]. When [hasNext] is false, [nextCursor] is
+/// normally `null`; when [hasPrev] is false, [prevCursor] is `null`.
 /// {@endtemplate}
 class Page {
   /// Creates a query page.
@@ -52,8 +57,10 @@ class Page {
   /// {@macro localpocket.page}
   const Page({
     required this.items,
-    required this.hasMore,
+    required this.hasNext,
     this.nextCursor,
+    this.prevCursor,
+    this.hasPrev = false,
   });
 
   /// Records in this page, in the requested order.
@@ -62,8 +69,20 @@ class Page {
   /// Cursor for the next keyset page, or `null` when this is the last page.
   final String? nextCursor;
 
-  /// Whether another page is available.
-  final bool hasMore;
+  /// Cursor for the previous keyset page, or `null` when nothing was
+  /// observed before this window (the first page, or a backward page whose
+  /// continuation found no earlier rows).
+  final String? prevCursor;
+
+  /// Whether the database observed a row after this window when the page was
+  /// built: exact via the limit+1 check on forward fetches, and via the
+  /// one-row forward probe on backward fetches.
+  final bool hasNext;
+
+  /// Whether rows were observed before this window. Exact for pages fetched
+  /// backward; for forward continuations it is a mint-time fact (the
+  /// consumed cursor's anchor row existed when that cursor was minted).
+  final bool hasPrev;
 }
 
 /// {@template localpocket.collection}

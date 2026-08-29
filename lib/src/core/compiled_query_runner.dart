@@ -23,14 +23,15 @@ Future<Map<String, Object?>> executeCompiledQuery(
     return {
       'items': <Map<String, Object?>>[],
       'lastRow': null,
-      'hasMore': false,
+      'firstRow': null,
+      'hasNext': false,
     };
   }
   final rows = await run(sql, plan.args);
 
   switch (plan.operation) {
     case 'query':
-      final hasMore = pageLimit != null && rows.length > pageLimit;
+      final hasNext = pageLimit != null && rows.length > pageLimit;
       final pageRows = pageLimit == null ? rows : rows.take(pageLimit).toList();
       final schema = pocket.requireTable(plan.store).schema;
       final columns = plan.decodeColumns;
@@ -54,8 +55,12 @@ Future<Map<String, Object?>> executeCompiledQuery(
             ];
       return {
         'items': projected,
-        'lastRow': hasMore && decoded.isNotEmpty ? decoded.last : null,
-        'hasMore': hasMore,
+        // Both boundary rows ride the envelope whenever the window is
+        // non-empty (regardless of direction or overflow): the facade needs
+        // them to mint bidirectional cursors in either direction.
+        'lastRow': decoded.isNotEmpty ? decoded.last : null,
+        'firstRow': decoded.isNotEmpty ? decoded.first : null,
+        'hasNext': hasNext,
       };
     case 'count':
     case 'countDistinct':

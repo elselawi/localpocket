@@ -254,7 +254,7 @@ class _QueriesPageState extends State<QueriesPage> {
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(
-                      'hasMore: true — use the Next page button.',
+                      'hasNext: true — use the Next page button.',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),

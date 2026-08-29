@@ -104,12 +104,9 @@ final page = await tasks.query(
   limit: 20,
 );
 
-if (page.hasMore) {
-  final next = await tasks.queryAfter(
-    page.nextCursor!,
-    orderBy: [Tasks.priority.asc],
-    limit: 20,
-  );
+// next() reuses the captured shape — nothing to re-state.
+if (page.hasNext) {
+  final next = await page.next();
 }
 ''';
 }

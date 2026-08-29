@@ -71,6 +71,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         _includeArchived = false,
         _includeHidden = false,
         _cursor = null,
+        _backward = false,
         _suppressIdTiebreak = false;
 
   /// Compile-only constructor used by the web query-plan spike.
@@ -88,6 +89,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         _includeArchived = false,
         _includeHidden = false,
         _cursor = null,
+        _backward = false,
         _suppressIdTiebreak = false;
 
   QueryBuilder._(
@@ -102,6 +104,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     this._includeArchived,
     this._includeHidden,
     this._cursor,
+    this._backward,
     this._suppressIdTiebreak,
   );
 
@@ -117,6 +120,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   final bool _includeArchived;
   final bool _includeHidden;
   final String? _cursor;
+
+  /// Backward-consume mode: the compiled ORDER BY and keyset predicate flip,
+  /// the cursor's `pv` tuple seeds the walk, and returned rows are re-reversed
+  /// into the query's declared order.
+  final bool _backward;
   final bool _suppressIdTiebreak;
 
   QueryBuilder _copyWith({
@@ -129,6 +137,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     bool? includeArchived,
     bool? includeHidden,
     String? cursor,
+    bool? backward,
     bool? suppressIdTiebreak,
   }) =>
       QueryBuilder._(
@@ -143,6 +152,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         includeArchived ?? _includeArchived,
         includeHidden ?? _includeHidden,
         cursor ?? _cursor,
+        backward ?? _backward,
         suppressIdTiebreak ?? _suppressIdTiebreak,
       );
 
@@ -360,6 +370,14 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     return o;
   }
 
+  /// The order the running SQL sorts by: the declared order, flipped end to
+  /// end (including the implicit `id` tiebreak) when consuming a cursor
+  /// backward. Flipping preserves the field sequence, so cursor tuples minted
+  /// in the forward order index identically into the flipped order.
+  List<OrderClause> get _consumeOrder => _backward
+      ? [for (final o in _effectiveOrder) OrderClause(o.field, desc: !o.desc)]
+      : _effectiveOrder;
+
   List<String> get _sortSignature =>
       [for (final o in _effectiveOrder) '${o.field}:${o.desc ? 'd' : 'a'}'];
 
@@ -440,7 +458,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     }
     if (_cursor != null) {
       final data = _decodeCursor(_cursor!);
-      final (ks, ksArgs) = _keysetPredicate(data);
+      final (ks, ksArgs) = _keysetPredicate(_consumeOrder, data.values);
       where.add(ks);
       args.addAll(ksArgs);
     }
@@ -461,7 +479,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
             for (final o in _order)
               if (o.field == distinctField) o
           ]
-        : _effectiveOrder;
+        : _consumeOrder;
     final orderSql = (forCount || aggregate != null)
         ? ''
         : (effOrder.isEmpty
@@ -513,7 +531,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
       schemaVer = m['schemaVer'];
       shape = m['shape'];
       sort = List<String>.from(m['sort'] as List? ?? const []);
-      values = List<Object?>.from(m['values'] as List? ?? const []);
+      // Forward consumption continues from the window's last row (`values`);
+      // backward consumption continues from its first row (`pv`). Both tuples
+      // are minted over the same forward sort signature.
+      final raw = _backward ? m['pv'] : m['values'];
+      values = List<Object?>.from(raw as List? ?? const []);
     } catch (_) {
       // Any malformed cursor (bad base64, invalid UTF-8/JSON, wrong field
       // types) is a stale cursor, never a FormatException/TypeError.
@@ -557,18 +579,23 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         'p': _select,
       });
 
-  (String, List<Object?>) _keysetPredicate(_CursorData data) {
-    final order = _effectiveOrder;
-    final values = data.values;
-
-    // Row-value fast path: when every sort column has the
-    // same direction and no cursor value is NULL, `(a, b) > (?, ?)` is exactly
-    // equivalent to the OR-chain below (verified on SQLite 3.53.4) and reads
-    // as one compact predicate. NULL values and mixed directions fall back to
-    // the OR-chain to preserve the existing (documented) semantics.
+  /// Compiles the keyset predicate for [values] under [order].
+  ///
+  /// Row-value fast path: when every sort column has the same direction —
+  /// and that direction is ASC — and no cursor value is NULL, `(a, b) > (?, ?)`
+  /// is exactly equivalent to the OR-chain below (verified on SQLite 3.53.4)
+  /// and reads as one compact predicate. The fast path is deliberately NOT
+  /// taken for uniform-DESC orders: `(a, b) < (?, ?)` evaluates to NULL for
+  /// rows whose sort value is NULL, so a nullable column's trailing NULL
+  /// group (which sorts LAST under DESC and must be kept) would be silently
+  /// dropped; those queries use the NULL-aware OR-chain. Mixed directions
+  /// and NULL cursor values always use the OR-chain.
+  (String, List<Object?>) _keysetPredicate(
+      List<OrderClause> order, List<Object?> values) {
+    // Row-value fast path: uniform ASC directions with no NULL cursor value.
     final uniform = order.every((o) => o.desc == order.first.desc);
     final noNull = values.every((v) => v != null);
-    if (order.length >= 2 && uniform && noNull) {
+    if (order.length >= 2 && uniform && !order.first.desc && noNull) {
       final cols =
           [for (final o in order) DdlCompiler.quote(o.field)].join(', ');
       final op = order.first.desc ? '<' : '>';
@@ -628,15 +655,16 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     return ('(${clauses.join(' OR ')})', args);
   }
 
-  String _makeCursor(Map<String, Object?> lastFullRow) {
+  String _makeCursor(
+      Map<String, Object?> lastFullRow, Map<String, Object?> firstFullRow) {
     final order = _effectiveOrder;
-    final values = [for (final o in order) lastFullRow[o.field]];
     final payload = {
       'store': _schema.name,
       'schemaVer': _schema.version,
       'sort': _sortSignature,
       'shape': _shapeFingerprint,
-      'values': values,
+      'values': [for (final o in order) lastFullRow[o.field]],
+      'pv': [for (final o in order) firstFullRow[o.field]],
     };
     return base64UrlEncode(utf8.encode(jsonEncode(payload)));
   }
@@ -644,12 +672,18 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   // -------------------------------------------------------------- execution --
 
   /// Executes the query and returns one page of records.
+  ///
+  /// In backward mode ([keysetBefore]) the SQL walks the flipped order, the
+  /// returned rows are re-reversed into the declared order, and [Page.hasPrev]
+  /// is exact (limit+1 check) while [Page.hasNext] is answered by a one-row
+  /// forward probe from the window's last row.
   Future<Page> fetch({int? internalLimit}) async {
     final limit = internalLimit ?? _resolveLimit();
     // A zero limit is a degenerate (but legal) page: nothing to return and
     // nothing to paginate from.
     if (limit == 0) {
-      return const Page(items: [], nextCursor: null, hasMore: false);
+      return const Page(
+          items: [], nextCursor: null, hasNext: false, hasPrev: false);
     }
     final (sql, args) =
         _compile(limitOverride: limit == null ? null : limit + 1);
@@ -658,7 +692,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
       throw StateError('A compile-only QueryBuilder cannot execute fetch().');
     }
     final rows = await pocket.traceQuery(sql, args);
-    final hasMore = limit != null && rows.length > limit;
+    var hasNext = limit != null && rows.length > limit;
+    var hasPrev = _cursor != null;
     final pageRows = limit == null ? rows : rows.take(limit).toList();
 
     // In-process, projection-aware decode: one-shot
@@ -683,11 +718,26 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         cryptoProvider: _requirePocket.cryptoProvider,
       );
     }
+    // A backward fetch walks the flipped order; re-reverse the window so
+    // items and cursor tuples are always in the query's declared order.
+    if (_backward && decoded.isNotEmpty) {
+      final reversed = decoded.reversed.toList();
+      decoded
+        ..clear()
+        ..addAll(reversed);
+    }
+    if (_backward) {
+      // Rows before the window were observed iff the flipped walk overflowed
+      // the limit; rows after the window need their own one-row probe.
+      hasPrev = hasNext;
+      hasNext = await _probeForwardAfter(decoded);
+    } else {
+      // A consumed cursor proves its anchor row existed at mint time.
+      hasPrev = hasPrev && decoded.isNotEmpty;
+    }
 
     final items = <Map<String, Object?>>[];
-    Map<String, Object?>? lastFull;
     for (final full in decoded) {
-      lastFull = full;
       if (_select != null) {
         items.add({
           for (final k in _select!)
@@ -697,11 +747,52 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         items.add(full);
       }
     }
-    String? cursor;
-    if (hasMore && lastFull != null) {
-      cursor = _makeCursor(lastFull);
+    String? nextCursor;
+    String? prevCursor;
+    if (decoded.isNotEmpty) {
+      // Both boundary tuples go into every minted payload, so one cursor
+      // string serves either direction; the nullness of each field encodes
+      // whether that side observed more rows.
+      if (hasNext) nextCursor = _makeCursor(decoded.last, decoded.first);
+      if (hasPrev) prevCursor = _makeCursor(decoded.last, decoded.first);
     }
-    return Page(items: items, nextCursor: cursor, hasMore: hasMore);
+    return Page(
+      items: items,
+      nextCursor: nextCursor,
+      hasNext: hasNext,
+      prevCursor: prevCursor,
+      hasPrev: hasPrev,
+    );
+  }
+
+  /// One-row existence probe for backward pages: does any row match the
+  /// query shape strictly AFTER the window's last row (declared order)?
+  Future<bool> _probeForwardAfter(List<Map<String, Object?>> decodedO) async {
+    final pocket = _pocket;
+    if (decodedO.isEmpty || pocket == null) return false;
+    final last = decodedO.last;
+    final (ks, ksArgs) = _keysetPredicate(
+        _effectiveOrder, [for (final o in _effectiveOrder) last[o.field]]);
+    final where = <String>[];
+    final args = <Object?>[];
+    final scope = <String>[];
+    if (!_includeArchived) scope.add('archived = 0');
+    if (!_includeHidden) scope.add('hidden = 0');
+    if (scope.isNotEmpty) where.add(scope.join(' AND '));
+    for (final c in _where) {
+      where.add(c.sql);
+      args.addAll(c.args);
+    }
+    for (final c in _orGroups) {
+      where.add(c.sql);
+      args.addAll(c.args);
+    }
+    where.add(ks);
+    args.addAll(ksArgs);
+    final sql = 'SELECT 1 FROM ${DdlCompiler.quote(_schema.name)}'
+        ' WHERE ${where.join(' AND ')} LIMIT 1';
+    final rows = await pocket.traceQuery(sql, args);
+    return rows.isNotEmpty;
   }
 
   /// True when every projected column is a declared field (or the synthetic
@@ -730,6 +821,17 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// projection, and ordering. A cursor from another query shape throws
   /// [StaleCursorError].
   Future<Page> keysetAfter(String cursor) => _copyWith(cursor: cursor).fetch();
+
+  /// Fetches the page immediately before the window [cursor] was minted
+  /// from, using backward keyset pagination.
+  ///
+  /// Consumes the cursor's `pv` (first-row) tuple: the SQL walks the flipped
+  /// order, the returned rows are re-reversed into the declared order, and
+  /// [Page.hasPrev] is exact while [Page.hasNext] is answered by a one-row
+  /// forward probe. A cursor from another query shape throws
+  /// [StaleCursorError].
+  Future<Page> keysetBefore(String cursor) =>
+      _copyWith(cursor: cursor, backward: true).fetch();
 
   /// Counts records matching the current filters.
   Future<int> count() async {
@@ -837,9 +939,14 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// Compiles a typed plan for the web transport.
   ///
   /// The plan contains only compiler-owned SQL and bound arguments. It is not
-  /// an arbitrary raw-SQL escape hatch.
-  QueryPlan compilePlan({int? limitOverride, String? cursor}) {
-    final query = cursor == null ? this : _copyWith(cursor: cursor);
+  /// an arbitrary raw-SQL escape hatch. [backward] flips the ORDER BY and
+  /// seeds the keyset predicate from the cursor's first-row (`pv`) tuple for
+  /// backward (previous-page) walks.
+  QueryPlan compilePlan(
+      {int? limitOverride, String? cursor, bool backward = false}) {
+    final query = cursor == null && !backward
+        ? this
+        : _copyWith(cursor: cursor, backward: backward);
     final (sql, args) = query._compile(limitOverride: limitOverride);
     return query._plan('query', sql, args,
         limit: limitOverride ?? query._resolveLimit(),
@@ -933,9 +1040,14 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     );
   }
 
-  /// Creates the next keyset cursor from a full decoded row returned by the
-  /// compiled-query worker path.
-  String cursorForCompiledRow(Map<String, Object?> row) => _makeCursor(row);
+  /// Creates the next bidirectional keyset cursor from the window's boundary
+  /// rows returned by the compiled-query worker path. [rowLast] is the last
+  /// row of the window in the query's declared order, [rowFirst] the first.
+  /// The payload carries both tuples, so the same string serves
+  /// [keysetAfter] and [keysetBefore].
+  String cursorForCompiledRow(
+          Map<String, Object?> rowLast, Map<String, Object?> rowFirst) =>
+      _makeCursor(rowLast, rowFirst);
 
   /// Reactive stream of query results.
   /// Watches this query and emits after committed matching changes.

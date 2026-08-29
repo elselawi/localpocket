@@ -165,6 +165,9 @@ final class _NativeCollectionQuerySurface implements TypedQuerySurface {
   Future<Page> keysetAfter(String cursor) => _builder.keysetAfter(cursor);
 
   @override
+  Future<Page> keysetBefore(String cursor) => _builder.keysetBefore(cursor);
+
+  @override
   Future<int> count() => _builder.count();
 
   @override
@@ -383,10 +386,16 @@ final class TypedCollection<S extends StoreDef<S>> {
   ///   the read without a page size.
   /// - [select] projects columns; reading an unselected field from the
   ///   resulting rows throws.
+  /// - [after] resumes a persisted cursor (a previous page's `nextCursor`)
+  ///   under the exact same slots; a cursor minted by a different shape
+  ///   throws [StaleCursorError]. In-session continuation never re-states
+  ///   slots: [TypedPage.next] and [TypedPage.prev] reuse the captured
+  ///   shape.
   ///
   /// `count`, `countDistinct`, `distinct`, `ids`, `explain`, `sum`, `min`,
   /// `max`, `avg`, and `watch` accept the same condition slots, so the
-  /// predicate shape is identical across every terminal.
+  /// predicate shape is identical across every terminal. Watchable queries
+  /// are live snapshots and have no pagination surface.
   Future<TypedPage<S>> query({
     required int limit,
     List<Cond<S>> where = const [],
@@ -394,40 +403,38 @@ final class TypedCollection<S extends StoreDef<S>> {
     bool includeArchived = false,
     bool includeHidden = false,
     List<FieldDef<S, Object?>> select = const [],
+    String? after,
   }) async {
     final projected = _projectedOf(select);
-    final page = await _compose(
-      where: where,
-      orderBy: orderBy,
-      limit: limit,
-      includeArchived: includeArchived,
-      includeHidden: includeHidden,
-      select: select,
-    ).fetch();
-    return _wrapPage(page, projected);
-  }
+    Future<TypedPage<S>> continueFrom(
+      String cursor, {
+      required bool backward,
+    }) async {
+      final surface = _compose(
+        where: where,
+        orderBy: orderBy,
+        limit: limit,
+        includeArchived: includeArchived,
+        includeHidden: includeHidden,
+        select: select,
+      );
+      final page = await (backward
+          ? surface.keysetBefore(cursor)
+          : surface.keysetAfter(cursor));
+      return _wrapPage(page, projected, continueFrom);
+    }
 
-  /// Runs the same query shape after the opaque keyset [cursor] (from a
-  /// previous page's [TypedPage.nextCursor]).
-  Future<TypedPage<S>> queryAfter(
-    String cursor, {
-    required int limit,
-    List<Cond<S>> where = const [],
-    List<OrderTerm<S>> orderBy = const [],
-    bool includeArchived = false,
-    bool includeHidden = false,
-    List<FieldDef<S, Object?>> select = const [],
-  }) async {
-    final projected = _projectedOf(select);
-    final page = await _compose(
+    final surface = _compose(
       where: where,
       orderBy: orderBy,
       limit: limit,
       includeArchived: includeArchived,
       includeHidden: includeHidden,
       select: select,
-    ).keysetAfter(cursor);
-    return _wrapPage(page, projected);
+    );
+    final page =
+        await (after == null ? surface.fetch() : surface.keysetAfter(after));
+    return _wrapPage(page, projected, continueFrom);
   }
 
   /// Counts matching records. Ordering, limits, and projections do not
@@ -759,12 +766,20 @@ final class TypedCollection<S extends StoreDef<S>> {
   Set<String>? _projectedOf(List<FieldDef<S, Object?>> select) =>
       select.isEmpty ? null : <String>{for (final field in select) field.name};
 
-  TypedPage<S> _wrapPage(Page page, Set<String>? projected) => TypedPage<S>(
+  TypedPage<S> _wrapPage(
+    Page page,
+    Set<String>? projected,
+    TypedPageLoader<S> loader,
+  ) =>
+      TypedPage<S>.internal(
         items: <TypedRow<S>>[
           for (final row in page.items)
             TypedRow<S>(def, row, projected: projected),
         ],
+        hasNext: page.hasNext,
+        hasPrev: page.hasPrev,
         nextCursor: page.nextCursor,
-        hasMore: page.hasMore,
+        prevCursor: page.prevCursor,
+        loader: loader,
       );
 }

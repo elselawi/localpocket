@@ -208,7 +208,7 @@ void main() {
       // fetch() with limit 50 triggers decodeDbRowsAsync across isolate
       final page = await col.query().limit(50).fetch();
       expect(page.items.length, 50);
-      expect(page.hasMore, isTrue);
+      expect(page.hasNext, isTrue);
 
       for (var i = 0; i < page.items.length; i++) {
         final item = page.items[i];

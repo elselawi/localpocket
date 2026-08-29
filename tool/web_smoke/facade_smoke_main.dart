@@ -276,7 +276,7 @@ Future<void> main() async {
 
     // Keyset pagination
     final page1 = await notes.query().orderBy('priority').limit(4).fetch();
-    if (!page1.hasMore || page1.nextCursor == null) {
+    if (!page1.hasNext || page1.nextCursor == null) {
       throw StateError('matrix pagination page1 failed');
     }
     final page2 = await notes

@@ -56,6 +56,48 @@ abstract class QueryHarness {
     }
     return out;
   }
+
+  /// Walks the query forward to the final window, then continues backward
+  /// from that window's first row; returns every row in declared order. One
+  /// pass exercises both cursor directions and their exactness flags.
+  Future<List<Map<String, Object?>>> walkFullBothDirections(
+    QueryHandle Function() build, {
+    int limit = 3,
+  }) async {
+    String? cursor;
+    String? lastPrev;
+    List<Map<String, Object?>> finalRows = const [];
+    var guard = 0;
+    while (true) {
+      final q = build();
+      final page = cursor == null
+          ? await q.limit(limit).fetch()
+          : await q.limit(limit).keysetAfter(cursor);
+      // Only the FINAL window's rows stay: the backward continuation from
+      // its first row re-covers every earlier page.
+      finalRows = page.items;
+      lastPrev = page.prevCursor;
+      if (!page.hasNext) break;
+      cursor = page.nextCursor;
+      if (++guard > 500) {
+        throw StateError('forward walk did not terminate');
+      }
+    }
+    final backwardPages = <List<Map<String, Object?>>>[];
+    var prev = lastPrev;
+    while (prev != null) {
+      final page = await build().limit(limit).keysetBefore(prev);
+      backwardPages.add(page.items);
+      prev = page.prevCursor;
+      if (++guard > 1000) {
+        throw StateError('backward walk did not terminate');
+      }
+    }
+    return [
+      for (final p in backwardPages.reversed) ...p,
+      ...finalRows,
+    ];
+  }
 }
 
 /// Unified query handle implemented by both native and compiled execution.
@@ -87,6 +129,7 @@ abstract class QueryHandle {
 
   Future<Page> fetch();
   Future<Page> keysetAfter(String cursor);
+  Future<Page> keysetBefore(String cursor);
   Future<int> count();
   Future<int> countDistinct(String field);
   Future<List<Object?>> distinct(String field);
@@ -278,6 +321,9 @@ class NativeQueryHandle implements QueryHandle {
   Future<Page> keysetAfter(String cursor) => _builder.keysetAfter(cursor);
 
   @override
+  Future<Page> keysetBefore(String cursor) => _builder.keysetBefore(cursor);
+
+  @override
   Future<int> count() => _builder.count();
 
   @override
@@ -409,15 +455,69 @@ class CompiledQueryHandle implements QueryHandle {
       pageLimit: allMode ? null : limit,
     );
     final items = (res['items'] as List).cast<Map<String, Object?>>();
-    final hasMore = res['hasMore'] as bool;
+    final hasNext = res['hasNext'] as bool;
     final last = res['lastRow'] as Map<String, Object?>?;
-    final nextCursor =
-        hasMore && last != null ? _builder.cursorForCompiledRow(last) : null;
-    return Page(items: items, nextCursor: nextCursor, hasMore: hasMore);
+    final first = res['firstRow'] as Map<String, Object?>?;
+    final nextCursor = hasNext && last != null && first != null
+        ? _builder.cursorForCompiledRow(last, first)
+        : null;
+    final hasPrev = cursor != null && items.isNotEmpty;
+    return Page(
+      items: items,
+      nextCursor: nextCursor,
+      hasNext: hasNext,
+      hasPrev: hasPrev,
+      prevCursor: hasPrev && last != null && first != null
+          ? _builder.cursorForCompiledRow(last, first)
+          : null,
+    );
   }
 
   @override
   Future<Page> keysetAfter(String cursor) => fetch(cursor: cursor);
+
+  @override
+  Future<Page> keysetBefore(String cursor) async {
+    final limit = _builder.limitValue;
+    final allMode = _builder.allMode;
+    final plan = _builder.compilePlan(
+      limitOverride: allMode || limit == null ? null : limit + 1,
+      cursor: cursor,
+      backward: true,
+    );
+    final res = await executeCompiledQuery(
+      _pocket,
+      (sql, args) => _pocket.traceQuery(sql, args),
+      plan,
+      pageLimit: allMode ? null : limit,
+    );
+    final itemsR = (res['items'] as List).cast<Map<String, Object?>>();
+    final hasPrev = res['hasNext'] as bool;
+    if (itemsR.isEmpty) {
+      return const Page(items: [], hasNext: false, hasPrev: false);
+    }
+    final last = res['lastRow'] as Map<String, Object?>?;
+    final first = res['firstRow'] as Map<String, Object?>?;
+    // The compiled walk runs the flipped order: its first row is the
+    // window's last row in the declared order, and vice versa.
+    final bidirectional = _builder.cursorForCompiledRow(first!, last!);
+    final probePlan =
+        _builder.compilePlan(limitOverride: 1, cursor: bidirectional);
+    final probeRes = await executeCompiledQuery(
+      _pocket,
+      (sql, args) => _pocket.traceQuery(sql, args),
+      probePlan,
+      pageLimit: 1,
+    );
+    final hasNext = ((probeRes['items'] as List?) ?? const []).isNotEmpty;
+    return Page(
+      items: itemsR.reversed.toList(),
+      hasNext: hasNext,
+      nextCursor: hasNext ? bidirectional : null,
+      hasPrev: hasPrev,
+      prevCursor: hasPrev ? bidirectional : null,
+    );
+  }
 
   @override
   Future<int> count() async {
@@ -795,7 +895,7 @@ void runQueryEdgesCorpus(
       await h.seed(count: 5);
       final zero = await h.query().limit(0).fetch();
       expect(zero.items, isEmpty);
-      expect(zero.hasMore, isFalse);
+      expect(zero.hasNext, isFalse);
       expect(zero.nextCursor, isNull);
 
       expect(() => h.query().limit(-1), throwsA(isA<ValidationException>()));
@@ -805,7 +905,7 @@ void runQueryEdgesCorpus(
 
       final all = await h.query().limit(1).all().fetch();
       expect(all.items, hasLength(5));
-      expect(all.hasMore, isFalse);
+      expect(all.hasNext, isFalse);
 
       final all2 = await h.query().all().limit(1).fetch();
       expect(all2.items, hasLength(5));
@@ -1154,6 +1254,247 @@ void runQueryEdgesCorpus(
     });
   });
 
+  group('backward keyset pagination and cursor direction', () {
+    test('uniform-DESC walk over a nullable column keeps the trailing NULLs',
+        () async {
+      // Regression: the row-value fast path `(a, id) < (?, ?)` once fired for
+      // uniform-DESC orders and silently dropped rows whose sort value is
+      // NULL (they sort last under DESC). The OR-chain must handle them.
+      for (var i = 0; i < 12; i++) {
+        await h.col.put(record(
+          id: generateRecordId(),
+          name: 'n$i',
+          qty: i % 3 == 0 ? null : i,
+        ));
+      }
+      final walked = await h.walkAll(
+          () => h.query().orderBy('qty', desc: true).orderBy('id', desc: true),
+          limit: 4);
+      final expected = await h
+          .query()
+          .orderBy('qty', desc: true)
+          .orderBy('id', desc: true)
+          .all()
+          .fetch();
+      expect(idsOf(walked), idsOf(expected.items),
+          reason: 'uniform-DESC continuation must include the NULL tail');
+      final nullCount = walked.where((r) => r['qty'] == null).length;
+      expect(nullCount, 4);
+    });
+
+    test('row-value fast path is uniform-ASC only', () async {
+      await h.seed(count: 6);
+      final cursor =
+          (await h.query().orderBy('qty').limit(2).fetch()).nextCursor!;
+      // The consuming shape must match the minting shape; the backward
+      // direction is a compile-mode of the SAME shape, not a different one.
+      final asc =
+          h.col.query().orderBy('qty').limit(3).compilePlan(cursor: cursor).sql;
+      expect(asc, contains('("qty", "id") > (?, ?)'),
+          reason: 'uniform-ASC keeps the compact row-value predicate');
+      final backward = h.col
+          .query()
+          .orderBy('qty')
+          .limit(3)
+          .compilePlan(cursor: cursor, backward: true)
+          .sql;
+      expect(backward, contains('ORDER BY "qty" DESC, "id" DESC'),
+          reason: 'the backward compile flips every direction');
+      expect(backward, isNot(contains('("qty", "id") < (?, ?)')),
+          reason: 'uniform-DESC must use the NULL-aware chain');
+      expect(backward, contains('OR "qty" IS NULL'));
+    });
+
+    test('one both-directions pass reconstructs the full order', () async {
+      for (var i = 0; i < 11; i++) {
+        await h.col.put(record(
+          id: generateRecordId(),
+          name: 'n$i',
+          qty: i % 4,
+        ));
+      }
+      final walked = await h.walkFullBothDirections(
+          () => h.query().orderBy('qty', desc: true),
+          limit: 3);
+      final expected = await h.query().orderBy('qty', desc: true).all().fetch();
+      expect(idsOf(walked), idsOf(expected.items),
+          reason: 'forward + backward union = full declared order, no dups');
+    });
+
+    test('backward walk with nulls and mixed directions', () async {
+      for (var i = 0; i < 15; i++) {
+        await h.col.put(record(
+          id: generateRecordId(),
+          name: 'n$i',
+          qty: i % 3 == 0 ? null : i % 5,
+          size: i % 2 == 0 ? null : (['S', 'M', 'L'][i % 3]),
+        ));
+      }
+      for (final spec in [
+        () => h.query().orderBy('qty'),
+        () => h.query().orderBy('qty', desc: true),
+        () => h.query().orderBy('qty').orderBy('size', desc: true),
+        () => h.query().orderBy('qty', desc: true).orderBy('size'),
+      ]) {
+        final walked = await h.walkFullBothDirections(spec, limit: 4);
+        final expected = await spec.call().all().fetch();
+        expect(idsOf(walked), idsOf(expected.items),
+            reason: 'complete ordered union per order spec');
+      }
+    });
+
+    test('anchored pages: prev of page N is page N-1 with exact flags',
+        () async {
+      await h.seed(count: 10);
+      final pages = <Page>[];
+      String? cursor;
+      while (true) {
+        final q = h.query().orderBy('qty');
+        final page = cursor == null
+            ? await q.limit(3).fetch()
+            : await q.limit(3).keysetAfter(cursor);
+        pages.add(page);
+        if (!page.hasNext) break;
+        cursor = page.nextCursor;
+      }
+      expect(pages, hasLength(4));
+      // First page: nothing observed before it.
+      expect(pages.first.hasPrev, isFalse);
+      expect(pages.first.prevCursor, isNull);
+      for (var i = 1; i < pages.length; i++) {
+        expect(pages[i].hasPrev, isTrue, reason: 'page $i consumed a cursor');
+        expect(pages[i].prevCursor, isNotNull);
+        final prev = await h
+            .query()
+            .orderBy('qty')
+            .limit(3)
+            .keysetBefore(pages[i].prevCursor!);
+        expect(idsOf(prev.items), idsOf(pages[i - 1].items),
+            reason: 'prev(page ${i + 1}) == page $i');
+        expect(prev.hasNext, isTrue, reason: 'rows exist after the window');
+        expect(prev.hasPrev, i > 1,
+            reason: 'exact: only page 1 has nothing before it');
+      }
+      // The last page: nothing after it.
+      expect(pages.last.hasNext, isFalse);
+      expect(pages.last.nextCursor, isNull);
+    });
+
+    test('backward page anchored on the first row is terminal', () async {
+      await h.seed(count: 6);
+      final first = await h.query().orderBy('qty').limit(2).fetch();
+      expect(first.prevCursor, isNull);
+      // Any cursor can be consumed backward (the payload is bidirectional):
+      // anchoring on the second page's prevCursor walks to the first page,
+      // and anchoring on the first row of the store returns an empty page.
+      final second = await h
+          .query()
+          .orderBy('qty')
+          .limit(2)
+          .keysetAfter(first.nextCursor!);
+      final beforeFirst = await h
+          .query()
+          .orderBy('qty')
+          .limit(2)
+          .keysetBefore(second.prevCursor!);
+      expect(idsOf(beforeFirst.items), idsOf(first.items));
+      final decoded = (jsonDecode(utf8.decode(base64Url.decode(
+              (await h.query().orderBy('qty').limit(2).fetch()).nextCursor!))))
+          as Map;
+      final atStart = encodeCursor({
+        ...decoded.cast<String, Object?>(),
+        'values': [null, first.items.first['id']],
+        'pv': [null, first.items.first['id']],
+      });
+      final terminal =
+          await h.query().orderBy('qty').limit(2).keysetBefore(atStart);
+      expect(terminal.items, isEmpty);
+      expect(terminal.hasNext, isFalse);
+      expect(terminal.hasPrev, isFalse);
+    });
+
+    test('projection and filters survive backward walks', () async {
+      await h.seed(count: 9);
+      final walked = await h.walkFullBothDirections(
+          () => h
+              .query()
+              .where('qty', gte: 2)
+              .select(['id', 'name']).orderBy('qty', desc: true),
+          limit: 2);
+      final expected = await h
+          .query()
+          .where('qty', gte: 2)
+          .select(['id', 'name'])
+          .orderBy('qty', desc: true)
+          .all()
+          .fetch();
+      expect(idsOf(walked), idsOf(expected.items));
+      for (final r in walked) {
+        expect(r.keys.toSet(), {'id', 'name'});
+      }
+    });
+
+    test('backward consumption validates shape and payload', () async {
+      await h.seed(count: 8);
+      final base = await h.query().orderBy('qty').limit(3).fetch();
+      final cursor = base.nextCursor!;
+
+      // A differently-shaped builder rejects the cursor in both directions.
+      await expectLater(h.query().orderBy('name').limit(3).keysetBefore(cursor),
+          throwsA(isA<StaleCursorError>()));
+      await expectLater(
+          h
+              .query()
+              .orderBy('qty')
+              .where('qty', gte: 1)
+              .limit(3)
+              .keysetBefore(cursor),
+          throwsA(isA<StaleCursorError>()));
+
+      // A legacy-style payload without the `pv` tuple cannot walk backward.
+      final decoded = (jsonDecode(utf8.decode(base64Url.decode(cursor))) as Map)
+          .cast<String, Object?>();
+      final noPv = encodeCursor({...decoded}..remove('pv'));
+      await expectLater(h.query().orderBy('qty').limit(3).keysetBefore(noPv),
+          throwsA(isA<StaleCursorError>()));
+      // Forward consumption of the same legacy payload still works.
+      final legacy = await h.query().orderBy('qty').limit(3).keysetAfter(noPv);
+      expect(legacy.items, isNotEmpty);
+
+      // Both cursor fields of a page carry the same bidirectional payload.
+      final second =
+          await h.query().orderBy('qty').limit(3).keysetAfter(cursor);
+      final decodedSecond =
+          (jsonDecode(utf8.decode(base64Url.decode(second.nextCursor!))) as Map)
+              .cast<String, Object?>();
+      expect(second.prevCursor, isNotNull);
+      expect(decodedSecond['pv'], isA<List>());
+      expect((decodedSecond['values']! as List).length,
+          (decodedSecond['sort']! as List).length);
+    });
+
+    test('empty store and empty pages carry no continuation', () async {
+      final empty = await h.query().orderBy('qty').limit(3).fetch();
+      expect(empty.items, isEmpty);
+      expect(empty.hasNext, isFalse);
+      expect(empty.hasPrev, isFalse);
+      expect(empty.nextCursor, isNull);
+      expect(empty.prevCursor, isNull);
+
+      // An after-page whose tail vanished is terminal in both directions.
+      await h.seed(count: 2);
+      final p1 = await h.query().orderBy('qty').limit(1).fetch();
+      final p2 =
+          await h.query().orderBy('qty').limit(1).keysetAfter(p1.nextCursor!);
+      expect(p2.items, hasLength(1));
+      expect(p2.hasNext, isFalse);
+      expect(p2.hasPrev, isTrue);
+      final back =
+          await h.query().orderBy('qty').limit(1).keysetBefore(p2.prevCursor!);
+      expect(idsOf(back.items), idsOf(p1.items));
+    });
+  });
+
   group('projection and extra-key contract', () {
     test('declared projections expose only requested keys', () async {
       await h.col
@@ -1229,14 +1570,14 @@ void runQueryEdgesCorpus(
       final page = await h.query().select(<String>[]).limit(3).fetch();
       expect(page.items, everyElement(isA<Map<String, Object?>>()));
       expect(page.items.every((r) => r.isEmpty), isTrue);
-      expect(page.hasMore, isTrue);
+      expect(page.hasNext, isTrue);
       final page2 = await h
           .query()
           .select(<String>[])
           .limit(3)
           .keysetAfter(page.nextCursor!);
       expect(page2.items, hasLength(2));
-      expect(page2.hasMore, isFalse);
+      expect(page2.hasNext, isFalse);
     });
   });
 

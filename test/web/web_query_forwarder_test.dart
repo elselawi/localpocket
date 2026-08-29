@@ -26,7 +26,7 @@ void main() {
       final r1 = {'id': 'a', 'name': 'apple'};
       fake.responses[WireOp.compiledQuery] = {
         'items': [encodeWireValue(r1)],
-        'hasMore': false,
+        'hasNext': false,
       };
 
       final page =
@@ -40,35 +40,39 @@ void main() {
 
       expect(page.items, hasLength(1));
       expect(page.items.single['name'], 'apple');
-      expect(page.hasMore, isFalse);
+      expect(page.hasNext, isFalse);
       expect(page.nextCursor, isNull);
     });
 
     test('an empty result is an empty page', () async {
       fake.responses[WireOp.compiledQuery] = {
         'items': <Object?>[],
-        'hasMore': false,
+        'hasNext': false,
       };
       final page =
           await WebQueryBuilder(fake, widgetsSchema()).limit(5).fetch();
       expect(page.items, isEmpty);
-      expect(page.hasMore, isFalse);
+      expect(page.hasNext, isFalse);
       expect(page.nextCursor, isNull);
     });
 
-    test('hasMore with a wire-encoded lastRow produces a nextCursor', () async {
+    test('hasNext with wire-encoded boundary rows produces a nextCursor',
+        () async {
       final r1 = {'id': 'a', 'name': 'apple'};
       fake.responses[WireOp.compiledQuery] = {
         'items': [encodeWireValue(r1)],
-        'hasMore': true,
+        'hasNext': true,
         'lastRow': encodeWireValue({'name': 'apple', 'id': 'a'}),
+        'firstRow': encodeWireValue({'name': 'apple', 'id': 'a'}),
       };
       final page = await WebQueryBuilder(fake, widgetsSchema())
           .orderBy('name')
           .limit(5)
           .fetch();
-      expect(page.hasMore, isTrue);
+      expect(page.hasNext, isTrue);
       expect(page.nextCursor, isNotNull);
+      expect(page.hasPrev, isFalse);
+      expect(page.prevCursor, isNull);
     });
 
     test('keysetAfter passes the cursor through to the compiled plan',
@@ -76,24 +80,93 @@ void main() {
       // Build a cursor with the same query shape as the facade builder.
       final core =
           QueryBuilder.compileOnly(widgetsSchema()).orderBy('name').limit(10);
-      final cursor = core.cursorForCompiledRow({'name': 'apple', 'id': 'a'});
+      final cursor = core.cursorForCompiledRow({
+        'name': 'apple',
+        'id': 'a'
+      }, {
+        'name': 'apricot',
+        'id': 'b',
+      });
 
       fake.responses[WireOp.compiledQuery] = {
         'items': <Object?>[],
-        'hasMore': false,
+        'hasNext': false,
       };
       final page = await WebQueryBuilder(fake, widgetsSchema())
           .orderBy('name')
           .limit(10)
           .keysetAfter(cursor);
 
-      expect(page.hasMore, isFalse);
+      expect(page.hasNext, isFalse);
       final args = planArgs(WireOp.compiledQuery);
       // The keyset predicate is baked into the plan SQL and the last-row sort
       // values are bound as args (cursor passed through).
       expect(args['sql'], contains('>'));
       expect(args['args'], contains('apple'));
       expect(args['args'], contains('a'));
+    });
+
+    test('keysetBefore compiles the flipped walk, reverses, and probes',
+        () async {
+      final core =
+          QueryBuilder.compileOnly(widgetsSchema()).orderBy('name').limit(10);
+      final cursor = core.cursorForCompiledRow(
+        {'name': 'apple', 'id': 'a'},
+        {'name': 'apricot', 'id': 'b'},
+      );
+
+      // First send: the backward window (walks the flipped order, so the
+      // worker's first row is the window's last row in declared order).
+      // Second send: the one-row forward probe from the window's last row.
+      var call = 0;
+      fake.onSend = (op, args) async {
+        call++;
+        if (call == 1) {
+          return {
+            'items': [
+              encodeWireValue({'id': 'c', 'name': 'apricot'}),
+              encodeWireValue({'id': 'b', 'name': 'apple'}),
+            ],
+            'hasNext': true,
+            'firstRow': encodeWireValue({'name': 'apricot', 'id': 'c'}),
+            'lastRow': encodeWireValue({'name': 'apple', 'id': 'b'}),
+          };
+        }
+        return {
+          'items': <Object?>[],
+          'hasNext': false,
+          'firstRow': null,
+          'lastRow': null,
+        };
+      };
+      final page = await WebQueryBuilder(fake, widgetsSchema())
+          .orderBy('name')
+          .limit(2)
+          .keysetBefore(cursor);
+
+      final sends =
+          fake.sent.where((s) => s.$1 == WireOp.compiledQuery).toList();
+      expect(sends, hasLength(2));
+      final windowArgs = sends[0].$2;
+      expect(windowArgs['sql'], contains('ORDER BY "name" DESC, "id" DESC'),
+          reason: 'the backward window flips every direction');
+      expect(windowArgs['args'], contains('apricot'),
+          reason: 'the pv tuple seeds the walk');
+      expect(page.hasPrev, isTrue,
+          reason: 'the window reported an overflow row');
+      expect(page.items.map((r) => r['id']).toList(), ['b', 'c'],
+          reason: 'rows come back in the declared (forward) order');
+
+      final probeArgs = sends[1].$2;
+      expect(probeArgs['sql'], contains('ORDER BY "name" ASC, "id" ASC'),
+          reason: 'the probe is a forward keyset read');
+      expect(probeArgs['args'], contains('apricot'),
+          reason: 'the probe anchors at the window last-row tuple');
+      expect(probeArgs['sql'], contains('LIMIT 1'));
+      expect(page.hasNext, isFalse,
+          reason: 'the probe found no row after the window');
+      expect(page.nextCursor, isNull);
+      expect(page.prevCursor, isNotNull);
     });
   });
 
@@ -194,7 +267,7 @@ void main() {
     test('orWhere forwards a group list to the compiled plan', () async {
       fake.responses[WireOp.compiledQuery] = {
         'items': <Object?>[],
-        'hasMore': false,
+        'hasNext': false,
       };
       final page = await WebQueryBuilder(fake, widgetsSchema())
           .orWhere(<Map<String, Object?>>[
@@ -209,7 +282,8 @@ void main() {
       expect(args['args'], containsAll(<Object?>['apple', 1]));
     });
 
-    test('select, includeArchived, includeHidden, and all mutate the core '
+    test(
+        'select, includeArchived, includeHidden, and all mutate the core '
         'builder in place', () {
       final builder = WebQueryBuilder(fake, widgetsSchema())
         ..select(['id', 'name'])
@@ -230,8 +304,7 @@ void main() {
 
     test('wherePredicate forwards a predicate node', () {
       final builder = WebQueryBuilder(fake, widgetsSchema())
-        ..wherePredicate(
-            const LeafPredicate('name', 'eq', ['apple']))
+        ..wherePredicate(const LeafPredicate('name', 'eq', ['apple']))
         ..all();
       final (sql, args) = builder.queryCore.debugCompile();
       expect(sql, contains('"name" = ?'));

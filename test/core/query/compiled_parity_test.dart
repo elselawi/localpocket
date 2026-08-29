@@ -79,7 +79,7 @@ void main() {
   }
 
   /// Walks every page through BOTH the native API and the compiled runner and
-  /// asserts identical items, cursors, and hasMore transitions.
+  /// asserts identical items, cursors, and hasNext transitions.
   Future<void> expectPagedParity(
       QueryBuilder Function(QueryBuilder) shape) async {
     var native = pocket.collection('widgets').query();
@@ -92,26 +92,29 @@ void main() {
 
     final nativeItems = <Map<String, Object?>>[];
     String? nativeCursor;
-    var hasMore = true;
-    while (hasMore) {
+    var hasNext = true;
+    while (hasNext) {
       final page = nativeCursor == null
           ? await native.fetch()
           : await native.keysetAfter(nativeCursor);
       nativeItems.addAll(page.items);
-      hasMore = page.hasMore;
+      hasNext = page.hasNext;
       nativeCursor = page.nextCursor;
     }
 
     final compiledItems = <Map<String, Object?>>[];
     String? compiledCursor;
-    hasMore = true;
-    while (hasMore) {
+    hasNext = true;
+    while (hasNext) {
       final res = await runCompiled(compiled, cursor: compiledCursor);
-      compiledItems.addAll((res['items']! as List).cast<Map<String, Object?>>());
-      hasMore = (res['hasMore']! as bool);
+      compiledItems
+          .addAll((res['items']! as List).cast<Map<String, Object?>>());
+      hasNext = (res['hasNext']! as bool);
       final last = res['lastRow'] as Map<String, Object?>?;
-      compiledCursor =
-          hasMore && last != null ? compiled.cursorForCompiledRow(last) : null;
+      final first = res['firstRow'] as Map<String, Object?>?;
+      compiledCursor = hasNext && last != null && first != null
+          ? compiled.cursorForCompiledRow(last, first)
+          : null;
       if (limit == null && allMode) break;
     }
 

@@ -738,6 +738,9 @@ final class _WebTypedQuerySurface implements TypedQuerySurface {
   Future<Page> keysetAfter(String cursor) => _builder.keysetAfter(cursor);
 
   @override
+  Future<Page> keysetBefore(String cursor) => _builder.keysetBefore(cursor);
+
+  @override
   Future<int> count() => _builder.count();
 
   @override

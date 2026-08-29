@@ -18,7 +18,10 @@ import '../sync/sync_backend.dart';
 /// Protocol version for every envelope. Bump on any incompatible change.
 /// v2: all reads are compiled query plans (`compiled_query`); descriptor-based
 /// query operations were removed.
-const int webProtocolVersion = 2;
+/// v3: the compiled-query response envelope renames `hasMore` to `hasNext`
+/// (bidirectional pagination — the flag is direction-explicit) and adds
+/// `firstRow` alongside `lastRow` for backward cursor minting.
+const int webProtocolVersion = 3;
 
 /// Names of supported operations. Unknown operations are rejected with a
 /// typed [ProtocolEnvelopeException] rather than silently ignored.

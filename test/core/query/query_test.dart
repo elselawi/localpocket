@@ -115,7 +115,7 @@ void main() {
       final page1 =
           await col.query().orderBy('qty', desc: true).limit(10).fetch();
       expect(page1.items, hasLength(10));
-      expect(page1.hasMore, isTrue);
+      expect(page1.hasNext, isTrue);
       expect(page1.nextCursor, isNotNull);
 
       final page2 = await col
@@ -128,7 +128,7 @@ void main() {
           .orderBy('qty', desc: true)
           .limit(10)
           .keysetAfter(page2.nextCursor!);
-      expect(page3.hasMore, isFalse);
+      expect(page3.hasNext, isFalse);
 
       final walked = [...page1.items, ...page2.items, ...page3.items];
       expect(walked.map((r) => r['id']).toSet(), hasLength(30),
@@ -151,7 +151,7 @@ void main() {
       }
       final q = col.query().orderBy('id', desc: true).limit(2);
       final page1 = await q.fetch();
-      expect(page1.hasMore, isTrue);
+      expect(page1.hasNext, isTrue);
 
       // Re-encode the page-1 cursor with a NULL sort value at every position:
       // NULLs sort last in DESC, so no row can follow any alternative of the
@@ -171,7 +171,7 @@ void main() {
 
       final exhausted = await q.keysetAfter(degenerate);
       expect(exhausted.items, isEmpty);
-      expect(exhausted.hasMore, isFalse);
+      expect(exhausted.hasNext, isFalse);
       expect(exhausted.nextCursor, isNull);
     });
 
@@ -366,13 +366,13 @@ void main() {
     test('empty and single row results', () async {
       final empty = await col.query().limit(5).fetch();
       expect(empty.items, isEmpty);
-      expect(empty.hasMore, isFalse);
+      expect(empty.hasNext, isFalse);
       expect(empty.nextCursor, isNull);
 
       await col.put(record(id: generateRecordId(), name: 'only'));
       final one = await col.query().limit(5).fetch();
       expect(one.items, hasLength(1));
-      expect(one.hasMore, isFalse);
+      expect(one.hasNext, isFalse);
     });
 
     test('date range millisecond boundary is inclusive on both ends', () async {

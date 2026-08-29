@@ -638,16 +638,11 @@ void main() {
         limit: 2,
       );
       expect(firstPage.items.map((r) => r.id), [_at(5), _at(1)]);
-      expect(firstPage.hasMore, isTrue);
+      expect(firstPage.hasNext, isTrue);
 
-      final secondPage = await tasks.queryAfter(
-        firstPage.nextCursor!,
-        where: [condition],
-        orderBy: [Tasks.title.asc],
-        limit: 2,
-      );
+      final secondPage = (await firstPage.next())!;
       expect(secondPage.items.map((r) => r.id), [_at(2)]);
-      expect(secondPage.hasMore, isFalse);
+      expect(secondPage.hasNext, isFalse);
 
       final union = <String>[
         ...firstPage.items.map((r) => r.id),
@@ -677,11 +672,11 @@ void main() {
       // Same rows but a different tree: the cursor must be rejected instead
       // of silently resuming a differently-filtered page.
       await expectLater(
-        tasks.queryAfter(
-          firstPage.nextCursor!,
+        tasks.query(
           where: [Tasks.count.gte(1)],
           orderBy: [Tasks.title.asc],
           limit: 2,
+          after: firstPage.nextCursor!,
         ),
         throwsA(isA<StaleCursorError>()),
       );

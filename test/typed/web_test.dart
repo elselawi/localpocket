@@ -9,7 +9,7 @@ import 'package:test/test.dart';
 
 void main() {
   test('case 160: typed APIs add no wire operation or protocol bump', () {
-    expect(webProtocolVersion, 2);
+    expect(webProtocolVersion, 3);
     expect(
       WireOp.allKnown.toSet(),
       equals(<String>{
