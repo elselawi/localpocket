@@ -2,8 +2,9 @@
 
 - **Typed bulk reads: `TypedCollection.getAll(ids)` — the bulk counterpart
   of `get`.** One `id IN (...)` query replaces the fetch-per-hit loop; rows
-  come back in id-list order, absent ids drop out, duplicates collapse, and
-  an empty list returns empty without querying. Visibility mirrors `get`:
+  come back in id-list order — one row per id occurrence, so deduping stays
+  the caller's job — absent ids drop out, and an empty list returns empty
+  without querying. Visibility mirrors `get`:
   archived and sync-hidden rows are included (unlike `query` defaults).
 
 - **Pagination is captured, not restated: `next()`/`prev()` on the page,

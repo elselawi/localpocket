@@ -45,7 +45,8 @@ void main() {
       expect([for (final row in rows) row(Tasks.title)], ids.reversed.toList());
     });
 
-    test('drops absent ids and collapses duplicates', () async {
+    test('drops absent ids; duplicate ids return once per occurrence',
+        () async {
       final db = await openTasks();
       addTearDown(db.close);
       final id = rid('ga', 4);
@@ -54,9 +55,9 @@ void main() {
 
       final rows = await tasks.getAll([id, 'nope0000000000a', id]);
 
-      expect(rows, hasLength(1));
-      expect(rows.single.id, id);
-      expect(rows.single(Tasks.title), 'only');
+      expect([for (final row in rows) row.id], [id, id]);
+      expect(rows.first(Tasks.title), 'only');
+      expect(rows.last(Tasks.title), 'only');
     });
 
     test('empty input returns empty without querying', () async {

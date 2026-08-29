@@ -268,15 +268,15 @@ final class TypedCollection<S extends StoreDef<S>> {
   }
 
   /// Reads the records with [ids] in one `id IN (...)` query — the bulk
-  /// counterpart of [get]. Rows come back in [ids] order; ids that are
-  /// absent (never created, or purged) drop out, and duplicate ids collapse
-  /// to one row. An empty [ids] returns an empty list without querying
-  /// (`inValues` refuses to compile an empty `IN ()`).
+  /// counterpart of [get]. Rows come back in [ids] order — one row per
+  /// id occurrence, so a duplicated id repeats — and ids that are absent
+  /// (never created, or purged) drop out. An empty [ids] returns an empty
+  /// list without querying (`inValues` refuses to compile an empty `IN ()`).
   ///
   /// Visibility mirrors [get]: archived and sync-hidden rows are included.
   Future<List<TypedRow<S>>> getAll(List<String> ids) async {
-    // First-occurrence order, deduplicated: one IN-bound per distinct id,
-    // one output row per distinct id.
+    // The SQL IN binds each distinct id once; the return below still emits
+    // one row per input occurrence — deduping stays the caller's job.
     final unique = <String>{...ids}.toList();
     if (unique.isEmpty) return const [];
     final page = await query(
@@ -287,7 +287,7 @@ final class TypedCollection<S extends StoreDef<S>> {
     );
     final byId = {for (final row in page.items) row.id: row};
     return [
-      for (final id in unique)
+      for (final id in ids)
         if (byId[id] != null) byId[id]!
     ];
   }
