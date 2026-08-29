@@ -267,6 +267,31 @@ final class TypedCollection<S extends StoreDef<S>> {
     return map == null ? null : TypedRow<S>(def, map);
   }
 
+  /// Reads the records with [ids] in one `id IN (...)` query — the bulk
+  /// counterpart of [get]. Rows come back in [ids] order; ids that are
+  /// absent (never created, or purged) drop out, and duplicate ids collapse
+  /// to one row. An empty [ids] returns an empty list without querying
+  /// (`inValues` refuses to compile an empty `IN ()`).
+  ///
+  /// Visibility mirrors [get]: archived and sync-hidden rows are included.
+  Future<List<TypedRow<S>>> getAll(List<String> ids) async {
+    // First-occurrence order, deduplicated: one IN-bound per distinct id,
+    // one output row per distinct id.
+    final unique = <String>{...ids}.toList();
+    if (unique.isEmpty) return const [];
+    final page = await query(
+      limit: Limits.unbounded,
+      includeArchived: true,
+      includeHidden: true,
+      where: [def.id.inValues(unique)],
+    );
+    final byId = {for (final row in page.items) row.id: row};
+    return [
+      for (final id in unique)
+        if (byId[id] != null) byId[id]!
+    ];
+  }
+
   /// Creates a record (or replaces the existing record with the same id)
   /// from the field-native [writes]. the database generates an id when no
   /// [Writes.id] value is present.

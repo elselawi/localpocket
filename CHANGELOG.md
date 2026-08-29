@@ -1,5 +1,11 @@
 ## Unreleased
 
+- **Typed bulk reads: `TypedCollection.getAll(ids)` — the bulk counterpart
+  of `get`.** One `id IN (...)` query replaces the fetch-per-hit loop; rows
+  come back in id-list order, absent ids drop out, duplicates collapse, and
+  an empty list returns empty without querying. Visibility mirrors `get`:
+  archived and sync-hidden rows are included (unlike `query` defaults).
+
 - **Pagination is captured, not restated: `next()`/`prev()` on the page,
   `queryAfter` removed, `hasMore` renamed to `hasNext` end to end.**
   `TypedPage` now carries `hasNext`/`hasPrev` — snapshot facts about what
