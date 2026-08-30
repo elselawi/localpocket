@@ -32,7 +32,7 @@ export 'typed.dart';
 
 === lib/pocketbase.dart ===
 export 'src/pocketbase/auth.dart' show AuthManager, Token, TokenProvider;
-export 'src/pocketbase/backend.dart' show PocketBaseBackend;
+export 'src/pocketbase/backend.dart' show PocketBaseRawBackend;
 export 'src/pocketbase/filter_builder.dart'
 export 'src/pocketbase/pb_client.dart' show PbClient;
 export 'src/pocketbase/sse.dart' show PbRealtime, PbRealtimeEvent;

@@ -32,6 +32,14 @@ Future<void> main() async {
       stores: [schema],
     );
 
+    // WebKit (Playwright on Windows) has no OPFS: the worker's blob store
+    // degrades to a volatile in-memory fallback there, and attach refuses
+    // unless the caller accepts volatility. The spike exercises the API
+    // mechanics, so it mirrors what a real app does: accept volatility only
+    // when the storage genuinely isn't durable.
+    final durable = await pocket.files.isBlobStorageDurable;
+    final allowVolatile = !durable;
+
     // Small attachment through the public files facade.
     final payload = utf8.encode(
         'worker-owned blob store round-trip payload with unicode ✓ 1234567890');
@@ -40,6 +48,7 @@ Future<void> main() async {
       recordId: 'task000000000001',
       byteArray: payload,
       name: 'small.txt',
+      allowVolatileBlobs: allowVolatile,
     );
     if ((small['hash'] as String).length != 64 ||
         small['state'] != 'pending_upload') {
@@ -53,6 +62,7 @@ Future<void> main() async {
       recordId: 'task000000000002',
       byteArray: bigBytes,
       name: 'big.bin',
+      allowVolatileBlobs: allowVolatile,
     );
     if ((big['hash'] as String).length != 64 ||
         big['state'] != 'pending_upload') {

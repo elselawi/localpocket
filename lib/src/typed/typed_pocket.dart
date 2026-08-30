@@ -27,9 +27,9 @@
 /// ```
 library;
 
-import 'package:localpocket/src/core/local_pocket.dart';
 import 'package:localpocket/src/typed/store_def.dart';
 import 'package:localpocket/src/typed/typed_collection.dart';
+import 'typed_pocket_platform.dart';
 
 /// The declaration list naming every store a database owns.
 ///
@@ -78,6 +78,15 @@ abstract class TypedPocket {
   /// registered" error rather than silently.
   StoreDefs get stores => const [];
 
+  /// SQLite wasm asset location used when [open] runs on the web, resolved
+  /// relative to the page (ignored on native). Defaults to the package's pub
+  /// layout; override when a deployment serves the assets elsewhere — the
+  /// default [doOpen] forwards it to [openTyped].
+  String? get wasmAssetPath => null;
+
+  /// Worker JavaScript asset location for web opens (see [wasmAssetPath]).
+  String? get workerAssetPath => null;
+
   /// Whether [open] has completed successfully and [close] has not been
   /// called since.
   bool get isOpen => _db != null;
@@ -106,14 +115,19 @@ abstract class TypedPocket {
   }
 
   /// Performs the actual database open. The default registers [stores]
-  /// under [path].
+  /// under [path] and forwards [wasmAssetPath]/[workerAssetPath].
   ///
-  /// Override to configure database options (web worker assets, `fieldCipher`,
+  /// Override to configure database options beyond those (`fieldCipher`,
   /// `blobStore`, durability window, injected clocks, …) — lifecycle
   /// memoization and reopening remain owned by this base. Prefer registering
   /// stores here too when overriding: skipping them means every [handle]
   /// access fails until they exist.
-  Future<LocalPocket> doOpen() => openTyped(path: path, stores: stores);
+  Future<LocalPocket> doOpen() => openTyped(
+        path: path,
+        stores: stores,
+        wasmAssetPath: wasmAssetPath,
+        workerAssetPath: workerAssetPath,
+      );
 
   /// The opened database handle. Throws a [StateError] until [open] has
   /// completed, with an actionable message instead of a null crash.
@@ -155,9 +169,12 @@ abstract class TypedPocket {
 /// application wiring.
 ///
 /// Works on native and web alike: this forwards to the platform's own
-/// `LocalPocket.open`. For options beyond path and stores (`fieldCipher`,
-/// blob stores, worker asset paths, injected clocks) call `LocalPocket.open`
-/// yourself — this sugar exists so first-step wiring reads without noise.
+/// `LocalPocket.open`. On web, [wasmAssetPath]/[workerAssetPath] locate the
+/// sqlite wasm and worker assets (defaulting to the package pub layout; the
+/// [TypedPocket] getters of the same names feed the default `doOpen`). For
+/// options beyond path, stores, and asset locations (`fieldCipher`, blob
+/// stores, injected clocks) call `LocalPocket.open` yourself — this sugar
+/// exists so first-step wiring reads without noise.
 ///
 /// ```dart
 /// final db = await openTyped(path: ':memory:', stores: [Tasks.store]);
@@ -166,6 +183,8 @@ abstract class TypedPocket {
 Future<LocalPocket> openTyped({
   required String? path,
   required StoreDefs stores,
+  String? wasmAssetPath,
+  String? workerAssetPath,
 }) {
   if (path == null) {
     throw UnimplementedError('Override "path" (or all of "doOpen").');
@@ -173,5 +192,7 @@ Future<LocalPocket> openTyped({
   return LocalPocket.open(
     path: path,
     stores: [for (final def in stores) def.collectionSchema],
+    wasmAssetPath: wasmAssetPath,
+    workerAssetPath: workerAssetPath,
   );
 }

@@ -15,7 +15,7 @@ void main() {
     test('concurrent prepare() probes exactly once', () async {
       final fake = FakeTransport();
       fake.sendStatus(200, '[]');
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.example.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -30,7 +30,7 @@ void main() {
     test('transient probe failure is retried on the next prepare', () async {
       final fake = FakeTransport();
       fake.sendStatus(500, '{"message":"boom"}');
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.example.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -51,7 +51,7 @@ void main() {
     test('permanent 403 disablement never re-probes', () async {
       final fake = FakeTransport();
       fake.sendStatus(403, '{"message":"disabled"}');
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.example.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -69,7 +69,7 @@ void main() {
         () async {
       final fake = FakeTransport();
       fake.sendStatus(400, '{"message":"empty batch rejected"}');
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.example.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -89,7 +89,7 @@ void main() {
     test('page size is forwarded to the wire perPage parameter', () async {
       final fake = FakeTransport();
       fake.sendStatus(200, '{"items":[]}');
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.example.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -102,7 +102,7 @@ void main() {
 
     test('close() is idempotent and closes the hints stream', () async {
       final fake = FakeTransport();
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.example.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -121,7 +121,7 @@ void main() {
     test('repeated start/stopRealtime creates fresh connections', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: server.baseUrl,
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -141,7 +141,7 @@ void main() {
     test('natural SSE completion followed by stop is clean', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: server.baseUrl,
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -160,7 +160,7 @@ void main() {
     test('hints after close are dropped, never delivered', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: server.baseUrl,
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -187,7 +187,7 @@ void main() {
     test('gap-closed hints cover every listed store', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: server.baseUrl,
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets', 'owners'],
@@ -209,7 +209,7 @@ void main() {
         () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: server.baseUrl,
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],

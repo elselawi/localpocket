@@ -41,7 +41,7 @@ void main() {
           tokenValue: 'stale-token',
           refreshTo: 'fresh-token',
           refreshDelay: const Duration(milliseconds: 40));
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
         baseUrl: server.baseUrl,
         tokenProvider: tokens,
         stores: const [],
@@ -84,7 +84,7 @@ void main() {
               .needsProactiveRefresh,
           isTrue);
 
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
         baseUrl: server.baseUrl,
         tokenProvider: tokens,
         stores: const [],
@@ -113,7 +113,7 @@ void main() {
       // AuthError (never a silent retry loop).
       final tokens =
           TestTokenProvider(tokenValue: 'bad', refreshTo: 'also-bad');
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl, tokenProvider: tokens, stores: const []);
       addTearDown(backend.close);
       await expectLater(
@@ -142,11 +142,11 @@ void main() {
       server.seed(store: 'widgets', data: {'name': 'r2'});
 
       // Different identities -> different sync scopes.
-      final alice = PocketBaseBackend(
+      final alice = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(identityValue: 'alice'),
           stores: const ['widgets']);
-      final bob = PocketBaseBackend(
+      final bob = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(identityValue: 'bob'),
           stores: const ['widgets']);
@@ -346,7 +346,7 @@ void main() {
 
       // Without any identity, building a sync scope must fail loudly instead
       // of sharing a scope across accounts.
-      final unset = PocketBaseBackend(
+      final unset = PocketBaseRawBackend(
           baseUrl: Uri.parse('https://pb.test'),
           tokenProvider: _DefaultIdentityProvider(),
           stores: const []);
@@ -354,15 +354,15 @@ void main() {
       expect(() => unset.scopeId, throwsStateError,
           reason: 'a missing identity is a loud error, not a shared scope');
 
-      final a = PocketBaseBackend(
+      final a = PocketBaseRawBackend(
           baseUrl: Uri.parse('https://pb.test'),
           tokenProvider: TestTokenProvider(identityValue: 'same'),
           stores: const []);
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
           baseUrl: Uri.parse('https://pb.test'),
           tokenProvider: TestTokenProvider(identityValue: 'same'),
           stores: const []);
-      final c = PocketBaseBackend(
+      final c = PocketBaseRawBackend(
           baseUrl: Uri.parse('https://pb.test'),
           tokenProvider: TestTokenProvider(identityValue: 'other'),
           stores: const []);
@@ -379,7 +379,6 @@ void main() {
 
 /// A scriptable [TokenProvider] with call counters and failure injection.
 class _ScriptedProvider implements TokenProvider {
-
   _ScriptedProvider({
     this.value = 'initial',
     this.expiresAt,

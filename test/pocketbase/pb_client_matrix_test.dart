@@ -8,11 +8,11 @@ import '../support/pb_helpers.dart';
 
 /// PbClient-level request/response matrix: typed status mapping,
 /// malformed response handling, URL/request encoding, and batch response
-/// cardinality, all driven through [PocketBaseBackend] over a fake transport.
+/// cardinality, all driven through [PocketBaseRawBackend] over a fake transport.
 void main() {
-  PocketBaseBackend backendWith(FakeTransport fake,
+  PocketBaseRawBackend backendWith(FakeTransport fake,
       {TestTokenProvider? tokens}) {
-    final b = PocketBaseBackend(
+    final b = PocketBaseRawBackend(
       baseUrl: Uri.parse('https://pb.example.test'),
       tokenProvider: tokens ?? TestTokenProvider(),
       stores: const ['widgets'],

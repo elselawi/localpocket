@@ -15,7 +15,7 @@ void main() {
     test('hints debounced 300ms per store', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
         baseUrl: server.baseUrl,
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -48,7 +48,7 @@ void main() {
     test('reconnect triggers pull all stores', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
         baseUrl: server.baseUrl,
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets', 'owners'],
@@ -83,7 +83,7 @@ void main() {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
       final id = server.seed(store: 'widgets', data: {'name': 'alive'});
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
         baseUrl: server.baseUrl,
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -242,7 +242,7 @@ void main() {
           StreamedHttpResponse(200, const {}, controller.stream));
       fake.sendStatus(204); // subscribe POST
       fake.sendError(HttpTransportException('connection reset')); // GET fails
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -289,7 +289,7 @@ void main() {
       // Verification GET returns the current (still-visible) record.
       fake.sendStatus(
           200, FakeTransport.recordBody('r1', data: {'name': 'alive'}));
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],

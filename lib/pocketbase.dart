@@ -13,7 +13,7 @@
 /// ```
 library;
 
-export 'src/pocketbase/backend.dart' show PocketBaseBackend;
+export 'src/pocketbase/backend.dart' show PocketBaseRawBackend;
 export 'src/pocketbase/auth.dart' show AuthManager, Token, TokenProvider;
 export 'src/pocketbase/filter_builder.dart'
     show pullFilter, pullPageFilter, quote, sweepFilter;

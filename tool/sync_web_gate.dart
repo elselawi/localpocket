@@ -4,25 +4,30 @@ import 'dart:io';
 
 Future<void> main() async {
   final root = Directory.current.absolute;
-  final output = File('build/web/sync_lifecycle_smoke_main.js')
-    ..parent.createSync(recursive: true);
-  final compile = await Process.run(
-      'dart',
-      [
-        'compile',
-        'js',
-        '-O4',
-        'tool/web_smoke/sync_lifecycle_smoke_main.dart',
-        '-o',
-        output.path,
-      ],
-      workingDirectory: root.path,
-      runInShell: Platform.isWindows);
-  if (compile.exitCode != 0) {
-    stdout.write(compile.stdout);
-    stderr.write(compile.stderr);
-    exitCode = compile.exitCode;
-    return;
+  for (final main in const [
+    'sync_lifecycle_smoke_main.dart',
+    'typed_sync_runtime_smoke_main.dart',
+  ]) {
+    final output = File('build/web/${main.replaceAll('.dart', '.js')}')
+      ..parent.createSync(recursive: true);
+    final compile = await Process.run(
+        'dart',
+        [
+          'compile',
+          'js',
+          '-O4',
+          'tool/web_smoke/$main',
+          '-o',
+          output.path,
+        ],
+        workingDirectory: root.path,
+        runInShell: Platform.isWindows);
+    if (compile.exitCode != 0) {
+      stdout.write(compile.stdout);
+      stderr.write(compile.stderr);
+      exitCode = compile.exitCode;
+      return;
+    }
   }
 
   final pageServer = await Process.start(
@@ -60,7 +65,7 @@ Future<void> main() async {
       workingDirectory: root.path,
       environment: {
         ...Platform.environment,
-        'SMOKE_PAGE': 'sync_lifecycle',
+        'SMOKE_PAGE': 'sync',
       },
     );
     if (runExitCode != 0) {

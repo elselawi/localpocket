@@ -24,3 +24,6 @@ export 'typed_query.dart';
 // native/web adapters, not by applications.
 export 'typed_search.dart' hide TypedSearchSurface;
 export 'typed_collection.dart' hide TypedStoreSurface;
+export 'typed_sync.dart';
+export 'typed_sync_host.dart' show PocketBaseSyncHost;
+export 'sync_engine_platform.dart';

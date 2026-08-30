@@ -12,7 +12,7 @@ void main() {
     test('error map each row to typed error', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -66,7 +66,7 @@ void main() {
       server.forceWriteStatus = null;
 
       // Network failure -> TransientNetworkError.
-      final dead = PocketBaseBackend(
+      final dead = PocketBaseRawBackend(
           baseUrl: Uri.parse('http://127.0.0.1:1'),
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -128,7 +128,7 @@ void main() {
     test('archived convention true or omitted never false', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);

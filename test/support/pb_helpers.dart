@@ -8,7 +8,6 @@ import 'mock_pb_server.dart';
 
 /// A controllable token provider for auth tests.
 class TestTokenProvider implements TokenProvider {
-
   TestTokenProvider({
     this.tokenValue = 'token-a',
     this.refreshTo = 'token-b',
@@ -47,11 +46,10 @@ class TestTokenProvider implements TokenProvider {
 
 /// A full adapter-backed engine harness (pocket + backend + engine).
 class PbEngineHarness {
-
   PbEngineHarness(
       this.pocket, this.backend, this.engine, this.server, this.tokens);
   final LocalPocket pocket;
-  final PocketBaseBackend backend;
+  final PocketBaseRawBackend backend;
   final SyncEngine engine;
   final MockPbServer server;
   final TestTokenProvider tokens;
@@ -71,7 +69,7 @@ class PbEngineHarness {
     int? maxBatch,
   }) async {
     final t = tokens ?? TestTokenProvider();
-    final backend = PocketBaseBackend(
+    final backend = PocketBaseRawBackend(
       baseUrl: server.baseUrl,
       tokenProvider: t,
       stores: storesList ?? const ['widgets'],

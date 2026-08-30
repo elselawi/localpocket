@@ -18,7 +18,6 @@ import '../../support/helpers.dart';
 /// Logs in against the `_superusers` collection with the test credentials and
 /// refreshes via `auth-refresh` (token in header AND body).
 class RealPbTokenProvider implements TokenProvider {
-
   RealPbTokenProvider({
     required this.baseUrl,
     required this.email,
@@ -87,10 +86,9 @@ class RealPbTokenProvider implements TokenProvider {
 
 /// A full adapter-backed engine harness pointed at the REAL server.
 class RealHarness {
-
   RealHarness(this.pocket, this.backend, this.engine, this.tokens, this.store);
   final LocalPocket pocket;
-  final PocketBaseBackend backend;
+  final PocketBaseRawBackend backend;
   final SyncEngine engine;
   final RealPbTokenProvider tokens;
   final String store;
@@ -112,7 +110,7 @@ class RealHarness {
       email: testPBEmail,
       password: testPBPassword,
     );
-    final backend = PocketBaseBackend(
+    final backend = PocketBaseRawBackend(
       baseUrl: Uri.parse(testPBServer),
       tokenProvider: tokens,
       stores: storesList ?? [store],

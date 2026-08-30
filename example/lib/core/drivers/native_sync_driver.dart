@@ -52,7 +52,7 @@ class NativeSyncDriver implements SyncDriver {
   @override
   Future<void> connect({required Uri baseUrl, String? token}) async {
     final tokens = StaticTokenProvider(token ?? '');
-    final backend = PocketBaseBackend(
+    final backend = PocketBaseRawBackend(
       baseUrl: baseUrl,
       tokenProvider: tokens,
       stores: const ['users', 'tasks', 'posts', 'metrics', 'secrets'],

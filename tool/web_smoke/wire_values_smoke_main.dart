@@ -130,12 +130,18 @@ Future<void> main() async {
       final bytes = Uint8List.fromList(
           List<int>.generate(700000, (index) => (index * 31) & 0xff));
       final original = List<int>.from(bytes);
+      // WebKit (Playwright on Windows) has no OPFS: the worker's blob store
+      // degrades to a volatile in-memory fallback there. This smoke exercises
+      // the wire-value round-trip, not the durability gate, so it accepts
+      // volatility only when storage isn't durable.
+      final allowVolatile = !await pocket.files.isBlobStorageDurable;
       final uploaded = await pocket.filesUpload(
         store: 'wire_values',
         recordId: 'wirevalue000001',
         bytes: bytes,
         field: 'payload',
         name: 'wire-values.bin',
+        allowVolatileBlobs: allowVolatile,
       );
       if (uploaded['hash'] is! String || bytes.length != original.length) {
         throw StateError('Upload mutated source length or returned no hash.');

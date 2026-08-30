@@ -13,7 +13,6 @@ part of 'worker_engine.dart';
 /// refresh; the current bearer value is replaced through sync_update_auth.
 /// {@endtemplate}
 final class _WebTokenProvider implements TokenProvider {
-
   /// {@macro localpocket.__web_token_provider}
   _WebTokenProvider(this.value, this.identityValue);
   String? value;
@@ -41,7 +40,7 @@ mixin WorkerSyncHandlers on WorkerEngineHost {
     final token = w.optionalString('token');
     final scopeId = w.optionalString('scopeId') ?? 'web-sync';
     final provider = _WebTokenProvider(token, scopeId);
-    final backend = PocketBaseBackend(
+    final backend = PocketBaseRawBackend(
       baseUrl: Uri.parse(baseUrl),
       tokenProvider: provider,
       stores: pocket.storeNames.toList(),
@@ -65,7 +64,7 @@ mixin WorkerSyncHandlers on WorkerEngineHost {
       sink.emit({
         'v': webProtocolVersion,
         'op': WireOp.syncStatus,
-        'status': _encodeSyncStatus(status),
+        'status': encodeSyncStatus(status),
       });
     });
     await engine.start();
@@ -82,7 +81,7 @@ mixin WorkerSyncHandlers on WorkerEngineHost {
     final engine = _syncEngine;
     if (engine == null) throw StateError('Sync is not started.');
     final report = await engine.syncNow();
-    return _encodeSyncReport(report);
+    return encodeSyncReport(report);
   }
 
   Future<Object?> _handleSyncPause(WorkerEventSink sink, WebRequest req) async {
@@ -125,29 +124,8 @@ mixin WorkerSyncHandlers on WorkerEngineHost {
   }
 
   Future<Object?> _handleSyncStatus(
-      WorkerEventSink sink, WebRequest req) async => _lastSyncStatus == null
-        ? {'state': SyncEngineState.closed.name}
-        : _encodeSyncStatus(_lastSyncStatus!);
-
-  static Map<String, Object?> _encodeSyncStatus(SyncStatus status) => {
-        'state': status.state.name,
-        'pending': status.pending,
-        'conflicts': status.conflicts,
-        'hidden': status.hidden,
-        'blocked': status.blocked,
-        if (status.lastError != null) 'lastError': status.lastError,
-        if (status.lastSyncAt != null)
-          'lastSyncAt': encodeWireValue(status.lastSyncAt),
-        if (status.lastSuccessfulSyncAt != null)
-          'lastSuccessfulSyncAt': encodeWireValue(status.lastSuccessfulSyncAt),
-      };
-
-  static Map<String, Object?> _encodeSyncReport(SyncReport report) => {
-        'pulled': report.pulled,
-        'swept': report.swept,
-        'pushed': report.pushed,
-        'deadLettered': report.deadLettered,
-        'discarded': report.discarded,
-        'hadError': report.hadError,
-      };
+          WorkerEventSink sink, WebRequest req) async =>
+      _lastSyncStatus == null
+          ? {'state': SyncEngineState.closed.name}
+          : encodeSyncStatus(_lastSyncStatus!);
 }

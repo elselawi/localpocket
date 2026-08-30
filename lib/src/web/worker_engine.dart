@@ -75,6 +75,7 @@ import 'conflicts_bridge.dart';
 import 'conversions.dart';
 import 'lifecycle.dart';
 import 'protocol.dart';
+import 'sync_status_codec.dart';
 import 'wire_args.dart';
 
 part 'worker_engine_conflicts.dart';
@@ -368,7 +369,7 @@ abstract class WorkerEngineHost {
     if (engine != null) {
       final backend = engine.backend;
       await engine.stop();
-      if (backend is PocketBaseBackend) {
+      if (backend is PocketBaseRawBackend) {
         await backend.stopRealtime();
         backend.close();
       }

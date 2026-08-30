@@ -362,7 +362,7 @@ void main() {
           {'body': <String, Object?>{}, 'status': 'not-an-int'},
         ]
       ));
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);

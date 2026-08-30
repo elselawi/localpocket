@@ -75,6 +75,9 @@ void main(List<String> args) {
     'TypedSearchHit',
     'TypedStoreRegistry',
     'TypedStoreMismatchError',
+    'PocketBaseSyncHost',
+    'PocketBaseSyncEngine',
+    'attachPocketBaseSync',
     'indexSpec',
     'ftsSpec',
   ];

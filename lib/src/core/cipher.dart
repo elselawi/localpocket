@@ -36,9 +36,9 @@ import 'package:cryptography/dart.dart';
 
 /// Format version for AES-256-GCM field ciphertext (v1).
 ///
-/// v1 is AES-256-GCM over `package:cryptography` (Web Crypto on browsers,
-/// the package's audited pure-Dart engine elsewhere), nonce `[1..13)`,
-/// 16-byte tag, and the field's AAD bound per [fieldAad].
+/// v1 is AES-256-GCM over `package:cryptography`'s pure-Dart engine
+/// ([DartAesGcm]) on every platform, nonce `[1..13)`, 16-byte tag, and the
+/// field's AAD bound per [fieldAad].
 const int _fieldCipherVersion = 0x01;
 
 /// Number of header/footer bytes in v1 ciphertext: version + nonce + tag.
@@ -156,10 +156,14 @@ class SingleKeyCryptoProvider implements CryptoProvider {
 /// {@template localpocket.aes_gcm_field_cipher}
 /// Standard AES-256-GCM field cipher with a fresh 12-byte random IV per value.
 ///
-/// Encrypts through `package:cryptography`'s AES-256-GCM: on browsers this is
-/// the Web Crypto API, and everywhere else it is the package's audited pure
-/// Dart engine — the pure-Dart path also serves as the web-worker fallback in
-/// non-secure contexts. No bespoke AES table-lookup code ships here anymore.
+/// Encrypts through `package:cryptography`'s audited pure-Dart AES-256-GCM
+/// engine ([DartAesGcm]) on every platform. The engine is constructed
+/// DIRECTLY — never through `Cryptography.instance`/`AesGcm.with*Bits()`:
+/// those factories resolve the platform cryptography instance, and the
+/// browser resolution probes `window.isSecureContext`, which crashes inside
+/// a dedicated worker (the only web consumer of this class — the worker owns
+/// the database engine). Web Crypto is unusable here regardless: it has no
+/// synchronous API and this codec is synchronous.
 ///
 /// Output is the versioned v1 format documented at the top of this library:
 /// `0x01 ‖ nonce(12) ‖ ciphertext ‖ tag(16)`. The codec binds each value to
@@ -170,7 +174,10 @@ class AesGcmFieldCipher extends FieldCipher {
   AesGcmFieldCipher(List<int> keyBytes, {Random? random})
       : _key = _validatedKey(keyBytes),
         _random = random ?? Random.secure(),
-        _engine = AesGcm.with256bits().toSync(),
+        // 32-byte key, 12-byte nonce: identical engine to the package's
+        // `AesGcm.with256bits()` path without touching Cryptography.instance
+        // (see the class doc for why that matters in web workers).
+        _engine = DartAesGcm(secretKeyLength: 32, nonceLength: 12),
         _secretKey = SecretKeyData(_validatedKey(keyBytes),
             overwriteWhenDestroyed: true);
 

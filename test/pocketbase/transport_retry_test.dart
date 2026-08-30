@@ -15,7 +15,7 @@ void main() {
   group('multipart and streamed transport retryability', () {
     test('default sendMultipart is unsupported and surfaces UnsupportedError',
         () async {
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.example.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -42,7 +42,7 @@ void main() {
       fake.multipartStatus(
           200, FakeTransport.recordBody('r1', imgs: ['f.bin']));
       var factoryCalls = 0;
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.example.test'),
         tokenProvider:
             TestTokenProvider(tokenValue: 'stale', refreshTo: 'fresh'),
@@ -77,7 +77,7 @@ void main() {
       final fake = FakeTransport();
       fake.readFilesOnMultipart = true;
       fake.multipartStatus(200, FakeTransport.recordBody('r1'));
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
           baseUrl: Uri.parse('https://pb.example.test'),
           tokenProvider: TestTokenProvider(),
           stores: const ['widgets'],
@@ -105,7 +105,7 @@ void main() {
     test('transport timeout maps to TransientNetworkError', () async {
       final fake = FakeTransport();
       fake.multipartError(HttpTransportException('request timed out'));
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
           baseUrl: Uri.parse('https://pb.example.test'),
           tokenProvider: TestTokenProvider(),
           stores: const ['widgets'],
@@ -127,7 +127,7 @@ void main() {
       final fake = FakeTransport();
       fake.readFilesOnMultipart = true;
       fake.multipartStatus(200, FakeTransport.recordBody('r1'));
-      final b = PocketBaseBackend(
+      final b = PocketBaseRawBackend(
           baseUrl: Uri.parse('https://pb.example.test'),
           tokenProvider: TestTokenProvider(),
           stores: const ['widgets'],
@@ -152,7 +152,7 @@ void main() {
       Future<void> expectStatus(int status, Type error) async {
         final fake = FakeTransport();
         fake.multipartStatus(status, '{"message":"boom"}');
-        final b = PocketBaseBackend(
+        final b = PocketBaseRawBackend(
             baseUrl: Uri.parse('https://pb.example.test'),
             tokenProvider: TestTokenProvider(),
             stores: const ['widgets'],

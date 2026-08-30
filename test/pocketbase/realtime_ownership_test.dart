@@ -129,7 +129,7 @@ void main() {
     test('stopRealtime cancels pending debounce timers and clears hints',
         () async {
       final fake = FakeTransport();
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],

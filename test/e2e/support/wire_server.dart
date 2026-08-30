@@ -36,12 +36,11 @@ List<CollectionSchema> _resolveSchemas(
 
 /// One client bound to a [WireServer]: the pocket + engine a scenario drives.
 class WireClient {
-
   WireClient(this.pocket, this.engine, this.backend, this.tokenProvider,
       this.blobStore, this.store);
   final LocalPocket pocket;
   final SyncEngine engine;
-  final PocketBaseBackend backend;
+  final PocketBaseRawBackend backend;
   final TokenProvider tokenProvider;
   final BlobStore? blobStore;
   final String store;
@@ -208,7 +207,7 @@ class MockWireServer extends WireServer {
   }) async {
     await start();
     final t = tokens();
-    final backend = PocketBaseBackend(
+    final backend = PocketBaseRawBackend(
       baseUrl: mock.baseUrl,
       tokenProvider: t,
       stores: const ['widgets'],
@@ -280,7 +279,6 @@ class MockWireServer extends WireServer {
 /// Live variant: speaks raw HTTP to the server in `test/secret.dart`, with
 /// clients built like `RealHarness`.
 class RealWireServer extends WireServer {
-
   RealWireServer()
       : _tokens = RealPbTokenProvider(
           baseUrl: Uri.parse(testPBServer),
@@ -291,7 +289,7 @@ class RealWireServer extends WireServer {
   final String _store = uniqueStore();
   final List<Future<void> Function()> _clientClosers = [];
   final List<Future<void> Function()> _closeHooks = [];
-  PocketBaseBackend? _opsBackend;
+  PocketBaseRawBackend? _opsBackend;
 
   @override
   String get store => _store;
@@ -303,7 +301,7 @@ class RealWireServer extends WireServer {
   /// superuser login/refresh handshake directly).
   RealPbTokenProvider get tokens => _tokens;
 
-  PocketBaseBackend get _backend => _opsBackend ??= PocketBaseBackend(
+  PocketBaseRawBackend get _backend => _opsBackend ??= PocketBaseRawBackend(
         baseUrl: Uri.parse(testPBServer),
         tokenProvider: _tokens,
         stores: [_store],
@@ -352,7 +350,7 @@ class RealWireServer extends WireServer {
     List<CollectionSchema Function(String)>? storeBuilders,
   }) async {
     final t = tokens();
-    final backend = PocketBaseBackend(
+    final backend = PocketBaseRawBackend(
       baseUrl: Uri.parse(testPBServer),
       tokenProvider: t,
       stores: [_store],

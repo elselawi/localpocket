@@ -14,7 +14,7 @@ void main() {
     test('json patch replaces whole data object', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -37,7 +37,7 @@ void main() {
     test('custom 15-char id create ok', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -53,7 +53,7 @@ void main() {
     test('duplicate id 400 and error shape', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -77,7 +77,7 @@ void main() {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
       server.poisonEnabled = true;
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -108,7 +108,7 @@ void main() {
     test('batch request wire shape: PUT upserts with id/store/data', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -141,7 +141,7 @@ void main() {
         () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);

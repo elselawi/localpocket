@@ -24,7 +24,7 @@ void main() {
       final fake = FakeTransport();
       fake.streamStatus(200);
       fake.sendStatus(204); // subscribe POST
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],
@@ -85,7 +85,7 @@ void main() {
       // forwards `thumb` to the wire as a query parameter.
       final fake = FakeTransport();
       fake.streamData(200, const [1, 2, 3]);
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.test'),
         tokenProvider: TestTokenProvider(),
         stores: const ['widgets'],

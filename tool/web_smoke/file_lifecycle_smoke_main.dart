@@ -39,18 +39,25 @@ Future<void> main() async {
     );
     try {
       final data = List<int>.generate(262144, (i) => (i * 17) & 0xff);
+      // WebKit (Playwright on Windows) has no OPFS: the worker's blob store
+      // degrades to a volatile in-memory fallback there, and attach refuses
+      // unless the caller accepts volatility. The smoke exercises lifecycle
+      // mechanics, so it accepts volatility only when storage isn't durable.
+      final allowVolatile = !await pocket.files.isBlobStorageDurable;
       final first = await pocket.files.attach(
         store: 'file_items',
         recordId: 'fileitem0000001',
         byteArray: data,
         name: 'first.bin',
         expectedSize: data.length,
+        allowVolatileBlobs: allowVolatile,
       );
       final duplicate = await pocket.files.attach(
         store: 'file_items',
         recordId: 'fileitem0000001',
         byteArray: data,
         name: 'duplicate.bin',
+        allowVolatileBlobs: allowVolatile,
       );
       if (first['hash'] != duplicate['hash'] ||
           first['refId'] != duplicate['refId']) {
@@ -62,6 +69,7 @@ Future<void> main() async {
         recordId: 'fileitem0000002',
         byteArray: data,
         name: 'shared.bin',
+        allowVolatileBlobs: allowVolatile,
       );
       if (secondRef['hash'] != first['hash']) {
         throw StateError('Shared content hash was not reused.');
@@ -116,6 +124,7 @@ Future<void> main() async {
         byteArray: const [],
         name: 'empty.bin',
         expectedSize: 0,
+        allowVolatileBlobs: allowVolatile,
       );
       if (empty['hash'] is! String) {
         throw StateError('Empty file hash missing.');

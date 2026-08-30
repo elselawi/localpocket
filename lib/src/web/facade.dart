@@ -10,6 +10,7 @@ import 'package:localpocket/src/web/facade/web_collections.dart';
 import 'package:localpocket/src/web/facade/web_conflicts.dart';
 import 'package:localpocket/src/web/facade/web_files.dart';
 import 'package:localpocket/src/web/facade/web_storage_capabilities.dart';
+import 'package:localpocket/src/web/facade/web_sync_surface.dart';
 import 'package:localpocket/src/web/facade/web_transactions.dart';
 import 'package:sqlite3_web/sqlite3_web.dart';
 import 'package:web/web.dart' as web;
@@ -22,6 +23,7 @@ import '../core/query/search_builder/search_builder.dart';
 import '../core/schema.dart';
 import '../core/store.dart';
 import '../sync/conflicts.dart';
+import '../sync/status.dart';
 import '../typed/query_surface.dart';
 import '../typed/typed.dart';
 import '../typed/typed_collection.dart' show TypedStoreSurface;
@@ -32,10 +34,13 @@ import 'connector.dart';
 import 'conversions.dart';
 import 'lifecycle.dart';
 import 'protocol.dart';
+import 'sync_status_codec.dart';
 import 'web_sender.dart';
 
 /// Web facade for a worker-owned LocalPocket database on the browser.
-class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
+class LocalPocket
+    with ChangeBusAwareLP
+    implements WebFacadeHost, WebSyncSurface {
   /// Creates a web facade around an already connected worker database.
   LocalPocket._({
     required this.path,
@@ -430,6 +435,7 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   /// Starts the synchronization engine in the worker with the given credentials.
   ///
   /// Note: Supported configuration is one tab running sync (§12).
+  @override
   Future<void> startSync(
       {String? baseUrl, String? scopeId, String? token}) async {
     await send(WireOp.syncStart, {
@@ -440,31 +446,44 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   }
 
   /// Stops the synchronization engine in the worker.
+  @override
   Future<void> stopSync() async {
     await send(WireOp.syncStop);
   }
 
-  /// Triggers a manual synchronization cycle immediately.
-  Future<void> syncNow() async {
-    await send(WireOp.syncNow);
+  /// Triggers a manual synchronization cycle immediately and returns the
+  /// decoded cycle report from the worker.
+  @override
+  Future<SyncReport> syncNow() async {
+    final raw = await send(WireOp.syncNow);
+    final decoded = decodeWireValue(raw);
+    return decodeSyncReport(
+      decoded is Map
+          ? decoded.map((k, v) => MapEntry(k.toString(), v))
+          : const {},
+    );
   }
 
   /// Updates the authentication token on the worker after a refresh or login.
+  @override
   Future<void> updateAuth(String? token) async {
     await send(WireOp.syncUpdateAuth, {'token': token});
   }
 
   /// Pauses periodic and event-driven sync cycles.
+  @override
   Future<void> pauseSync() async {
     await send(WireOp.syncPause);
   }
 
   /// Resumes synchronization cycles.
+  @override
   Future<void> resumeSync() async {
     await send(WireOp.syncResume);
   }
 
   /// Informs the sync engine of online/offline connectivity changes.
+  @override
   Future<void> setConnectivity(bool online) async {
     await send(WireOp.syncSetConnectivity, {'online': online});
   }
@@ -612,9 +631,11 @@ class LocalPocket with ChangeBusAwareLP implements WebFacadeHost {
   }
 
   /// Worker-owned synchronization status snapshots.
+  @override
   Stream<Map<String, Object?>> get syncStatus => _syncStatusController.stream;
 
   /// Emits when the worker cannot refresh a rejected sync token.
+  @override
   Stream<void> get authRequired => _authRequiredController.stream;
 
   /// Closes the worker connection and releases browser resources.

@@ -80,7 +80,7 @@ void main() {
       'realtime stop leaves no dangling subscription and close() is idempotent',
       () async {
     final fake = FakeTransport();
-    final backend = PocketBaseBackend(
+    final backend = PocketBaseRawBackend(
       baseUrl: Uri.parse('https://pb.test'),
       tokenProvider: TestTokenProvider(),
       stores: const ['widgets'],
@@ -141,7 +141,7 @@ void main() {
   test('failed requests do not leak the backend; it stays usable', () async {
     final fake = FakeTransport();
     fake.sendError(HttpTransportException('connection reset'));
-    final backend = PocketBaseBackend(
+    final backend = PocketBaseRawBackend(
       baseUrl: Uri.parse('https://pb.test'),
       tokenProvider: TestTokenProvider(),
       stores: const ['widgets'],

@@ -267,15 +267,16 @@ class _ConnectPageState extends State<ConnectPage> {
   }
 
   static const _code = '''
-final backend = PocketBaseBackend(
+final backend = PocketBaseRawBackend(
   baseUrl: Uri.parse('https://your-pocketbase.example.com'),
   tokenProvider: yourTokenProvider,   // owns your auth token
   stores: const ['users', 'tasks', 'posts', 'metrics', 'secrets'],
 );
 
 final engine = SyncEngine(pocket: db, backend: backend);
-await engine.start();          // periodic pull/push
-await engine.syncNow();        // one immediate cycle
+await engine.start();              // periodic pull/push
+await engine.syncNow();            // one immediate cycle
+await backend.startRealtime();     // SSE hints — explicit, optional
 engine.status.listen((s) { /* state, pending, conflicts */ });
 ''';
 }

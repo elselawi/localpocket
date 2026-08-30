@@ -1,5 +1,24 @@
 ## Unreleased
 
+- **Sync on native and web with one wiring: `attachPocketBaseSync` +
+  `PocketBaseSyncEngine` (a `PocketBaseSyncHost`).** The typed layer no
+  longer pins the native engine: `TypedPocket` opens through the same
+  conditional-export seam the main barrel uses, so `AppDb.open()` spawns
+  the worker-backed facade on web instead of hitting the native-only
+  database factory (`UnsupportedError` before). The new host gives one
+  call site for `start`/`stop`/`syncNow`/`pause`/`resume`/
+  `setConnectivity`/`startRealtime`/`updateAuth`/`status`/`authRequired`:
+  native wraps a real `SyncEngine` + `PocketBaseSync` (store names from
+  the `TypedPocket` manifest, never re-listed), web delegates to the
+  facade sync verbs and bridges `TokenProvider` refresh in-page
+  (`authRequired` → refresh → `updateAuth`). One host per database is
+  memoized, so two engines can never double-push an outbox. Web facade
+  `syncNow()` now returns the decoded `SyncReport` (native parity).
+  **Breaking on web:** the old direct pattern — `SyncEngine(pocket:
+  db.pocket, backend: PocketBaseSync(db: …))` — no longer compiles on web
+  (the page-side `LocalPocket` is the facade); it remains the documented
+  native-only escape hatch for advanced knobs.
+
 - **Typed bulk reads: `TypedCollection.getAll(ids)` — the bulk counterpart
   of `get`.** One `id IN (...)` query replaces the fetch-per-hit loop; rows
   come back in id-list order — one row per id occurrence, so deduping stays

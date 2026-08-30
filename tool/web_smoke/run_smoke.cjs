@@ -73,6 +73,7 @@ async function run(name, browserType, pagePath, signal) {
     ['web_durability_reopen_smoke.html', '__durability_reopen_smoke'],
     ['web_file_lifecycle_smoke.html', '__file_lifecycle_smoke'],
     ['web_sync_lifecycle_smoke.html', '__sync_lifecycle_smoke'],
+    ['web_typed_sync_runtime_smoke.html', '__typed_sync_runtime_smoke'],
     ['web_compatibility_environment_smoke.html', '__compatibility_environment_smoke'],
     ['web_performance_resource_smoke.html', '__performance_resource_smoke']]
         .filter(([p]) => !pageFilter || p.includes(pageFilter))

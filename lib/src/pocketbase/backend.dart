@@ -45,14 +45,13 @@ import 'transport.dart';
 /// it server-side (PB record hook / custom endpoint) — the client keeps its
 /// `RemoteVersionConflict` re-merge machinery for backends that CAN throw it.
 /// {@endtemplate}
-class PocketBaseBackend implements SyncBackend {
+abstract base class PBBackend implements SyncBackend {
   /// Creates a PocketBase synchronization backend.
   ///
   /// {@macro localpocket.pocket_base_backend}
-  PocketBaseBackend({
+  PBBackend({
     required this.baseUrl,
     required this.tokenProvider,
-    this.stores = const [],
     this.realtimeDebounce = const Duration(milliseconds: 300),
     this.maxPage = 200,
     this.maxBatch = 25,
@@ -65,14 +64,14 @@ class PocketBaseBackend implements SyncBackend {
         PbClient(transport: this.transport, baseUrl: baseUrl, auth: _auth);
   }
 
+  /// LocalPocket stores represented in the remote data collection.
+  List<String> get storeNames => const [];
+
   /// PocketBase server base URL.
   final Uri baseUrl;
 
   /// Application-supplied token provider.
   final TokenProvider tokenProvider;
-
-  /// LocalPocket stores represented in the remote data collection.
-  final List<String> stores;
 
   /// Realtime coalescing window per store (default 300 ms).
   final Duration realtimeDebounce;
@@ -197,7 +196,7 @@ class PocketBaseBackend implements SyncBackend {
   void _onGapClosed() {
     // A connect (or reconnect) just happened: a gap is closed, so every store
     // must be re-pulled — never assume nothing changed.
-    for (final s in stores) {
+    for (final s in storeNames) {
       _debounce(s, BackendHint(s));
     }
   }
@@ -206,7 +205,7 @@ class PocketBaseBackend implements SyncBackend {
     // The remote collection carries every store; only events for stores this
     // backend manages may become hints (the engine also guards, but dropping
     // foreign events here avoids the wasted delete-verification GET too).
-    if (!stores.contains(ev.record.store)) return;
+    if (!storeNames.contains(ev.record.store)) return;
     if (ev.action == 'delete') {
       // delete events always verify via targeted GET.
       unawaited(_verifyDelete(ev.record));
@@ -217,7 +216,7 @@ class PocketBaseBackend implements SyncBackend {
   }
 
   Future<void> _verifyDelete(RemoteRecord ev) async {
-    if (!stores.contains(ev.store)) return;
+    if (!storeNames.contains(ev.store)) return;
     RemoteRecord? current;
     try {
       current = await _client.getRecord(ev.id);
@@ -368,4 +367,27 @@ class PocketBaseBackend implements SyncBackend {
   @override
   Future<List<PushResult>> pushBatch(List<PushOp> ops) =>
       _client.pushBatch(ops);
+}
+
+final class PocketBaseRawBackend extends PBBackend {
+  /// Creates a PocketBase synchronization backend.
+  ///
+  /// {@macro localpocket.pocket_base_backend}
+  PocketBaseRawBackend({
+    required super.baseUrl,
+    required super.tokenProvider,
+    super.identity,
+    super.maxBatch,
+    super.maxPage,
+    super.realtimeCollection,
+    super.realtimeDebounce,
+    super.transport,
+    this.stores = const [],
+  });
+
+  /// LocalPocket stores represented in the remote data collection.
+  final List<String> stores;
+
+  @override
+  List<String> get storeNames => stores;
 }

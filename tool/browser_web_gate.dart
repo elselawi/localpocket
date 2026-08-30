@@ -89,9 +89,10 @@ Future<void> main() async {
         ...Platform.environment,
         'SMOKE_EXPECTED_PAGES': '$browserPageCount',
         'SMOKE_EXPECTED_SCENARIOS': '${browserPageCount * browserCount}',
-        // sync_lifecycle needs its own fixture server (port 8125) and is run
-        // separately by sync_web_gate.dart; keep it out of the shared matrix.
-        'SMOKE_EXCLUDE_PAGE': 'sync_lifecycle',
+        // The sync pages need their own fixture server (port 8125) and are
+        // run separately by sync_web_gate.dart; keep them out of the shared
+        // matrix.
+        'SMOKE_EXCLUDE_PAGE': 'sync',
       },
       workingDirectory: root.path,
     );

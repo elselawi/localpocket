@@ -10,7 +10,7 @@ void main() {
     test('probe 200 enables batch', () async {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -26,7 +26,7 @@ void main() {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
       server.batchEnabled = false; // probe answers 403
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -47,7 +47,7 @@ void main() {
       final server = await MockPbServer().start();
       addTearDown(() => server.stop());
       final existing = server.seed(store: 'widgets', data: {'name': 'old'});
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -83,7 +83,7 @@ void main() {
       addTearDown(() => server.stop());
       server.poisonEnabled = true;
       final goodId = generateRecordId();
-      final backend = PocketBaseBackend(
+      final backend = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -114,8 +114,8 @@ void main() {
   });
 
   group('batch response contract (client level)', () {
-    Future<PocketBaseBackend> backend(MockPbServer server) async {
-      final b = PocketBaseBackend(
+    Future<PocketBaseRawBackend> backend(MockPbServer server) async {
+      final b = PocketBaseRawBackend(
           baseUrl: server.baseUrl,
           tokenProvider: TestTokenProvider(),
           stores: const []);
@@ -187,7 +187,8 @@ void main() {
       await expectLater(
         b.pushBatch(twoOps()),
         throwsA(isA<ProtocolError>()),
-        reason: 'three results for two requests: extra entries are a server bug',
+        reason:
+            'three results for two requests: extra entries are a server bug',
       );
     });
 
