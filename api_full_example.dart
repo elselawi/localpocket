@@ -247,12 +247,10 @@ extension TaskStore on TypedCollection<Tasks> {
       for (final t in page.items) {
         print('  ${t.id}: ${t.title}');
       }
-      if (!page.hasMore) break;
-      page = await queryAfter(
-        page.nextCursor!,
-        orderBy: [Tasks.priority.asc],
-        limit: 2,
-      );
+      if (!page.hasNext) break;
+      // next() reuses the captured shape — no slots to re-state. hasNext
+      // being true means next() returns a page, never null.
+      page = (await page.next())!;
     }
   }
 
@@ -271,142 +269,91 @@ extension TaskStore on TypedCollection<Tasks> {
 final class AppDb extends TypedPocket {
   AppDb(super.path);
 
-  // required: define the stores this app uses
   @override
   StoreDefs get stores => [Tasks.store];
 
-  // optional: add one-line accessors for each store
   TypedCollection<Tasks> get tasks => handle(Tasks.store);
 }
 
+// 1. The library ships NO ready-made token provider — you implement the
+//    3-method interface. (The old README's `TokenProvider.staticToken(...)`
+//    does not exist; the example app hand-writes exactly this.)
+class StaticTokenProvider implements TokenProvider {
+  StaticTokenProvider(this.value);
+  final String value;
+
+  @override
+  Future<Token> currentToken() async => Token(value);
+
+  @override
+  Future<Token> refreshToken(Token current) async => Token(value);
+
+  @override
+  String? get identity => 'user-123'; // must be STABLE across token refreshes
+}
+
+// Two-way sync with PocketBase over REST
+// with SSE realtime as an explicit opt-in hint layer.
+
+// first we need to define a token provider
+class MyTokenProvider implements TokenProvider {
+  // define `currentToken`
+  // this will grab the latest token, from a secure storage
+  @override
+  Future<Token> currentToken() async {
+    // `expiresAt` and `issuedAt` are optional
+    // but they are useful if you want
+    // this library to handle scheduling for token refreshes
+    final expiresAt = DateTime.now().add(const Duration(days: 7));
+    final issuesAt = DateTime.now().subtract(const Duration(days: 2));
+    return Token(
+      'token',
+      expiresAt: expiresAt,
+      issuedAt: issuesAt,
+    );
+  }
+
+  // when you define `expiresAt` and `issuedAt` (above)
+  // the library will call this method
+  // this method supposed to grab a fresh token using the current one
+  @override
+  Future<Token> refreshToken(Token current) async {
+    final expiresAt = DateTime.now().add(const Duration(days: 7));
+    final issuesAt = DateTime.now();
+    return Token(
+      'token',
+      expiresAt: expiresAt,
+      issuedAt: issuesAt,
+    );
+  }
+
+  // The stable identity the token belongs to
+  // (used for the sync scope id).
+  @override
+  String? get identity => 'user-001';
+}
+
 void main() async {
-  final db = await openTyped(
-    path: ':memory:',
-    stores: [Tasks.store],
-  );
-  final tasks = db.store(Tasks.store);
+  final db = AppDb('app.db'); // your TypedPocket subclass
+  await db.open();
 
-  final donePage = await tasks.query(
-    where: [
-      Tasks.done.eq(false), // not done
-      Tasks.status.inValues([TaskStatus.todo, TaskStatus.done]), // one of these
-      Tasks.priority.between(1, 5), // priority in range
-      Tasks.dueAt.isNull(), // no due date set
-    ],
-    orderBy: [Tasks.priority.desc], // sort, then take the page
-    limit: 20,
+  final myTokenProvider = MyTokenProvider();
+
+  final sync = attachPocketBaseSync(
+    db: db,
+    baseUrl: Uri.parse('https://pb.example.com'),
+    tokenProvider: myTokenProvider,
+    identity: 'user-123',
   );
 
-  final allDone = await tasks.query(
-    // to make the query return all the results
-    // although not recommended
-    // but you can explicitly use `Limits.unbounded`
-    limit: Limits.unbounded,
-    where: [Tasks.done.eq(true)],
-  );
+  sync.status.listen((status) {
+    print('${status.state} — ${status.pending} pending');
+  });
 
-  // conditions compose into bigger ones with
-  // & (and), | (or) and ~ (not). parentheses
-  // decide the order, like in arithmetic
-  final matching = await tasks.query(
-    where: [
-      (Tasks.done.eq(true) | Tasks.priority.eq(5)) &
-          ~Tasks.title.startsWith('Draft'),
-    ],
-    // select trims every row down to these fields.
-    // reading anything else from these rows throws
-    select: [Tasks.title, Tasks.priority],
-    limit: 20,
-  );
+  await sync.start();
+  await sync.startRealtime();
+  final report = await sync.syncNow();
+  await sync.stop();
 
-  // queryAfter continues a listing from the cursor
-  // the previous page returned. same `where`, same
-  // `orderBy` — just the next slice of results.
-  // check hasMore before asking for the next page
-  final firstPage = await tasks.query(
-    where: [Tasks.done.eq(false)],
-    orderBy: [Tasks.priority.desc],
-    limit: 20,
-  );
-  final nextPage = firstPage.hasMore
-      ? await tasks.queryAfter(
-          firstPage.nextCursor!,
-          where: [Tasks.done.eq(false)], // same shape as firstPage
-          orderBy: [Tasks.priority.desc],
-          limit: 20,
-        )
-      : null;
-
-  // get reads one record by id.
-  // null when there is no such record — it doesn't throw
-  final oneTask = await tasks.get('tsk1234567890ab');
-
-  // fields are read through the descriptor: row(Tasks.field)
-  final oneTitle = oneTask?.call(Tasks.title);
-
-  // count returns how many rows match. nothing else
-  final activeCount = await tasks.count(where: [Tasks.done.eq(false)]);
-
-  // ids returns the matching record ids
-  // instead of whole rows
-  final openIds = await tasks.ids(
-    where: [Tasks.done.eq(false)],
-    orderBy: [Tasks.priority.desc],
-    limit: 100,
-  );
-
-  // sum / min / max / avg work on number fields only
-  // (integer, real, date) — anything else won't compile.
-  // they return null when no rows match
-  final priorityTotal = await tasks.sum(Tasks.priority);
-  final heaviest = await tasks.max(Tasks.priority);
-  final lightest = await tasks.min(Tasks.priority);
-  final average =
-      await tasks.avg(Tasks.priority, where: [Tasks.done.eq(false)]);
-
-  // distinct lists the unique values a field holds
-  final priorities = await tasks.distinct(Tasks.priority);
-
-  // countDistinct counts them instead of listing them
-  final priorityCount = await tasks.countDistinct(Tasks.priority);
-
-  print([
-    priorityCount,
-    allDone,
-    priorities,
-    average,
-    lightest,
-    heaviest,
-    priorityTotal,
-    openIds,
-    activeCount,
-    oneTitle,
-    nextPage,
-    matching,
-    donePage
-  ]);
-
-  final n = await tasks.count(where: [
-    ~Tasks.done.eq(true),
-    Tasks.dueAt.lt(DateTime.now()),
-  ]);
-  print('There are $n tasks left to do');
-
-  // Keep analyzed values live in this complete API example.
-  Tasks.title;
-  donePage;
-  matching;
-  firstPage;
-  nextPage;
-  oneTitle;
-  activeCount;
-  openIds;
-  priorityTotal;
-  heaviest;
-  lightest;
-  average;
-  priorities;
-  priorityCount;
-
-  await db.close();
+  report;
 }
