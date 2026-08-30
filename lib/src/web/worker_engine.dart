@@ -53,6 +53,7 @@ import 'dart:typed_data';
 
 import 'package:sqlite3/common.dart';
 
+import '../contract/contract.dart' as contract;
 import '../core/change_bus.dart';
 import '../core/database_adapter.dart';
 import '../core/errors.dart';
@@ -224,6 +225,7 @@ abstract class WorkerEngineHost {
   SyncStatus? _lastSyncStatus;
   final Set<WorkerEventSink> _connections = {};
   StreamSubscription<RecordChangeEvent>? _eventSubscription;
+  StreamSubscription<contract.Event>? _contractEventSubscription;
 
   // ------------------------------------------------------- compiled-query --
 
@@ -361,9 +363,38 @@ abstract class WorkerEngineHost {
     _activeSession = null;
     await _eventSubscription?.cancel();
     _eventSubscription = null;
+    await _contractEventSubscription?.cancel();
+    _contractEventSubscription = null;
     _connections.clear();
     await pocket.close();
     return {'ok': true};
+  }
+
+  // --------------------------------------------------- typed contract wire --
+
+  /// Answers one typed contract request through the kernel's own command
+  /// handler — the same handler the direct runtime calls. There is no
+  /// worker-side reinterpretation: payloads, results, and errors travel in
+  /// the contract codec's wire form, so a remote send cannot drift from a
+  /// native one.
+  ///
+  /// Application failures are returned inside the reply as a contract-encoded
+  /// error so the caller reconstructs the typed kernel error; envelope-level
+  /// failures (a malformed request payload) throw and fall through to the
+  /// transport error framing.
+  Future<Object?> _handleContract(WorkerEventSink sink, WebRequest req) async {
+    final raw = req.args['request'];
+    if (raw is! Map) {
+      throw ProtocolEnvelopeException(
+          'Contract envelope requires a "request" map.');
+    }
+    final request = contract.ContractCodec.decodeRequest(deepStringMap(raw));
+    try {
+      final result = await pocket.commands.handle(request);
+      return {'result': contract.ContractCodec.encodeResult(result)};
+    } catch (e) {
+      return {'error': contract.encodeError(e)};
+    }
   }
 
   /// Stops the active sync engine and its realtime connection, clearing the
@@ -516,6 +547,16 @@ final class WorkerEngine extends WorkerEngineHost
         conn.emit(envelope);
       }
     });
+    _contractEventSubscription ??= pocket.commands.events.listen((event) {
+      final envelope = <String, Object?>{
+        'v': webProtocolVersion,
+        'op': WireOp.contractEvent,
+        'event': contract.ContractCodec.encodeEvent(event),
+      };
+      for (final conn in _connections) {
+        conn.emit(envelope);
+      }
+    });
 
     final WebRequest req;
     try {
@@ -599,6 +640,7 @@ final class WorkerEngine extends WorkerEngineHost
     WireOp.conflictsAcceptLocal: _handleConflictsAcceptLocal,
     WireOp.conflictsAcceptRemote: _handleConflictsAcceptRemote,
     WireOp.conflictsWatch: _handleConflictsWatch,
+    WireOp.contractRequest: _handleContract,
     WireOp.close: _handleClose,
   };
 

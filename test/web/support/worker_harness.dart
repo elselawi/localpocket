@@ -56,7 +56,10 @@ class WorkerHarness {
   int _counter = 0;
 
   /// Opens a harness with the canonical `widgets` schema (or [stores]) and an
-  /// in-memory blob store.
+  /// in-memory blob store. [path] backs the engine with a real database file
+  /// instead of an in-memory one; [sink] replaces the default recording sink
+  /// (a subclass may forward events elsewhere while keeping the recording
+  /// behavior).
   static Future<WorkerHarness> open({
     List<CollectionSchema>? stores,
     BlobStore? blobStore,
@@ -65,8 +68,12 @@ class WorkerHarness {
     TestHooks? testHooks,
     int maxDocBytes = 1900000,
     PlatformProfile platform = PlatformProfile.native,
+    String path = ':memory:',
+    RecordingSink? sink,
   }) async {
-    final rawDb = sqlite.sqlite3.openInMemory();
+    final rawDb = path == ':memory:'
+        ? sqlite.sqlite3.openInMemory()
+        : sqlite.sqlite3.open(path);
     final adapter = DirectSqliteDatabase(rawDb);
     final pocket = await LocalPocket.open(
       path: ':memory:',
@@ -88,7 +95,7 @@ class WorkerHarness {
       rawDb: rawDb,
       pocket: pocket,
       engine: engine,
-      sink: RecordingSink(),
+      sink: sink ?? RecordingSink(),
     );
   }
 
@@ -156,6 +163,31 @@ class WorkerHarness {
   Future<Map<String, Object?>?> get(String store, String id) async {
     final raw = await sendOk(req(WireOp.get, args: {'store': store, 'id': id}));
     return decodeWireValue(raw) as Map<String, Object?>?;
+  }
+
+  /// Feeds one wire envelope through the JS boundary's exact path: parse →
+  /// dispatch → reply → response envelope. This is the transport a page-side
+  /// remote runtime binds to; the returned map is what `jsify()` would hand
+  /// to `Database.customRequest` in the browser.
+  Future<Object?> customRequest(Map<String, Object?> envelope) async {
+    final reply = await engine.handleRequest(sink, envelope);
+    if (reply is WorkerSuccess) {
+      return WebResponse.success(
+        version: webProtocolVersion,
+        requestId: reply.requestId,
+        result: reply.result,
+      ).toJson();
+    }
+    final err = reply as WorkerError;
+    return WebResponse.error(
+      version: webProtocolVersion,
+      requestId: err.requestId,
+      error: WebError(
+        code: err.code,
+        message: err.message,
+        details: err.details,
+      ),
+    ).toJson();
   }
 
   /// Sends the close request and returns the reply.

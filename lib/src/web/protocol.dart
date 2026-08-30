@@ -100,6 +100,15 @@ class WireOp {
   static const String conflictsAcceptRemote = 'conflicts_accept_remote';
   static const String conflictsWatch = 'conflicts_watch';
 
+  /// The typed contract envelope: the request travels exactly as the contract
+  /// codec encodes it and the kernel answers through the same command handler
+  /// the direct runtime uses. Coexists with the string-op registry until every
+  /// family routes through it; the two envelopes share one kernel.
+  static const String contractRequest = 'contract_request';
+
+  /// Committed facts and watch snapshots, contract-event encoded.
+  static const String contractEvent = 'contract_event';
+
   static bool isKnown(String op) => _known.contains(op);
 
   /// Immutable list of operations used by worker dispatch tables.
@@ -157,6 +166,8 @@ class WireOp {
     conflictsAcceptLocal,
     conflictsAcceptRemote,
     conflictsWatch,
+    contractRequest,
+    contractEvent,
   };
 }
 

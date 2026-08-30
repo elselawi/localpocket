@@ -4,27 +4,58 @@ import 'package:localpocket/src/api/api.dart';
 import 'package:localpocket/src/contract/contract.dart';
 import 'package:localpocket/src/core/local_pocket.dart' as kernel
     show KernelDatabase;
+import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/runtime/runtime_client.dart';
 import 'package:localpocket/src/typed/typed.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
 import '../api/tasks_store.dart';
+import '../web/support/worker_harness.dart';
 
 /// Runtime conformance for the public facade: the SAME bodies run against
-/// the direct runtime and the loopback runtime (full codec round-trip) must
+/// the direct runtime, the loopback runtime (full codec round-trip), and the
+/// remote runtime (contract envelopes through the worker engine) must
 /// produce equal results and events. The loopback pass proves every payload
-/// the facade builds survives the wire.
+/// the facade builds survives the wire; the remote pass proves the same
+/// payloads survive the real worker path.
 void main() {
-  for (final entry in {
-    'direct': LocalRuntimeClient.new,
-    'loopback': LoopbackRuntimeClient.new,
-  }.entries) {
-    group('facade conformance over ${entry.key} runtime', () {
+  for (final runtimeName in const ['direct', 'loopback', 'remote']) {
+    group('facade conformance over $runtimeName runtime', () {
       late LocalPocket db;
       late RuntimeClient runtime;
 
       Future<LocalPocket> open({String? path}) async {
+        if (runtimeName == 'remote') {
+          // The worker hosts the real kernel. The throwaway kernel
+          // `openWith` compiles locally is closed as soon as the remote
+          // runtime takes over; the remote harness uses the requested path.
+          final pipe = _PipeSink();
+          final harness = await WorkerHarness.open(
+            path: path ?? ':memory:',
+            stores: [Tasks.store.collectionSchema],
+            sink: pipe,
+          );
+          addTearDown(harness.close);
+          final client = RemoteRuntimeClient(transport: harness.customRequest);
+          pipe.target = client.handleWorkerEvent;
+          final pocket = await LocalPocket.openWith(
+            LocalPocketOptions(
+              path: ':memory:',
+              stores: [Tasks.store],
+            ),
+            (handler) {
+              unawaited(handler.close());
+              return client;
+            },
+          );
+          runtime = client;
+          return pocket;
+        }
+        final constructors = {
+          'direct': LocalRuntimeClient.new,
+          'loopback': LoopbackRuntimeClient.new,
+        };
         RuntimeClient? captured;
         final pocket = await LocalPocket.openWith(
           LocalPocketOptions(
@@ -32,7 +63,7 @@ void main() {
             stores: [Tasks.store],
           ),
           (handler) {
-            captured = entry.value(handler);
+            captured = constructors[runtimeName]!(handler);
             return captured!;
           },
         );
@@ -334,4 +365,16 @@ Future<void> _waitFor(bool Function() predicate,
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
   fail('Timed out waiting for condition.');
+}
+
+/// Forwards every worker event to the remote runtime's event feed while
+/// keeping the recording behavior the harness expects.
+class _PipeSink extends RecordingSink {
+  void Function(Map<String, Object?> event)? target;
+
+  @override
+  void emit(Map<String, Object?> event) {
+    super.emit(event);
+    target?.call(event);
+  }
 }
