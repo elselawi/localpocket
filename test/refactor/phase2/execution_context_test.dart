@@ -27,7 +27,8 @@ void main() {
     });
 
     test('transaction context carries its executor and read-only flag', () {
-      final ctx = ExecutionContext.transaction(executor: _FakeExec(), readOnly: true);
+      final ctx =
+          ExecutionContext.transaction(executor: _FakeExec(), readOnly: true);
       expect(ctx.isTransaction, isTrue);
       expect(ctx.executor, isNotNull);
       expect(ctx.readOnly, isTrue);
@@ -131,7 +132,8 @@ void main() {
       final id = generateRecordId();
       await col.put(record(name: 'plan', qty: 2, id: id));
 
-      final plan = col.query().where('name', eq: 'plan').limit(10).compilePlan();
+      final plan =
+          col.query().where('name', eq: 'plan').limit(10).compilePlan();
       final result = await db.reads.executeCompiled(
         plan,
         run: (sql, params) => db.db.rawQuery(sql, params),

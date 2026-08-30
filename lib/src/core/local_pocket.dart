@@ -1044,8 +1044,7 @@ class _CommitGroup {
     final outcomes = <(_CommitMember, Object?, Object?, StackTrace?)>[];
     try {
       await context.db.transaction((txn) async {
-        final tx = Tx.internal(
-            context.database, txn, changes,
+        final tx = Tx.internal(context.database, txn, changes,
             recordEvents: recordEvents);
         if (solo) {
           try {

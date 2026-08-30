@@ -119,9 +119,8 @@ class TransactionCoordinator {
     if (++_writesSinceCheckpoint < _passiveCheckpointEveryWrites) return;
     _writesSinceCheckpoint = 0;
     Timer.run(() {
-      unawaited(context.database
-          .walCheckpointPassive()
-          .catchError((Object _) {}));
+      unawaited(
+          context.database.walCheckpointPassive().catchError((Object _) {}));
     });
   }
 }
