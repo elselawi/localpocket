@@ -34,6 +34,10 @@ Future<void> main() async {
       '${Directory.systemTemp.path}/localpocket_api_web.js'
     ],
     'production worker compile': ['run', 'tool/web_worker_compile.dart'],
+    'shipped worker asset is current': [
+      'run',
+      'tool/worker_asset_current_gate.dart'
+    ],
     'web asset hashes': ['run', 'tool/web_asset_gate.dart'],
   };
   var failed = 0;

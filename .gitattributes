@@ -1,0 +1,5 @@
+# Shipped assets are byte-exact artifacts: never apply eol conversion to them
+# (autocrlf would corrupt the wasm binary and churn the compiled worker).
+assets/sqlite3.wasm binary
+assets/localpocket_worker.js -text
+assets/*.sha256 text eol=lf

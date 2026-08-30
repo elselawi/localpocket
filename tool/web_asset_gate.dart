@@ -21,6 +21,9 @@ Future<void> main() async {
     if (parts.length < 2) {
       throw StateError('Malformed checksum manifest: ${entry.value}');
     }
+    // Raw bytes, never eol-normalized: the manifest was computed over the
+    // byte-exact artifact, and `.gitattributes` pins the assets as binary so
+    // a checkout can never convert them.
     final actual = sha256.convert(await asset.readAsBytes()).toString();
     if (parts[0].toLowerCase() != actual) {
       throw StateError(

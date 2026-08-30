@@ -198,7 +198,8 @@ void main() {
         orderSpec;
       });
 
-      test('cursor corpus: nullable sorts, uniform descending, and the '
+      test(
+          'cursor corpus: nullable sorts, uniform descending, and the '
           'implicit id tie-breaker', () async {
         db = await open();
         addTearDown(db.close);
@@ -280,12 +281,11 @@ void main() {
         );
         final walked = await walk(spec);
         final full = [
-          for (final row
-              in (await tasks.query(QuerySpec<Tasks>(
-                orderBy: [Tasks.priority.asc, Tasks.title.desc],
-                limit: Limits.unbounded,
-              )))
-                  .items)
+          for (final row in (await tasks.query(QuerySpec<Tasks>(
+            orderBy: [Tasks.priority.asc, Tasks.title.desc],
+            limit: Limits.unbounded,
+          )))
+              .items)
             row(Tasks.title),
         ];
         expect(walked, full,
@@ -375,8 +375,7 @@ void main() {
           limit: 2,
         ));
         final token = page1.nextCursor!.token;
-        final firstTitles =
-            page1.items.map((r) => r(Tasks.title)).toList();
+        final firstTitles = page1.items.map((r) => r(Tasks.title)).toList();
         await db.close();
 
         // Reopen the same file and continue from the persisted cursor.
