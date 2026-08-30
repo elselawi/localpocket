@@ -22,25 +22,25 @@
 /// cross-area helpers) plus area handler mixins declared in the parts:
 ///
 /// - `worker_engine.dart` (this file) — the [WorkerEngineHost] base: the
-///   engine, all worker-owned session state, the compiled-query core shared
-///   by reads and watches, cross-cutting teardown (`close`, `stopSync`), and
-///   the shared helpers that two or more areas depend on; plus
-///   [WorkerEngine], the public entry point with the envelope parse,
-///   dispatch table, and per-op routing.
+///   engine, worker-owned watcher/upload state, cross-cutting teardown
+///   (`close`, `stopSync`), and the shared helpers that two or more areas
+///   depend on; plus [WorkerEngine], the public entry point with the
+///   envelope parse, dispatch table, and per-op routing.
 /// - `worker_engine_crud.dart` — store registration (`open`).
 /// - `worker_engine_maintenance.dart` — health/capabilities + maintenance.
-/// - `worker_engine_tx.dart` — interactive transaction sessions.
 /// - `worker_engine_sync.dart` — sync engine lifecycle + auth.
 /// - `worker_engine_files.dart` — chunked upload + file metadata RPCs.
 /// - `worker_engine_conflicts.dart` — conflict inspection + resolution.
 ///
+/// Reads, writes, and transaction sessions have no dedicated handlers:
+/// they travel as typed contract requests and the kernel command handler
+/// answers them directly.
+///
 /// ## DRY rule (anti-drift)
 ///
 /// Any helper used by two or more areas lives on [WorkerEngineHost] — never
-/// copied into a mixin: `_applyMutation` (`tx_mutate_batch`),
-/// `_emitWorkerEvent` (`conflicts_watch`), `_requireSession`
-/// (every `tx_*` handler + compiled-query tx reads), `_parseCompiledPlan`
-/// (`compiled_query`), and `_stopSync` (sync handlers + `close`). The mixins
+/// copied into a mixin: `_emitWorkerEvent` (`conflicts_watch`) and
+/// `_stopSync` (sync handlers + `close`). The mixins
 /// are `on WorkerEngineHost` and share one library with it, so they access
 /// its private state directly with zero plumbing. Keeping each shared wire
 /// contract in exactly one place is what stops the areas from drifting apart.
@@ -54,19 +54,14 @@ import 'package:sqlite3/common.dart';
 import '../contract/contract.dart' as contract;
 import '../core/database_adapter.dart';
 import '../core/errors.dart';
-import '../core/hashing.dart';
-import '../core/canonical_json.dart';
 import '../core/local_pocket.dart';
-import '../core/query_plan.dart';
 import '../core/schema_manifest.dart';
 import '../core/schema.dart';
-import '../core/store.dart';
 import '../files/files_api.dart' show FileRef;
 import '../pocketbase/auth.dart';
 import '../pocketbase/backend.dart';
 import '../sync/engine.dart';
 import '../sync/status.dart';
-import '../core/transaction.dart';
 import 'conflicts_bridge.dart';
 import 'conversions.dart';
 import 'lifecycle.dart';
@@ -79,7 +74,6 @@ part 'worker_engine_crud.dart';
 part 'worker_engine_files.dart';
 part 'worker_engine_maintenance.dart';
 part 'worker_engine_sync.dart';
-part 'worker_engine_tx.dart';
 
 /// Sink for worker→client events.
 ///
@@ -207,8 +201,6 @@ abstract class WorkerEngineHost {
   /// The LocalPocket engine served by this worker.
   final LocalPocket pocket;
 
-  _TxSession? _activeSession;
-  int _nextSessionId = 1;
   final Map<int, _ActiveWatcher> _watchers = {};
   final UploadSessionRegistry _uploadSessions = UploadSessionRegistry();
   Timer? _uploadExpiryTimer;
@@ -219,117 +211,6 @@ abstract class WorkerEngineHost {
   SyncStatus? _lastSyncStatus;
   final Set<WorkerEventSink> _connections = {};
   StreamSubscription<contract.Event>? _contractEventSubscription;
-
-  // ------------------------------------------------------- compiled-query --
-
-  /// The single read operation: an engine-compiled query plan (SQL + bound
-  /// args + schema fingerprint). Every query, aggregate, search, and
-  /// transaction read travels as this envelope.
-  ///
-  /// Kept on the base (not in a part) because `watch_query` shares the plan
-  /// parser and executor — the read path must be identical for on-demand
-  /// fetches and watcher refreshes.
-  Future<Object?> _handleCompiledQuery(
-          WorkerEventSink sink, WebRequest req) async =>
-      _dispatchCompiledQuery(req.args);
-
-  static const Set<String> _compiledOperations = {
-    'query',
-    'count',
-    'countDistinct',
-    'distinct',
-    'ids',
-    'explain',
-    'sum',
-    'avg',
-    'min',
-    'max',
-    'search',
-  };
-
-  /// Parses and validates a compiled query plan envelope. The plan is a typed
-  /// compiler artifact: operation vocabulary, compiler version, schema
-  /// version + fingerprint, argument count, and the `SELECT ` prefix are all
-  /// checked before the SQL is ever executed.
-  QueryPlan _parseCompiledPlan(Map<String, Object?> args) {
-    final type = args['type'];
-    final operation = args['operation'];
-    final compilerVersion = args['compilerVersion'];
-    final store = args['store'];
-    final schemaVersion = args['schemaVersion'];
-    final schemaFingerprint = args['schemaFingerprint'];
-    final argumentCount = args['argumentCount'];
-    final sql = args['sql'];
-    final parameters = args['args'];
-    if (type != QueryPlan.type ||
-        operation is! String ||
-        !_compiledOperations.contains(operation) ||
-        compilerVersion != queryCompilerVersion ||
-        store is! String ||
-        schemaVersion is! int ||
-        schemaFingerprint is! String ||
-        argumentCount is! int ||
-        sql is! String ||
-        parameters is! List) {
-      throw ProtocolEnvelopeException(
-          'Malformed or stale compiled query plan.');
-    }
-    final schema = pocket.requireTable(store).schema;
-    final expectedFingerprint = sha256Hex(canonicalize(schema.toJson()));
-    if (schema.version != schemaVersion ||
-        expectedFingerprint != schemaFingerprint ||
-        parameters.length != argumentCount ||
-        !sql.startsWith('SELECT ')) {
-      throw ProtocolEnvelopeException(
-          'Stale or mismatched compiled query plan.');
-    }
-    final projectionRaw = args['projection'];
-    final limitRaw = args['limit'];
-    final shapeRaw = args['shape'];
-    // EVERY field the page sends must survive the
-    // temporary compiled-plan bridge. `decodeColumns` drives the
-    // projection-aware decoder in the runner/watcher; dropping it silently
-    // disabled projected decoding on web.
-    final decodeColumnsRaw = args['decodeColumns'];
-    final typeName = type! as String;
-    return QueryPlan(
-      typeName: typeName,
-      operation: operation,
-      compilerVersion: queryCompilerVersion,
-      store: store,
-      schemaVersion: schemaVersion,
-      schemaFingerprint: schemaFingerprint,
-      sql: sql,
-      args:
-          List<Object?>.unmodifiable(parameters.map(decodeWireValue).toList()),
-      limit: limitRaw is int ? limitRaw : null,
-      projection: projectionRaw is List ? projectionRaw.cast<String>() : null,
-      decodeColumns:
-          decodeColumnsRaw is List ? decodeColumnsRaw.cast<String>() : null,
-      shape: shapeRaw is String ? shapeRaw : '',
-    );
-  }
-
-  Future<Map<String, Object?>> _dispatchCompiledQuery(
-      Map<String, Object?> args) async {
-    final plan = _parseCompiledPlan(args);
-
-    final Future<List<Map<String, Object?>>> Function(
-        String sql, List<Object?> params) run;
-    final sessionId = args['sessionId'];
-    if (sessionId is int) {
-      final session = _requireSession(sessionId);
-      run = (sql, params) => session.tx.executor.rawQuery(sql, params);
-    } else {
-      run = (sql, params) => pocket.traceQuery(sql, params);
-    }
-
-    final pageLimitRaw = args['pageLimit'];
-    final pageLimit = pageLimitRaw is int ? pageLimitRaw : null;
-    // The worker reaches the SAME kernel read
-    // service native uses — plan execution cannot drift between platforms.
-    return pocket.reads.executeCompiled(plan, run: run, pageLimit: pageLimit);
-  }
 
   // ------------------------------------------------------ cross-cutting --
 
@@ -349,11 +230,8 @@ abstract class WorkerEngineHost {
     _uploadExpiryTimer?.cancel();
     _uploadExpiryTimer = null;
     _uploadSessions.clear();
-    if (_activeSession != null && !_activeSession!.completer.isCompleted) {
-      _activeSession!.completer
-          .completeError(DatabaseWorkerClosedException('Database closed.'));
-    }
-    _activeSession = null;
+    // Interactive transaction sessions are kernel-owned: closing the kernel
+    // settles them.
     await _contractEventSubscription?.cancel();
     _contractEventSubscription = null;
     _connections.clear();
@@ -409,56 +287,6 @@ abstract class WorkerEngineHost {
     _lastSyncStatus = null;
   }
 
-  // ------------------------------------------------------ shared helpers --
-
-  /// Applies one wire mutation to [col].
-  ///
-  /// [m] is a single element of a `mutations` array: `action` plus the
-  /// action's `id`/`record`. `tx_mutate_batch` is the only caller, so the
-  /// action vocabulary stays in exactly one place. Unknown actions fail with a typed
-  /// [ValidationException] — never a silent no-op. Malformed elements (a
-  /// non-map, a non-string `action`/`id`, or a `record` that does not decode
-  /// to a map) fail with a typed [ProtocolEnvelopeException] — never a raw
-  /// cast error.
-  Future<void> _applyMutation(Collection col, Object? m) async {
-    if (m is! Map) {
-      throw ProtocolEnvelopeException('Mutation element must be a map, got '
-          '${m == null ? 'null' : m.runtimeType}.');
-    }
-    final w = WireArgs(m.map((k, v) => MapEntry(k.toString(), v)));
-    final action = w.requireString('action');
-    final id = w.optionalString('id');
-    final rawRecord = m['record'];
-    final Map<String, Object?>? record;
-    if (rawRecord != null) {
-      final decoded = decodeWireValue(rawRecord);
-      if (decoded is! Map) {
-        throw ProtocolEnvelopeException(
-            'Mutation "record" must decode to a map, got '
-            '${decoded.runtimeType}.');
-      }
-      record = decoded.map((k, v) => MapEntry(k.toString(), v));
-    } else {
-      record = null;
-    }
-    switch (action) {
-      case 'put':
-        await col.put(record!);
-      case 'upsert':
-        await col.upsert(record!);
-      case 'patch':
-        await col.patch(id!, record!);
-      case 'archive':
-        await col.archive(id!);
-      case 'restore':
-        await col.restore(id!);
-      case 'purge':
-        await col.purge(id!);
-      default:
-        throw ValidationException('Unknown mutation action: $action');
-    }
-  }
-
   /// Emits a worker→client `worker_event` snapshot envelope for [watchId].
   ///
   /// Query watches and single-record watches travel the typed contract
@@ -471,18 +299,6 @@ abstract class WorkerEngineHost {
       'watchId': watchId,
       'value': encodeWireValue(value),
     });
-  }
-
-  /// Resolves the single active transaction session, rejecting requests that
-  /// target a missing or foreign session id with a [StateError]. Shared by
-  /// every `tx_*` handler and the transaction-read path of compiled queries.
-  _TxSession _requireSession(int? sessionId) {
-    if (sessionId == null ||
-        _activeSession == null ||
-        _activeSession!.sessionId != sessionId) {
-      throw StateError('No active transaction session matching ID $sessionId.');
-    }
-    return _activeSession!;
   }
 }
 
@@ -501,7 +317,6 @@ final class WorkerEngine extends WorkerEngineHost
     with
         WorkerCrudHandlers,
         WorkerMaintenanceHandlers,
-        WorkerTxHandlers,
         WorkerSyncHandlers,
         WorkerFilesHandlers,
         WorkerConflictsHandlers {
@@ -575,7 +390,6 @@ final class WorkerEngine extends WorkerEngineHost
       _handlers = {
     WireOp.health: _handleHealth,
     WireOp.capabilities: _handleCapabilities,
-    WireOp.compiledQuery: _handleCompiledQuery,
     WireOp.open: _handleOpen,
     WireOp.analyze: _handleAnalyze,
     WireOp.walCheckpoint: _handleWalCheckpoint,
@@ -583,14 +397,6 @@ final class WorkerEngine extends WorkerEngineHost
     WireOp.pruneOutbox: _handlePruneOutbox,
     WireOp.compact: _handleCompact,
     WireOp.runMaintenance: _handleRunMaintenance,
-    WireOp.txBegin: _handleTxBegin,
-    WireOp.txGet: _handleTxGet,
-    WireOp.txMutateBatch: _handleTxMutateBatch,
-    WireOp.txSavepoint: _handleTxSavepoint,
-    WireOp.txRollbackTo: _handleTxRollbackTo,
-    WireOp.txRelease: _handleTxRelease,
-    WireOp.txCommit: _handleTxCommit,
-    WireOp.txRollback: _handleTxRollback,
     WireOp.watchCancel: _handleWatchCancel,
     WireOp.syncStart: _handleSyncStart,
     WireOp.syncStop: _handleSyncStop,

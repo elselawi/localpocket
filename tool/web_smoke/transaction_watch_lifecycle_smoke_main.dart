@@ -4,7 +4,6 @@ import 'dart:js_interop_unsafe';
 
 import 'package:localpocket/src/core/schema.dart';
 import 'package:localpocket/src/web/facade.dart';
-import 'package:localpocket/src/web/protocol.dart';
 
 Future<void> main() async {
   void report(String status, [String? detail]) {
@@ -194,7 +193,9 @@ Future<void> main() async {
             'Outer transaction did not commit repeated nested work.');
       }
 
-      // Only one worker transaction session may be active.
+      // Only one interactive write session may be active: a second session
+      // would queue behind the held-open first one and never begin, so the
+      // kernel rejects it with a typed error.
       final firstTransaction = Completer<void>();
       final firstStarted = Completer<void>();
       final first = pocket.transaction((tx) async {
@@ -211,8 +212,8 @@ Future<void> main() async {
       } catch (error) {
         secondError = error;
       }
-      if (secondError is! RemoteLocalPocketException ||
-          secondError.code != 'StateError') {
+      if (secondError is! StateError ||
+          !(secondError.message.contains('already active'))) {
         throw StateError(
             'Concurrent transaction was not rejected: $secondError');
       }

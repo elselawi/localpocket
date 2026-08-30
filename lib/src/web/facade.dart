@@ -26,6 +26,7 @@ import '../core/query/search_builder/search_builder.dart';
 import '../core/schema.dart';
 import '../core/schema_manifest.dart';
 import '../core/store.dart';
+import '../contract/contract.dart' as contract;
 import '../sync/conflicts.dart';
 import '../sync/status.dart';
 import '../typed/query_surface.dart';
@@ -420,20 +421,22 @@ class LocalPocket
   /// `watch`, `resolve`, `acceptLocal`, `acceptRemote`.
   WebConflicts get conflicts => _conflicts ??= WebConflicts.ins(this);
 
-  /// Runs [action] in an interactive transaction session.
+  /// Runs [action] in an interactive transaction session. The session is
+  /// kernel-minted and settles only after the real commit/rollback has run.
   Future<T> transaction<T>(Future<T> Function(WebTx tx) action) async {
-    final beginRes = (decodeWireValue((await send(WireOp.txBegin))!))!
-        as Map<String, Object?>;
-    final sessionId = beginRes['sessionId']! as int;
-    final tx = WebTx.ins(this, sessionId);
+    final begun = await contractRuntime
+        .send(const contract.TransactionBeginRequest(readOnly: false));
+    final tx = WebTx.ins(this, begun.session);
 
     try {
       final result = await action(tx);
-      await send(WireOp.txCommit, {'sessionId': sessionId});
+      await contractRuntime
+          .send(contract.TransactionCommitRequest(session: begun.session));
       return result;
     } catch (e) {
       try {
-        await send(WireOp.txRollback, {'sessionId': sessionId});
+        await contractRuntime
+            .send(contract.TransactionRollbackRequest(session: begun.session));
       } catch (_) {}
       rethrow;
     }

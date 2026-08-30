@@ -218,7 +218,8 @@ void main() {
       // Snapshots arrive as contract events on the shared runtime stream;
       // the initial one (emitted by the kernel on registration) is decoded
       // including its wire DateTime.
-      fake.deliverContractEvent(contract.WatchSnapshot(subscription: 'w1', items: [
+      fake.deliverContractEvent(
+          contract.WatchSnapshot(subscription: 'w1', items: [
         {
           'id': 'abc',
           'name': 'apple',
@@ -231,7 +232,8 @@ void main() {
       expect(events.single!['made_on'], DateTime.utc(2026, 2, 3));
 
       // A later snapshot (record updated) is delivered as well.
-      fake.deliverContractEvent(contract.WatchSnapshot(subscription: 'w1', items: [
+      fake.deliverContractEvent(
+          contract.WatchSnapshot(subscription: 'w1', items: [
         {
           'id': 'abc',
           'name': 'apple-2',
@@ -304,8 +306,8 @@ void main() {
       final cancels = fake.sent
           .map((s) => s.$2['request'])
           .whereType<Map>()
-          .map((m) => contract.ContractCodec.decodeRequest(
-              m.cast<String, Object?>()))
+          .map((m) =>
+              contract.ContractCodec.decodeRequest(m.cast<String, Object?>()))
           .whereType<contract.WatchCancelRequest>()
           .toList();
       expect(cancels, hasLength(1),

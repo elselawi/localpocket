@@ -637,3 +637,70 @@ envelope feeds both"). Consequences:
   unknown action, missing id) fail typed.
 - Deleted: `watch_protocol_test.dart` (old-envelope pins),
   `watch_initialization_test.dart` (helper deleted with watch_one).
+---
+
+# Transaction cutover over the contract (2026-08-31)
+
+The web facade's interactive transactions ride the kernel's contract session
+commands, and the last compiled-plan shipping path is gone: `tx_begin`,
+`tx_get`, `tx_mutate_batch`, `tx_savepoint`, `tx_rollback_to`, `tx_release`,
+`tx_commit`, `tx_rollback`, and `compiled_query` are all deleted from the
+wire registry. Gates: analyze 0, suite `+2721 ~83`, local web gate 7/7
+(asset regenerated), API snapshot PASS, browser matrix PASS.
+
+## The re-route
+- `db.transaction(...)` sends `TransactionBeginRequest(readOnly: false)` over
+  the shared contract runtime and carries the kernel-minted STRING session
+  (`WebTx.session`, formerly the worker-minted int `sessionId` — the public
+  field is renamed; the worker's one-active-session rule is superseded by
+  the kernel's session table). Commit/rollback semantics are unchanged and
+  the settle only completes after the real SQL commit/rollback ran (kernel
+  `_settle`).
+- `WebTxCollection` mixes the (now session-aware) `WebContractCrudForwarder`;
+  `WebTxQueryBuilder`/`WebTxSearchQueryBuilder` mix the (now session-aware)
+  `WebContractQueryForwarder`/`WebContractSearchForwarder`. In-session
+  writes ignore the `durability` parameter (fixed at begin), matching the
+  old wire's effective behavior (`tx_mutate_batch` never parsed it).
+- Nested transactions mint facade-side savepoint names (`sp1`, `sp2`, ...)
+  and ride `TransactionSavepointRequest`/`RollbackTo`/`Release`. Kernel
+  semantics preserved: ROLLBACK TO also RELEASEs, so names are reusable.
+- Worker deletions: the whole `worker_engine_tx.dart` (interactive session
+  machinery `_TxSession`/`_runTxSession`/`_activeSession`, all 8 handlers),
+  `_handleCompiledQuery`/`_parseCompiledQuery`/`_compiledOperations`,
+  `_requireSession`, `_applyMutation` (their last callers died together).
+  Facade deletions: `send_plan.dart`, `page_from_compiled.dart`,
+  `web_query_forwarder.dart`, `web_search_forwarder.dart`,
+  `web_collection_mixin.dart`.
+- DEVIATION (recorded): `QueryPlan`/`query_plan.dart` STAY as the
+  kernel-internal compiled artifact — `ReadService` and the builders'
+  compile paths run the native read engine with it, and rewriting that
+  engine is not this family's job (Rule 10). What dies here is plan
+  SHIPPING across the runtime boundary. The barrel export of `QueryPlan`
+  is the Phase 9 gate's business.
+
+## Tests moved in the same commit
+- `web_tx_test.dart` re-pinned to decoded contract requests (savepoint/
+  release/rollback-to sequence, session on every request, typed mutation
+  kinds, keyset cursor in the spec, typed search hit fetch through the
+  session).
+- `worker_engine_test.dart`: the compiled-plan group and the two old tx
+  groups are replaced by a compact contract-session group (CRUD + commit,
+  rollback, savepoint bookkeeping, unknown-session typed failure, commit
+  fault surfacing typed, close mid-transaction). Deeper session coverage
+  already lives in `test/runtime/loopback_test.dart` over the loopback
+  codec path.
+- Deleted: `plan_bridge_test.dart`, `send_compiled_plan_test.dart`,
+  `page_from_compiled_test.dart`, `transaction_query_test.dart` (all pinned
+  machinery that no longer exists). The case-160 vocabulary pin drops the
+  nine ops.
+### Concurrency rule discovered by the browser smoke (added in this pass)
+The transaction smoke hung on its "concurrent transaction is rejected" pin:
+the kernel's `db.read` and `db.transaction` share the write queue, so a
+second session (write OR read-only) could never begin while one was held
+open — its `TransactionBeginRequest` blocked forever instead of failing.
+Fix: the kernel `_begin` now rejects any second session while one is active
+(`StateError`), restoring the old worker's single-session rule uniformly for
+direct, loopback, and remote runtimes. The facade's savepoint error path is
+unaffected; the smoke now expects the contract-decoded `StateError` (the
+contract error codec replaces the old `RemoteLocalPocketException` envelope
+mapping).

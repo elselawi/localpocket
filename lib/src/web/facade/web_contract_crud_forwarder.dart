@@ -18,10 +18,15 @@ mixin WebContractCrudForwarder {
   /// Collection name carried in every request.
   String get name;
 
+  /// Transaction session the writes participate in, or null for the root
+  /// path (the kernel opens its own transaction). The session id is
+  /// kernel-minted (string); its durability class was fixed at begin.
+  String? get session => null;
+
   /// Reads the record with [id], or null when absent.
   Future<Map<String, Object?>?> get(String id) async =>
       (await pocket.contractRuntime
-              .send(contract.GetRequest(store: name, id: id)))
+              .send(contract.GetRequest(store: name, id: id, session: session)))
           .row;
 
   /// Inserts or replaces [record].
@@ -92,6 +97,12 @@ mixin WebContractCrudForwarder {
       _send(contract.MutationPurge(id), durability);
 
   Future<void> _send(contract.Mutation mutation, DurabilityClass durability) {
+    if (session != null) {
+      // In-session writes always ride the session's transaction; the
+      // session's durability class was fixed at begin.
+      return pocket.contractRuntime.send(contract.MutateRequest(
+          store: name, mutation: mutation, session: session));
+    }
     if (durability == DurabilityClass.normal) {
       return pocket.contractRuntime
           .send(contract.MutateRequest(store: name, mutation: mutation));

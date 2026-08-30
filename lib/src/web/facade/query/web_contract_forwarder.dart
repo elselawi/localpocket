@@ -107,10 +107,14 @@ mixin WebContractQueryForwarder<T extends Object> on QueryForwarder<T> {
   /// WebFacadeHost instance connected to the web worker.
   WebFacadeHost get pocket;
 
+  /// Transaction session the reads participate in, or null for the root
+  /// path. The session id is kernel-minted (string).
+  String? get session => null;
+
   RemoteRuntimeClient get _runtime => pocket.contractRuntime;
 
   QueryRequest _request(QuerySpecData spec) =>
-      QueryRequest(store: queryCore.store, spec: spec);
+      QueryRequest(store: queryCore.store, spec: spec, session: session);
 
   /// Executes the query and returns one page of records.
   Future<Page> fetch({String? cursor}) async {
@@ -132,34 +136,45 @@ mixin WebContractQueryForwarder<T extends Object> on QueryForwarder<T> {
   }
 
   /// Counts records matching the current filters.
-  Future<int> count() async =>
-      (await _runtime.send(CountRequest(store: queryCore.store, spec: _spec())))
-          .value;
+  Future<int> count() async => (await _runtime.send(CountRequest(
+          store: queryCore.store, spec: _spec(), session: session)))
+      .value;
 
   /// Counts distinct values of [field] matching the current filters.
   Future<int> countDistinct(String field) async =>
       (await _runtime.send(CountDistinctRequest(
-              store: queryCore.store, field: field, spec: _spec())))
+              store: queryCore.store,
+              field: field,
+              spec: _spec(),
+              session: session)))
           .value;
 
   /// Returns the distinct values of [field] matching the current filters.
-  Future<List<Object?>> distinct(String field) async => (await _runtime.send(
-          DistinctRequest(store: queryCore.store, field: field, spec: _spec())))
-      .values;
+  Future<List<Object?>> distinct(String field) async =>
+      (await _runtime.send(DistinctRequest(
+              store: queryCore.store,
+              field: field,
+              spec: _spec(),
+              session: session)))
+          .values;
 
   /// Returns IDs matching the current query.
-  Future<List<String>> ids() async =>
-      (await _runtime.send(IdsRequest(store: queryCore.store, spec: _spec())))
-          .ids;
+  Future<List<String>> ids() async => (await _runtime.send(
+          IdsRequest(store: queryCore.store, spec: _spec(), session: session)))
+      .ids;
 
   /// Returns SQLite's `EXPLAIN QUERY PLAN` output for this query.
-  Future<String> explain() async => (await _runtime
-          .send(ExplainRequest(store: queryCore.store, spec: _spec())))
+  Future<String> explain() async => (await _runtime.send(ExplainRequest(
+          store: queryCore.store, spec: _spec(), session: session)))
       .plan;
 
   Future<num?> _aggregate(AggregateFn fn, String field) async =>
       (await _runtime.send(AggregateRequest(
-              store: queryCore.store, fn: fn, field: field, spec: _spec())))
+              store: queryCore.store,
+              fn: fn,
+              field: field,
+              spec: _spec(),
+              session: session)))
           .value;
 
   /// Returns the sum of a numeric [field].

@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/core/query_plan.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:localpocket/src/web/worker_engine.dart';
@@ -28,25 +27,6 @@ Future<void> waitUntil(
   }
   fail('Timed out after $timeout waiting for condition.');
 }
-
-/// Converts a [QueryPlan] into the wire payload the worker's
-/// `_parseCompiledPlan` expects (mirrors `send_plan.dart`).
-Map<String, Object?> planPayload(QueryPlan plan, {int? pageLimit}) => {
-      'type': plan.typeName,
-      'operation': plan.operation,
-      'compilerVersion': plan.compilerVersion,
-      'store': plan.store,
-      'schemaVersion': plan.schemaVersion,
-      'schemaFingerprint': plan.schemaFingerprint,
-      'argumentCount': plan.argumentCount,
-      'sql': plan.sql,
-      'args': plan.args.map(encodeWireValue).toList(),
-      'limit': plan.limit,
-      'projection': plan.projection,
-      'decodeColumns': plan.decodeColumns,
-      'shape': plan.shape,
-      if (pageLimit != null) 'pageLimit': pageLimit,
-    };
 
 void main() {
   group('WorkerEngine — envelope & protocol', () {
@@ -308,7 +288,10 @@ void main() {
     });
   });
 
-  group('WorkerEngine — compiled query plan', () {
+  group('WorkerEngine — interactive transactions over the contract', () {
+    // The wire contract for a settle (commit/rollback must not acknowledge
+    // before the real SQL runs) is exercised through the contract session
+    // commands; application failures ride the contract error codec.
     late WorkerHarness h;
 
     setUp(() async {
@@ -316,492 +299,155 @@ void main() {
       addTearDown(() async {
         await h.close();
       });
-      await h.put('widgets', record(name: 'apple', qty: 7),
-          id: generateRecordId());
-      await h.put('widgets', record(name: 'banana', qty: 8),
-          id: generateRecordId());
-      await h.put('widgets', record(name: 'cherry', qty: 9),
-          id: generateRecordId());
     });
 
-    test('query op executes and decodes rows', () async {
-      final plan = h.pocket
-          .collection('widgets')
-          .query()
-          .where('name', eq: 'banana')
-          .limit(50)
-          .compilePlan();
-      final result = (await h
-              .sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
-          as Map<String, Object?>;
-      final items = (result['items']! as List).cast<Map>();
-      expect(items, hasLength(1));
-      expect(items.first['name'], 'banana');
-    });
+    Future<String> begin() async => (await h.runtime
+            .send(const contract.TransactionBeginRequest(readOnly: false)))
+        .session;
 
-    test('count / ids / sum aggregate ops', () async {
-      Future<Map<String, Object?>> run(QueryPlan plan) async => (await h
-              .sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
-          as Map<String, Object?>;
-
-      final count = await run(
-          h.pocket.collection('widgets').query().limit(50).compileCountPlan());
-      expect(count['value'], 3);
-
-      final ids = await run(
-          h.pocket.collection('widgets').query().limit(50).compileIdsPlan());
-      expect((ids['ids']! as List), hasLength(3));
-
-      final sum = await run(h.pocket
-          .collection('widgets')
-          .query()
-          .limit(50)
-          .compileAggregatePlan('SUM', 'qty'));
-      expect(sum['value'], 24);
-    });
-
-    test('explain op wraps the validated SELECT', () async {
-      final plan =
-          h.pocket.collection('widgets').query().limit(50).compileExplainPlan();
-      final result = (await h
-              .sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
-          as Map<String, Object?>;
-      expect(result['plan'], isA<String>());
-      expect(result['plan'], isNotEmpty);
-    });
-
-    test('pageLimit produces hasNext + boundary rows', () async {
-      final plan = h.pocket
-          .collection('widgets')
-          .query()
-          .orderBy('name')
-          .limit(50)
-          .compilePlan();
-      final result = (await h.sendOk(h.req(WireOp.compiledQuery,
-          args: planPayload(plan, pageLimit: 2))))! as Map<String, Object?>;
-      expect(result['hasNext'], isTrue);
-      expect((result['items']! as List), hasLength(2));
-      expect(result['lastRow'], isA<Map>());
-      expect(result['firstRow'], isA<Map>(),
-          reason: 'both boundary rows ride the envelope for bidirectional '
-              'cursor minting');
-    });
-
-    test('backward plan walks the flipped order in R-sequence', () async {
-      // Seed (name ASC): apple, banana, cherry — plus apricot inserted here
-      // so four rows exist: apple, apricot, banana, cherry.
-      await h.put('widgets', record(name: 'apricot', qty: 8),
-          id: generateRecordId());
-      final listPlan = h.pocket
-          .collection('widgets')
-          .query()
-          .orderBy('name')
-          .limit(50)
-          .compilePlan();
-      final listed = (await h.sendOk(
-              h.req(WireOp.compiledQuery, args: planPayload(listPlan))))!
-          as Map<String, Object?>;
-      final rows = [
-        for (final i in listed['items']! as List)
-          (i as Map).cast<String, Object?>(),
-      ];
-      expect(
-          rows.map((r) => r['name']), ['apple', 'apricot', 'banana', 'cherry']);
-
-      // Mint a cursor anchored at cherry: `values` = cherry (forward
-      // continuation), `pv` = cherry as the first row of a hypothetical
-      // window — the backward walk starts there.
-      final builder =
-          h.pocket.collection('widgets').query().orderBy('name').limit(1);
-      final cursor = builder.cursorForCompiledRow(rows[3], rows[3]);
-      // The backward window compiles with limit+1 so overflow is observable.
-      final plan = builder.compilePlan(
-        cursor: cursor,
-        backward: true,
-        limitOverride: 2,
-      );
-      final args = planPayload(plan, pageLimit: 1);
-      expect(args['sql'], contains('ORDER BY "name" DESC, "id" DESC'),
-          reason: 'the backward compile flips every direction');
-      expect(args['args'], contains('cherry'),
-          reason: 'the pv tuple seeds the walk');
-      final result = (await h.sendOk(h.req(WireOp.compiledQuery, args: args)))!
-          as Map<String, Object?>;
-      // Walking the flipped order from cherry yields banana (window, R
-      // order) with apricot as the overflow row — hasNext is the exact
-      // "rows exist before this window" flag.
-      expect(result['hasNext'], isTrue);
-      final items = result['items']! as List;
-      expect(items, hasLength(1));
-      expect((items.single as Map)['name'], 'banana');
-      expect((result['firstRow']! as Map)['name'], 'banana');
-      expect((result['lastRow']! as Map)['name'], 'banana');
-    });
-
-    test('plan validation matrix → ProtocolEnvelopeException (E15)', () async {
-      final plan = h.pocket
-          .collection('widgets')
-          .query()
-          .where('name', eq: 'apple')
-          .limit(50)
-          .compilePlan();
-      final good = planPayload(plan);
-
-      final tampered = <String, Object?>{
-        // unknown operation vocabulary
-        ...good,
-        'operation': 'delete',
-      };
-      final wrongCompiler = {
-        ...good,
-        'compilerVersion': queryCompilerVersion + 1
-      };
-      final staleSchemaVersion = {...good, 'schemaVersion': 999};
-      final staleFingerprint = {...good, 'schemaFingerprint': 'deadbeef'};
-      final argCountMismatch = {...good, 'argumentCount': 99};
-      final nonSelect = {...good, 'sql': 'DELETE FROM "widgets"'};
-      final wrongType = {...good, 'type': 'not_a_plan'};
-
-      for (final entry in {
-        'unknown operation': tampered,
-        'wrong compiler version': wrongCompiler,
-        'stale schema version': staleSchemaVersion,
-        'stale schema fingerprint': staleFingerprint,
-        'argument count mismatch': argCountMismatch,
-        'non-SELECT sql': nonSelect,
-        'wrong plan type': wrongType,
-      }.entries) {
-        final err =
-            await h.sendError(h.req(WireOp.compiledQuery, args: entry.value));
-        expect(err.code, WireErrorCode.localpocket, reason: entry.key);
-        expect(err.details?['type'], 'ProtocolEnvelopeException',
-            reason: entry.key);
-        expect(err.message, anyOf(contains('Malformed'), contains('Stale')),
-            reason: entry.key);
-      }
-    });
-
-    test('stale plan against a mutated schema is rejected', () async {
-      // Open with a schema, then compile a plan from a DIFFERENT engine whose
-      // schema has an extra field → fingerprint mismatch on the wire.
-      final other = await WorkerHarness.open(stores: [
-        widgetsSchema(extraFields: [Field.text('nickname')])
-      ]);
-      addTearDown(() => other.close());
-      final plan = other.pocket
-          .collection('widgets')
-          .query()
-          .where('name', eq: 'apple')
-          .limit(50)
-          .compilePlan();
-
-      final err = await h
-          .sendError(h.req(WireOp.compiledQuery, args: planPayload(plan)));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ProtocolEnvelopeException');
-      expect(err.message, contains('Stale'));
-    });
-  });
-
-  group('WorkerEngine — interactive transactions', () {
-    late WorkerHarness h;
-    late int sessionId;
-
-    setUp(() async {
-      h = await WorkerHarness.open();
-      addTearDown(() async {
-        await h.close();
-      });
-      final result =
-          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
-      sessionId = (result['sessionId']! as int);
-    });
-
-    test('tx session CRUD + commit persists', () async {
+    test('session CRUD + commit persists', () async {
+      final session = await begin();
       final id = generateRecordId();
-      await h.sendOk(h.req(WireOp.txMutateBatch, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue(record(name: 'tx', qty: 42, id: id))
-          },
-        ],
-      }));
+      await h.runtime.send(contract.MutateRequest(
+        store: 'widgets',
+        mutation: contract.MutationPut(record(name: 'tx', qty: 42, id: id)),
+        session: session,
+      ));
+      // The write is visible in-session...
+      final inTx = await h.runtime.send(
+          contract.GetRequest(store: 'widgets', id: id, session: session));
+      expect(inTx.row?['qty'], 42);
 
-      final doc = await h.sendOk(h.req(WireOp.txGet, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'id': id,
-      }));
-      expect(decodeWireValue(doc), isA<Map>());
-
-      await h.sendOk(h.req(WireOp.txCommit, args: {'sessionId': sessionId}));
+      await h.runtime.send(contract.TransactionCommitRequest(session: session));
 
       final committed = await h.get('widgets', id);
       expect(committed, isNotNull);
       expect(committed!['qty'], 42);
     });
 
-    test('tx rollback discards the session work', () async {
+    test('rollback discards the session work', () async {
+      final session = await begin();
       final id = generateRecordId();
-      await h.sendOk(h.req(WireOp.txMutateBatch, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue(record(name: 'gone', qty: 1, id: id))
-          },
-        ],
-      }));
-
-      await h.sendOk(h.req(WireOp.txRollback, args: {'sessionId': sessionId}));
-
+      await h.runtime.send(contract.MutateRequest(
+        store: 'widgets',
+        mutation: contract.MutationPut(record(name: 'gone', qty: 1, id: id)),
+        session: session,
+      ));
+      await h.runtime
+          .send(contract.TransactionRollbackRequest(session: session));
       expect(await h.get('widgets', id), isNull);
     });
 
-    test('savepoint → rollback_to → release bookkeeping (E15)', () async {
+    test('savepoint rollback-to discards nested work and releases the name',
+        () async {
+      final session = await begin();
       final id = generateRecordId();
-      await h.sendOk(h.req(WireOp.txMutateBatch, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue(record(name: 'outer', qty: 1, id: id))
-          },
-        ],
-      }));
+      await h.runtime.send(contract.MutateRequest(
+        store: 'widgets',
+        mutation: contract.MutationPut(record(name: 'outer', qty: 1, id: id)),
+        session: session,
+      ));
 
-      final sp = (await h.sendOk(
-              h.req(WireOp.txSavepoint, args: {'sessionId': sessionId})))!
-          as Map<String, Object?>;
-      final spName = sp['savepoint']! as String;
+      const spName = 'sp1';
+      await h.runtime.send(
+          contract.TransactionSavepointRequest(session: session, name: spName));
+      await h.runtime.send(contract.MutateRequest(
+        store: 'widgets',
+        mutation: contract.MutationPatch(id, {'qty': 99}),
+        session: session,
+      ));
+      // Rolling back to a savepoint also releases it, so a later savepoint
+      // may reuse the name (no unbounded growth / collision).
+      await h.runtime.send(contract.TransactionRollbackToRequest(
+          session: session, name: spName));
+      final inTx = await h.runtime.send(
+          contract.GetRequest(store: 'widgets', id: id, session: session));
+      expect(inTx.row?['qty'], 1);
 
-      await h.sendOk(h.req(WireOp.txMutateBatch, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'patch',
-            'id': id,
-            'record': encodeWireValue({'qty': 99})
-          },
-        ],
-      }));
-
-      // Rollback to the savepoint discards the patch.
-      await h.sendOk(h.req(WireOp.txRollbackTo, args: {
-        'sessionId': sessionId,
-        'savepoint': spName,
-      }));
-
-      final inTx = await h.sendOk(h.req(WireOp.txGet, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'id': id,
-      }));
-      expect((decodeWireValue(inTx) as Map)['qty'], 1);
-
-      // Bookkeeping: the savepoint was removed, so a new savepoint reuses the
-      // name (no unbounded growth / collision).
-      final sp2 = (await h.sendOk(
-              h.req(WireOp.txSavepoint, args: {'sessionId': sessionId})))!
-          as Map<String, Object?>;
-      expect(sp2['savepoint'], spName);
-
-      await h.sendOk(h.req(WireOp.txRelease, args: {
-        'sessionId': sessionId,
-        'savepoint': spName,
-      }));
-      await h.sendOk(h.req(WireOp.txCommit, args: {'sessionId': sessionId}));
+      await h.runtime.send(
+          contract.TransactionSavepointRequest(session: session, name: spName));
+      await h.runtime.send(contract.MutateRequest(
+        store: 'widgets',
+        mutation: contract.MutationPatch(id, {'qty': 2}),
+        session: session,
+      ));
+      await h.runtime.send(contract.TransactionCommitRequest(session: session));
+      expect((await h.get('widgets', id))!['qty'], 2);
     });
 
-    test('_requireSession rejects unknown / absent sessions (E15)', () async {
-      final err = await h.sendError(h.req(WireOp.txGet, args: {
-        'sessionId': 9999,
-        'store': 'widgets',
-        'id': generateRecordId(),
-      }));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'StateError');
-
-      final err2 = await h.sendError(h.req(WireOp.txGet, args: {
-        'store': 'widgets',
-        'id': generateRecordId(),
-      }));
-      expect(err2.details?['type'], 'StateError');
+    test('session ops on an unknown session fail typed', () async {
+      await expectLater(
+        h.runtime.send(const contract.GetRequest(
+            store: 'widgets', id: 'x', session: 'tx9999')),
+        throwsA(isA<StateError>()),
+      );
     });
 
-    test('non-map mutation element in tx_mutate_batch → typed error', () async {
-      final err = await h.sendError(h.req(WireOp.txMutateBatch, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue({'id': generateRecordId(), 'name': 'x'})
-          },
-          'not-a-map',
-        ],
-      }));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ProtocolEnvelopeException');
-      expect(err.message, isNot(contains('TypeError')));
+    test('a second session while one is active fails typed', () async {
+      final first = await begin();
+      await expectLater(
+        h.runtime.send(const contract.TransactionBeginRequest(readOnly: false)),
+        throwsA(isA<StateError>()),
+      );
+      await expectLater(
+        h.runtime.send(const contract.TransactionBeginRequest(readOnly: true)),
+        throwsA(isA<StateError>()),
+      );
+      await h.runtime.send(contract.TransactionRollbackRequest(session: first));
+      // After the writer settles, a new session begins cleanly.
+      final second = await begin();
+      await h.runtime
+          .send(contract.TransactionRollbackRequest(session: second));
     });
 
-    test('a second txBegin while one is active → StateError', () async {
-      final err = await h.sendError(h.req(WireOp.txBegin));
-      expect(err.details?['type'], 'StateError');
-      expect(err.message, contains('already active'));
-    });
-
-    test('session ops after commit → StateError', () async {
-      await h.sendOk(h.req(WireOp.txCommit, args: {'sessionId': sessionId}));
-      final err = await h.sendError(h.req(WireOp.txGet, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'id': generateRecordId(),
-      }));
-      expect(err.details?['type'], 'StateError');
-    });
-  });
-
-  group('WorkerEngine — interactive transaction settle failures', () {
-    // The wire contract (E: tx_commit/tx_rollback must not acknowledge
-    // before the real SQL COMMIT/ROLLBACK runs): a failed settle surfaces as
-    // a WorkerError — never a false success — the session is released, and
-    // the rolled-back work is absent from a fresh read.
     test(
-        'a failed COMMIT surfaces a WorkerError, releases the session, and '
+        'a failed COMMIT surfaces a typed error, releases the session, and '
         'the record is not committed', () async {
       final hooks = TestHooks();
-      final h = await WorkerHarness.open(testHooks: hooks);
-      addTearDown(h.close);
+      final h2 = await WorkerHarness.open(testHooks: hooks);
+      addTearDown(h2.close);
 
-      final begin =
-          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
-      final sessionId = begin['sessionId']! as int;
-
+      final session = await (h2.runtime
+              .send(const contract.TransactionBeginRequest(readOnly: false)))
+          .then((b) => b.session);
       final id = generateRecordId();
-      await h.sendOk(h.req(WireOp.txMutateBatch, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue(record(name: 'doomed', qty: 7, id: id))
-          },
-        ],
-      }));
+      await h2.runtime.send(contract.MutateRequest(
+        store: 'widgets',
+        mutation: contract.MutationPut(record(name: 'doomed', qty: 7, id: id)),
+        session: session,
+      ));
 
-      // Arm the commit-fault hook: the COMMIT now fails and rolls back.
-      final commitFault = StateError('simulated COMMIT failure (disk full)');
-      hooks.commitCrashPoint = () => throw commitFault;
-
-      final err = await h
-          .sendError(h.req(WireOp.txCommit, args: {'sessionId': sessionId}));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.message, contains('simulated COMMIT failure'));
-
-      // Disarm the fault hook so the follow-up session settles cleanly.
+      hooks.commitCrashPoint =
+          () => throw StateError('simulated COMMIT failure (disk full)');
+      await expectLater(
+        h2.runtime.send(contract.TransactionCommitRequest(session: session)),
+        throwsA(isA<StateError>()),
+      );
       hooks.commitCrashPoint = null;
 
-      // The session was released: a fresh tx_begin (and rollback) works.
-      final begin2 =
-          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
-      await h.sendOk(
-          h.req(WireOp.txRollback, args: {'sessionId': begin2['sessionId']}));
-
-      // The failed COMMIT rolled back the session's write.
-      expect(await h.get('widgets', id), isNull);
-    });
-
-    test(
-        'a failed ROLLBACK surfaces a WorkerError, releases the session, '
-        'and the record is absent', () async {
-      final hooks = TestHooks();
-      final h = await WorkerHarness.open(testHooks: hooks);
-      addTearDown(h.close);
-
-      final begin =
-          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
-      final sessionId = begin['sessionId']! as int;
-
-      final id = generateRecordId();
-      await h.sendOk(h.req(WireOp.txMutateBatch, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue(record(name: 'doomed', qty: 8, id: id))
-          },
-        ],
-      }));
-
-      // Arm the rollback-fault hook: the ROLLBACK is reported as failed.
-      final rollbackFault = StateError('simulated ROLLBACK failure (I/O)');
-      hooks.rollbackCrashPoint = () => throw rollbackFault;
-
-      final err = await h
-          .sendError(h.req(WireOp.txRollback, args: {'sessionId': sessionId}));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.message, contains('simulated ROLLBACK failure'));
-
-      // Disarm the fault hook so the follow-up session rolls back cleanly.
-      hooks.rollbackCrashPoint = null;
-
-      // The session was released and the rollback ran: the write is gone.
-      final begin2 =
-          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
-      await h.sendOk(
-          h.req(WireOp.txRollback, args: {'sessionId': begin2['sessionId']}));
-      expect(await h.get('widgets', id), isNull);
-    });
-
-    test(
-        'an unarmed session still commits and rolls back (no hook = no '
-        'fault)', () async {
-      final hooks = TestHooks();
-      final h = await WorkerHarness.open(testHooks: hooks);
-      addTearDown(h.close);
-
-      final id = generateRecordId();
-      final begin =
-          (await h.sendOk(h.req(WireOp.txBegin)))! as Map<String, Object?>;
-      final sessionId = begin['sessionId']! as int;
-      await h.sendOk(h.req(WireOp.txMutateBatch, args: {
-        'sessionId': sessionId,
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue(record(name: 'kept', qty: 1, id: id))
-          },
-        ],
-      }));
-      await h.sendOk(h.req(WireOp.txCommit, args: {'sessionId': sessionId}));
-      expect((await h.get('widgets', id))?['qty'], 1);
+      // The session was released: a fresh session settles cleanly, and the
+      // failed COMMIT rolled the write back.
+      final fresh = await (h2.runtime
+              .send(const contract.TransactionBeginRequest(readOnly: false)))
+          .then((b) => b.session);
+      await h2.runtime
+          .send(contract.TransactionRollbackRequest(session: fresh));
+      expect(await h2.get('widgets', id), isNull);
     });
 
     test(
         'close mid-transaction settles the session without surfacing an '
         'unhandled error', () async {
-      final h = await WorkerHarness.open();
-      await h.sendOk(h.req(WireOp.txBegin));
+      final h3 = await WorkerHarness.open();
+      await h3.runtime
+          .send(const contract.TransactionBeginRequest(readOnly: false));
 
-      // Closing while the tx is held open fails the body with
-      // DatabaseWorkerClosedException, the transaction rolls back, and the
-      // session's `done` outcome is consumed by the guard listener — no
-      // unhandled-async-error failure.
-      final reply = await h.close();
+      // Closing while the kernel session is held open settles it: the close
+      // reply is a success and no unhandled async error escapes.
+      final reply = await h3.close();
       expect(reply, isA<WorkerSuccess>());
     });
   });
-
   group('WorkerEngine — reactive watchers', () {
     late WorkerHarness h;
 
@@ -849,7 +495,7 @@ void main() {
           for (final e in h.sink.byOp(WireOp.contractEvent))
             if (contract.ContractCodec.decodeEvent(
                     (e['event']! as Map).cast<String, Object?>())
-                case contract.WatchSnapshot s
+                case final contract.WatchSnapshot s
                 when s.subscription == subscription)
               s,
         ];
@@ -898,8 +544,7 @@ void main() {
       await waitUntil(() async {
         final s = snapshots(started.subscription);
         return s.isNotEmpty &&
-            s.first.items.map((r) => r['id']).toList().toString() ==
-                '[${b}, ${a}]';
+            s.first.items.map((r) => r['id']).toList().toString() == '[$b, $a]';
       });
 
       // A pure reorder: same rows, new positions (b drops below a).
@@ -973,14 +618,12 @@ void main() {
           .send(contract.WatchOneRequest(store: 'widgets', id: id));
       // The kernel emits the initial snapshot on registration.
       await waitUntil(() async => snapshots(started.subscription).isNotEmpty);
-      expect(snapshots(started.subscription).single.items.single['name'],
-          'one');
+      expect(
+          snapshots(started.subscription).single.items.single['name'], 'one');
 
       await h.put('widgets', record(name: 'one-updated', qty: 2), id: id);
-      await waitUntil(
-          () async => snapshots(started.subscription).length >= 2);
-      expect(
-          snapshots(started.subscription).last.items.single['name'],
+      await waitUntil(() async => snapshots(started.subscription).length >= 2);
+      expect(snapshots(started.subscription).last.items.single['name'],
           'one-updated');
     });
 

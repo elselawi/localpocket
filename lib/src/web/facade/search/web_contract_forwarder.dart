@@ -11,6 +11,10 @@ mixin WebContractSearchForwarder<T extends Object> on SearchForwarder<T> {
   /// WebFacadeHost instance connected to the web worker.
   WebFacadeHost get pocket;
 
+  /// Transaction session the search participates in, or null for the root
+  /// path. The session id is kernel-minted (string).
+  String? get session => null;
+
   /// The search term.
   String get term;
 
@@ -28,6 +32,7 @@ mixin WebContractSearchForwarder<T extends Object> on SearchForwarder<T> {
         includeArchived: searchCore.includeArchivedFlag,
         includeHidden: searchCore.includeHiddenFlag,
       ),
+      session: session,
     ));
     return [
       for (final h in res.hits) SearchResult(id: h.id, score: h.score),

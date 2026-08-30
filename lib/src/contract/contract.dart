@@ -17,7 +17,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
-import 'package:localpocket/src/core/change_bus.dart' show ChangeAction, ChangeOrigin;
+import 'package:localpocket/src/core/change_bus.dart'
+    show ChangeAction, ChangeOrigin;
 import 'package:localpocket/src/core/errors.dart';
 
 // The typed error hierarchy crosses the runtime boundary via the error

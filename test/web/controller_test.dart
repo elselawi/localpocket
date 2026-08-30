@@ -73,51 +73,28 @@ void main() {
           'done': false,
         });
 
-    // 3. Verify the compiled query plan envelope (single read operation)
-    final queryReq = WebRequest(
+    // 3. Verify a maintenance envelope round-trips
+    final analyzeReq = WebRequest(
       version: webProtocolVersion,
       requestId: 3,
-      op: WireOp.compiledQuery,
-      args: {
-        'operation': 'query',
-        'compilerVersion': 1,
-        'store': 'notes',
-        'schemaVersion': 1,
-        'schemaFingerprint': 'f' * 64,
-        'argumentCount': 1,
-        'sql': 'SELECT * FROM "notes" WHERE done = ? LIMIT 20',
-        'args': [true],
-        'pageLimit': 20,
-      },
+      op: WireOp.analyze,
+      args: {'store': 'notes'},
     );
 
-    final queryDecoded = WebRequest.fromJson(queryReq.toJson());
-    expect(queryDecoded.op, WireOp.compiledQuery);
-    expect(queryDecoded.args['pageLimit'], 20);
+    final analyzeDecoded = WebRequest.fromJson(analyzeReq.toJson());
+    expect(analyzeDecoded.op, WireOp.analyze);
+    expect(analyzeDecoded.args['store'], 'notes');
 
-    // 4. Verify transaction session envelopes
-    final txBeginReq = WebRequest(
+    // 4. Verify an old-wire watch cancel envelope round-trips (the int-id
+    // channel that remains for conflicts watches)
+    final watchCancelReq = WebRequest(
       version: webProtocolVersion,
       requestId: 4,
-      op: WireOp.txBegin,
+      op: WireOp.watchCancel,
+      args: {'watchId': 7},
     );
-    expect(txBeginReq.op, WireOp.txBegin);
-
-    final txSavepointReq = WebRequest(
-      version: webProtocolVersion,
-      requestId: 5,
-      op: WireOp.txSavepoint,
-      args: {'sessionId': 1},
-    );
-    expect(txSavepointReq.op, WireOp.txSavepoint);
-
-    final txCommitReq = WebRequest(
-      version: webProtocolVersion,
-      requestId: 6,
-      op: WireOp.txCommit,
-      args: {'sessionId': 1},
-    );
-    expect(txCommitReq.op, WireOp.txCommit);
+    expect(watchCancelReq.op, WireOp.watchCancel);
+    expect(watchCancelReq.args['watchId'], 7);
   });
 
   test('file upload protocol envelopes round-trip through WebRequest', () {

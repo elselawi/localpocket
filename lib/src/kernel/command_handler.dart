@@ -441,6 +441,14 @@ class KernelCommandHandler implements CommandHandler {
   // -- interactive transactions ----------------------------------------------
 
   Future<Result> _begin(bool readOnly, TransactionDurability durability) {
+    // One interactive session at a time. Reads and writes share the write
+    // queue, so a second held-open session could never begin — its begin
+    // would block forever behind the first. This restores, at the kernel
+    // level, the old worker's single-session rule for both runtimes.
+    if (_sessions.isNotEmpty) {
+      throw StateError(
+          'A transaction session is already active on this database.');
+    }
     final id = 'tx${++_counter}';
     final session = _TxSession(id, readOnly);
     _sessions[id] = session;
@@ -546,19 +554,19 @@ class KernelCommandHandler implements CommandHandler {
     final watcher = OneWatcher(context.database, table, id);
     late final StreamSubscription<dynamic> sub;
     sub = watcher.startStream().listen(
-          (item) {
-            _events.add(WatchSnapshot(
-              subscription: subscription,
-              items: item == null ? const [] : [item],
-            ));
-          },
-          onError: (Object _) {
-            // A refresh failure kills the watch: cancel it so the broken
-            // subscription stops emitting instead of leaking.
-            unawaited(sub.cancel());
-            _watches.remove(subscription);
-          },
-        );
+      (item) {
+        _events.add(WatchSnapshot(
+          subscription: subscription,
+          items: item == null ? const [] : [item],
+        ));
+      },
+      onError: (Object _) {
+        // A refresh failure kills the watch: cancel it so the broken
+        // subscription stops emitting instead of leaking.
+        unawaited(sub.cancel());
+        _watches.remove(subscription);
+      },
+    );
     _watches[subscription] = sub;
     return Future.value(WatchStartedResult(subscription: subscription));
   }

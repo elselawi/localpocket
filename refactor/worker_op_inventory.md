@@ -30,7 +30,7 @@ with the string registry).
 |---|---|---|
 | `get` | `GetRequest(store, id, select?, context?)` → `RowResult` | ✔ CUT OVER (2026-08-31) — old op carried no projection facts (audit in ledger); deleted with `_handleGet`. |
 | `mutate_batch` | `MutateRequest(store, mutation, context?)` → `MutationResult` | ✔ CUT OVER (2026-08-31) — facade batches map to `MutationPutAll`/`MutationUpsertAll`/`MutationPatchAll`; explicit `DurabilityClass.full` rides a contract tx session. Deleted with `_handleMutateBatch`/`_parseDurability`. |
-| `compiled_query` | `QueryRequest(store, ir, context?)` → `QueryPageResult` | ✔ CUT OVER (2026-08-30) — remains ONLY for transaction-scoped reads; retires with the tx family. |
+| `compiled_query` | `QueryRequest(store, ir, context?)` → `QueryPageResult` | ✔ RETIRED (2026-08-31) — tx-scoped reads ride the contract's session-aware `QueryRequest`/`SearchRequest`; plan shipping across the runtime boundary is gone. |
 
 ## 3. Maintenance family (6 ops)
 
@@ -47,14 +47,14 @@ with the string registry).
 
 | Op | Destination command | Notes |
 |---|---|---|
-| `tx_begin` | `BeginTransactionRequest(readOnly, durability)` → `BeginTransactionResult(contextId)` | worker session model (§11.3) |
-| `tx_get` | `GetRequest` + `context` | context rides the request |
-| `tx_mutate_batch` | `MutateRequest` + `context` | |
-| `tx_savepoint` | `SavepointRequest(context, name)` | manual savepoints preserved |
-| `tx_rollback_to` | `RollbackToRequest(context, name)` | |
-| `tx_release` | `ReleaseRequest(context, name)` | |
-| `tx_commit` | `CommitTransactionRequest(context)` → `CommitResult` | events post-commit only |
-| `tx_rollback` | `RollbackTransactionRequest(context)` | page sends rollback before rethrowing |
+| `tx_begin` | `BeginTransactionRequest(readOnly, durability)` → `BeginTransactionResult(contextId)` | ✔ CUT OVER (2026-08-31) — kernel-minted string sessions; the int-id worker handshake is deleted |
+| `tx_get` | `GetRequest` + `context` | ✔ CUT OVER (2026-08-31) |
+| `tx_mutate_batch` | `MutateRequest` + `context` | ✔ CUT OVER (2026-08-31) |
+| `tx_savepoint` | `SavepointRequest(context, name)` | ✔ CUT OVER (2026-08-31) — facade mints names |
+| `tx_rollback_to` | `RollbackToRequest(context, name)` | ✔ CUT OVER (2026-08-31) |
+| `tx_release` | `ReleaseRequest(context, name)` | ✔ CUT OVER (2026-08-31) |
+| `tx_commit` | `CommitTransactionRequest(context)` → `CommitResult` | ✔ CUT OVER (2026-08-31) |
+| `tx_rollback` | `RollbackTransactionRequest(context)` | ✔ CUT OVER (2026-08-31) |
 
 ## 5. Watch family (3 ops)
 
@@ -126,6 +126,7 @@ runtimes (§6.7).
 
 CRUD/batch ✔ (2026-08-31) → query/search/cursors ✔ (2026-08-30) → watches/events ✔
 (2026-08-31; `worker_event`/int-id `watch_cancel` survive for conflicts only) →
-transactions → maintenance/capabilities → conflicts → files/streams →
+transactions ✔ (2026-08-31; `QueryPlan` stays kernel-internal) →
+maintenance/capabilities → conflicts → files/streams →
 sync/auth/status/realtime → close/lifecycle. Old and new envelopes may coexist
 per family; both must call the same kernel services.

@@ -32,11 +32,6 @@ class WireOp {
   static const String workerEvent = 'worker_event';
   static const String capabilities = 'capabilities';
 
-  /// The single read operation: an engine-compiled query plan (SQL + bound
-  /// args + schema fingerprint). Every query, aggregate, search, and
-  /// transaction read travels as this envelope.
-  static const String compiledQuery = 'compiled_query';
-
   // Maintenance
   static const String analyze = 'analyze';
   static const String walCheckpoint = 'wal_checkpoint';
@@ -44,16 +39,6 @@ class WireOp {
   static const String pruneOutbox = 'prune_outbox';
   static const String compact = 'compact';
   static const String runMaintenance = 'run_maintenance';
-
-  // Interactive transaction sessions
-  static const String txBegin = 'tx_begin';
-  static const String txGet = 'tx_get';
-  static const String txMutateBatch = 'tx_mutate_batch';
-  static const String txSavepoint = 'tx_savepoint';
-  static const String txRollbackTo = 'tx_rollback_to';
-  static const String txRelease = 'tx_release';
-  static const String txCommit = 'tx_commit';
-  static const String txRollback = 'tx_rollback';
 
   // Reactive Watchers
 
@@ -117,21 +102,12 @@ class WireOp {
     health,
     workerEvent,
     capabilities,
-    compiledQuery,
     analyze,
     walCheckpoint,
     vacuum,
     pruneOutbox,
     compact,
     runMaintenance,
-    txBegin,
-    txGet,
-    txMutateBatch,
-    txSavepoint,
-    txRollbackTo,
-    txRelease,
-    txCommit,
-    txRollback,
     watchCancel,
     syncStart,
     syncStop,

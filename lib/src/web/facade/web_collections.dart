@@ -82,8 +82,8 @@ class WebCollection with ChangeBusAwareStore, WebContractCrudForwarder {
     if (registration == null) return;
     await registration.listener.cancel();
     try {
-      await _pocket.contractRuntime.send(contract.WatchCancelRequest(
-          subscription: registration.subscription));
+      await _pocket.contractRuntime.send(
+          contract.WatchCancelRequest(subscription: registration.subscription));
     } catch (_) {}
   }
 

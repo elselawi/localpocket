@@ -75,11 +75,28 @@ Cutover slices DONE (2026-08-30):
    `conflicts_watch` only. See the "Watches and committed events cutover"
    ledger section for the payload decision.
 
+6. **Transaction family cutover**: `db.transaction` begins kernel-minted
+   string sessions over the contract; `WebTx.session` (renamed from the
+   int `sessionId`); `WebTxCollection`/builders mix the session-aware
+   contract forwarders. Deleted: the eight `tx_*` wire ops +
+   `worker_engine_tx.dart`, the worker's interactive-session machinery,
+   `WireOp.compiledQuery` + its parse/dispatch/handler, `send_plan.dart`,
+   `page_from_compiled.dart`, `web_query_forwarder.dart`,
+   `web_search_forwarder.dart`, `web_collection_mixin.dart`, and the
+   plan-bridge tests. Kernel rule restored: ONE interactive session at a
+   time (a second begin fails typed — reads and writes share the write
+   queue, so anything else would block forever). DEVIATION:
+   `query_plan.dart` STAYS as the kernel-internal compiled artifact
+   (ReadService + builders run the native read engine with it); what
+   retired is plan shipping across the runtime boundary. The barrel
+   export dies at the Phase 9 gate.
+
 Remaining (this stage):
-transactions (retires `compiled_query`/`send_plan.dart`/`QueryPlan`) →
-maintenance/capabilities → conflicts (retires `worker_event`/
-`watch_cancel`/`conflicts_*`) → files → sync/auth/status/realtime →
-close/lifecycle. The barrel switch is the NEXT agent's stage (plan Phase 9).
+maintenance/capabilities (`run_maintenance` needs `RunMaintenanceRequest`;
+`health` folds away; `close` semantics consolidate) → conflicts (retires
+`worker_event`/`watch_cancel`/`conflicts_*`) → files →
+sync/auth/status/realtime → close/lifecycle. The barrel switch is the NEXT
+agent's stage (plan Phase 9).
 
 The full destination plan (12 stages, gates, checklists) is in
 `final_refactoring_plan.md`. Stages 0–6 are DONE. You are starting stage 7:
@@ -452,17 +469,19 @@ Fixed order:
    `watch_initialization_test.dart`. DEVIATION: `worker_event` + int-id
    `watch_cancel` survive for `conflicts_watch` only (deleted with the
    conflicts family).
-3. **Transactions** — `tx_begin`/`tx_get`/`tx_mutate_batch`/savepoints/
-   commit/rollback → contract session commands (exist; sessions are
-   strings — the old wire uses int ids). Re-route `WebTx`,
-   `WebTxCollection`, `WebTxQueryBuilder`, `WebTxSearchQueryBuilder`.
-   THIS FAMILY RETIRES THE LAST COMPILED-PLAN CALLERS — delete here:
-   `send_plan.dart`, `page_from_compiled.dart`, `_parseCompiledPlan`/
-   `_dispatchCompiledQuery`/`_compiledOperations`/`_handleCompiledQuery`,
-   `WireOp.compiledQuery`, public `QueryPlan` construction
-   (`query_plan.dart`), the `planPayload` helper,
-   `send_compiled_plan_test.dart`, and the remaining bridge tests in
-   `plan_bridge_test.dart`. Update `test/web/web_tx_test.dart`.
+3. **Transactions** — DONE (2026-08-31, see the ledger's "Transaction
+   cutover" section). `db.transaction` begins kernel-minted string sessions
+   over the contract; `WebTx.session` (renamed from int `sessionId`);
+   `WebTxCollection`/builders mix the session-aware contract forwarders.
+   Deleted: the eight `tx_*` wire ops + `worker_engine_tx.dart`, the
+   worker's interactive-session machinery, `WireOp.compiledQuery` + its
+   parse/dispatch/handler, `send_plan.dart`, `page_from_compiled.dart`,
+   `web_query_forwarder.dart`, `web_search_forwarder.dart`,
+   `web_collection_mixin.dart`, and the plan-bridge tests.
+   DEVIATION: `query_plan.dart` STAYS as the kernel-internal compiled
+   artifact (ReadService + builders run the native read engine with it);
+   what retired is plan shipping across the runtime boundary. The barrel
+   export dies at the Phase 9 gate.
 4. **Maintenance/capabilities** — `analyze`/`wal_checkpoint`/`vacuum`/
    `prune_outbox`/`compact` → contract (exist); `capabilities` → contract
    (exists; worker handshake stays authoritative); `health` folds away;

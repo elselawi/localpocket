@@ -491,12 +491,10 @@ abstract final class ContractCodec {
           id: id,
           origin: _changeOrigin(payload['origin']),
           action: _changeAction(payload['action']),
-          oldRecord: oldRecord == null
-              ? null
-              : _stringMap(oldRecord, 'oldRecord'),
-          newRecord: newRecord == null
-              ? null
-              : _stringMap(newRecord, 'newRecord'),
+          oldRecord:
+              oldRecord == null ? null : _stringMap(oldRecord, 'oldRecord'),
+          newRecord:
+              newRecord == null ? null : _stringMap(newRecord, 'newRecord'),
           changedFields: changedFields is List
               ? {for (final f in changedFields) f as String}
               : const {},
