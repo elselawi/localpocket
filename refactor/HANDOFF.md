@@ -35,15 +35,26 @@ same contract (replace the `WireOp`/`wire_args` registry family by family;
 the old wire stays as an adapter until each family passes), then query IR,
 then barrel switch. The old raw/typed surfaces still work.
 
-First cutover slice DONE (2026-08-30): the worker answers
-`contract_request` envelopes through the kernel's own command handler,
-emits `contract_event` envelopes for committed facts, and
-`RemoteRuntimeClient` (`lib/src/runtime/remote_runtime_client.dart`)
-carries the same envelopes over the page transport. The conformance suite
-runs every facade body over a third `remote` runtime through the worker
-engine. See the remote-cutover ledger section at the end of
-`refactor/contract-runtime.md`. Next: re-route the page-side facade
-families to the contract envelope (CRUD/batch first), then query IR.
+First cutover slices DONE (2026-08-30):
+
+1. The worker answers `contract_request` envelopes through the kernel's own
+   command handler, emits `contract_event` envelopes for committed facts,
+   and `RemoteRuntimeClient` (`lib/src/runtime/remote_runtime_client.dart`)
+   carries the same envelopes over the page transport. The conformance suite
+   runs every facade body over a third `remote` runtime through the worker
+   engine.
+2. `LocalPocket.open` dispatches through a conditional platform opener
+   (`lib/src/api/open_platform.dart`): native keeps the direct runtime; web
+   boots the kernel in the worker and binds the page to a
+   `RemoteRuntimeClient` — the destination-API web vocabulary is executable
+   and proven by a browser smoke page in the matrix
+   (`tool/web_smoke/api_smoke_main.dart`). The browser run also exposed and
+   fixed a latent N-times event-delivery bug in the worker's JS boundary
+   (`controller.dart` now registers ONE sink per connection).
+
+See the two remote-cutover ledger sections at the end of
+`refactor/contract-runtime.md`. Next: re-route the page-side old-wire
+families (CRUD/batch first, then query/search/cursors), then query IR.
 
 The full destination plan (12 stages, gates, checklists) is in
 `final_refactoring_plan.md`. Stages 0–4 and the stage-5 facade vertical
