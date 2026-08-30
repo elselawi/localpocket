@@ -90,8 +90,7 @@ final class Store<S extends StoreDef<S>> {
       ));
 
   /// Inserts or overwrites a batch of records atomically.
-  Future<void> upsertAll(List<List<Write<S>>> records) =>
-      _send(MutateRequest(
+  Future<void> upsertAll(List<List<Write<S>>> records) => _send(MutateRequest(
         store: name,
         mutation: MutationUpsertAll([
           for (final record in records) _buildRecord(record, allowId: true),

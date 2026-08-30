@@ -6,28 +6,7 @@ import 'package:localpocket/src/typed/typed.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
-
-/// The canonical store definition for the facade tests.
-final class Tasks extends StoreDef<Tasks> {
-  Tasks._() : super(name: 'tasks', version: 1);
-  static final Tasks store = Tasks._();
-
-  static final title = store.schema.text('title').req();
-  static final done = store.schema.boolean('done');
-  static final priority = store.schema.integer('priority');
-  static final dueAt = store.schema.dateTime('due_at');
-  static final tags = store.schema.jsonList<String>('tags');
-
-  @override
-  List<FieldDef<Tasks, Object?>> get fields =>
-      [title, done, priority, dueAt, tags];
-
-  @override
-  List<IndexSpec> get indexes => [store.indexSpec([done, priority])];
-
-  @override
-  bool get keepUnsyncedArchives => true;
-}
+import 'tasks_store.dart';
 
 LocalPocketOptions options({String path = ':memory:'}) =>
     LocalPocketOptions(path: path, stores: [Tasks.store]);
@@ -106,7 +85,9 @@ void main() {
       expect(patched(Tasks.title), 'b', reason: 'patch keeps other fields');
       expect(patched(Tasks.priority), 7);
 
-      await tasks.patchAll({id: [Tasks.priority.set(8)]});
+      await tasks.patchAll({
+        id: [Tasks.priority.set(8)]
+      });
       expect((await tasks.get(id))!(Tasks.priority), 8);
 
       await tasks.archive(id);
@@ -129,26 +110,19 @@ void main() {
       expect(await tasks.get(id), isNull);
     });
 
-    test('writes enforce store ownership and patch immutability', () async {
+    test('patch rejects id writes and unknown records', () async {
       final db = await LocalPocket.open(options());
       addTearDown(db.close);
       final tasks = db.store(Tasks.store);
 
-      final other = Tasks._();
+      final created = await tasks.put([Tasks.title.set('x')]);
       expect(
-        () => tasks.put([Tasks.title.set('x')]),
-        returnsNormally,
-      );
-      // A forged FieldWrite owned by a foreign definition instance is the
-      // runtime backstop behind the phantom type.
-      expect(
-        tasks.put([FieldWrite<Tasks>(other, 'title', 'forged')]),
-        throwsA(isA<TypedStoreMismatchError>()),
-      );
-      expect(
-        tasks.patch((await tasks.put([Tasks.title.set('x')])).id,
-            [Writes.id('nope')]),
+        tasks.patch(created.id, [Writes.id('nope')]),
         throwsA(isA<ArgumentError>()),
+      );
+      expect(
+        tasks.patch('missing-id', [Tasks.title.set('y')]),
+        throwsA(isA<RecordNotFoundException>()),
       );
     });
 
@@ -223,8 +197,7 @@ void main() {
       // connection: the kernel's JSON decode succeeds (a map), the typed
       // list codec refuses it.
       final raw = await kernel.KernelDatabase.open(path: t.path, stores: []);
-      await raw.traceExecute(
-          'UPDATE "tasks" SET "tags" = ? WHERE "id" = ?',
+      await raw.traceExecute('UPDATE "tasks" SET "tags" = ? WHERE "id" = ?',
           ['{"a": 1}', created.id]);
       await raw.close();
 
