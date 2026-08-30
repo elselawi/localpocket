@@ -68,6 +68,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         _executor = executor,
         _where = [],
         _orGroups = [],
+        _structuredFilters = [],
         _order = [],
         _limit = null,
         _all = false,
@@ -87,6 +88,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         _executor = null,
         _where = [],
         _orGroups = [],
+        _structuredFilters = [],
         _order = [],
         _limit = null,
         _all = false,
@@ -112,6 +114,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     this._cursor,
     this._backward,
     this._suppressIdTiebreak,
+    this._structuredFilters,
   );
 
   final LocalPocket? _pocket;
@@ -143,6 +146,12 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
 
   final List<WhereClause> _where;
   final List<WhereClause> _orGroups;
+
+  /// Structured mirror of [_where]/[_orGroups] recorded at DSL call time:
+  /// one [PredicateNode] per `where`/`orWhere`/`wherePredicate` call, in call
+  /// order. Consumed by the web facade's spec lowering while the page-side
+  /// compiled-plan transport exists; never used for compilation itself.
+  final List<PredicateNode> _structuredFilters;
   final List<OrderClause> _order;
   final int? _limit;
   final bool _all;
@@ -160,6 +169,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   QueryBuilder _copyWith({
     List<WhereClause>? where,
     List<WhereClause>? orGroups,
+    List<PredicateNode>? structuredFilters,
     List<OrderClause>? order,
     int? limit,
     bool? all,
@@ -185,6 +195,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         cursor ?? _cursor,
         backward ?? _backward,
         suppressIdTiebreak ?? _suppressIdTiebreak,
+        structuredFilters ?? List<PredicateNode>.from(_structuredFilters),
       );
 
   /// Name of the collection being queried.
@@ -276,6 +287,26 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     }
     final copy = _copyWith();
     copy._where.addAll(clauses);
+    // Structured mirror for the web spec lowering: one node per supplied
+    // operator, in the same order the clauses were added. Operators the tree
+    // compiler does not spell (`neq`, `isNotNull`) capture as negations.
+    copy._structuredFilters.addAll([
+      if (eq != null) LeafPredicate(field, 'eq', [eq]),
+      if (neq != null) NotPredicate(LeafPredicate(field, 'eq', [neq])),
+      if (gt != null) LeafPredicate(field, 'gt', [gt]),
+      if (gte != null) LeafPredicate(field, 'gte', [gte]),
+      if (lt != null) LeafPredicate(field, 'lt', [lt]),
+      if (lte != null) LeafPredicate(field, 'lte', [lte]),
+      if (inValues != null) LeafPredicate(field, 'inValues', inValues),
+      if (between != null)
+        LeafPredicate(field, 'between', [between.$1, between.$2]),
+      if (startsWith != null) LeafPredicate(field, 'startsWith', [startsWith]),
+      if (endsWith != null) LeafPredicate(field, 'endsWith', [endsWith]),
+      if (contains != null) LeafPredicate(field, 'contains', [contains]),
+      if (isNull == true) LeafPredicate(field, 'isNull', const []),
+      if (isNotNull == true)
+        NotPredicate(LeafPredicate(field, 'isNull', const [])),
+    ]);
     return copy;
   }
 
@@ -301,6 +332,14 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     if (groupSqls.isEmpty) return this;
     final copy = _copyWith();
     copy._orGroups.add(WhereClause('(${groupSqls.join(' OR ')})', args));
+    // Structured mirror: one OR node whose arms are the per-group ANDs.
+    copy._structuredFilters.add(AnyPredicate([
+      for (final g in groups)
+        if (g.isNotEmpty)
+          AllPredicate([
+            for (final e in g.entries) LeafPredicate(e.key, 'eq', [e.value]),
+          ]),
+    ]));
     return copy;
   }
 
@@ -325,6 +364,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     final (sql, args) = compilePredicateTree(node);
     final copy = _copyWith();
     copy._where.add(WhereClause(sql, args));
+    copy._structuredFilters.add(node);
     return copy;
   }
 
@@ -435,6 +475,27 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
 
   /// Whether the query has a projection.
   bool get isProjection => _select != null;
+
+  // --------------------------------------- web spec-lowering snapshot ------
+
+  /// The structured filter nodes recorded by `where`/`orWhere`/
+  /// `wherePredicate`, in call order. Consumed by the web facade's spec
+  /// lowering; removed together with the page-side compiled-plan transport.
+  List<PredicateNode> get filterNodes => List.unmodifiable(_structuredFilters);
+
+  /// The declared ordering terms (the implicit `id` tie-breaker is added by
+  /// the compiler, never recorded here).
+  List<OrderClause> get orderNodes => List.unmodifiable(_order);
+
+  /// The archived-scope flag.
+  bool get includeArchivedFlag => _includeArchived;
+
+  /// The hidden-scope flag.
+  bool get includeHiddenFlag => _includeHidden;
+
+  /// The projected field list, or null for a full-row read.
+  List<String>? get selectFields =>
+      _select == null ? null : List.unmodifiable(_select!);
 
   // ------------------------------------------------------------- compiling --
 
