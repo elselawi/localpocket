@@ -1,4 +1,4 @@
-# HANDOFF — public facade over the runtime contract
+# HANDOFF — web remote cutover over the runtime contract
 
 Read this file top to bottom before touching anything. It is written so an
 agent with no prior session memory can continue the work safely.
@@ -13,11 +13,15 @@ restructured toward a single destination architecture:
 > One public API. One semantic kernel. Two runtimes (native direct, browser
 > worker remote). One sealed typed command contract.
 
-The destination **public** API is fully specified by two fixtures that do not
-compile yet — they are the executable definition of your target:
+The destination **public** API is specified by two fixtures — they are the
+executable definition of the target:
 
-- `refactor/fixtures/final_api_vm.dart` — VM target
-- `refactor/fixtures/final_api_web.dart` — web/worker target
+- `test/compile_fixtures/final_api_vm.dart` — VM target, **ACTIVE** (the
+  analyzer is its gate; it imports `lib/src/api/api.dart` until the barrel
+  switch, then flips to `package:localpocket/localpocket.dart` unchanged in
+  body);
+- `refactor/fixtures/final_api_web.dart` — web/worker target, still pending;
+  it activates when the web remote cutover lands.
 
 Your stage: ~~make the public facade (`LocalPocket`, `Store<S>`, `Row<S>`,
 `Page<S>`, `Transaction`, events, watches, sync attachment) exist and run
@@ -32,8 +36,9 @@ the old wire stays as an adapter until each family passes), then query IR,
 then barrel switch. The old raw/typed surfaces still work.
 
 The full destination plan (12 stages, gates, checklists) is in
-`final_refactoring_plan.md`. Stages 0–4 are DONE. You are starting stage 5.
-Stage-by-stage history lives in `refactor/*.md`.
+`final_refactoring_plan.md`. Stages 0–4 and the stage-5 facade vertical
+slice (native + loopback) are DONE. You are starting stage 6: the web
+remote cutover. Stage-by-stage history lives in `refactor/*.md`.
 
 ---
 
@@ -319,8 +324,8 @@ switch + planning-artifact deletion).
 
 ```
 dart analyze lib test tool
-dart test                                   # full hermetic suite (~2700 tests)
-dart test test/runtime test/contract test/refactor   # your fast inner loop
+dart test                                   # full hermetic suite (~2730 tests)
+dart test test/api test/conformance test/runtime test/contract   # facade inner loop
 dart run tool/local_web_gate.dart
 dart run tool/api_snapshot.dart
 dart test --tags real --run-skipped test/e2e/        # live PocketBase (optional)
