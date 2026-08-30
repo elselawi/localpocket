@@ -1,4 +1,4 @@
-/// Typed Web/WASM protocol invariants (plan §4.9, cases 158–163).
+/// Typed Web/WASM protocol invariants.
 ///
 /// Runtime worker behavior is exercised by `tool/web_smoke/typed_smoke_main.dart`;
 /// this VM test pins the exact wire vocabulary that the typed facade must reuse.

@@ -318,7 +318,8 @@ void main() {
           openPocket(stores: [dupIx]), throwsA(isA<sqlite.SqliteException>()));
     });
 
-    test('store name collision across stores: rejected before any DDL (Phase 3)',
+    test(
+        'store name collision across stores: rejected before any DDL',
         () async {
       final a = CollectionSchema<Object?>(
         name: 'same',
@@ -330,7 +331,7 @@ void main() {
         version: 1,
         fields: [Field.text('b')],
       );
-      // Phase 3 (§4.17): the old "last registration wins silently" mismatch
+      // The old "last registration wins silently" mismatch
       // is now a typed error before any schema mutation.
       await expectLater(
         openPocket(stores: [a, b]),

@@ -39,7 +39,7 @@ enum ChangeAction {
 /// The ONE canonical "parameter not provided" sentinel. Every omitted-value
 /// comparison in the change/event layer must use this single instance so two
 /// different sentinel objects can never be interpreted as two different
-/// concepts (refactor plan §4.13 — one omitted-value sentinel).
+/// concepts — one omitted-value sentinel, everywhere.
 const Object _sentinelUnset = Object();
 
 /// {@template localpocket.record_change_event}

@@ -248,18 +248,16 @@ void main() {
       await pocket.close();
 
       // Reopen WITH parity rules: an FTS config change is a behavior change,
-      // so it requires a version bump (Phase 3 manifest policy) — and the
+      // so it requires a version bump (manifest policy) — and the
       // registration must rebuild the index so pre-existing rows honor the
       // new equivalences.
-      pocket = await openPocket(
-          path: path,
-          stores: [
-            articlesSchema(
-              rules: _arabicRules,
-              version: 2,
-              migrations: [StoreMigration(toVersion: 2)],
-            ),
-          ]);
+      pocket = await openPocket(path: path, stores: [
+        articlesSchema(
+          rules: _arabicRules,
+          version: 2,
+          migrations: [StoreMigration(toVersion: 2)],
+        ),
+      ]);
       addTearDown(pocket.close);
       final results =
           await pocket.collection('articles').search('احمد').all().fetch();
@@ -467,8 +465,8 @@ void main() {
     test('multi-token fuzzy query validates EACH token', () {
       final builder = SearchBuilder.compileOnly(
           searchSchema(fuzzy: true), 'hello ab world cd ef');
-      expect(
-          () => builder.all().debugCompile(), throwsA(isA<ValidationException>()));
+      expect(() => builder.all().debugCompile(),
+          throwsA(isA<ValidationException>()));
       // Error names the first offending token.
       try {
         SearchBuilder.compileOnly(searchSchema(fuzzy: true), 'ok123 ab')
@@ -510,8 +508,8 @@ void main() {
           throwsA(isA<ValidationException>()));
       // But a bareword CONTAINING operator letters is legal FTS5 syntax
       // (no word boundaries) — pinned as accepted.
-      final glued = SearchBuilder.compileOnly(
-          searchSchema(rules: {'a': 'AND'}), 'aa');
+      final glued =
+          SearchBuilder.compileOnly(searchSchema(rules: {'a': 'AND'}), 'aa');
       expect(() => glued.all().debugCompile(), returnsNormally);
     });
 
@@ -589,12 +587,9 @@ void main() {
         () async {
       final t = await tempDbPath();
       addTearDown(t.cleanup);
-      final pocket = await openPocket(
-          path: t.path,
-          stores: [
-            articlesSchema(
-                rules: _arabicRules, keepUnsyncedArchives: true),
-          ]);
+      final pocket = await openPocket(path: t.path, stores: [
+        articlesSchema(rules: _arabicRules, keepUnsyncedArchives: true),
+      ]);
       addTearDown(pocket.close);
       final col = pocket.collection('articles');
       final visible = generateRecordId();
@@ -692,7 +687,7 @@ void main() {
           path: path, stores: [articlesSchema(rules: _arabicRules)]);
       await pocket
           .collection('articles')
-            .put({'id': 'aaa000000000001', 'title': 'أحمد', 'body': ''});
+          .put({'id': 'aaa000000000001', 'title': 'أحمد', 'body': ''});
       await pocket.close();
 
       pocket = await openPocket(
@@ -702,7 +697,7 @@ void main() {
       await pocket
           .collection('articles')
           .put({'id': 'bbb000000000002', 'title': 'إحمد', 'body': ''});
-        expect(await pocket.collection('articles').search('احمد').all().fetch(),
+      expect(await pocket.collection('articles').search('احمد').all().fetch(),
           hasLength(2),
           reason: 'both rows searchable by bare alef across the restart');
     });

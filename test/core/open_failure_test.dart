@@ -155,7 +155,7 @@ void main() {
 
   group('same-version and duplicate-name registration', () {
     test(
-        'same schema version with changed definitions is REJECTED (Phase 3 '
+        'same schema version with changed definitions is REJECTED ('
         'manifest policy)', () async {
       final t = await tempDbPath();
       addTearDown(t.cleanup);
@@ -175,14 +175,13 @@ void main() {
       );
     });
 
-    test(
-        'duplicate store names in one open: rejected before any DDL (Phase 3)',
+    test('duplicate store names in one open: rejected before any DDL',
         () async {
       final a = CollectionSchema<Object?>(
           name: 'dup', version: 1, fields: [Field.text('a')]);
       final b = CollectionSchema<Object?>(
           name: 'dup', version: 1, fields: [Field.text('b')]);
-      // §4.17: store identity must be unambiguous — the old "first table wins,
+      // Store identity must be unambiguous — the old "first table wins,
       // last definition wins" mismatch is now a typed error before any schema
       // mutation.
       await expectLater(

@@ -5,7 +5,7 @@ import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
 
-/// Phase 1 characterization — refactor plan §4.4 (coarse and detailed change
+/// Coarse and detailed change
 /// feeds are not identical) and Rule 7 (events are committed facts).
 ///
 /// One internal committed fact must feed BOTH consumers: the coarse

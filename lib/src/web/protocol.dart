@@ -50,7 +50,7 @@ class WireOp {
   static const String compact = 'compact';
   static const String runMaintenance = 'run_maintenance';
 
-  // Interactive Transaction Sessions (§7.1)
+  // Interactive transaction sessions
   static const String txBegin = 'tx_begin';
   static const String txGet = 'tx_get';
   static const String txMutateBatch = 'tx_mutate_batch';
@@ -64,7 +64,7 @@ class WireOp {
   static const String watchQuery = 'watch_query';
   static const String watchOne = 'watch_one';
   static const String watchCancel = 'watch_cancel';
-  // Sync & Auth (§8, §12)
+  // Sync & auth
   static const String syncStart = 'sync_start';
   static const String syncStop = 'sync_stop';
   static const String syncNow = 'sync_now';

@@ -1,4 +1,4 @@
-/// Part of `worker_engine.dart` — sync engine lifecycle + auth (§8).
+/// Part of `worker_engine.dart` — sync engine lifecycle + auth.
 ///
 /// Wire handlers for `sync_start/stop/now/pause/resume/set_connectivity/
 /// update_auth/status`. `sync_start` builds a `PocketBaseBackend` and the

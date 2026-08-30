@@ -105,7 +105,7 @@ class SyncConfig {
       return const Duration(seconds: 1);
     }
     // The shared overflow-safe exponential primitive — the SAME one the
-    // realtime reconnect loop uses (refactor plan §4.12).
+    // realtime reconnect loop uses.
     return exponentialBackoffDelay(
       base: backoffBase,
       cap: backoffCap,

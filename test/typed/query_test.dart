@@ -1,4 +1,4 @@
-/// Typed queries, FTS search, and watch (plan §4.6, cases 92–126).
+/// Typed queries, FTS search, and watch.
 library;
 
 import 'dart:async';

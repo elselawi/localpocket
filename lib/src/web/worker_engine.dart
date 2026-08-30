@@ -291,7 +291,7 @@ abstract class WorkerEngineHost {
     final projectionRaw = args['projection'];
     final limitRaw = args['limit'];
     final shapeRaw = args['shape'];
-    // §4.5 (refactor plan): EVERY field the page sends must survive the
+    // EVERY field the page sends must survive the
     // temporary compiled-plan bridge. `decodeColumns` drives the
     // projection-aware decoder in the runner/watcher; dropping it silently
     // disabled projected decoding on web.
@@ -331,7 +331,7 @@ abstract class WorkerEngineHost {
 
     final pageLimitRaw = args['pageLimit'];
     final pageLimit = pageLimitRaw is int ? pageLimitRaw : null;
-    // Phase 2 (plan §12 step 7/8): the worker reaches the SAME kernel read
+    // The worker reaches the SAME kernel read
     // service native uses — plan execution cannot drift between platforms.
     return pocket.reads.executeCompiled(plan, run: run, pageLimit: pageLimit);
   }

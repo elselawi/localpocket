@@ -2,7 +2,7 @@ import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('Phase 7 Watcher Wire Protocol Envelopes', () {
+  group('Watcher wire protocol envelopes', () {
     test('watchQuery envelope round-trip', () {
       final req = WebRequest(
         version: webProtocolVersion,

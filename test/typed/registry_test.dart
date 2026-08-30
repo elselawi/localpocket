@@ -1,4 +1,4 @@
-/// Reference-identity registry tests (plan §4.2, cases 41–49): direct
+/// Reference-identity registry tests: direct
 /// `TypedStoreRegistry` unit tests plus the `db.store`/`tx.store` wiring.
 library;
 

@@ -2,7 +2,7 @@ import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('Phase 6 Sync & Auth wire protocol envelopes', () {
+  group('Sync & auth wire protocol envelopes', () {
     test('syncStart request round-trip', () {
       const req = WebRequest(
         version: webProtocolVersion,

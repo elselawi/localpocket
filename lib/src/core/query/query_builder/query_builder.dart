@@ -120,7 +120,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// The execution context's executor. Non-null only when this builder was
   /// created from a transaction-scoped [Collection] — the query then runs
   /// through the TRANSACTION executor and can never fall back to the outer
-  /// database (plan §4.2 / §5.3).
+  /// database.
   final DatabaseExecutor? _executor;
 
   /// Structural pin for tests: the executor this query will run through.

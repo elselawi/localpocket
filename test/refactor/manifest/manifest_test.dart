@@ -27,14 +27,16 @@ CollectionSchema<Object?> _schema({
         Field.enumValue('size', ['S', 'M']),
         Field.ref('owner_id', to: 'owners', enforceFk: true),
       ],
-      indexes: const [IndexSpec(['name', 'qty'])],
+      indexes: const [
+        IndexSpec(['name', 'qty'])
+      ],
       conflictPolicy: conflictPolicy ?? const ConflictPolicy(),
       migrations: migrations,
       documentMigrations: documentMigrations,
       validator: validator ? ((_) => const []) : null,
     );
 
-/// Phase 3 — the complete schema manifest (plan §9, §12 Phase 3).
+/// The complete schema manifest.
 ///
 /// Every behavior-affecting value is in the manifest; executable features are
 /// explicit flags (never silently dropped); duplicate stores, same-version
@@ -57,7 +59,7 @@ void main() {
       expect((definition['indexes']! as List), hasLength(1));
     });
 
-    test('captures conflict-policy descriptors (§4.1 closed)', () {
+    test('captures conflict-policy descriptors', () {
       final manifest = _compile(_schema(
         name: 'policy',
         conflictPolicy: ConflictPolicy(
@@ -76,8 +78,7 @@ void main() {
 
     test('round-trips through JSON with a stable fingerprint', () {
       final manifest = _compile(widgetsSchema(name: 'roundtrip', version: 3));
-      final restored =
-          SchemaManifest.fromJson(_decode(manifest.encodedJson));
+      final restored = SchemaManifest.fromJson(_decode(manifest.encodedJson));
       expect(restored.store, 'roundtrip');
       expect(restored.version, 3);
       expect(restored.fingerprint, manifest.fingerprint);
@@ -137,12 +138,11 @@ void main() {
     });
 
     test('a clean schema has none', () {
-      expect(_compile(widgetsSchema(name: 'clean')).unsupportedFeatures,
-          isEmpty);
+      expect(
+          _compile(widgetsSchema(name: 'clean')).unsupportedFeatures, isEmpty);
     });
 
-    test('the manifest fingerprint differs when a callback differs (§4.1)',
-        () {
+    test('the manifest fingerprint differs when a callback differs', () {
       final plain =
           _compile(_schema(name: 'e', conflictPolicy: ConflictPolicy()));
       final withResolver = _compile(_schema(
@@ -194,7 +194,7 @@ void main() {
       expect(db.requireTable('webok').manifest.unsupportedFeatures, isEmpty);
     });
 
-    test('native runtime keeps executing callbacks until Phase 8 (interim)',
+    test('native runtime keeps executing callbacks (flagged in the manifest)',
         () async {
       final db = await openPocket(
         stores: [

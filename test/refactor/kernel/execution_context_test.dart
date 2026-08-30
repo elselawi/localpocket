@@ -4,7 +4,7 @@ import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
 
-/// Phase 2 structural pins — refactor plan §12 Phase 2:
+/// Structural pins:
 ///
 /// 1. The outer-executor fallback is GONE for transaction reads: query and
 ///    search builders created from a `Tx` carry the transaction's executor

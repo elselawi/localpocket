@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 Map<String, Object?> _decodeWireMap(Map<String, Object?> wire) =>
     wire.map((k, v) => MapEntry(k, decodeWireValue(v)));
 
-/// Phase 1 — refactor plan §4.9: sync status/report wire codecs must be
+/// Sync status/report wire codecs must be
 /// COMPLETE. Every field the model exposes survives encode → decode, including
 /// `blocked`, `discarded`, timestamps, and error state. Before the fix the
 /// report codec dropped `blocked` by design ("intentionally absent"), so a
@@ -31,7 +31,7 @@ void main() {
       expect(decoded.pushed, report.pushed);
       expect(decoded.deadLettered, report.deadLettered);
       expect(decoded.blocked, report.blocked,
-          reason: '§4.9: blocked must not disappear in the wire codec');
+          reason: 'blocked must not disappear in the wire codec');
       expect(decoded.discarded, report.discarded);
       expect(decoded.hadError, report.hadError);
     });

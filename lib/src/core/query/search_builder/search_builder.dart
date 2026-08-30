@@ -79,7 +79,7 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
   /// The execution context's executor. Non-null only when created from a
   /// transaction-scoped [Collection] — the search then runs through the
   /// TRANSACTION executor and can never fall back to the outer database
-  /// (plan §4.2 / §5.3).
+  ///.
   final DatabaseExecutor? _executor;
 
   /// Structural pin for tests: the executor this search will run through.

@@ -1,5 +1,4 @@
-/// Part of `local_pocket.dart` — the kernel context (Phase 2 of the final
-/// refactoring plan, plan §12 step 2).
+/// Part of `local_pocket.dart` — the kernel context.
 ///
 /// The shared dependency set every kernel service receives (destination:
 /// `src/kernel/kernel_context.dart`). `KernelContext` carries the database
@@ -31,7 +30,7 @@ final class KernelContext {
 
   /// The owning kernel database. Services should prefer the narrow fields
   /// below; this reference exists for the legacy raw/typed migration clients
-  /// (Collection/Tx) until Phase 5–7 retire them.
+  /// (Collection/Tx) until those clients are retired.
   final KernelDatabase database;
 
   /// The SQLite database executor (platform-supplied port).

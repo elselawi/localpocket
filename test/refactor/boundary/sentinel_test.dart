@@ -5,7 +5,8 @@ import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
 
-/// Phase 1 characterization — refactor plan §4.13 (one omitted-value sentinel).
+/// One omitted-value sentinel: every omitted-value comparison in the
+/// change/event layer uses a single canonical sentinel instance.
 ///
 /// Before the fix, `change_bus.dart` carried TWO different sentinel objects
 /// (`const Object _sentinelUnset` and `class _SentinelUnset`), and

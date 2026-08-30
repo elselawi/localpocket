@@ -1,4 +1,4 @@
-/// Typed row reads (plan §4.3, cases 50–72): the engine is the source of
+/// Typed row reads: the engine is the source of
 /// truth — every test writes through the raw path and reads through the
 /// typed path (or vice versa), so the typed layer can never silently
 /// diverge from the raw surface.
@@ -36,10 +36,9 @@ Future<LocalPocket> pocketWithNullTitle() async {
   await raw.collection('tasks').put({'id': 'rowcase58000001', 'title': null});
   // Drop the persisted manifest so the reopen exercises the LEGACY adoption
   // path (a manifest-less database): the raw fixture deliberately declares a
-  // different same-version schema than the typed one, which the Phase 3
+  // different same-version schema than the typed one, which the manifest
   // manifest comparison would (correctly) refuse.
-  await raw.db
-      .execute("DELETE FROM lp_meta WHERE k = 'schema_manifest:tasks'");
+  await raw.db.execute("DELETE FROM lp_meta WHERE k = 'schema_manifest:tasks'");
   await raw.close();
   return LocalPocket.open(path: t.path, stores: [Tasks.store.collectionSchema]);
 }

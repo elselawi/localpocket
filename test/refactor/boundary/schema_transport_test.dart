@@ -23,21 +23,21 @@ CollectionSchema<Object?> _schema(
       migrations: migrations,
     );
 
-/// Phase 1 characterization — refactor plan §4.1, §4.16, §4.17.
+/// Schema transport characterization.
 ///
 /// These tests DOCUMENT the lossy/lenient schema-transport behavior the
 /// destination architecture removes:
 ///
-/// - §4.1: executable callbacks (conflict resolvers, migration transforms) are
+/// - Executable callbacks (conflict resolvers, migration transforms) are
 ///   absent from `CollectionSchema.toJson()`, so two schemas with DIFFERENT
-///   behavior share ONE fingerprint. Phase 3 replaces this with the complete
+///   behavior share ONE legacy fingerprint; the complete
 ///   `SchemaManifest` and rejects unsupported callbacks before open.
-/// - §4.16: a same-version behavior-affecting definition change reopens with
-///   stale physical columns. Phase 3 rejects it without a version bump.
-/// - §4.17: duplicate store names currently resolve to "last handle wins".
-///   Phase 3 rejects duplicates before opening.
+/// - A same-version behavior-affecting definition change would reopen with
+///   stale physical columns; it is rejected without a version bump.
+/// - Duplicate store names previously resolved to "last handle wins";
+///   they are now rejected before opening.
 void main() {
-  group('§4.1 schema transport drops executable callbacks', () {
+  group('schema transport drops executable callbacks', () {
     test('a custom conflict resolver is invisible to the fingerprint', () {
       final plain = _schema(name: 'resolved');
       final withResolver = _schema(
@@ -49,7 +49,7 @@ void main() {
       expect(
         _fingerprint(plain),
         _fingerprint(withResolver),
-        reason: 'documents §4.1: resolver behavior is NOT transported today',
+        reason: 'resolver behavior is NOT transported today',
       );
     });
 
@@ -71,7 +71,7 @@ void main() {
       expect(
         _fingerprint(withoutTransform),
         _fingerprint(withTransform),
-        reason: 'documents §4.1: transform behavior is NOT transported today',
+        reason: 'transform behavior is NOT transported today',
       );
     });
 
@@ -81,11 +81,10 @@ void main() {
               conflictPolicy: ConflictPolicy(editsUnarchive: true))
           .toJson();
       expect(json.containsKey('conflictPolicy'), isFalse,
-          reason: 'policy is not part of the transport today (§4.1)');
+          reason: 'policy is not part of the transport today');
     });
 
-    test('Phase 3 FIX: the MANIFEST fingerprint is honest about callbacks',
-        () {
+    test('the MANIFEST fingerprint is honest about callbacks', () {
       final plain = SchemaManifest.compile(_schema(name: 'resolved'));
       final withResolver = SchemaManifest.compile(_schema(
         name: 'resolved',

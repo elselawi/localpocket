@@ -1,4 +1,4 @@
-/// Part of `worker_engine.dart` — reactive watchers (§7.2).
+/// Part of `worker_engine.dart` — reactive watchers.
 ///
 /// Wire handlers for `watch_query` (compiled-plan watch), `watch_one`
 /// (single-record watch) and `watch_cancel`. Watcher emissions are forwarded
@@ -13,7 +13,7 @@
 part of 'worker_engine.dart';
 
 /// {@template localpocket.__active_watcher}
-/// Active watcher registration in the worker (§7.2).
+/// Active watcher registration in the worker.
 /// {@endtemplate}
 class _ActiveWatcher {
   /// {@macro localpocket.__active_watcher}
@@ -27,7 +27,7 @@ mixin WorkerWatchHandlers on WorkerEngineHost {
       WorkerEventSink sink, WebRequest req) async {
     final watchId = WireArgs(req.args).requireInt('watchId', op: 'watch_query');
     final plan = _parseCompiledPlan(req.args);
-    // §4.6 (refactor plan): an explicitly ordered watch MUST use an
+    // An explicitly ordered watch MUST use an
     // order-sensitive digest on every runtime, so a pure re-order emits. The
     // page declares the query's ordering because the compiled SQL cannot
     // distinguish an explicit ORDER BY from an implicit tie-breaker.

@@ -75,8 +75,8 @@ void main() {
       expect(decoded.hadError, isTrue);
     });
 
-    test('blocked is on the wire (§4.9) and decode stays tolerant', () {
-      // Refactor plan §4.9: reports must be complete — `blocked` used to be
+    test('blocked is on the wire and decode stays tolerant', () {
+      // Reports must be complete — `blocked` used to be
       // dropped by the codec, so a decoded web report always claimed 0.
       final encoded = encodeSyncReport(const SyncReport(pushed: 2, blocked: 5));
       expect(encoded['blocked'], 5);

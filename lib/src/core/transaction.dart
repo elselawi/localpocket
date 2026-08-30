@@ -40,7 +40,7 @@ class Tx {
   /// The database executor scoped to this transaction.
   DatabaseExecutor get executor => _executor;
 
-  /// The explicit execution context for this transaction (plan §5.3).
+  /// The explicit execution context for this transaction.
   ///
   /// Every operation legal inside a transaction routes through this context:
   /// the transaction executor — never the outer database executor. Queries

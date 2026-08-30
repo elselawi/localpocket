@@ -1,14 +1,11 @@
-/// Part of `store.dart` — the mutation service (Phase 2 of the final
-/// refactoring plan, plan §12 step 5).
+/// Part of `store.dart` — the mutation service.
 ///
 /// [MutationService] is the named owner of the local mutation path: validation,
 /// canonical payload construction, dirty-base capture, outbox/sync-row
 /// atomicity, file dependencies, cache invalidation, and committed event
 /// buffering. The implementation is the existing private pipeline on
-/// [Collection] (moved to this ownership in Phase 2 without changing SQL or
-/// event semantics); Phase 6/7 command handlers call THIS service rather than
-/// the collection, and Phase 10 moves it physically to
-/// `src/kernel/mutation_service.dart`.
+/// [Collection] (moved to this ownership without changing SQL or event
+/// semantics); command handlers call THIS service rather than the collection.
 part of 'store.dart';
 
 /// The kernel mutation owner.

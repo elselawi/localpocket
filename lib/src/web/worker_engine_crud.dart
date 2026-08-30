@@ -27,7 +27,7 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
     final store = w.requireString('store', op: 'mutate_batch');
     final mutations = w.requireList('mutations', op: 'mutate_batch');
     final durability =
-      _parseDurability(w.optionalString('durability'), op: 'mutate_batch');
+        _parseDurability(w.optionalString('durability'), op: 'mutate_batch');
 
     // Fast path: a lone mutation at the default durability class skips the
     // transaction machinery entirely. Any explicit durability request must
@@ -84,7 +84,7 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
               'Store "${schema.name}" declares encrypted fields but no '
               'fieldCipher was provided.');
         }
-        // Phase 3 (plan §12 step 10): the open handshake validates the schema
+        // The open handshake validates the schema
         // manifest BEFORE any registration — the page-computed fingerprint
         // must match the worker's own compilation (so both runtimes provably
         // mean the same schema), and unsupported executable features fail in

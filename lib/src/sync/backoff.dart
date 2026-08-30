@@ -1,6 +1,6 @@
 /// The ONE shared overflow-safe exponential backoff primitive.
 ///
-/// Refactor plan §4.12: sync retry delays and realtime reconnect backoff must
+/// Sync retry delays and realtime reconnect backoff must
 /// share one primitive (or clearly composed policies) so their timing
 /// contracts can never drift. Both [SyncConfig.delayFor] (sync cycles) and
 /// the SSE reconnect loop (PocketBase realtime) delegate here.

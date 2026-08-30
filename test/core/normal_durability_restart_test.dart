@@ -66,8 +66,7 @@ void main() {
           .archive(id, durability: DurabilityClass.normal);
       await pocket.close();
 
-      final reopened = await openFileBacked(t.path,
-          keepUnsyncedArchives: true);
+      final reopened = await openFileBacked(t.path, keepUnsyncedArchives: true);
       addTearDown(reopened.close);
       final rows =
           await reopened.db.query('widgets', where: 'id = ?', whereArgs: [id]);

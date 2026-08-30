@@ -1,10 +1,9 @@
-/// Part of `local_pocket.dart` — the read service (Phase 2 of the final
-/// refactoring plan, plan §12 step 7).
+/// Part of `local_pocket.dart` — the read service.
 ///
 /// A wrapper around the existing compiled-plan runner (`executeCompiledQuery`)
-/// and, from Phase 6, the one query compiler. Native and the web worker reach
+/// and the one query compiler. Native and the web worker reach
 /// the SAME read path through this service; neither side owns SQL execution
-/// semantics. Destination file: `src/kernel/read_service.dart` (Phase 10).
+/// semantics.
 part of 'local_pocket.dart';
 
 /// The kernel read owner: query execution and result shaping.

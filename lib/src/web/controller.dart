@@ -63,7 +63,7 @@ final class LocalPocketDatabaseController extends DatabaseController {
         (backupPath) => _removeOpfsFile(backupDbName, backupPath);
 
     try {
-      // Assert journal mode TRUNCATE immediately after open per §6.8.
+      // Assert journal mode TRUNCATE immediately after open.
       rawDb.execute('PRAGMA journal_mode=TRUNCATE');
       final mode = rawDb.select('PRAGMA journal_mode').first.columnAt(0);
       if (mode.toString().toLowerCase() != 'truncate') {

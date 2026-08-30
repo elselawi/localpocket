@@ -237,7 +237,7 @@ class LocalPocket
     }));
 
     // Explicitly send open envelope with schemas to ensure registration.
-    // Phase 3: the page also sends its computed manifest fingerprints; the
+    // The page also sends its computed manifest fingerprints; the
     // worker verifies each against its own compilation, so both runtimes
     // provably mean the same schema before any store is used.
     // Fail fast FIRST on executable features that could never survive the
@@ -383,7 +383,7 @@ class LocalPocket
   /// `watch`, `resolve`, `acceptLocal`, `acceptRemote`.
   WebConflicts get conflicts => _conflicts ??= WebConflicts.ins(this);
 
-  /// Runs [action] in an interactive transaction session (§7.1).
+  /// Runs [action] in an interactive transaction session.
   Future<T> transaction<T>(Future<T> Function(WebTx tx) action) async {
     final beginRes = (decodeWireValue((await send(WireOp.txBegin))!))!
         as Map<String, Object?>;
@@ -448,11 +448,11 @@ class LocalPocket
     });
   }
 
-  // -------------------------------------------------- Sync & Auth Controls (§8, §12)
+  // -------------------------------------------------- Sync & auth controls
 
   /// Starts the synchronization engine in the worker with the given credentials.
   ///
-  /// Note: Supported configuration is one tab running sync (§12).
+  /// Note: Supported configuration is one tab running sync.
   @override
   Future<void> startSync(
       {String? baseUrl, String? scopeId, String? token}) async {

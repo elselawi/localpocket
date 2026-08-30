@@ -37,7 +37,7 @@ class CompiledWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
 
   /// Whether the watched query has an explicit order. When true the digest is
   /// order-sensitive: a pure re-order of the same rows emits. Mirrors the
-  /// native watcher's `_query.hasExplicitOrder` policy (§4.6).
+  /// native watcher's `_query.hasExplicitOrder` policy.
   final bool ordered;
 
   @override

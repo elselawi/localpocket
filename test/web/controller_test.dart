@@ -6,7 +6,7 @@ import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('Phase 3 worker controller request parsing and dispatch', () {
+  test('Worker controller request parsing and dispatch', () {
     // 1. Verify schema serialization through WebRequest
     final schema = CollectionSchema<Object?>(
       name: 'notes',

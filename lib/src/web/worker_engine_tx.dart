@@ -1,4 +1,4 @@
-/// Part of `worker_engine.dart` — interactive transaction sessions (§7.1).
+/// Part of `worker_engine.dart` — interactive transaction sessions.
 ///
 /// Wire handlers for `tx_begin/get/mutate_batch/savepoint/rollback_to/
 /// release/commit/rollback`. There is exactly one active session at a time
@@ -13,7 +13,7 @@
 part of 'worker_engine.dart';
 
 /// {@template localpocket.__tx_session}
-/// Active interactive transaction session state in the worker (§7.1).
+/// Active interactive transaction session state in the worker.
 /// {@endtemplate}
 class _TxSession {
   /// {@macro localpocket.__tx_session}

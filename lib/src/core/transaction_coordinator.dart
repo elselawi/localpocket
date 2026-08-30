@@ -1,13 +1,12 @@
-/// Part of `local_pocket.dart` — the transaction coordinator (Phase 2 of the
-/// final refactoring plan, plan §12 step 6).
+/// Part of `local_pocket.dart` — the transaction coordinator.
 ///
 /// Owns transaction settlement: the single-writer write-queue slot, durability
 /// pragma transitions, group commit (end-of-turn coalescing + coalescing
 /// window), read transactions, and post-commit WAL bounding. This is an
 /// extraction AROUND the existing behavior — the SQL, savepoint, event, and
 /// settlement semantics are unchanged; the ownership boundary moves. The
-/// physical file merge into `kernel/transaction_coordinator.dart` happens in
-/// Phase 10; logically this class is the transaction owner.
+/// physically alongside the kernel services; logically this class is the
+/// transaction owner.
 part of 'local_pocket.dart';
 
 /// The transaction owner. Every transaction entry point on the kernel

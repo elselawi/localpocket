@@ -8,7 +8,7 @@ import 'support/worker_harness.dart';
 
 /// Converts a [QueryPlan] into the wire payload the worker's
 /// `_parseCompiledPlan` expects (mirrors `send_plan.dart`, including the
-/// fields that motivated the §4.5 fix).
+/// fields).
 Map<String, Object?> planPayload(QueryPlan plan, {int? pageLimit}) => {
       'type': plan.typeName,
       'operation': plan.operation,
@@ -26,15 +26,15 @@ Map<String, Object?> planPayload(QueryPlan plan, {int? pageLimit}) => {
       if (pageLimit != null) 'pageLimit': pageLimit,
     };
 
-/// Phase 1 — web compiled-plan bridge parity, refactor plan §4.5 and §4.6.
+/// Web compiled-plan bridge parity.
 ///
-/// §4.5: EVERY field the page sends must survive the temporary plan bridge.
+/// EVERY field the page sends must survive the temporary plan bridge.
 /// Before the fix the worker's `_parseCompiledPlan` silently dropped
 /// `decodeColumns` (the projection-aware decoder was disabled on web even
 /// though the page sent it). These tests pin the field's survival through the
 /// real parse → dispatch → runner path.
 ///
-/// §4.6: an explicitly ordered web watch digests its rows IN ORDER — a pure
+/// An explicitly ordered web watch digests its rows IN ORDER — a pure
 /// re-order emits. Before the fix the compiled watcher hardcoded
 /// `ordered: false`.
 /// Waits (polling, deadline-bounded) until [predicate] holds.
@@ -52,7 +52,7 @@ Future<void> waitUntil(
 }
 
 void main() {
-  group('§4.5 plan bridge keeps projection decode metadata', () {
+  group('plan bridge keeps projection decode metadata', () {
     late WorkerHarness h;
 
     setUp(() async {
@@ -112,7 +112,7 @@ void main() {
     });
   });
 
-  group('§4.6 ordered web watch', () {
+  group('ordered web watch', () {
     late WorkerHarness h;
 
     setUp(() async {
@@ -151,7 +151,7 @@ void main() {
         if (last == null || last.length != 2) return false;
         final ids = last.map((i) => (decodeWireValue(i) as Map)['id']);
         return ids.first == a && ids.last == b;
-      }, reason: 'ordered watch must emit on a pure reorder (§4.6)');
+      }, reason: 'ordered watch must emit on a pure reorder');
     });
 
     test('an unordered watch stays digest-deduped for equal snapshots',

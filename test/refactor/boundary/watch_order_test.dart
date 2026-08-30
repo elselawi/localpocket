@@ -5,7 +5,7 @@ import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
 
-/// Phase 1 — refactor plan §4.6: ordered watch snapshots must remain ordered.
+/// Ordered watch snapshots must remain ordered.
 /// An explicitly ordered query digests its rows IN ORDER, so a pure re-order
 /// (same set, same rows, new positions) emits; an unordered query may digest
 /// canonically. The web compiled watcher previously hardcoded `ordered: false`

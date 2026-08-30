@@ -13,8 +13,7 @@ const int kQueryCompilerVersion = queryCompilerVersion;
 /// at open.
 const int schemaManifestFormatVersion = 1;
 
-/// Immutable, versioned, wire-safe schema description (Phase 3 of the final
-/// refactoring plan — plan §9, destination `src/schema/manifest.dart`).
+/// Immutable, versioned, wire-safe schema description.
 ///
 /// The manifest contains EVERY behavior-affecting value of a store: ordered
 /// fields, indexes, FTS configuration, archive/file options, conflict-policy
@@ -170,7 +169,8 @@ Map<String, Object?> _completeDefinitionJson(CollectionSchema<Object?> schema) {
           'hasTransform': m.transform != null,
         },
     ],
-    'documentMigrationVersions': schema.documentMigrations.keys.toList()..sort(),
+    'documentMigrationVersions': schema.documentMigrations.keys.toList()
+      ..sort(),
     'hasValidatorCallback': schema.validator != null,
   };
 }

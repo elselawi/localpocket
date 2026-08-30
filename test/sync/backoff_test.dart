@@ -3,7 +3,7 @@ import 'package:localpocket/src/sync/backoff.dart';
 import 'package:localpocket/src/sync/sync_config.dart';
 import 'package:test/test.dart';
 
-/// Phase 1 — refactor plan §4.12: ONE retry primitive. Sync cycle backoff and
+/// ONE retry primitive. Sync cycle backoff and
 /// realtime reconnect backoff share `exponentialBackoffDelay`. Before the fix
 /// the SSE reconnect loop carried a verbatim COPY of the SyncConfig logic
 /// ("mirroring"), which is exactly the drift the destination architecture

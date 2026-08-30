@@ -120,7 +120,7 @@ class StoreTable {
   /// The compiled SQL representation of the schema.
   final CompiledSchema compiled;
 
-  /// The complete, versioned schema manifest for this store (Phase 3).
+  /// The complete, versioned schema manifest for this store.
   final SchemaManifest manifest;
 
   /// Warnings produced while compiling the schema.
@@ -211,12 +211,12 @@ Object? _copyValue(Object? v) {
   return v;
 }
 
-/// The semantic kernel owner (Phase 2 of the final refactoring plan).
+/// The semantic kernel owner.
 ///
 /// This is the concrete database implementation that previously rode under
 /// the public name `LocalPocket`. The public name is now a transitional
-/// alias; the final public facade (Phase 5) will be a separate class over a
-/// private `RuntimeClient`, and `KernelDatabase` becomes the internal
+/// alias; the final public facade will be a separate class over a
+/// private `RuntimeClient`, and `KernelDatabase` stays the internal
 /// kernel-facing owner constructed identically by native and the web worker.
 ///
 /// Open a database by injecting the platform's [DatabaseFactory], register one
@@ -492,19 +492,19 @@ class KernelDatabase with ChangeBusAwareLP {
 
   /// Registers [schema], creating or migrating its SQLite table.
   ///
-  /// Phase 3 (plan §9 / §12): before ANY DDL, migration, or mutation, the
+  /// Before ANY DDL, migration, or mutation, the
   /// schema is compiled into a complete [SchemaManifest] and validated:
   ///
   /// - duplicate store names within one open are rejected;
   /// - on the worker/web runtime, executable features that cannot cross the
   ///   worker boundary (resolvers, validator callbacks, migration transforms,
   ///   document migrations) are rejected — the schema is never silently
-  ///   reduced (native keeps executing them until Phase 8 removes them);
+  ///   reduced (the native runtime keeps executing them for now, flagged);
   /// - a behavior-affecting change at the SAME schema version (manifest
   ///   fingerprint mismatch against the persisted manifest) is rejected —
   ///   the application must bump the version and provide a migration.
   Future<void> registerStore(CollectionSchema<Object?> schema) async {
-    // §4.17: store identity must be unambiguous — duplicates never resolve to
+    // Store identity must be unambiguous — duplicates never resolve to
     // "first table wins, last definition wins".
     if (_tables.containsKey(schema.name)) {
       throw SchemaRegistrationError(
@@ -584,8 +584,8 @@ class KernelDatabase with ChangeBusAwareLP {
     SchemaManifest? persisted;
     try {
       final raw = rows.first['v'];
-      persisted = SchemaManifest.fromJson(
-          raw is String ? jsonDecode(raw) : raw);
+      persisted =
+          SchemaManifest.fromJson(raw is String ? jsonDecode(raw) : raw);
     } on LocalPocketError {
       // Unreadable/corrupt persisted manifest: treat as adoption so the
       // store can recover; the corrupt value is overwritten below.
@@ -605,13 +605,12 @@ class KernelDatabase with ChangeBusAwareLP {
       String store, SchemaManifest manifest) async {
     final key = _manifestMetaKey(store);
     final json = manifest.encodedJson;
-    final existing = await db.query('lp_meta',
-        where: 'k = ?', whereArgs: [key], limit: 1);
+    final existing =
+        await db.query('lp_meta', where: 'k = ?', whereArgs: [key], limit: 1);
     if (existing.isEmpty) {
       await db.insert('lp_meta', {'k': key, 'v': json});
     } else {
-      await db.update('lp_meta', {'v': json},
-          where: 'k = ?', whereArgs: [key]);
+      await db.update('lp_meta', {'v': json}, where: 'k = ?', whereArgs: [key]);
     }
   }
 
@@ -1219,7 +1218,7 @@ class _CommitMember {
 
 /// Transitional alias: the public name `LocalPocket` previously referred to
 /// the concrete class above (and still does on the web via a separate
-/// facade). The final public facade (Phase 5) becomes a distinct class over a
+/// facade). The final public facade becomes a distinct class over a
 /// private `RuntimeClient`; at that point this alias dies with the raw
 /// surface. All legacy raw/typed clients and tests keep compiling through it.
 typedef LocalPocket = KernelDatabase;

@@ -45,7 +45,7 @@ SyncStatus decodeSyncStatus(Map<String, Object?> wire) => SyncStatus(
 
 /// Encodes a [SyncReport] for the worker→client wire.
 ///
-/// Complete by contract (refactor plan §4.9): every field the model exposes —
+/// Complete by contract: every field the model exposes —
 /// including `blocked` — must survive the codec. A decoded report equals the
 /// encoded report for every public field.
 Map<String, Object?> encodeSyncReport(SyncReport report) => {

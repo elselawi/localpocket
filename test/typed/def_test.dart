@@ -1,5 +1,5 @@
 /// Phase-1 definition tests: descriptor → `Field` parity, definition edge
-/// cases, and `StoreDef` assembly (plan §4.1, cases 1–40).
+/// cases, and `StoreDef` assembly.
 ///
 /// Descriptor-level cases use fresh local probe stores rather than
 /// `Tasks.store.schema`: every descriptor created through a store's `schema.` is
@@ -412,7 +412,7 @@ void main() {
       expect(b.toField().toJson(), Field.bool('b').toJson());
       expect(b.decode(true), isTrue);
       // `schema.boolean('x', encrypted: true)` does not compile — the parameter
-      // does not exist (pinned by the §4.8 compile-fail harness in Phase 2).
+      // does not exist (pinned by the compile-fail harness).
     });
 
     test('case 8: schema.date maps to Field.date with logical int', () {
@@ -677,7 +677,7 @@ void main() {
       final opt = probe.schema.text('x');
       final first = opt.req();
       // `first.req()` does not compile — the Req variant has no req() member
-      // (pinned by the §4.8 compile-fail harness in Phase 2). Repeat calls
+      // (pinned by the compile-fail harness). Repeat calls
       // on the Opt return the same descriptor.
       expect(identical(opt.req(), first), isTrue);
       expect(first.required, isTrue);

@@ -1,7 +1,6 @@
 import 'database_adapter.dart';
 
-/// An explicit execution context (Phase 2 of the final refactoring plan —
-/// plan §5.3 / §12 step 3, destination `src/runtime/execution_context.dart`).
+/// An explicit execution context.
 ///
 /// Every operation that can run inside a transaction receives one. A context
 /// is either the ROOT context (operations on the outer database executor) or a

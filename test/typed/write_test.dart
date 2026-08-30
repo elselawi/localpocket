@@ -1,4 +1,4 @@
-/// Typed writes (plan §4.4, cases 73–84 plus the edge-case batch): the
+/// Typed writes: the
 /// typed layer performs no validation of its own — every case is pinned
 /// against the engine's raw behavior.
 library;

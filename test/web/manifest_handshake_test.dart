@@ -7,7 +7,7 @@ import 'package:test/test.dart';
 import '../support/helpers.dart';
 import 'support/worker_harness.dart';
 
-/// Phase 3 — worker open handshake (plan §12 Phase 3 step 10).
+/// Worker open handshake.
 ///
 /// The worker validates the schema manifest BEFORE any registration:
 /// unsupported executable features fail with `UnsupportedSchemaFeatureError`

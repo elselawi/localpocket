@@ -1,4 +1,4 @@
-/// Compile-fail harness (plan §4.8): each fixture in
+/// Compile-fail harness: each fixture in
 /// `test/typed/compile_fail/` pins a compile-time failure the typed layer
 /// guarantees.
 ///
@@ -9,7 +9,7 @@
 /// typo that breaks a fixture differently also fails the gate.
 ///
 /// Convention: one `// expect: <code>` comment per expected error. A fixture
-/// without `expect:` lines must analyze clean (e.g. the §4.8 case-156
+/// without `expect:` lines must analyze clean (e.g. the case-156
 /// "known limit" fixture).
 @Tags(['gate'])
 library;

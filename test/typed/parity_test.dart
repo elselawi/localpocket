@@ -1,4 +1,4 @@
-/// Façade ↔ engine equivalence (plan §4.5, cases 83–91, probe E seed):
+/// Façade ↔ engine equivalence:
 /// typed and raw paths agree byte-for-byte; the engine is never bypassed.
 library;
 

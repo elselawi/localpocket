@@ -3,11 +3,11 @@ import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
 
-/// Phase 1 characterization — refactor plan §4.2: transaction query/search
+/// Transaction query/search
 /// reads must never execute through the outer database executor.
 ///
 /// The structural fix (an explicit ExecutionContext routing) lands in
-/// Phase 2. Until then these tests pin the OBSERVABLE behavior the fix must
+/// Until the structural fix these tests pin the OBSERVABLE behavior the fix must
 /// preserve: reads-your-writes inside the transaction, and full visibility
 /// reversal after a savepoint rollback, for BOTH the query builder and the
 /// search builder created from a `Tx` (today both are constructed from the
