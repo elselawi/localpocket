@@ -60,6 +60,7 @@ import '../core/hashing.dart';
 import '../core/canonical_json.dart';
 import '../core/local_pocket.dart';
 import '../core/query_plan.dart';
+import '../core/schema_manifest.dart';
 import '../core/schema.dart';
 import '../core/store.dart';
 import '../core/watch.dart';

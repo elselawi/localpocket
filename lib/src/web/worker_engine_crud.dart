@@ -66,6 +66,13 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
 
   Future<Object?> _handleOpen(WorkerEventSink sink, WebRequest req) async {
     final storesRaw = WireArgs(req.args).optionalList('stores');
+    final fingerprintsRaw = req.args['manifestFingerprints'];
+    final expectedFingerprints = <String, String>{};
+    if (fingerprintsRaw is Map) {
+      fingerprintsRaw.forEach((k, v) {
+        if (k is String && v is String) expectedFingerprints[k] = v;
+      });
+    }
     if (storesRaw != null) {
       for (final s in storesRaw) {
         final schema = parseSchema(s);
@@ -77,8 +84,28 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
               'Store "${schema.name}" declares encrypted fields but no '
               'fieldCipher was provided.');
         }
+        // Phase 3 (plan §12 step 10): the open handshake validates the schema
+        // manifest BEFORE any registration — the page-computed fingerprint
+        // must match the worker's own compilation (so both runtimes provably
+        // mean the same schema), and unsupported executable features fail in
+        // registerStore on the web runtime — all before any DDL.
+        final manifest = SchemaManifest.compile(schema);
+        final expected = expectedFingerprints[schema.name];
+        if (expected != null && expected != manifest.fingerprint) {
+          throw ProtocolEnvelopeException(
+              'Schema manifest mismatch for "${schema.name}": the page and '
+              'the worker compiled different schemas.');
+        }
         if (!pocket.storeNames.contains(schema.name)) {
           await pocket.registerStore(schema);
+        } else {
+          // Re-sent store: the definition must still match what the worker
+          // already registered.
+          final registered = pocket.requireTable(schema.name).manifest;
+          if (registered.fingerprint != manifest.fingerprint) {
+            throw ProtocolEnvelopeException(
+                'Schema manifest mismatch for "${schema.name}".');
+          }
         }
       }
     }

@@ -19,6 +19,7 @@ import 'migrator.dart';
 import 'perf_counters.dart';
 import 'query_plan.dart';
 import 'schema.dart';
+import 'schema_manifest.dart';
 import 'store.dart';
 import 'system_tables.dart';
 import 'transaction.dart';
@@ -110,13 +111,17 @@ class StoreTable {
   /// Creates a table descriptor from a schema and its compiled SQL.
   ///
   /// {@macro localpocket.store_table}
-  StoreTable(this.schema, this.compiled) : warnings = compiled.warnings;
+  StoreTable(this.schema, this.compiled, {required this.manifest})
+      : warnings = compiled.warnings;
 
   /// The collection schema represented by this table.
   final CollectionSchema<Object?> schema;
 
   /// The compiled SQL representation of the schema.
   final CompiledSchema compiled;
+
+  /// The complete, versioned schema manifest for this store (Phase 3).
+  final SchemaManifest manifest;
 
   /// Warnings produced while compiling the schema.
   final List<String> warnings;
@@ -486,7 +491,36 @@ class KernelDatabase with ChangeBusAwareLP {
   }
 
   /// Registers [schema], creating or migrating its SQLite table.
+  ///
+  /// Phase 3 (plan §9 / §12): before ANY DDL, migration, or mutation, the
+  /// schema is compiled into a complete [SchemaManifest] and validated:
+  ///
+  /// - duplicate store names within one open are rejected;
+  /// - on the worker/web runtime, executable features that cannot cross the
+  ///   worker boundary (resolvers, validator callbacks, migration transforms,
+  ///   document migrations) are rejected — the schema is never silently
+  ///   reduced (native keeps executing them until Phase 8 removes them);
+  /// - a behavior-affecting change at the SAME schema version (manifest
+  ///   fingerprint mismatch against the persisted manifest) is rejected —
+  ///   the application must bump the version and provide a migration.
   Future<void> registerStore(CollectionSchema<Object?> schema) async {
+    // §4.17: store identity must be unambiguous — duplicates never resolve to
+    // "first table wins, last definition wins".
+    if (_tables.containsKey(schema.name)) {
+      throw SchemaRegistrationError(
+          'Duplicate store name "${schema.name}" in this open call.');
+    }
+    // Compile the complete manifest and reject unrepresentable behavior
+    // before anything is created or changed on disk.
+    final manifest = SchemaManifest.compile(schema);
+    if (capabilities.platform == PlatformProfile.web &&
+        manifest.unsupportedFeatures.isNotEmpty) {
+      throw UnsupportedSchemaFeatureError(
+          'Store "${schema.name}" declares executable features that cannot '
+          'run on the worker runtime: ${manifest.unsupportedFeatures.join(', ')}.');
+    }
+    await _assertSameVersionManifestUnchanged(schema, manifest);
+
     final compiled = DdlCompiler(capabilities).compile(schema);
     // The write-side normalizer must exist before ANY trigger can fire
     // (fresh create below, or the FTS-rebuild / destructive paths).
@@ -531,7 +565,54 @@ class KernelDatabase with ChangeBusAwareLP {
           where: 'store = ?',
           whereArgs: [schema.name]);
     }
-    _tables[schema.name] = StoreTable(schema, compiled);
+    _tables[schema.name] = StoreTable(schema, compiled, manifest: manifest);
+    // Persist the manifest so the NEXT open can compare behavior, not just
+    // version numbers.
+    await _persistSchemaManifest(schema.name, manifest);
+  }
+
+  /// The persisted manifest key for [store].
+  static String _manifestMetaKey(String store) => 'schema_manifest:$store';
+
+  /// Rejects a behavior-affecting manifest change at the SAME schema version.
+  /// Legacy databases without a persisted manifest adopt the current one.
+  Future<void> _assertSameVersionManifestUnchanged(
+      CollectionSchema<Object?> schema, SchemaManifest manifest) async {
+    final rows = await db.query('lp_meta',
+        where: 'k = ?', whereArgs: [_manifestMetaKey(schema.name)], limit: 1);
+    if (rows.isEmpty) return; // adoption: first open of a manifest-era store
+    SchemaManifest? persisted;
+    try {
+      final raw = rows.first['v'];
+      persisted = SchemaManifest.fromJson(
+          raw is String ? jsonDecode(raw) : raw);
+    } on LocalPocketError {
+      // Unreadable/corrupt persisted manifest: treat as adoption so the
+      // store can recover; the corrupt value is overwritten below.
+      return;
+    }
+    if (persisted.version != schema.version) return; // version change: legal
+    if (persisted.fingerprint != manifest.fingerprint) {
+      throw SchemaRegistrationError(
+          'Store "${schema.name}" changed behavior at the SAME schema '
+          'version ${schema.version}. Bump the store version and provide a '
+          'migration description.');
+    }
+  }
+
+  /// Persists the manifest (and its fingerprint) for the NEXT open.
+  Future<void> _persistSchemaManifest(
+      String store, SchemaManifest manifest) async {
+    final key = _manifestMetaKey(store);
+    final json = manifest.encodedJson;
+    final existing = await db.query('lp_meta',
+        where: 'k = ?', whereArgs: [key], limit: 1);
+    if (existing.isEmpty) {
+      await db.insert('lp_meta', {'k': key, 'v': json});
+    } else {
+      await db.update('lp_meta', {'v': json},
+          where: 'k = ?', whereArgs: [key]);
+    }
   }
 
   /// Reports whether the destructive-migration backup file at [path] exists,

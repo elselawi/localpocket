@@ -155,8 +155,8 @@ void main() {
 
   group('same-version and duplicate-name registration', () {
     test(
-        'same schema version with changed definitions reuses the old table '
-        '(documented)', () async {
+        'same schema version with changed definitions is REJECTED (Phase 3 '
+        'manifest policy)', () async {
       final t = await tempDbPath();
       addTearDown(t.cleanup);
       final v1 = CollectionSchema<Object?>(
@@ -167,37 +167,28 @@ void main() {
 
       final changed = CollectionSchema<Object?>(
           name: 't', version: 1, fields: [Field.text('b')]);
-      final p2 = await LocalPocket.open(path: t.path, stores: [changed]);
-      addTearDown(p2.close);
-      // No ALTER is issued for an equal version: the old columns survive.
-      final cols = await p2.db.rawQuery('PRAGMA table_info("t")');
-      final colNames = cols.map((c) => c['name']).toList();
-      expect(colNames, contains('a'));
-      expect(colNames, isNot(contains('b')));
-      // Writing the new definition's field hits the missing column.
+      // The persisted manifest fingerprint no longer matches: the old silent
+      // stale-column drift is now a typed rejection — bump the version.
       await expectLater(
-        p2.collection('t').put({'id': generateRecordId(), 'b': 'y'}),
-        throwsA(isA<StorageError>()),
+        LocalPocket.open(path: t.path, stores: [changed]),
+        throwsA(isA<SchemaRegistrationError>()),
       );
     });
 
     test(
-        'duplicate store names in one open: last definition wins the handle '
-        'but the table keeps the first definition (documented)', () async {
+        'duplicate store names in one open: rejected before any DDL (Phase 3)',
+        () async {
       final a = CollectionSchema<Object?>(
           name: 'dup', version: 1, fields: [Field.text('a')]);
       final b = CollectionSchema<Object?>(
           name: 'dup', version: 1, fields: [Field.text('b')]);
-      final pocket = await LocalPocket.open(path: ':memory:', stores: [a, b]);
-      addTearDown(pocket.close);
-      expect(pocket.storeNames, ['dup']);
-      final cols = await pocket.db.rawQuery('PRAGMA table_info("dup")');
-      final colNames = cols.map((c) => c['name']).toList();
-      expect(colNames, contains('a'));
-      expect(colNames, isNot(contains('b')));
-      final stores = await pocket.db
-          .rawQuery('SELECT store FROM lp_stores WHERE store = ?', ['dup']);
-      expect(stores, hasLength(1), reason: 'one ledger row for one name');
+      // §4.17: store identity must be unambiguous — the old "first table wins,
+      // last definition wins" mismatch is now a typed error before any schema
+      // mutation.
+      await expectLater(
+        LocalPocket.open(path: ':memory:', stores: [a, b]),
+        throwsA(isA<SchemaRegistrationError>()),
+      );
     });
   });
 }

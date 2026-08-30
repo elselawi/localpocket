@@ -88,6 +88,17 @@ class SchemaRegistrationError extends LocalPocketError {
   SchemaRegistrationError(super.message);
 }
 
+/// {@template localpocket.unsupported_schema_feature_error}
+/// A schema declared an executable feature that cannot be represented in the
+/// worker-safe manifest (a validator callback, a document-migration
+/// transform, a custom conflict resolver). Thrown BEFORE any DDL, migration,
+/// or worker registration — the schema is never silently reduced.
+/// {@endtemplate}
+class UnsupportedSchemaFeatureError extends SchemaRegistrationError {
+  /// {@macro localpocket.unsupported_schema_feature_error}
+  UnsupportedSchemaFeatureError(super.message);
+}
+
 /// {@template localpocket.fts_unavailable_error}
 /// FTS5 is not available on this SQLite engine or FTS is not configured for
 /// the store.

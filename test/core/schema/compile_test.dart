@@ -318,7 +318,7 @@ void main() {
           openPocket(stores: [dupIx]), throwsA(isA<sqlite.SqliteException>()));
     });
 
-    test('store name collision across stores: last registration wins silently',
+    test('store name collision across stores: rejected before any DDL (Phase 3)',
         () async {
       final a = CollectionSchema<Object?>(
         name: 'same',
@@ -330,16 +330,12 @@ void main() {
         version: 1,
         fields: [Field.text('b')],
       );
-      final pocket = await openPocket(stores: [a, b]);
-      addTearDown(pocket.close);
-      // Only one store handle exists...
-      expect(pocket.storeNames, ['same']);
-      // ...and the table keeps the FIRST registration's columns (the second
-      // registration does not rebuild the existing table).
-      final cols = await pocket.db.rawQuery('PRAGMA table_info("same")');
-      final colNames = cols.map((c) => c['name']).toList();
-      expect(colNames, contains('a'));
-      expect(colNames, isNot(contains('b')));
+      // Phase 3 (§4.17): the old "last registration wins silently" mismatch
+      // is now a typed error before any schema mutation.
+      await expectLater(
+        openPocket(stores: [a, b]),
+        throwsA(isA<SchemaRegistrationError>()),
+      );
     });
 
     test('reserved system-table names fail at SQLite open', () {

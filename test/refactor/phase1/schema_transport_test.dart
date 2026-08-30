@@ -1,4 +1,5 @@
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/core/schema_manifest.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
@@ -82,11 +83,25 @@ void main() {
       expect(json.containsKey('conflictPolicy'), isFalse,
           reason: 'policy is not part of the transport today (§4.1)');
     });
+
+    test('Phase 3 FIX: the MANIFEST fingerprint is honest about callbacks',
+        () {
+      final plain = SchemaManifest.compile(_schema(name: 'resolved'));
+      final withResolver = SchemaManifest.compile(_schema(
+        name: 'resolved',
+        conflictPolicy:
+            ConflictPolicy(collectionResolver: CustomResolver((ctx) => null)),
+      ));
+      // The legacy JSON fingerprint above is blind; the manifest is not.
+      expect(withResolver.unsupportedFeatures, contains('conflictResolver'));
+      expect(plain.unsupportedFeatures, isEmpty);
+      expect(plain.fingerprint, isNot(withResolver.fingerprint),
+          reason: '§4.1 is closed at the manifest level');
+    });
   });
 
-  group('§4.16 same-version behavior change reopens with stale columns', () {
-    test('reopen with a new field at the SAME version leaves it unbacked',
-        () async {
+  group('§4.16 same-version behavior change', () {
+    test('is REJECTED at reopen (Phase 3 manifest policy)', () async {
       final db = await tempDbPath();
       addTearDown(db.cleanup);
 
@@ -96,62 +111,76 @@ void main() {
       await p1.collection('stale').put(record(name: 'row', qty: 3, id: id));
       await p1.close();
 
-      // SAME version, but the definition gained a field.
+      // SAME version, but the definition gained a field: the persisted
+      // manifest fingerprint no longer matches → typed rejection instead of
+      // the old silent unbacked-column drift.
       final after = widgetsSchema(
         name: 'stale',
         version: 1,
         extraFields: [Field.text('brand_new')],
       );
-      final p2 = await openPocket(
-          path: db.path, stores: [after], destructiveBackup: true);
+      await expectLater(
+        openPocket(path: db.path, stores: [after], destructiveBackup: true),
+        throwsA(isA<SchemaRegistrationError>()),
+      );
+    });
+
+    test('an identical reopen is accepted (fingerprint stability)', () async {
+      final db = await tempDbPath();
+      addTearDown(db.cleanup);
+
+      final schema = widgetsSchema(name: 'stable', version: 1);
+      final p1 = await openPocket(path: db.path, stores: [schema]);
+      final id = generateRecordId();
+      await p1.collection('stable').put(record(name: 'row', qty: 3, id: id));
+      await p1.close();
+
+      final p2 = await openPocket(path: db.path, stores: [schema]);
       addTearDown(p2.close);
+      expect((await p2.collection('stable').get(id))?['name'], 'row');
+    });
 
-      // Current behavior: reopen succeeds and the row round-trips.
-      final row = await p2.collection('stale').get(id);
-      expect(row?['name'], 'row');
+    test('a version BUMP with an additive migration is accepted', () async {
+      final db = await tempDbPath();
+      addTearDown(db.cleanup);
 
-      // The physical table has NO column for the new field — definition and
-      // physical schema diverge silently on a same-version change.
-      final physical = await _physicalColumns(p2, 'stale');
-      expect(physical, contains('name'));
-      expect(physical, isNot(contains('brand_new')));
-      expect(after.fieldByName('brand_new'), isNotNull,
-          reason: 'the definition claims the field exists');
+      final p1 = await openPocket(
+          path: db.path, stores: [widgetsSchema(name: 'bump', version: 1)]);
+      final id = generateRecordId();
+      await p1.collection('bump').put(record(name: 'row', qty: 3, id: id));
+      await p1.close();
+
+      final p2 = await openPocket(
+        path: db.path,
+        stores: [
+          widgetsSchema(
+            name: 'bump',
+            version: 2,
+            extraFields: [Field.text('brand_new')],
+            migrations: [
+              StoreMigration(
+                  toVersion: 2, addedFields: [Field.text('brand_new')]),
+            ],
+          ),
+        ],
+      );
+      addTearDown(p2.close);
+      expect((await p2.collection('bump').get(id))?['name'], 'row');
     });
   });
 
   group('§4.17 store identity', () {
-    test(
-        'duplicate store names: FIRST table wins, LAST definition wins — '
-        'and the mismatch breaks writes', () async {
-      final p = await openPocket(
-        stores: [
-          widgetsSchema(name: 'dup', version: 1),
-          widgetsSchema(
-              name: 'dup', version: 1, extraFields: [Field.text('other')]),
-        ],
-      );
-      addTearDown(p.close);
-
-      // The FIRST registration created the physical table...
-      final table = p.requireTable('dup');
-      expect(table.schema.version, 1);
-
-      // ...but the LAST definition owns the in-memory handle, and its INSERT
-      // enumerates every declared field — including `other`, which has no
-      // physical column. EVERY write through the last handle fails.
-      final id = generateRecordId();
+    test('duplicate store names in one open are REJECTED (Phase 3)', () async {
       await expectLater(
-        p.collection('dup').put(record(name: 'x', qty: 1, id: id)),
-        throwsA(isA<StorageError>()),
-        reason: '§4.17: the duplicate registration leaves the store unusable '
-            'for writes through the last definition',
+        openPocket(
+          stores: [
+            widgetsSchema(name: 'dup', version: 1),
+            widgetsSchema(
+                name: 'dup', version: 1, extraFields: [Field.text('other')]),
+          ],
+        ),
+        throwsA(isA<SchemaRegistrationError>()),
       );
     });
   });
-}
-
-Future<List<String>> _physicalColumns(LocalPocket pocket, String store) async {
-  final res = await pocket.db.rawQuery('PRAGMA table_info($store)');
-  return [for (final row in res) row['name']! as String];
 }

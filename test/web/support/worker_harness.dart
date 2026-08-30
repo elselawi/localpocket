@@ -64,6 +64,7 @@ class WorkerHarness {
     int Function()? now,
     TestHooks? testHooks,
     int maxDocBytes = 1900000,
+    PlatformProfile platform = PlatformProfile.native,
   }) async {
     final rawDb = sqlite.sqlite3.openInMemory();
     final adapter = DirectSqliteDatabase(rawDb);
@@ -71,7 +72,7 @@ class WorkerHarness {
       path: ':memory:',
       database: adapter,
       stores: stores ?? [widgetsSchema()],
-      platform: PlatformProfile.native,
+      platform: platform,
       blobStore: blobStore ?? MemoryBlobStore(),
       fieldCipher: fieldCipher,
       now: now,

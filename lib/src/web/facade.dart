@@ -17,10 +17,12 @@ import 'package:web/web.dart' as web;
 
 import '../core/capabilities.dart';
 import '../core/change_bus.dart';
+import '../core/errors.dart';
 import '../core/perf_counters.dart';
 import '../core/query/query_builder/predicate_tree.dart';
 import '../core/query/search_builder/search_builder.dart';
 import '../core/schema.dart';
+import '../core/schema_manifest.dart';
 import '../core/store.dart';
 import '../sync/conflicts.dart';
 import '../sync/status.dart';
@@ -234,9 +236,25 @@ class LocalPocket
       pocket._markWorkerClosed();
     }));
 
-    // Explicitly send open envelope with schemas to ensure registration
+    // Explicitly send open envelope with schemas to ensure registration.
+    // Phase 3: the page also sends its computed manifest fingerprints; the
+    // worker verifies each against its own compilation, so both runtimes
+    // provably mean the same schema before any store is used.
+    // Fail fast FIRST on executable features that could never survive the
+    // worker boundary — the schema is never silently reduced.
+    for (final s in stores) {
+      final unsupported = SchemaManifest.compile(s).unsupportedFeatures;
+      if (unsupported.isNotEmpty) {
+        throw UnsupportedSchemaFeatureError(
+            'Store "${s.name}" declares executable features that cannot '
+            'run on the worker runtime: ${unsupported.join(', ')}.');
+      }
+    }
     await pocket.send(WireOp.open, {
       'stores': stores.map((s) => s.toJson()).toList(),
+      'manifestFingerprints': {
+        for (final s in stores) s.name: SchemaManifest.compile(s).fingerprint,
+      },
       'maxDocBytes': maxDocBytes,
       'destructiveBackup': destructiveBackup,
     });

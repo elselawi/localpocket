@@ -13,8 +13,11 @@ import '../sync/engine/mock_backend.dart';
 /// across restart — both for direct collection writes and for sync-engine
 /// settlements (outbox/dirty state committed by `SyncEngine.syncNow`).
 void main() {
-  Future<LocalPocket> openFileBacked(String path) =>
-      openPocket(path: path, stores: [widgetsSchema()]);
+  Future<LocalPocket> openFileBacked(String path,
+          {bool keepUnsyncedArchives = false}) =>
+      openPocket(
+          path: path,
+          stores: [widgetsSchema(keepUnsyncedArchives: keepUnsyncedArchives)]);
 
   group('direct writes with normal durability survive reopen', () {
     test('put commits without the FULL toggle and survives close/reopen',
@@ -63,7 +66,8 @@ void main() {
           .archive(id, durability: DurabilityClass.normal);
       await pocket.close();
 
-      final reopened = await openFileBacked(t.path);
+      final reopened = await openFileBacked(t.path,
+          keepUnsyncedArchives: true);
       addTearDown(reopened.close);
       final rows =
           await reopened.db.query('widgets', where: 'id = ?', whereArgs: [id]);

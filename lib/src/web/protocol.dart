@@ -202,6 +202,11 @@ String stableWireErrorType(Object error) {
     if (error is RecordNotFoundException) return 'RecordNotFoundException';
     if (error is SchemaTooNewError) return 'SchemaTooNewError';
     if (error is FtsUnavailableError) return 'FtsUnavailableError';
+    // UnsupportedSchemaFeatureError is a SchemaRegistrationError subtype, so
+    // this must be checked FIRST or it is never reached.
+    if (error is UnsupportedSchemaFeatureError) {
+      return 'UnsupportedSchemaFeatureError';
+    }
     if (error is SchemaRegistrationError) return 'SchemaRegistrationError';
     if (error is StaleCursorError) return 'StaleCursorError';
     if (error is MissingLimitError) return 'MissingLimitError';

@@ -28,6 +28,7 @@ exported, or shipped.
 | `naming_and_policy.md` | Final naming table + manifest/callback policy | §12 Phase 0.5–0.6 |
 | `phase1_ledger.md` | §4 item-by-item disposition: named test, FIX/PIN/EXISTS/DESTINATION, owner phase | §12 Phase 1, §4 |
 | `phase2_ledger.md` | KernelDatabase rename, KernelContext, ExecutionContext, TransactionCoordinator/MutationService/ReadService extraction | §12 Phase 2 |
+| `phase3_ledger.md` | SchemaManifest, open-time validation (duplicates/same-version/unsupported), worker manifest handshake | §12 Phase 3, §9 |
 | `fixtures/final_api_vm.dart` | Destination-API compile fixture (VM) | §12 Phase 0.5 |
 | `fixtures/final_api_web.dart` | Destination-API compile fixture (JavaScript/worker) | §12 Phase 0.5 |
 

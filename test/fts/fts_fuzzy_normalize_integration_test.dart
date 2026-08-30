@@ -18,11 +18,13 @@ CollectionSchema<Object?> articlesSchema({
   Map<String, String> rules = const {},
   int version = 1,
   bool keepUnsyncedArchives = false,
+  List<StoreMigration> migrations = const [],
 }) =>
     CollectionSchema<Object?>(
       name: name_ ?? 'articles',
       version: version,
       keepUnsyncedArchives: keepUnsyncedArchives,
+      migrations: migrations,
       fields: [
         Field.text('title', required: true),
         Field.text('body'),
@@ -245,10 +247,19 @@ void main() {
           isEmpty);
       await pocket.close();
 
-      // Reopen WITH parity rules: registration must rebuild the index so
-      // pre-existing rows honor the new equivalences.
+      // Reopen WITH parity rules: an FTS config change is a behavior change,
+      // so it requires a version bump (Phase 3 manifest policy) — and the
+      // registration must rebuild the index so pre-existing rows honor the
+      // new equivalences.
       pocket = await openPocket(
-          path: path, stores: [articlesSchema(rules: _arabicRules)]);
+          path: path,
+          stores: [
+            articlesSchema(
+              rules: _arabicRules,
+              version: 2,
+              migrations: [StoreMigration(toVersion: 2)],
+            ),
+          ]);
       addTearDown(pocket.close);
       final results =
           await pocket.collection('articles').search('احمد').all().fetch();
@@ -303,7 +314,8 @@ void main() {
       pocket = await openPocket(path: path, stores: [
         CollectionSchema<Object?>(
           name: 'articles',
-          version: 1,
+          version: 2,
+          migrations: [StoreMigration(toVersion: 2)],
           fields: [
             Field.text('title', required: true),
             Field.text('body'),

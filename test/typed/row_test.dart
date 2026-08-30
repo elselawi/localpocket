@@ -34,6 +34,12 @@ Future<LocalPocket> pocketWithNullTitle() async {
     ],
   );
   await raw.collection('tasks').put({'id': 'rowcase58000001', 'title': null});
+  // Drop the persisted manifest so the reopen exercises the LEGACY adoption
+  // path (a manifest-less database): the raw fixture deliberately declares a
+  // different same-version schema than the typed one, which the Phase 3
+  // manifest comparison would (correctly) refuse.
+  await raw.db
+      .execute("DELETE FROM lp_meta WHERE k = 'schema_manifest:tasks'");
   await raw.close();
   return LocalPocket.open(path: t.path, stores: [Tasks.store.collectionSchema]);
 }
@@ -330,6 +336,10 @@ void main() {
         'title': 'x',
         'dueAt': '2026-09-01T00:00:00Z'
       });
+      // Drop the persisted manifest: the raw fixture deliberately declares a
+      // different same-version schema (legacy adoption path — see case 58).
+      await raw.db
+          .execute("DELETE FROM lp_meta WHERE k = 'schema_manifest:tasks'");
       await raw.close();
       final db = await LocalPocket.open(
           path: t.path, stores: [Tasks.store.collectionSchema]);
