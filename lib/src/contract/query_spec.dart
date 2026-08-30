@@ -78,8 +78,9 @@ final class QuerySpecData {
         if (groupsRaw is List)
           for (final g in groupsRaw) conditions(g),
       ],
-      predicate:
-          m['predicate'] is Map ? PredicateSpecData.fromJson(m['predicate']) : null,
+      predicate: m['predicate'] is Map
+          ? PredicateSpecData.fromJson(m['predicate'])
+          : null,
       order: [
         if (orderRaw is List)
           for (final o in orderRaw) QueryOrderTermData.fromJson(o),
@@ -208,8 +209,7 @@ final class NotSpecData extends PredicateSpecData {
   final PredicateSpecData child;
 
   @override
-  Map<String, Object?> toJson() =>
-      {'kind': 'not', 'child': child.toJson()};
+  Map<String, Object?> toJson() => {'kind': 'not', 'child': child.toJson()};
 }
 
 /// A conjunction — the children AND together.

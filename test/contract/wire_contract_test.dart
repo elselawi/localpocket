@@ -192,6 +192,16 @@ void main() {
       expect((decoded as ValidationException).field, 'qty');
     });
 
+    test('projection misses keep their field detail', () {
+      final decoded =
+          decodeError(encodeError(FieldNotSelectedError('priority')));
+      expect(
+        decoded,
+        isA<FieldNotSelectedError>()
+            .having((e) => e.field, 'field', 'priority'),
+      );
+    });
+
     test('unknown errors degrade to a typed wire error', () {
       final decoded = decodeError(encodeError(const FormatException('nope')));
       expect(decoded, isA<WireException>());

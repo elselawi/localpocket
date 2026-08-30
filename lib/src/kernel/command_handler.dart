@@ -650,7 +650,6 @@ PredicateNode _predicateLeaf(QueryConditionData condition) {
     case QueryConditionOp.isNull:
       return LeafPredicate(field, 'isNull', const <Object?>[]);
     case QueryConditionOp.isNotNull:
-      return NotPredicate(
-          LeafPredicate(field, 'isNull', const <Object?>[]));
+      return NotPredicate(LeafPredicate(field, 'isNull', const <Object?>[]));
   }
 }

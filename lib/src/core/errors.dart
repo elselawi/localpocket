@@ -175,7 +175,7 @@ class FieldNotSelectedError extends LocalPocketError {
   /// {@macro localpocket.field_not_selected_error}
   FieldNotSelectedError(this.field)
       : super('Field "$field" was not selected and is unavailable in '
-          'this row.');
+            'this row.');
 
   /// The projected-out field that was read.
   final String field;
