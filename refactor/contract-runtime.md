@@ -200,3 +200,89 @@ web gate + API snapshot PASS.
 - `close_sinks` needs an ignore on the watch controller (the stream owner
   controls its lifetime); broadcast event streams deliver asynchronously, so
   watches attach their event listener immediately after the start request.
+
+---
+
+# Remote cutover — contract envelope in the worker (2026-08-30)
+
+The first cutover slice is in: the worker speaks the typed contract alongside
+the old string-op registry, and the conformance suite runs every facade body
+over a third runtime (`remote`) that reaches the kernel through the worker
+engine. Full suite `+2744 ~83` green, analyze clean, web gate + API snapshot
+PASS. Commit `feat(web): typed contract envelope in the worker and a
+RemoteRuntimeClient`.
+
+## What landed
+
+- `lib/src/web/protocol.dart` — two new registry entries:
+  `contract_request` (page → worker, carries the `ContractCodec.encodeRequest`
+  output) and `contract_event` (worker → page emission only: committed facts
+  and watch snapshots, contract-event encoded). Both documented as the
+  destination envelope coexisting with the string-op registry.
+- `lib/src/web/worker_engine.dart` — `_handleContract` on the host: decodes
+  the request with `ContractCodec.decodeRequest` and dispatches it to
+  `pocket.commands.handle` — the same `KernelCommandHandler` the direct
+  runtime calls, so there is no worker-side reinterpretation of payloads and
+  no second error vocabulary. Application failures are returned inside the
+  success reply as `{'error': encodeError(e)}` (contract codec) so the caller
+  reconstructs typed kernel errors; envelope-level failures (malformed
+  payload) throw and fall through to the transport error framing. A parallel
+  subscription on `pocket.commands.events` emits `contract_event` envelopes to
+  every connection; cancelled in `_handleClose`.
+- `lib/src/runtime/remote_runtime_client.dart` (new) — `RemoteRuntimeClient
+  implements RuntimeClient`: one contract envelope per send over the injectable
+  transport, composed on top of `WebSender` (per-request timeout,
+  worker-closed classification, response-version checking are reused, not
+  reimplemented). `send` verifies result/request tag correlation via
+  `ContractCodec.decodeResult`; `handleWorkerEvent` filters `contract_event`
+  envelopes and decodes them, dropping malformed ones instead of killing the
+  broadcast stream; `close()` marks the sender closed locally (the embedder
+  tears down page resources itself) and ends the event stream.
+- `test/web/support/worker_harness.dart` — `customRequest(envelope)` mirrors
+  the JS boundary's exact path (parse → dispatch → reply → `WebResponse`
+  encoding), plus `path` (file-backed engine) and `sink` (injectable
+  `RecordingSink`) options for the conformance suite.
+- `test/conformance/facade_conformance_test.dart` — third group
+  `over remote runtime`: the SAME bodies (CRUD/batch, projection, cursors +
+  stale rejection, transactions/savepoints, ordered watches, committed-change
+  events, typed error survival, corrupt rows, aggregates, search) run through
+  `RemoteRuntimeClient` → worker engine → kernel.
+- `test/typed/web_test.dart` — the wire-vocabulary pin now includes the two
+  `contract_*` ops, with a comment stating their nature (contract-codec
+  payloads, never new string-op argument shapes).
+
+## Decisions and deviations
+
+- The freeze pin on the `WireOp` registry was updated rather than bypassed:
+  the two envelope ops are the sanctioned mechanism of the cutover, not new
+  string-op surface. No `wire_args.dart` shapes were added; the old handlers
+  are untouched.
+- `contract_event` is in the known-op set but is never a *request*: an
+  incoming `contract_request` dispatches, an incoming `contract_event` fails
+  dispatch with "Unhandled operation". This is intentional — the op exists so
+  the emission envelope is versioned like every other.
+- Double emission during coexistence: the worker now emits BOTH
+  `record_event` (old codec) and `contract_event` (contract codec) for every
+  committed fact. The old facade listens to the former, the new runtime to
+  the latter. The old stream dies with its last family.
+- Close semantics differ between the two envelopes by design: the old `close`
+  op runs full worker teardown (`_handleClose`); a contract `CloseRequest`
+  goes through the kernel command handler (kernel close only). Worker-level
+  teardown consolidates when the lifecycle family cuts over.
+- The conformance `remote` entry opens a throwaway local kernel via
+  `openWith` (the only public construction seam) and closes it immediately;
+  the real kernel lives in the worker harness. On the browser destination the
+  conditional import makes the "local open" itself the worker open, so this
+  seam exists only in VM tests.
+
+## Gotchas learned this pass
+
+- `conversions.dart` and `contract/wire_values.dart` both define
+  `encodeWireValue`/`decodeWireValue`, and `protocol.dart` and
+  `error_codec.dart` both define `decodeError` — any file that needs both
+  worlds must prefix one import (the worker engine prefixes `contract`, the
+  remote runtime prefixes `wire`).
+- `WebSender` lives in `web_sender.dart`, not `protocol.dart`.
+- The `RecordingSink` type is load-bearing in harness tests (`byOp`
+  assertions), so the injectable-sink option is typed as a `RecordingSink`
+  subclass rather than the interface.

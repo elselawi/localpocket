@@ -35,6 +35,16 @@ same contract (replace the `WireOp`/`wire_args` registry family by family;
 the old wire stays as an adapter until each family passes), then query IR,
 then barrel switch. The old raw/typed surfaces still work.
 
+First cutover slice DONE (2026-08-30): the worker answers
+`contract_request` envelopes through the kernel's own command handler,
+emits `contract_event` envelopes for committed facts, and
+`RemoteRuntimeClient` (`lib/src/runtime/remote_runtime_client.dart`)
+carries the same envelopes over the page transport. The conformance suite
+runs every facade body over a third `remote` runtime through the worker
+engine. See the remote-cutover ledger section at the end of
+`refactor/contract-runtime.md`. Next: re-route the page-side facade
+families to the contract envelope (CRUD/batch first), then query IR.
+
 The full destination plan (12 stages, gates, checklists) is in
 `final_refactoring_plan.md`. Stages 0–4 and the stage-5 facade vertical
 slice (native + loopback) are DONE. You are starting stage 6: the web
@@ -85,7 +95,8 @@ remote cutover. Stage-by-stage history lives in `refactor/*.md`.
   `test(compile_fixtures): activate the VM destination-API compile fixture`).
 - `dart analyze lib test tool` → 0 issues (now includes the active
   compile fixture `test/compile_fixtures/final_api_vm.dart`).
-- `dart test` → `+2733 ~83` all passed (83 skips = live/gate/platform tags).
+- `dart test` → `+2744 ~83` all passed (83 skips = live/gate/platform tags;
+  the count grew by the remote conformance group over the worker engine).
 - `dart run tool/local_web_gate.dart` → PASS (worker compile + asset hashes).
 - `dart run tool/api_snapshot.dart` → PASS (snapshot unchanged; the new
   facade is intentionally NOT exported from the barrel yet).
