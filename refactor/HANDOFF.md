@@ -19,11 +19,17 @@ compile yet — they are the executable definition of your target:
 - `refactor/fixtures/final_api_vm.dart` — VM target
 - `refactor/fixtures/final_api_web.dart` — web/worker target
 
-Your stage: make the public facade (`LocalPocket`, `Store<S>`, `Row<S>`,
+Your stage: ~~make the public facade (`LocalPocket`, `Store<S>`, `Row<S>`,
 `Page<S>`, `Transaction`, events, watches, sync attachment) exist and run
-**over the runtime contract** (`RuntimeClient`), proven by a
-runtime-factory-parameterized conformance suite (direct runtime vs loopback
-runtime). The old raw/typed surfaces keep working during this stage.
+**over the runtime contract** (`RuntimeClient`)~~ — **DONE (2026-08-30)**:
+the facade exists in `lib/src/api/`, runs over both runtimes, and is proven
+by `test/conformance/facade_conformance_test.dart`. See the facade section
+at the end of `refactor/contract-runtime.md` for everything that landed.
+
+**Your stage now: the web remote cutover** — point the browser page at the
+same contract (replace the `WireOp`/`wire_args` registry family by family;
+the old wire stays as an adapter until each family passes), then query IR,
+then barrel switch. The old raw/typed surfaces still work.
 
 The full destination plan (12 stages, gates, checklists) is in
 `final_refactoring_plan.md`. Stages 0–4 are DONE. You are starting stage 5.
@@ -66,16 +72,22 @@ Stage-by-stage history lives in `refactor/*.md`.
 
 ---
 
-## 2. Current state (verified 2026-08-30)
+## 2. Current state (verified 2026-08-30, after the facade stage)
 
-- Branch `refactor/final-architecture`; working tree clean; HEAD
-  `7c5e944` "feat(contract): sealed request/result/event runtime contract …".
-- `dart analyze lib test tool` → 0 issues.
-- `dart test` → `+2689 ~83` all passed (83 skips = live/gate/platform tags).
+- Branch `refactor/final-architecture`; working tree clean; HEAD is the
+  compile-fixture activation commit on top of the facade commits
+  (`feat(contract): serializable predicate tree …` →
+  `test(compile_fixtures): activate the VM destination-API compile fixture`).
+- `dart analyze lib test tool` → 0 issues (now includes the active
+  compile fixture `test/compile_fixtures/final_api_vm.dart`).
+- `dart test` → `+2733 ~83` all passed (83 skips = live/gate/platform tags).
 - `dart run tool/local_web_gate.dart` → PASS (worker compile + asset hashes).
-- `dart run tool/api_snapshot.dart` → PASS. Also exist: `raw_api_gate`,
-  `typed_surface_gate`, `dependency_check`, `readme_version_check`,
-  `coverage_gate` (90% threshold), `tool/release.dart` full runner.
+- `dart run tool/api_snapshot.dart` → PASS (snapshot unchanged; the new
+  facade is intentionally NOT exported from the barrel yet).
+- NEW this pass: `lib/src/api/` (facade: options, LocalPocket, Store, Row,
+  QuerySpec/Page/Cursor, Transaction, events), contract predicate tree,
+  `DistinctRequest.limit`, `TransactionBeginRequest.durability`,
+  `FieldNotSelectedError`, `test/conformance/`, `test/compile_fixtures/`.
 - Known wall-clock flakes (pass in isolation; re-run before diagnosing):
   `test/pocketbase/sse_test.dart` fast-path,
   `test/pocketbase/backend_lifecycle_test.dart` authChanged,
@@ -112,13 +124,24 @@ realtime, `getAll` beyond `rows`, revision numbers on `CommittedChange`.
 
 ---
 
-## 3. Your task — the facade vertical slice
+## 3. What the facade stage delivered (complete — read the ledger)
 
-Build in `lib/src/api/` (new directory, common Dart only: no `dart:io`, no
-`dart:js_interop`, no `package:web`, no SQLite imports). Commit after each
-numbered task with its acceptance test.
+The full account (files, decisions, deviations, gotchas) is in the facade
+section of `refactor/contract-runtime.md`. Quick orientation:
 
-### Task 1 — options + facade shell
+- `lib/src/api/api.dart` is the facade barrel (not exported from the
+  package barrel yet). `LocalPocket.open` = direct runtime;
+  `LocalPocket.openWith(options, factory)` is the runtime seam the
+  conformance suite and (later) the worker runtime plug into.
+- Contract extensions: serializable predicate tree (`QuerySpecData.predicate`,
+  compiled kernel-side via `wherePredicate`), `DistinctRequest.limit`,
+  `TransactionBeginRequest.durability`, `FieldNotSelectedError`.
+- The original Tasks 1–8 checklist below is retained for reference; every
+  item it describes is done except the pieces explicitly deferred (sync /
+  files / conflicts vocabulary, `Store.events` record payloads, search
+  snippets — none of which exist in the contract yet).
+
+### Task 1 — options + facade shell (DONE)
 
 `LocalPocketOptions` (path, `List<StoreDef<Object?>> stores`, encryption
 config, `BootstrapOptions` (workerAssetPath, wasmAssetPath, requestTimeout),
@@ -305,15 +328,24 @@ dart test --tags real --run-skipped test/e2e/        # live PocketBase (optional
 
 ---
 
-## 6. Out of scope for this stage (do NOT start)
+## 6. Out of scope for the facade stage — now the NEXT agent's order of work
 
-- Web page cutover onto the contract (replace `WireOp`/`wire_args` registry
-  family-by-family; old wire stays as adapter until each family passes).
-- Query IR replacing the compiled-plan bridge (`QueryPlan` stays internal
-  until then; the fixture compile will tell you if `QuerySpec` needs more).
-- Files/conflicts/sync command families in the contract.
-- Barrel switch, `refactor/` + plan deletion, coverage re-baselining.
+The facade stage is done. Work the remaining architecture in this order:
 
-The stage is done when the facade runs the vertical slice through BOTH
-runtimes with green conformance, the compile fixture for VM is active, and
-the full suite + gates pass.
+1. **Web remote cutover** — replace the `WireOp`/`wire_args` registry
+   family by family so the browser page runs on this contract; the old wire
+   stays as an adapter until each family passes. `LocalPocket.openWith` +
+   a worker-backed `RuntimeClient` is the integration seam.
+2. **Query IR** — replace the compiled-plan bridge (`QueryPlan` stays
+   internal; the predicate tree in `QuerySpecData` is the seed).
+3. **Family-by-family web collapse** — files/conflicts/sync command
+   families enter the contract, activating the remaining fixture vocabulary
+   (sync attachment, `Store.events` record payloads, search snippets).
+4. **Barrel switch** — export `lib/src/api/api.dart` from the package
+   barrel, flip the compile fixture's import to the barrel, retire the
+   `LocalPocket = KernelDatabase` typedef and the web facade's claim on the
+   name, re-baseline coverage, then delete `refactor/` + the plan file.
+
+Also still out of scope until their families land: `db.flush()`/
+`db.backup()`, `getAll` beyond `rows`, revision numbers on
+`CommittedChange`.

@@ -88,3 +88,115 @@ over every request variant, delegating to the kernel services:
 5. Delete the planning artifacts (`refactor/`, `final_refactoring_plan.md`)
    once the destination API is in place; keep `refactor/` ledgers only as
    long as they are useful.
+
+---
+
+# Facade over the contract — ledger (2026-08-30)
+
+The public facade now exists and runs the vertical slice through both
+runtimes (direct + loopback), proven by a factory-parameterized conformance
+suite. Full suite `+2733 ~83` green, `dart analyze lib test tool` clean,
+web gate + API snapshot PASS.
+
+## What landed
+
+### Contract extensions (`lib/src/contract/`)
+- `query_spec.dart`: serializable predicate tree — sealed
+  `PredicateSpecData` with `LeafSpecData` (wraps `QueryConditionData`),
+  `NotSpecData`, `AllSpecData`, `AnySpecData`; wired into
+  `QuerySpecData.predicate` (authoritative when present; the flat
+  `where`/`orGroups` lists remain for compatibility). Codec round-trips it.
+- `request.dart`: `DistinctRequest.limit` (the facade's `distinct(limit:)`
+  forced it), `TransactionDurability { normal, full }` +
+  `TransactionBeginRequest.durability`.
+- `error_codec.dart` + `core/errors.dart`: new `FieldNotSelectedError`
+  (carries `field` in wire details) — the projection-miss error for the
+  facade's `Row`.
+
+### Kernel (`lib/src/kernel/command_handler.dart`, `core/local_pocket.dart`)
+- `_query` compiles `spec.predicate` into the builder via
+  `predicateNode(...)` → `builder.wherePredicate(node)`. Contract operators
+  the tree compiler does not spell lower to negations: `neq` → `NOT (eq)`,
+  `isNotNull` → `NOT (isNull)`. `neq(null)` is rejected (matches no rows).
+- `_distinct` honors the request limit (builder default 1000 when absent).
+- `_begin` maps `TransactionDurability` onto the kernel's `DurabilityClass`.
+
+### Facade (`lib/src/api/`, new; common Dart only)
+- `options.dart` — `LocalPocketOptions`, `EncryptionConfig.aesGcm256`
+  (→ `AesGcmFieldCipher`; key never leaves the object), `BootstrapOptions`
+  (worker/wasm assets + request timeout), re-exports `DurabilityClass`.
+- `local_pocket.dart` — one concrete `LocalPocket` (private ctor);
+  `open(options)` uses the direct runtime, `openWith(options, factory)` is
+  the conformance seam; `capabilities` getter, `changes` stream, maintenance
+  (`analyze`/`walCheckpoint`/`vacuum`/`pruneOutbox`/`compact`), `close()`
+  (subsequent sends fail with `StateError`, idempotent), `transaction()`
+  resolving only after commit succeeds, `read()` (readOnly session →
+  kernel `ReadOnlyTxError` on writes).
+- `store.dart` — `Store<S>`: put/upsert return the written `Row` (facade
+  generates the record id when the writes do not supply one, so the row can
+  be fetched; kernel `MutationResult.ids` only echoes provided ids); putAll/
+  upsertAll/patch/patchAll/archive/restore/purge; get/getAll (one row per id
+  occurrence, misses null); query/count/countDistinct/distinct/ids/explain/
+  sum/avg/min/max; search (hits with lazy typed fetch); watch (limit
+  required; rejected inside sessions with `ValidationException`; cancel
+  sends `WatchCancelRequest`); per-store `changes`. Write lowering ports the
+  typed layer's `_buildRecord` exactly (owner backstop, duplicate-id and
+  reserved-extra-key checks).
+- `query.dart` — `QuerySpec<S>`/`SearchSpec<S>`/`Cursor<S>`/`Page<S>`/
+  `SearchHit<S>`; lowering to `QuerySpecData` (AND-list of `Cond` trees →
+  one `AllSpecData`/single-node tree; `Limits.unbounded` → `all: true`;
+  paging terminals require a limit → `MissingLimitError`; owner checks on
+  every leaf/order/projection). `Page.next()/prev()` re-issue the same spec
+  with the kernel-minted cursor (`backward: true` for prev).
+- `row.dart` — immutable snapshot; deep defensive copies; `extra`/`toJson()`
+  unmodifiable; projected-out reads → `FieldNotSelectedError`; required-miss
+  and wrong-stored-type → `ValidationException` (port of the typed reader).
+- `transaction.dart` — `Transaction.store(S)` (session-bound views),
+  `savepoint()` (facade-generated names)/`rollbackTo`/`release`.
+- Cross-file seams use public `.internal` constructors (private named
+  parameters are library-private in Dart).
+
+### Tests
+- `test/api/` — facade shell acceptance, CRUD/rows/ownership, immutable
+  rows + projection errors, corruption via out-of-band UPDATE, query parity
+  against the raw builder (pages, cursors, facts), missing-limit and
+  unbounded semantics, search, transactions/savepoints/read-only/watch-in-tx.
+- `test/conformance/facade_conformance_test.dart` — the same bodies over
+  direct and loopback runtimes (CRUD+batch, projection, forward/backward
+  cursors + shape-mismatch stale rejection, transactions+savepoints,
+  ordered-watch reorder re-emit, committed-change events, typed error
+  survival, corrupt-row decoding, aggregates/distinct/ids/explain, search).
+- `test/compile_fixtures/final_api_vm.dart` — the destination-API compile
+  fixture activated (analyzer is the gate), trimmed to contract-backed
+  vocabulary; imports `src/api/api.dart` until the barrel switch.
+
+## Decisions and deviations
+- The `typedef LocalPocket = KernelDatabase` stays for now (the barrel must
+  not change this stage, and the api snapshot pins it); the api facade
+  coexists with it. The typedef dies at the barrel switch, together with the
+  web facade's claim on the name.
+- The full VM fixture (sync attachment, files, conflicts, per-store record
+  events with old/new records, change revisions, search snippets, sync
+  `hit.fetch()`) cannot compile yet — that vocabulary is not in the
+  contract. It activates with the web remote cutover. The activated fixture
+  covers everything the contract carries.
+- `db.flush()`/`db.backup()` are not in the contract; omitted.
+- The typed layer still throws `ValidationException` for projected-out
+  reads (pinned behavior); only the new facade `Row` throws
+  `FieldNotSelectedError`. Unifying is a follow-up.
+
+## Gotchas learned this pass
+- Set the facade `_closed` flag only AFTER the close request resolves —
+  the guard otherwise fails the close call itself.
+- `QueryBuilder.keysetAfter(cursor)` fetches; for raw-side parity, restate
+  the builder and call `keysetAfter` on it (there is no public cursor
+  setter).
+- Record ids must match `[a-z0-9]{15}` — use `rid(label, n)` in tests.
+- Archive drops never-synced records unless the store sets
+  `keepUnsyncedArchives` — test stores must set it to assert archive/restore.
+- Strict tables block most out-of-band column corruption; corrupting a JSON
+  column with a JSON *map* passes kernel decode and fails the typed list
+  codec at the row boundary.
+- `close_sinks` needs an ignore on the watch controller (the stream owner
+  controls its lifetime); broadcast event streams deliver asynchronously, so
+  watches attach their event listener immediately after the start request.
