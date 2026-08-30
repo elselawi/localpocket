@@ -11,9 +11,8 @@ import 'capabilities.dart';
 import 'codec.dart';
 import 'change_bus.dart';
 import 'cipher.dart';
-import 'ddl_compiler.dart';
 import 'compiled_query_runner.dart';
-import 'errors.dart';
+import 'ddl_compiler.dart';
 import 'fts_normalizer.dart';
 import 'migrator.dart';
 import 'perf_counters.dart';
@@ -24,6 +23,8 @@ import 'store.dart';
 import 'system_tables.dart';
 import 'transaction.dart';
 import 'write_queue.dart';
+import 'query/query_builder/query_builder.dart';
+import 'query/search_builder/search_builder.dart';
 import '../sync/op_queue.dart';
 import '../sync/outbox.dart';
 import '../sync/conflicts.dart';
@@ -31,12 +32,15 @@ import '../sync/sync_tables.dart';
 import '../files/blob_store.dart';
 import '../files/files_api.dart';
 import '../typed/typed.dart';
+import '../contract/contract.dart';
 
 part 'kernel_context.dart';
 
 part 'read_service.dart';
 
 part 'transaction_coordinator.dart';
+
+part '../kernel/command_handler.dart';
 
 /// Default clock: wall-clock epoch milliseconds.
 int _defaultNow() => DateTime.now().millisecondsSinceEpoch;
@@ -268,6 +272,7 @@ class KernelDatabase with ChangeBusAwareLP {
     _transactions = TransactionCoordinator(kernel);
     mutations = MutationService(kernel);
     reads = ReadService(kernel);
+    commands = KernelCommandHandler(kernel);
     outbox = Outbox.internal(this);
     opQueue = OpQueue.internal(this);
     conflicts = Conflicts.internal(this);
@@ -291,6 +296,9 @@ class KernelDatabase with ChangeBusAwareLP {
 
   /// The kernel read owner (compiled-plan execution and result shaping).
   late final ReadService reads;
+
+  /// The exhaustive command dispatcher over the runtime contract.
+  late final KernelCommandHandler commands;
 
   /// The database path supplied to [open].
   final String path;
