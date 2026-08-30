@@ -61,7 +61,6 @@ class WireOp {
   static const String txRollback = 'tx_rollback';
 
   // Reactive Watchers
-  static const String watchQuery = 'watch_query';
   static const String watchOne = 'watch_one';
   static const String watchCancel = 'watch_cancel';
   // Sync & auth
@@ -138,7 +137,6 @@ class WireOp {
     txRelease,
     txCommit,
     txRollback,
-    watchQuery,
     watchOne,
     watchCancel,
     syncStart,

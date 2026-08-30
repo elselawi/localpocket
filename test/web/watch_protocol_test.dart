@@ -3,29 +3,6 @@ import 'package:test/test.dart';
 
 void main() {
   group('Watcher wire protocol envelopes', () {
-    test('watchQuery envelope round-trip', () {
-      final req = WebRequest(
-        version: webProtocolVersion,
-        requestId: 20,
-        op: WireOp.watchQuery,
-        args: {
-          'watchId': 100,
-          'operation': 'query',
-          'compilerVersion': 1,
-          'store': 'tasks',
-          'schemaVersion': 1,
-          'schemaFingerprint': 'b' * 64,
-          'argumentCount': 0,
-          'sql': 'SELECT * FROM "tasks" LIMIT 50',
-          'args': <Object?>[],
-        },
-      );
-      final decoded = WebRequest.fromJson(req.toJson());
-      expect(decoded.op, WireOp.watchQuery);
-      expect(decoded.args['watchId'], 100);
-      expect(decoded.args['store'], 'tasks');
-    });
-
     test('watchOne envelope round-trip', () {
       final req = WebRequest(
         version: webProtocolVersion,

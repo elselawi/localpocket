@@ -30,7 +30,7 @@
 /// - `worker_engine_crud.dart` — `get`, `mutate_batch`, `open`.
 /// - `worker_engine_maintenance.dart` — health/capabilities + maintenance.
 /// - `worker_engine_tx.dart` — interactive transaction sessions.
-/// - `worker_engine_watch.dart` — compiled-plan + single-record watchers.
+/// - `worker_engine_watch.dart` — single-record watchers (`watch_one`).
 /// - `worker_engine_sync.dart` — sync engine lifecycle + auth.
 /// - `worker_engine_files.dart` — chunked upload + file metadata RPCs.
 /// - `worker_engine_conflicts.dart` — conflict inspection + resolution.
@@ -39,13 +39,12 @@
 ///
 /// Any helper used by two or more areas lives on [WorkerEngineHost] — never
 /// copied into a mixin: `_applyMutation` (`mutate_batch` + `tx_mutate_batch`),
-/// `_emitWorkerEvent` (`watch_query`/`watch_one`/`conflicts_watch`),
-/// `_requireSession` (every `tx_*` handler + compiled-query tx reads),
-/// `_parseCompiledPlan` (`compiled_query` + `watch_query`), and `_stopSync`
-/// (sync handlers + `close`). The mixins are `on WorkerEngineHost` and share
-/// one library with it, so they access its private state directly with zero
-/// plumbing. Keeping each shared wire contract in exactly one place is what
-/// stops the areas from drifting apart.
+/// `_emitWorkerEvent` (`watch_one`/`conflicts_watch`), `_requireSession`
+/// (every `tx_*` handler + compiled-query tx reads), `_parseCompiledPlan`
+/// (`compiled_query`), and `_stopSync` (sync handlers + `close`). The mixins
+/// are `on WorkerEngineHost` and share one library with it, so they access
+/// its private state directly with zero plumbing. Keeping each shared wire
+/// contract in exactly one place is what stops the areas from drifting apart.
 library;
 
 import 'dart:async';
@@ -71,7 +70,6 @@ import '../pocketbase/backend.dart';
 import '../sync/engine.dart';
 import '../sync/status.dart';
 import '../core/transaction.dart';
-import 'compiled_watcher.dart';
 import 'conflicts_bridge.dart';
 import 'conversions.dart';
 import 'lifecycle.dart';
@@ -613,7 +611,6 @@ final class WorkerEngine extends WorkerEngineHost
     WireOp.txRelease: _handleTxRelease,
     WireOp.txCommit: _handleTxCommit,
     WireOp.txRollback: _handleTxRollback,
-    WireOp.watchQuery: _handleWatchQuery,
     WireOp.watchOne: _handleWatchOne,
     WireOp.watchCancel: _handleWatchCancel,
     WireOp.syncStart: _handleSyncStart,

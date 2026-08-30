@@ -50,8 +50,7 @@ void main() {
     expect(args['shape'], plan.shape);
   });
 
-  test('the envelope carries exactly the plan keys plus the ordered flag',
-      () async {
+  test('the envelope carries exactly the plan keys', () async {
     fake.responses[WireOp.compiledQuery] = {'items': <Object?>[]};
     await sendCompiledPlan(fake, buildPlan());
     final (_, args) = fake.sent.single;
@@ -71,20 +70,10 @@ void main() {
         'projection',
         'decodeColumns',
         'shape',
-        'ordered',
       },
       reason: 'the payload key set is the bridge contract: adding a key '
           'changes the wire the worker parses',
     );
-    expect(args['ordered'], isFalse,
-        reason: 'the ordered digest flag defaults to false');
-  });
-
-  test('the ordered flag rides the envelope when requested', () async {
-    fake.responses[WireOp.watchQuery] = {'items': <Object?>[]};
-    await sendCompiledPlan(fake, buildPlan(), watchId: 3, ordered: true);
-    final (_, args) = fake.sent.single;
-    expect(args['ordered'], isTrue);
   });
 
   test('tagged wire values in args are encoded on the way out', () async {
@@ -191,29 +180,25 @@ void main() {
     expect(args['sql'], contains('MATCH ?'));
   });
 
-  test('sessionId/pageLimit/watchId are omitted when not provided', () async {
+  test('sessionId/pageLimit are omitted when not provided', () async {
     fake.responses[WireOp.compiledQuery] = {'items': <Object?>[]};
     await sendCompiledPlan(fake, buildPlan());
     final (_, args) = fake.sent.single;
     expect(args, isNot(contains('sessionId')));
     expect(args, isNot(contains('pageLimit')));
-    expect(args, isNot(contains('watchId')));
   });
 
-  test('sessionId/pageLimit/watchId are included only when provided', () async {
-    fake.responses[WireOp.watchQuery] = {'items': <Object?>[]};
-    await sendCompiledPlan(fake, buildPlan(),
-        sessionId: 7, pageLimit: 10, watchId: 3);
+  test('sessionId/pageLimit are included only when provided', () async {
+    fake.responses[WireOp.compiledQuery] = {'items': <Object?>[]};
+    await sendCompiledPlan(fake, buildPlan(), sessionId: 7, pageLimit: 10);
 
     final (op, args) = fake.sent.single;
-    expect(op, WireOp.watchQuery,
-        reason: 'a watch id routes to watch_query, not compiled_query');
+    expect(op, WireOp.compiledQuery);
     expect(args['sessionId'], 7);
     expect(args['pageLimit'], 10);
-    expect(args['watchId'], 3);
   });
 
-  test('without a watch id the plan routes to compiled_query', () async {
+  test('a session-scoped plan routes to compiled_query', () async {
     fake.responses[WireOp.compiledQuery] = {'value': 1};
     await sendCompiledPlan(fake, buildPlan(), sessionId: 7, pageLimit: 10);
     expect(fake.sent.single.$1, WireOp.compiledQuery);

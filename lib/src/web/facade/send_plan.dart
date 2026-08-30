@@ -4,17 +4,16 @@ import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
 /// Sends an engine-compiled [QueryPlan] to the worker as the single read
-/// envelope and returns the decoded response map.
+/// envelope and returns the decoded response map. Remaining callers are
+/// transaction-scoped reads; the root query/search/watch families run over
+/// the typed contract.
 Future<Map<String, Object?>> sendCompiledPlan(
   WebFacadeHost pocket,
   QueryPlan plan, {
   int? sessionId,
   int? pageLimit,
-  int? watchId,
-  bool ordered = false,
 }) async {
-  final res = await pocket
-      .send(watchId != null ? WireOp.watchQuery : WireOp.compiledQuery, {
+  final res = await pocket.send(WireOp.compiledQuery, {
     'type': plan.typeName,
     'operation': plan.operation,
     'compilerVersion': plan.compilerVersion,
@@ -28,10 +27,8 @@ Future<Map<String, Object?>> sendCompiledPlan(
     'projection': plan.projection,
     'decodeColumns': plan.decodeColumns,
     'shape': plan.shape,
-    'ordered': ordered,
     if (sessionId != null) 'sessionId': sessionId,
     if (pageLimit != null) 'pageLimit': pageLimit,
-    if (watchId != null) 'watchId': watchId,
   });
   return (res! as Map).map((k, v) => MapEntry(k.toString(), v));
 }

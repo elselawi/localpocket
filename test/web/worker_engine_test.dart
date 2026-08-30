@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/core/query_plan.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/protocol.dart';
@@ -908,83 +909,162 @@ void main() {
       });
     });
 
-    test('watch_query: initial snapshot + emissions + digest dedupe (E17)',
-        () async {
+    Future<contract.WatchStartedResult> startContractWatch(
+        contract.QuerySpecData spec) async {
+      final request = contract.WatchRequest(store: 'widgets', spec: spec);
+      final reply = (await h.customRequest({
+        'v': webProtocolVersion,
+        'i': 0,
+        'op': WireOp.contractRequest,
+        'a': {
+          'request': contract.ContractCodec.encodeRequest(request),
+        },
+      }))! as Map<String, Object?>;
+      final r = (reply['r']! as Map).cast<String, Object?>();
+      final result = (r['result']! as Map).cast<String, Object?>();
+      return contract.ContractCodec.decodeResult(request, result)
+          as contract.WatchStartedResult;
+    }
+
+    Future<contract.OkResult> cancelContractWatch(String subscription) async {
+      final request =
+          contract.WatchCancelRequest(subscription: subscription);
+      final reply = (await h.customRequest({
+        'v': webProtocolVersion,
+        'i': 0,
+        'op': WireOp.contractRequest,
+        'a': {
+          'request': contract.ContractCodec.encodeRequest(request),
+        },
+      }))! as Map<String, Object?>;
+      final r = (reply['r']! as Map).cast<String, Object?>();
+      final result = (r['result']! as Map).cast<String, Object?>();
+      return contract.ContractCodec.decodeResult(request, result)
+          as contract.OkResult;
+    }
+
+    List<contract.WatchSnapshot> snapshots(String subscription) => [
+          for (final e in h.sink.byOp(WireOp.contractEvent))
+            if (contract.ContractCodec
+                .decodeEvent((e['event']! as Map).cast<String, Object?>())
+                case contract.WatchSnapshot s
+                when s.subscription == subscription)
+              s,
+        ];
+
+    test('a contract watch emits its initial snapshot and dedupes unrelated '
+        'changes', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'apple', qty: 1), id: id);
 
-      final plan = h.pocket
-          .collection('widgets')
-          .query()
-          .where('name', eq: 'apple')
-          .limit(50)
-          .compilePlan();
-      const watchId = 7;
-      final result = (await h.sendOk(h.req(WireOp.watchQuery, args: {
-        ...planPayload(plan),
-        'watchId': watchId,
-      })))! as Map<String, Object?>;
-      expect(result['watchId'], watchId);
-      final initial = (result['items']! as List).cast<Map>();
-      expect(initial, hasLength(1));
-      expect(initial.first['name'], 'apple');
+      final started = await startContractWatch(contract.QuerySpecData(
+        predicate: contract.LeafSpecData(contract.QueryConditionData(
+            'name', contract.QueryConditionOp.eq,
+            value: 'apple')),
+        limit: 50,
+      ));
+      await waitUntil(
+          () async => snapshots(started.subscription).isNotEmpty);
+      var current = snapshots(started.subscription);
+      expect(current.single.items.single['name'], 'apple');
 
-      // A mutation matching the query emits a workerEvent.
-      await h.put('widgets', record(name: 'apple', qty: 2, id: id));
-      await waitUntil(() async => h.sink.byOp(WireOp.workerEvent).isNotEmpty);
-      final events = h.sink.byOp(WireOp.workerEvent);
-      expect(events.last['watchId'], watchId);
-      expect(events.last['op'], WireOp.workerEvent);
-      expect(events.last['value'], isA<List>());
+      // A mutation matching the query emits a fresh snapshot.
+      await h.put('widgets', record(name: 'apple', qty: 2, id: id), id: id);
+      await waitUntil(
+          () async => snapshots(started.subscription).length >= 2);
+      current = snapshots(started.subscription);
+      expect(current.last.items.single['qty'], 2);
 
-      // A mutation NOT affecting the snapshot is digest-deduped (no emission).
-      final emitted = h.sink.byOp(WireOp.workerEvent).length;
+      // A mutation NOT affecting the snapshot is digest-deduped.
+      final emitted = snapshots(started.subscription).length;
       await h.put('widgets', record(name: 'banana', qty: 100),
           id: generateRecordId());
       await Future<void>.delayed(const Duration(milliseconds: 120));
-      expect(h.sink.byOp(WireOp.workerEvent).length, emitted,
+      expect(snapshots(started.subscription).length, emitted,
           reason: 'Unrelated row must not re-emit an unchanged snapshot');
     });
 
-    test('watch_query honors projections', () async {
-      final id = generateRecordId();
-      await h.put('widgets', record(name: 'apple', qty: 1, price: 1.5), id: id);
+    test('an ordered contract watch re-emits on a pure reorder', () async {
+      final a = generateRecordId();
+      final b = generateRecordId();
+      await h.put('widgets', record(name: 'a', qty: 1, id: a), id: a);
+      await h.put('widgets', record(name: 'b', qty: 2, id: b), id: b);
 
-      final plan = h.pocket
-          .collection('widgets')
-          .query()
-          .select(['name'])
-          .limit(50)
-          .compilePlan();
-      const watchId = 8;
-      final result = (await h.sendOk(h.req(WireOp.watchQuery, args: {
-        ...planPayload(plan),
-        'watchId': watchId,
-      })))! as Map<String, Object?>;
-      final initial = (result['items']! as List).cast<Map>();
-      expect(initial.single.keys, ['name']);
+      final started = await startContractWatch(contract.QuerySpecData(
+        order: [contract.QueryOrderTermData('qty', desc: true)],
+        limit: 50,
+      ));
+      await waitUntil(() async {
+        final s = snapshots(started.subscription);
+        return s.isNotEmpty &&
+            s.first.items.map((r) => r['id']).toList().toString() ==
+                '[${b}, ${a}]';
+      });
+
+      // A pure reorder: same rows, new positions (b drops below a).
+      await h.put('widgets', record(name: 'b', qty: 0, id: b), id: b);
+      await waitUntil(() async {
+        final s = snapshots(started.subscription);
+        if (s.isEmpty) return false;
+        final ids = s.last.items.map((r) => r['id']).toList();
+        return ids.first == a && ids.last == b;
+      });
     });
 
-    test('watch_cancel stops further emissions', () async {
+    test('a projected contract watch emits projected rows', () async {
+      final id = generateRecordId();
+      await h.put('widgets', record(name: 'apple', qty: 1, price: 1.5),
+          id: id);
+
+      final started = await startContractWatch(contract.QuerySpecData(
+        select: ['name'],
+        limit: 50,
+      ));
+      await waitUntil(
+          () async => snapshots(started.subscription).isNotEmpty);
+      final s = snapshots(started.subscription).single;
+      expect(s.items.single.keys, ['name']);
+    });
+
+    test('a contract watch on an unknown field fails with a typed error',
+        () async {
+      final request = contract.WatchRequest(
+        store: 'widgets',
+        spec: contract.QuerySpecData(order: [
+          contract.QueryOrderTermData('no_such_column'),
+        ]),
+      );
+      final reply = (await h.customRequest({
+        'v': webProtocolVersion,
+        'i': 0,
+        'op': WireOp.contractRequest,
+        'a': {
+          'request': contract.ContractCodec.encodeRequest(request),
+        },
+      }))! as Map<String, Object?>;
+      final r = (reply['r']! as Map).cast<String, Object?>();
+      final error = (r['error']! as Map).cast<String, Object?>();
+      expect(contract.decodeError(error), isA<ValidationException>());
+    });
+
+    test('a contract watch cancel stops further emissions', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'apple', qty: 1), id: id);
-      final plan = h.pocket
-          .collection('widgets')
-          .query()
-          .where('name', eq: 'apple')
-          .limit(50)
-          .compilePlan();
-      const watchId = 9;
-      await h.sendOk(h.req(WireOp.watchQuery, args: {
-        ...planPayload(plan),
-        'watchId': watchId,
-      }));
-      await h.sendOk(h.req(WireOp.watchCancel, args: {'watchId': watchId}));
+      final started = await startContractWatch(contract.QuerySpecData(
+        predicate: contract.LeafSpecData(contract.QueryConditionData(
+            'name', contract.QueryConditionOp.eq,
+            value: 'apple')),
+        limit: 50,
+      ));
+      await waitUntil(
+          () async => snapshots(started.subscription).isNotEmpty);
+      await cancelContractWatch(started.subscription);
 
-      await h.put('widgets', record(name: 'apple', qty: 5, id: id));
+      final emitted = snapshots(started.subscription).length;
+      await h.put('widgets', record(name: 'apple', qty: 5, id: id), id: id);
       await Future<void>.delayed(const Duration(milliseconds: 120));
-      expect(h.sink.byOp(WireOp.workerEvent), isEmpty,
-          reason: 'No emissions after watch_cancel');
+      expect(snapshots(started.subscription).length, emitted,
+          reason: 'No emissions after watch cancel');
     });
 
     test('watch_one: initial item + update emission', () async {
@@ -1007,61 +1087,6 @@ void main() {
       expect(ev['watchId'], watchId);
       final item = decodeWireValue(ev['value']) as Map?;
       expect(item?['name'], 'one-updated');
-    });
-
-    test('watch_query rejects a stale plan', () async {
-      final plan = h.pocket
-          .collection('widgets')
-          .query()
-          .where('name', eq: 'apple')
-          .limit(50)
-          .compilePlan();
-      final err = await h.sendError(h.req(WireOp.watchQuery, args: {
-        ...planPayload(plan),
-        'schemaFingerprint': 'stale',
-        'watchId': 11,
-      }));
-      expect(err.details?['type'], 'ProtocolEnvelopeException');
-    });
-
-    test('watch_query execution failure cleans up the watcher registration',
-        () async {
-      final id = generateRecordId();
-      await h.put('widgets', record(name: 'apple', qty: 1), id: id);
-
-      // A plan that passes envelope validation (SELECT prefix, matching
-      // fingerprint) but fails at execution: the referenced column does not
-      // exist. initializeWebWatch must run its cleanup (drop the watcher).
-      final plan = h.pocket
-          .collection('widgets')
-          .query()
-          .where('name', eq: 'apple')
-          .limit(50)
-          .compilePlan();
-      const watchId = 12;
-      final err = await h.sendError(h.req(WireOp.watchQuery, args: {
-        ...planPayload(QueryPlan(
-          operation: plan.operation,
-          compilerVersion: plan.compilerVersion,
-          store: plan.store,
-          schemaVersion: plan.schemaVersion,
-          schemaFingerprint: plan.schemaFingerprint,
-          sql: plan.sql.replaceAll('"name"', '"no_such_column"'),
-          args: plan.args,
-          limit: plan.limit,
-          projection: plan.projection,
-          shape: plan.shape,
-        )),
-        'watchId': watchId,
-      }));
-      expect(err, isA<WorkerError>());
-
-      // The failed registration was cleaned up: cancelling a non-existent
-      // watcher is a no-op success (no leaked watcher remains).
-      final cancel = (await h
-              .sendOk(h.req(WireOp.watchCancel, args: {'watchId': watchId})))!
-          as Map<String, Object?>;
-      expect(cancel['ok'], isTrue);
     });
 
     test('watch_one with an undecodable record fails and cleans up', () async {

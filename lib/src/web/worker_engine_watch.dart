@@ -1,15 +1,11 @@
 /// Part of `worker_engine.dart` — reactive watchers.
 ///
-/// Wire handlers for `watch_query` (compiled-plan watch), `watch_one`
-/// (single-record watch) and `watch_cancel`. Watcher emissions are forwarded
-/// to the client as `worker_event` envelopes via the shared
-/// `WorkerEngineHost._emitWorkerEvent` (main file), so all watcher kinds
-/// share one envelope shape and cannot drift.
-///
-/// The compiled-plan validation shared with `compiled_query` lives in
-/// `WorkerEngineHost._parseCompiledPlan` (main file) — it is never duplicated
-/// here, so watcher refreshes and on-demand fetches validate plans
-/// identically.
+/// Wire handlers for `watch_one` (single-record watch) and `watch_cancel`.
+/// Watcher emissions are forwarded to the client as `worker_event` envelopes
+/// via the shared `WorkerEngineHost._emitWorkerEvent` (main file), so all
+/// watcher kinds share one envelope shape and cannot drift. Query watches
+/// travel the typed contract (`WatchRequest`/`WatchSnapshot`), answered by
+/// the kernel command handler.
 part of 'worker_engine.dart';
 
 /// {@template localpocket.__active_watcher}
@@ -23,45 +19,6 @@ class _ActiveWatcher {
 
 /// Reactive-watcher handlers (see the file doc above).
 mixin WorkerWatchHandlers on WorkerEngineHost {
-  Future<Object?> _handleWatchQuery(
-      WorkerEventSink sink, WebRequest req) async {
-    final watchId = WireArgs(req.args).requireInt('watchId', op: 'watch_query');
-    final plan = _parseCompiledPlan(req.args);
-    // An explicitly ordered watch MUST use an
-    // order-sensitive digest on every runtime, so a pure re-order emits. The
-    // page declares the query's ordering because the compiled SQL cannot
-    // distinguish an explicit ORDER BY from an implicit tie-breaker.
-    final ordered = req.args['ordered'] == true;
-    final watcher = CompiledWatcher(
-      pocket,
-      pocket.requireTable(plan.store).schema,
-      plan.sql,
-      plan.args,
-      plan.projection,
-      plan.decodeColumns,
-      (items) => _emitWorkerEvent(sink, watchId, items),
-      ordered: ordered,
-    );
-    final registration = _ActiveWatcher(() async {
-      watcher.dispose();
-    });
-    final initialItems = await initializeWebWatch<List<Map<String, Object?>>>(
-      start: watcher.start,
-      register: () => _watchers[watchId] = registration,
-      initialize: watcher.initial,
-      cleanup: () async {
-        if (identical(_watchers[watchId], registration)) {
-          _watchers.remove(watchId);
-        }
-        await registration.cancel();
-      },
-    );
-    return {
-      'watchId': watchId,
-      'items': initialItems.map(encodeWireValue).toList(),
-    };
-  }
-
   Future<Object?> _handleWatchOne(WorkerEventSink sink, WebRequest req) async {
     final aw = WireArgs(req.args);
     final watchId = aw.requireInt('watchId', op: 'watch_one');

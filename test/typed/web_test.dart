@@ -40,7 +40,6 @@ void main() {
         'tx_release',
         'tx_commit',
         'tx_rollback',
-        'watch_query',
         'watch_one',
         'watch_cancel',
         'sync_start',
