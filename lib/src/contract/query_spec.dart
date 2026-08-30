@@ -11,6 +11,7 @@ final class QuerySpecData {
   const QuerySpecData({
     this.where = const [],
     this.orGroups = const [],
+    this.predicate,
     this.order = const [],
     this.limit,
     this.all = false,
@@ -23,6 +24,11 @@ final class QuerySpecData {
 
   final List<QueryConditionData> where;
   final List<List<QueryConditionData>> orGroups;
+
+  /// A full boolean predicate tree. When present it is the authoritative
+  /// filter; the flat [where]/[orGroups] lists remain for callers that only
+  /// need conjunctions of simple comparisons.
+  final PredicateSpecData? predicate;
   final List<QueryOrderTermData> order;
   final int? limit;
   final bool all;
@@ -41,6 +47,7 @@ final class QuerySpecData {
         'orGroups': [
           for (final g in orGroups) [for (final c in g) c.toJson()],
         ],
+        if (predicate != null) 'predicate': predicate!.toJson(),
         'order': [for (final o in order) o.toJson()],
         if (limit != null) 'limit': limit,
         'all': all,
@@ -71,6 +78,8 @@ final class QuerySpecData {
         if (groupsRaw is List)
           for (final g in groupsRaw) conditions(g),
       ],
+      predicate:
+          m['predicate'] is Map ? PredicateSpecData.fromJson(m['predicate']) : null,
       order: [
         if (orderRaw is List)
           for (final o in orderRaw) QueryOrderTermData.fromJson(o),
@@ -144,6 +153,89 @@ enum QueryConditionOp {
   contains,
   isNull,
   isNotNull,
+}
+
+/// One node of a serializable boolean predicate tree — a leaf comparison or
+/// a composed expression. The tree mirrors the kernel's in-memory predicate
+/// algebra (leaf / not / all / any) so a condition built once on a typed
+/// surface crosses a runtime boundary without losing structure; the kernel
+/// compiles it, SQL never does.
+sealed class PredicateSpecData {
+  const PredicateSpecData();
+
+  Map<String, Object?> toJson();
+
+  static PredicateSpecData fromJson(Object? raw) {
+    if (raw is! Map) throw WireException('Malformed predicate tree.');
+    final m = raw.map((k, v) => MapEntry(k.toString(), v));
+    List<PredicateSpecData> children(Object? v) {
+      if (v is! List) throw WireException('Malformed predicate children.');
+      return [for (final c in v) PredicateSpecData.fromJson(c)];
+    }
+
+    switch (m['kind']) {
+      case 'leaf':
+        return LeafSpecData(QueryConditionData.fromJson(m));
+      case 'not':
+        return NotSpecData(PredicateSpecData.fromJson(m['child']));
+      case 'all':
+        return AllSpecData(children(m['children']));
+      case 'any':
+        return AnySpecData(children(m['children']));
+      default:
+        throw WireException('Unknown predicate node kind: ${m['kind']}');
+    }
+  }
+}
+
+/// One comparison leaf. Values are wire-encoded through the condition codec.
+final class LeafSpecData extends PredicateSpecData {
+  const LeafSpecData(this.condition);
+
+  final QueryConditionData condition;
+
+  @override
+  Map<String, Object?> toJson() => {
+        'kind': 'leaf',
+        ...condition.toJson(),
+      };
+}
+
+/// A negation — SQL `NOT (...)`.
+final class NotSpecData extends PredicateSpecData {
+  const NotSpecData(this.child);
+
+  final PredicateSpecData child;
+
+  @override
+  Map<String, Object?> toJson() =>
+      {'kind': 'not', 'child': child.toJson()};
+}
+
+/// A conjunction — the children AND together.
+final class AllSpecData extends PredicateSpecData {
+  const AllSpecData(this.children);
+
+  final List<PredicateSpecData> children;
+
+  @override
+  Map<String, Object?> toJson() => {
+        'kind': 'all',
+        'children': [for (final c in children) c.toJson()],
+      };
+}
+
+/// A disjunction — the children OR together.
+final class AnySpecData extends PredicateSpecData {
+  const AnySpecData(this.children);
+
+  final List<PredicateSpecData> children;
+
+  @override
+  Map<String, Object?> toJson() => {
+        'kind': 'any',
+        'children': [for (final c in children) c.toJson()],
+      };
 }
 
 /// One ordering term.

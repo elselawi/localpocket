@@ -164,6 +164,23 @@ class TypedStoreMismatchError extends LocalPocketError {
   TypedStoreMismatchError(super.message);
 }
 
+/// {@template localpocket.field_not_selected_error}
+/// A field excluded by a projection (`select`) was read from a row snapshot.
+///
+/// Projected rows only carry the selected columns; reading anything else is
+/// a caller bug, so it surfaces as a typed error naming the field instead of
+/// a silent `null`.
+/// {@endtemplate}
+class FieldNotSelectedError extends LocalPocketError {
+  /// {@macro localpocket.field_not_selected_error}
+  FieldNotSelectedError(this.field)
+      : super('Field "$field" was not selected and is unavailable in '
+          'this row.');
+
+  /// The projected-out field that was read.
+  final String field;
+}
+
 /// Translates a SQLite exception or error into a typed [LocalPocketError].
 /// `record` (if given) is used to extract the offending value for unique
 /// violations.

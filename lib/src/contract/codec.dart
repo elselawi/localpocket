@@ -197,6 +197,7 @@ abstract final class ContractCodec {
         return DistinctRequest(
           store: _store(m),
           field: _required(m, 'field'),
+          limit: m['limit'] is int ? m['limit']! as int : null,
           session: _optionalSession(m),
         );
       case 'ids':
@@ -234,7 +235,17 @@ abstract final class ContractCodec {
         if (readOnly is! bool) {
           throw WireException('Malformed txBegin payload.');
         }
-        return TransactionBeginRequest(readOnly: readOnly);
+        final durabilityName = m['durability'];
+        final durability = TransactionDurability.values
+            .where((d) => d.name == durabilityName)
+            .firstOrNull;
+        if (durabilityName is String && durability == null) {
+          throw WireException('Unknown tx durability: $durabilityName');
+        }
+        return TransactionBeginRequest(
+          readOnly: readOnly,
+          durability: durability ?? TransactionDurability.normal,
+        );
       case 'txCommit':
       case 'txRollback':
         final session = m['session'];

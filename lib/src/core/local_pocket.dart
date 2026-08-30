@@ -24,6 +24,7 @@ import 'system_tables.dart';
 import 'transaction.dart';
 import 'write_queue.dart';
 import 'query/query_builder/query_builder.dart';
+import 'query/query_builder/predicate_tree.dart';
 import 'query/search_builder/search_builder.dart';
 import '../sync/op_queue.dart';
 import '../sync/outbox.dart';

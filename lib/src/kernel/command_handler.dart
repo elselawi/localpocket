@@ -110,10 +110,16 @@ class KernelCommandHandler implements CommandHandler {
             () => _query(store, spec, session).countDistinct(field),
             CountResult.new,
           ),
-        DistinctRequest(:final store, :final field, :final session) =>
+        DistinctRequest(
+          :final store,
+          :final field,
+          :final limit,
+          :final session,
+        ) =>
           _withSession(
             session,
-            () => _query(store, const QuerySpecData(), session).distinct(field),
+            () => _query(store, QuerySpecData(limit: limit), session)
+                .distinct(field),
             DistinctResult.new,
           ),
         IdsRequest(:final store, :final spec, :final session) => _withSession(
@@ -149,7 +155,8 @@ class KernelCommandHandler implements CommandHandler {
             spec,
             session,
           ),
-        TransactionBeginRequest(:final readOnly) => _begin(readOnly),
+        TransactionBeginRequest(:final readOnly, :final durability) =>
+          _begin(readOnly, durability),
         TransactionCommitRequest(:final session) => _settle(session, true),
         TransactionRollbackRequest(:final session) => _settle(session, false),
         TransactionSavepointRequest(:final session, :final name) =>
@@ -326,6 +333,12 @@ class KernelCommandHandler implements CommandHandler {
           if (c.op == QueryConditionOp.eq) {c.field: c.value},
       ]);
     }
+    // A structured predicate tree is the authoritative filter when present;
+    // it compiles through the same builder path as the flat conditions.
+    final predicate = spec.predicate;
+    if (predicate != null) {
+      builder = builder.wherePredicate(predicateNode(predicate));
+    }
     for (final o in spec.order) {
       builder = builder.orderBy(o.field, desc: o.desc);
     }
@@ -417,7 +430,7 @@ class KernelCommandHandler implements CommandHandler {
 
   // -- interactive transactions ----------------------------------------------
 
-  Future<Result> _begin(bool readOnly) {
+  Future<Result> _begin(bool readOnly, TransactionDurability durability) {
     final id = 'tx${++_counter}';
     final session = _TxSession(id, readOnly);
     _sessions[id] = session;
@@ -429,7 +442,14 @@ class KernelCommandHandler implements CommandHandler {
       if (session.rollback) throw const _RollbackSignal();
     }
 
-    session.future = readOnly ? db.read(run) : db.transaction(run);
+    session.future = readOnly
+        ? db.read(run)
+        : db.transaction(
+            run,
+            durability: durability == TransactionDurability.full
+                ? DurabilityClass.full
+                : DurabilityClass.normal,
+          );
     return session.ready.future
         .then((_) => TransactionBeginResult(session: id));
   }
@@ -571,5 +591,66 @@ class KernelCommandHandler implements CommandHandler {
     unawaited(_changeSub.cancel());
     await context.database.close();
     await _events.close();
+  }
+}
+
+/// Lowers a serializable predicate tree into the builder's in-memory
+/// predicate algebra. The switch is exhaustive over the sealed wire tree; the
+/// two contract operators the tree compiler does not spell directly (`neq`,
+/// `isNotNull`) lower to negations of their positive forms, which match the
+/// same rows (`field <> v` is NULL-excluding exactly like `NOT (field = v)`).
+PredicateNode predicateNode(PredicateSpecData node) => switch (node) {
+      LeafSpecData(:final condition) => _predicateLeaf(condition),
+      NotSpecData(:final child) => NotPredicate(predicateNode(child)),
+      AllSpecData(:final children) => AllPredicate([
+          for (final child in children) predicateNode(child),
+        ]),
+      AnySpecData(:final children) => AnyPredicate([
+          for (final child in children) predicateNode(child),
+        ]),
+    };
+
+PredicateNode _predicateLeaf(QueryConditionData condition) {
+  final field = condition.field;
+  switch (condition.op) {
+    case QueryConditionOp.eq:
+      final value = condition.value;
+      if (value == null) {
+        return LeafPredicate(field, 'isNull', const <Object?>[]);
+      }
+      return LeafPredicate(field, 'eq', <Object?>[value]);
+    case QueryConditionOp.neq:
+      final value = condition.value;
+      if (value == null) {
+        throw ArgumentError('neq(null) matches no rows; use isNotNull.');
+      }
+      return NotPredicate(LeafPredicate(field, 'eq', <Object?>[value]));
+    case QueryConditionOp.gt:
+      return LeafPredicate(field, 'gt', <Object?>[condition.value]);
+    case QueryConditionOp.gte:
+      return LeafPredicate(field, 'gte', <Object?>[condition.value]);
+    case QueryConditionOp.lt:
+      return LeafPredicate(field, 'lt', <Object?>[condition.value]);
+    case QueryConditionOp.lte:
+      return LeafPredicate(field, 'lte', <Object?>[condition.value]);
+    case QueryConditionOp.inValues:
+      return LeafPredicate(field, 'inValues', condition.values ?? const []);
+    case QueryConditionOp.between:
+      final v = condition.values ?? const [];
+      if (v.length != 2) {
+        throw ArgumentError('between requires exactly two values.');
+      }
+      return LeafPredicate(field, 'between', v);
+    case QueryConditionOp.startsWith:
+      return LeafPredicate(field, 'startsWith', <Object?>[condition.value]);
+    case QueryConditionOp.endsWith:
+      return LeafPredicate(field, 'endsWith', <Object?>[condition.value]);
+    case QueryConditionOp.contains:
+      return LeafPredicate(field, 'contains', <Object?>[condition.value]);
+    case QueryConditionOp.isNull:
+      return LeafPredicate(field, 'isNull', const <Object?>[]);
+    case QueryConditionOp.isNotNull:
+      return NotPredicate(
+          LeafPredicate(field, 'isNull', const <Object?>[]));
   }
 }

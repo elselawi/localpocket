@@ -12,6 +12,8 @@ Map<String, Object?> encodeError(Object error) {
     message = error.message;
     if (error is ValidationException && error.field != null) {
       details = {'field': error.field};
+    } else if (error is FieldNotSelectedError) {
+      details = {'field': error.field};
     } else if (error is UniqueConstraintException) {
       details = {'field': error.field};
     } else if (error is NotNullConstraintException) {
@@ -58,6 +60,7 @@ String _localPocketErrorType(LocalPocketError error) => switch (error) {
       DestructiveMigrationRefusedError() => 'DestructiveMigrationRefusedError',
       ReadOnlyTxError() => 'ReadOnlyTxError',
       TypedStoreMismatchError() => 'TypedStoreMismatchError',
+      FieldNotSelectedError() => 'FieldNotSelectedError',
     };
 
 /// Decodes a wire error back into a typed error. Known kernel errors are
@@ -113,6 +116,8 @@ Object decodeError(Map<String, Object?> wire) {
       return DestructiveMigrationRefusedError(m);
     case 'ReadOnlyTxError':
       return ReadOnlyTxError(m);
+    case 'FieldNotSelectedError':
+      return FieldNotSelectedError(detail('field') ?? '');
     case 'TypedStoreMismatchError':
       return TypedStoreMismatchError(m);
     case 'StateError':

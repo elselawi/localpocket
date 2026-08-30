@@ -216,11 +216,19 @@ final class CountDistinctRequest extends Request<CountResult> {
 }
 
 final class DistinctRequest extends Request<DistinctResult> {
-  const DistinctRequest(
-      {required this.store, required this.field, this.session});
+  const DistinctRequest({
+    required this.store,
+    required this.field,
+    this.limit,
+    this.session,
+  });
 
   final String store;
   final String field;
+
+  /// Cap on the number of distinct values returned; `null` lets the kernel
+  /// apply its default cap for unbounded distinct scans.
+  final int? limit;
   final String? session;
 
   @override
@@ -232,6 +240,7 @@ final class DistinctRequest extends Request<DistinctResult> {
   Map<String, Object?> toJson() => {
         'store': store,
         'field': field,
+        if (limit != null) 'limit': limit,
         if (session != null) 'session': session,
       };
 }
@@ -330,10 +339,19 @@ final class SearchRequest extends Request<SearchHitsResult> {
 // interactive transactions
 // ---------------------------------------------------------------------------
 
+/// Commit durability for an interactive transaction: [normal] relies on the
+/// WAL default (app-crash-safe, cheap commits), [full] forces an fsync per
+/// commit (power-loss-safe, slower).
+enum TransactionDurability { normal, full }
+
 final class TransactionBeginRequest extends Request<TransactionBeginResult> {
-  const TransactionBeginRequest({required this.readOnly});
+  const TransactionBeginRequest({
+    required this.readOnly,
+    this.durability = TransactionDurability.normal,
+  });
 
   final bool readOnly;
+  final TransactionDurability durability;
 
   @override
   String get tag => 'txBegin';
@@ -341,7 +359,10 @@ final class TransactionBeginRequest extends Request<TransactionBeginResult> {
   String get resultTag => TransactionBeginResult.tagValue;
 
   @override
-  Map<String, Object?> toJson() => {'readOnly': readOnly};
+  Map<String, Object?> toJson() => {
+        'readOnly': readOnly,
+        'durability': durability.name,
+      };
 }
 
 final class TransactionCommitRequest extends Request<OkResult> {
