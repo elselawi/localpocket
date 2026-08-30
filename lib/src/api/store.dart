@@ -210,7 +210,7 @@ final class Store<S extends StoreDef<S>> {
     final result = await _send(DistinctRequest(
       store: name,
       field: field.name,
-      limit: limit,
+      spec: QuerySpecData(limit: limit),
       session: _session,
     ));
     return result.values;

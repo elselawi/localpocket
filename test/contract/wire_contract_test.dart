@@ -83,6 +83,34 @@ void main() {
         }),
         throwsA(isA<WireException>()),
       );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'distinct',
+          'payload': encodeWireValue({
+            'store': 's',
+            'field': 'f',
+            'spec': {
+              'where': [
+                {'field': 'qty', 'op': 'bogus'},
+              ],
+            },
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a malformed condition inside a distinct spec fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'distinct',
+          'payload': encodeWireValue({
+            'store': 's',
+            'field': 'f',
+            'spec': 'not-a-map',
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a non-map distinct spec fails typed',
+      );
     });
   });
 

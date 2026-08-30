@@ -113,13 +113,12 @@ class KernelCommandHandler implements CommandHandler {
         DistinctRequest(
           :final store,
           :final field,
-          :final limit,
+          :final spec,
           :final session,
         ) =>
           _withSession(
             session,
-            () => _query(store, QuerySpecData(limit: limit), session)
-                .distinct(field),
+            () => _query(store, spec, session).distinct(field),
             DistinctResult.new,
           ),
         IdsRequest(:final store, :final spec, :final session) => _withSession(

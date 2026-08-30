@@ -219,16 +219,17 @@ final class DistinctRequest extends Request<DistinctResult> {
   const DistinctRequest({
     required this.store,
     required this.field,
-    this.limit,
+    this.spec = const QuerySpecData(),
     this.session,
   });
 
   final String store;
   final String field;
 
-  /// Cap on the number of distinct values returned; `null` lets the kernel
-  /// apply its default cap for unbounded distinct scans.
-  final int? limit;
+  /// The read spec the distinct scan is scoped by (filters, scope flags, and
+  /// the cap on returned values via [QuerySpecData.limit]). The kernel applies
+  /// its default cap when the spec carries no limit.
+  final QuerySpecData spec;
   final String? session;
 
   @override
@@ -240,7 +241,7 @@ final class DistinctRequest extends Request<DistinctResult> {
   Map<String, Object?> toJson() => {
         'store': store,
         'field': field,
-        if (limit != null) 'limit': limit,
+        'spec': spec.toJson(),
         if (session != null) 'session': session,
       };
 }

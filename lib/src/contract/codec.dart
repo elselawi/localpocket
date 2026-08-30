@@ -39,7 +39,16 @@ abstract final class ContractCodec {
     QueryRequest(store: 's', spec: QuerySpecData()),
     CountRequest(store: 's', spec: QuerySpecData()),
     CountDistinctRequest(store: 's', field: 'f', spec: QuerySpecData()),
-    DistinctRequest(store: 's', field: 'f'),
+    DistinctRequest(
+      store: 's',
+      field: 'f',
+      spec: QuerySpecData(
+        predicate: LeafSpecData(
+            QueryConditionData('qty', QueryConditionOp.gt, value: 3)),
+        order: [QueryOrderTermData('qty', desc: true)],
+        limit: 7,
+      ),
+    ),
     IdsRequest(store: 's', spec: QuerySpecData()),
     AggregateRequest(
         store: 's', fn: AggregateFn.sum, field: 'f', spec: QuerySpecData()),
@@ -197,7 +206,7 @@ abstract final class ContractCodec {
         return DistinctRequest(
           store: _store(m),
           field: _required(m, 'field'),
-          limit: m['limit'] is int ? m['limit']! as int : null,
+          spec: QuerySpecData.fromJson(m['spec'] ?? const <String, Object?>{}),
           session: _optionalSession(m),
         );
       case 'ids':
