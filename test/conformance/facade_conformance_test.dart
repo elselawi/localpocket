@@ -54,8 +54,10 @@ void main() {
         addTearDown(db.close);
         final tasks = db.store(Tasks.store);
 
-        final a = await tasks.put([Tasks.title.set('a'), Tasks.priority.set(1)]);
-        final b = await tasks.put([Tasks.title.set('b'), Tasks.priority.set(2)]);
+        final a =
+            await tasks.put([Tasks.title.set('a'), Tasks.priority.set(1)]);
+        final b =
+            await tasks.put([Tasks.title.set('b'), Tasks.priority.set(2)]);
         await tasks.putAll([
           [Tasks.title.set('c'), Tasks.priority.set(3)],
           [Tasks.title.set('d'), Tasks.priority.set(4)],
@@ -97,8 +99,8 @@ void main() {
         ));
         final row = page.items.single;
         expect(row(Tasks.title), 'proj');
-        expect(() => row(Tasks.priority),
-            throwsA(isA<FieldNotSelectedError>()));
+        expect(
+            () => row(Tasks.priority), throwsA(isA<FieldNotSelectedError>()));
         expect(() => row.archived, throwsA(isA<FieldNotSelectedError>()));
         expect(row.toJson(), containsPair('title', 'proj'));
       });
@@ -108,8 +110,7 @@ void main() {
         addTearDown(db.close);
         final tasks = db.store(Tasks.store);
         for (var i = 0; i < 4; i++) {
-          await tasks
-              .put([Tasks.title.set('row $i'), Tasks.priority.set(i)]);
+          await tasks.put([Tasks.title.set('row $i'), Tasks.priority.set(i)]);
         }
 
         const orderSpec = QuerySpecData(order: [
@@ -117,7 +118,8 @@ void main() {
         ]);
         final page1 = await runtime.send(QueryRequest(
           store: 'tasks',
-          spec: QuerySpecData(order: [QueryOrderTermData('priority')], limit: 2),
+          spec:
+              QuerySpecData(order: [QueryOrderTermData('priority')], limit: 2),
         ));
         expect(page1.items, hasLength(2));
         expect(page1.hasNext, isTrue);
@@ -145,8 +147,8 @@ void main() {
             backward: true,
           ),
         ));
-        expect(before.items.map((m) => m['id']),
-            page1.items.map((m) => m['id']),
+        expect(
+            before.items.map((m) => m['id']), page1.items.map((m) => m['id']),
             reason: 'backward continuation re-lands on the earlier window');
 
         // A cursor replayed against a different sort signature is stale.
@@ -176,8 +178,8 @@ void main() {
           final sp = await tx.savepoint();
           await txTasks.put([Tasks.title.set('doomed')]);
           await tx.rollbackTo(sp);
-          final doomed = await txTasks.query(QuerySpec<Tasks>(
-              where: [Tasks.title.eq('doomed')], limit: 10));
+          final doomed = await txTasks.query(
+              QuerySpec<Tasks>(where: [Tasks.title.eq('doomed')], limit: 10));
           expect(doomed.items, isEmpty);
           return kept.id;
         });
@@ -188,10 +190,10 @@ void main() {
         db = await open();
         addTearDown(db.close);
         final tasks = db.store(Tasks.store);
-        final first = await tasks.put(
-            [Tasks.title.set('alpha'), Tasks.priority.set(1)]);
-        final second = await tasks
-            .put([Tasks.title.set('zeta'), Tasks.priority.set(2)]);
+        final first =
+            await tasks.put([Tasks.title.set('alpha'), Tasks.priority.set(1)]);
+        final second =
+            await tasks.put([Tasks.title.set('zeta'), Tasks.priority.set(2)]);
 
         final snapshots = <List<String>>[];
         final sub = tasks
@@ -207,7 +209,8 @@ void main() {
         // flips while the row set is unchanged ('zeta' → 'aaa' drops it below
         // 'alpha' in the title-desc window).
         await tasks.patch(second.id, [Tasks.title.set('aaa')]);
-        await _waitFor(() => snapshots.length > 1 && snapshots.last.length == 2);
+        await _waitFor(
+            () => snapshots.length > 1 && snapshots.last.length == 2);
         expect(snapshots.last, [first.id, second.id],
             reason: 'the window is re-emitted in the new order');
         expect(snapshots.first, [second.id, first.id],
@@ -267,8 +270,7 @@ void main() {
         await db.close();
 
         final raw = await kernel.KernelDatabase.open(path: t.path, stores: []);
-        await raw.traceExecute(
-            'UPDATE "tasks" SET "tags" = ? WHERE "id" = ?',
+        await raw.traceExecute('UPDATE "tasks" SET "tags" = ? WHERE "id" = ?',
             ['{"not": "a list"}', created.id]);
         await raw.close();
 
@@ -284,8 +286,7 @@ void main() {
         addTearDown(db.close);
         final tasks = db.store(Tasks.store);
         for (var i = 0; i < 4; i++) {
-          await tasks.put(
-              [Tasks.title.set('agg $i'), Tasks.priority.set(i)]);
+          await tasks.put([Tasks.title.set('agg $i'), Tasks.priority.set(i)]);
         }
 
         final where = [Tasks.priority.gte(2)];
@@ -295,9 +296,11 @@ void main() {
         expect(await tasks.max(Tasks.priority, where: where), 3);
         expect(
             await tasks.avg(Tasks.priority, where: where), closeTo(2.5, 1e-9));
+        expect(await tasks.countDistinct(Tasks.priority, where: where), 2);
         expect(
-            await tasks.countDistinct(Tasks.priority, where: where), 2);
-        expect(await tasks.distinct(Tasks.priority, limit: 100).then((v) => v.toSet()),
+            await tasks
+                .distinct(Tasks.priority, limit: 100)
+                .then((v) => v.toSet()),
             hasLength(4));
         expect(await tasks.ids(QuerySpec<Tasks>(limit: 10)), hasLength(4));
         expect(
@@ -313,8 +316,8 @@ void main() {
         final hit = await tasks.put([Tasks.title.set('findable needle')]);
         await tasks.put([Tasks.title.set('other row')]);
 
-        final hits =
-            await tasks.search(const SearchSpec<Tasks>(term: 'needle', limit: 10));
+        final hits = await tasks
+            .search(const SearchSpec<Tasks>(term: 'needle', limit: 10));
         expect(hits.map((h) => h.id), contains(hit.id));
         final fetched = await hits.first.fetch();
         expect(fetched!.id, hits.first.id);

@@ -33,7 +33,9 @@ final class Tasks extends StoreDef<Tasks> {
       [title, done, priority, dueAt, tags];
 
   @override
-  List<IndexSpec> get indexes => [store.indexSpec([done, priority])];
+  List<IndexSpec> get indexes => [
+        store.indexSpec([done, priority])
+      ];
 
   @override
   FtsSpec? get fts => store.ftsSpec([title]);

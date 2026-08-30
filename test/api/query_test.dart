@@ -43,14 +43,18 @@ Future<(LocalPocket, kernel.KernelDatabase)> _seedPair() async {
 
 /// The raw builder equivalent of the facade spec used by the parity test:
 /// `done = false OR (priority >= 2 AND title != 'task 4')`, priority desc.
-QueryBuilder _parityBuilder(kernel.KernelDatabase raw) =>
-    raw.collection('tasks').query().wherePredicate(AnyPredicate([
+QueryBuilder _parityBuilder(kernel.KernelDatabase raw) => raw
+    .collection('tasks')
+    .query()
+    .wherePredicate(AnyPredicate([
       LeafPredicate('done', 'eq', <Object?>[false]),
       AllPredicate([
         LeafPredicate('priority', 'gte', <Object?>[2]),
         NotPredicate(LeafPredicate('title', 'eq', <Object?>['task 4'])),
       ]),
-    ])).orderBy('priority', desc: true).limit(2);
+    ]))
+    .orderBy('priority', desc: true)
+    .limit(2);
 
 QuerySpec<Tasks> _paritySpec() => QuerySpec<Tasks>(
       where: [

@@ -20,8 +20,7 @@ void main() {
 
       final insideId = await db.transaction((tx) async {
         final txTasks = tx.store(Tasks.store);
-        final created =
-            await txTasks.put([Tasks.title.set('inside tx')]);
+        final created = await txTasks.put([Tasks.title.set('inside tx')]);
         final page = await txTasks.query(
             QuerySpec<Tasks>(where: [Tasks.title.eq('inside tx')], limit: 10));
         expect(page.items.single.id, created.id,
@@ -46,8 +45,8 @@ void main() {
         throwsA(isA<StateError>()),
       );
 
-      final page = await tasks
-          .query(QuerySpec<Tasks>(where: [Tasks.title.eq('doomed')], limit: 10));
+      final page = await tasks.query(
+          QuerySpec<Tasks>(where: [Tasks.title.eq('doomed')], limit: 10));
       expect(page.items, isEmpty, reason: 'rolled-back work never commits');
     });
 
