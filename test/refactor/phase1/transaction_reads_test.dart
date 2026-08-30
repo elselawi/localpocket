@@ -17,8 +17,9 @@ import '../../support/helpers.dart';
 void main() {
   group('reads inside a transaction', () {
     test('query built from Tx reads its own uncommitted writes', () async {
-      final p = await openPocket(
-          stores: [widgetsSchema(fts: const FtsSpec(['name']))]);
+      final p = await openPocket(stores: [
+        widgetsSchema(fts: const FtsSpec(['name']))
+      ]);
       addTearDown(p.close);
       await p.collection('widgets').put(record(name: 'committed', qty: 1));
 
@@ -38,8 +39,9 @@ void main() {
     });
 
     test('search built from Tx reads its own uncommitted writes', () async {
-      final p = await openPocket(
-          stores: [widgetsSchema(fts: const FtsSpec(['name']))]);
+      final p = await openPocket(stores: [
+        widgetsSchema(fts: const FtsSpec(['name']))
+      ]);
       addTearDown(p.close);
       await p.collection('widgets').put(record(name: 'zebra'));
 
@@ -89,7 +91,9 @@ void main() {
       final p = await openPocket();
       addTearDown(p.close);
       final id = generateRecordId();
-      await p.collection('widgets').put(record(name: 'visible', qty: 9, id: id));
+      await p
+          .collection('widgets')
+          .put(record(name: 'visible', qty: 9, id: id));
 
       await p.read((tx) async {
         final row = await tx.collection('widgets').get(id);

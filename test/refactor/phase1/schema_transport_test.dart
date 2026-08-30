@@ -7,10 +7,10 @@ String _fingerprint(CollectionSchema<Object?> schema) =>
     sha256Hex(canonicalize(schema.toJson()));
 
 CollectionSchema<Object?> _schema(
-    {required String name,
-    int version = 1,
-    ConflictPolicy? conflictPolicy,
-    List<StoreMigration> migrations = const []}) =>
+        {required String name,
+        int version = 1,
+        ConflictPolicy? conflictPolicy,
+        List<StoreMigration> migrations = const []}) =>
     CollectionSchema(
       name: name,
       version: version,
@@ -121,15 +121,14 @@ void main() {
   });
 
   group('§4.17 store identity', () {
-    test('duplicate store names: FIRST table wins, LAST definition wins — '
+    test(
+        'duplicate store names: FIRST table wins, LAST definition wins — '
         'and the mismatch breaks writes', () async {
       final p = await openPocket(
         stores: [
           widgetsSchema(name: 'dup', version: 1),
           widgetsSchema(
-              name: 'dup',
-              version: 1,
-              extraFields: [Field.text('other')]),
+              name: 'dup', version: 1, extraFields: [Field.text('other')]),
         ],
       );
       addTearDown(p.close);

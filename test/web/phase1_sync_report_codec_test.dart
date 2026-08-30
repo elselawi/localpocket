@@ -72,7 +72,8 @@ void main() {
         lastSyncAt: at,
         lastSuccessfulSyncAt: at,
       );
-      final decoded = decodeSyncStatus(_decodeWireMap(encodeSyncStatus(status)));
+      final decoded =
+          decodeSyncStatus(_decodeWireMap(encodeSyncStatus(status)));
       expect(decoded.state, status.state);
       expect(decoded.pending, 3);
       expect(decoded.conflicts, 1);

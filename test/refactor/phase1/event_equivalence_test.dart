@@ -52,8 +52,8 @@ void main() {
     await pump();
 
     // Detailed feed: one create event for this record.
-    final mine =
-        recordEvents.where((e) => e.id == id && e.action == ChangeAction.create);
+    final mine = recordEvents
+        .where((e) => e.id == id && e.action == ChangeAction.create);
     expect(mine, isNotEmpty,
         reason: 'detailed feed carries the committed fact');
     expect(mine.single.store, 'widgets');
@@ -61,7 +61,8 @@ void main() {
 
     // Coarse feed: the watch refreshed for the same committed fact.
     await _waitFor(
-      () => emissions.length > watchSnapshots &&
+      () =>
+          emissions.length > watchSnapshots &&
           emissions.last['dual']!.any((r) => r['id'] == id),
       reason: 'coarse invalidation reflects the same committed fact',
     );
@@ -127,8 +128,8 @@ void main() {
     await col.put(record(name: 'payload', qty: 6, id: id));
     await pump();
 
-    final updates =
-        recordEvents.where((e) => e.id == id && e.action == ChangeAction.update);
+    final updates = recordEvents
+        .where((e) => e.id == id && e.action == ChangeAction.update);
     expect(updates, hasLength(1));
     expect(updates.single.oldRecord?['qty'], 5);
     expect(updates.single.newRecord?['qty'], 6);

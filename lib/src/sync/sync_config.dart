@@ -17,7 +17,6 @@ import 'backoff.dart';
 /// - exponential growth is integer and overflow-safe (capped at `backoffCap`).
 /// {@endtemplate}
 class SyncConfig {
-
   /// Creates synchronization configuration with conservative defaults.
   ///
   /// {@macro localpocket.sync_config}
@@ -40,6 +39,7 @@ class SyncConfig {
     int Function()? now,
   })  : jitter = jitter ?? _defaultJitter,
         now = now ?? _wallClock;
+
   /// Pull page size (server max 500; default 200).
   final int maxPage;
 

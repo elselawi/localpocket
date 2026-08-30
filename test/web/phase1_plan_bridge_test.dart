@@ -60,8 +60,7 @@ void main() {
       addTearDown(h.close);
     });
 
-    test('compilePlan mints decodeColumns for a declared-field projection',
-        () {
+    test('compilePlan mints decodeColumns for a declared-field projection', () {
       final plan = h.pocket
           .collection('widgets')
           .query()
@@ -77,8 +76,7 @@ void main() {
     test('a plan WITH decodeColumns executes and projects identically',
         () async {
       final id = generateRecordId();
-      await h.put('widgets', record(name: 'apple', qty: 3, price: 1.5),
-          id: id);
+      await h.put('widgets', record(name: 'apple', qty: 3, price: 1.5), id: id);
 
       final plan = h.pocket
           .collection('widgets')
@@ -86,8 +84,9 @@ void main() {
           .select(['name', 'qty'])
           .limit(50)
           .compilePlan();
-      final result = (await h.sendOk(h.req(WireOp.compiledQuery,
-          args: planPayload(plan))))! as Map<String, Object?>;
+      final result = (await h
+              .sendOk(h.req(WireOp.compiledQuery, args: planPayload(plan))))!
+          as Map<String, Object?>;
       final items = ((result['items'] ?? result['rows']) as List? ?? const []);
       expect(items, hasLength(1));
       final item = decodeWireValue(items.first) as Map;

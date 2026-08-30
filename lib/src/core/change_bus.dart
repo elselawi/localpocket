@@ -61,6 +61,7 @@ class RecordChangeEvent {
   ///
   /// {@macro localpocket.record_change_event}
   factory RecordChangeEvent.fromJson(Map<String, Object?> json) =>
+
       /// {@macro localpocket.record_change_event}
       RecordChangeEvent(
         store: json['store']! as String,

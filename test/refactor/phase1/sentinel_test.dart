@@ -28,8 +28,7 @@ void main() {
           reason: 'from=1 does not match a null old value');
     });
 
-    test('explicit null matches create/purge transitions, absent does not',
-        () {
+    test('explicit null matches create/purge transitions, absent does not', () {
       const created = RecordChangeEvent(
         store: 'widgets',
         id: 'a',
