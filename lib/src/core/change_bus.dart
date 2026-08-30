@@ -36,6 +36,10 @@ enum ChangeAction {
   hide,
 }
 
+/// The ONE canonical "parameter not provided" sentinel. Every omitted-value
+/// comparison in the change/event layer must use this single instance so two
+/// different sentinel objects can never be interpreted as two different
+/// concepts (refactor plan §4.13 — one omitted-value sentinel).
 const Object _sentinelUnset = Object();
 
 /// {@template localpocket.record_change_event}
@@ -427,10 +431,14 @@ mixin ChangeBusAwareStore {
       );
 
   /// Convenience stream for listening to a specific field transition from [from] to [to].
+  ///
+  /// Uses the layer's single canonical omitted-value sentinel (see
+  /// [_sentinelUnset]): a call without [from]/[to] matches ANY transition of
+  /// [field], and passing `null` explicitly matches create/purge transitions.
   Stream<RecordChangeEvent> onFieldTransition(
     String field, {
-    Object? from = const _SentinelUnset(),
-    Object? to = const _SentinelUnset(),
+    Object? from = _sentinelUnset,
+    Object? to = _sentinelUnset,
     ChangeOrigin? origin,
     ChangeAction? action,
   }) =>
@@ -441,8 +449,4 @@ mixin ChangeBusAwareStore {
         from: from,
         to: to,
       );
-}
-
-class _SentinelUnset {
-  const _SentinelUnset();
 }

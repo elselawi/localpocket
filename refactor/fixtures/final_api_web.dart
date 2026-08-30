@@ -37,7 +37,8 @@ final class Notes extends StoreDef<Notes> {
   ValidatorSpec get validator => const ValidatorSpec.rules([]);
 
   @override
-  ConflictPolicySpec get conflictPolicy => const ConflictPolicySpec.remoteWins();
+  ConflictPolicySpec get conflictPolicy =>
+      const ConflictPolicySpec.remoteWins();
 
   @override
   List<MigrationSpec> get migrations => const [];
@@ -80,9 +81,8 @@ Future<void> exerciseOnWeb() async {
     await txNotes.patch(created.id, [Notes.body.set(body)]);
   });
 
-  final sub = notes
-      .watch(QuerySpec<Notes>(limit: 50))
-      .listen((page) => page.items);
+  final sub =
+      notes.watch(QuerySpec<Notes>(limit: 50)).listen((page) => page.items);
   await sub.cancel();
 
   // Web capabilities are the worker handshake's truth, never a page guess.

@@ -45,13 +45,15 @@ SyncStatus decodeSyncStatus(Map<String, Object?> wire) => SyncStatus(
 
 /// Encodes a [SyncReport] for the worker→client wire.
 ///
-/// Note: `blocked` is intentionally absent from the wire (the status
-/// snapshot carries it); a decoded report reports `blocked == 0`.
+/// Complete by contract (refactor plan §4.9): every field the model exposes —
+/// including `blocked` — must survive the codec. A decoded report equals the
+/// encoded report for every public field.
 Map<String, Object?> encodeSyncReport(SyncReport report) => {
       'pulled': report.pulled,
       'swept': report.swept,
       'pushed': report.pushed,
       'deadLettered': report.deadLettered,
+      'blocked': report.blocked,
       'discarded': report.discarded,
       'hadError': report.hadError,
     };
@@ -63,6 +65,7 @@ SyncReport decodeSyncReport(Map<String, Object?> wire) => SyncReport(
       swept: _asIntMap(wire['swept']),
       pushed: _asInt(wire['pushed']),
       deadLettered: _asInt(wire['deadLettered']),
+      blocked: _asInt(wire['blocked']),
       discarded: _asInt(wire['discarded']),
       hadError: wire['hadError'] == true,
     );

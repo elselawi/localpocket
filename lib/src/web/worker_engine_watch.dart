@@ -28,6 +28,11 @@ mixin WorkerWatchHandlers on WorkerEngineHost {
       WorkerEventSink sink, WebRequest req) async {
     final watchId = WireArgs(req.args).requireInt('watchId', op: 'watch_query');
     final plan = _parseCompiledPlan(req.args);
+    // §4.6 (refactor plan): an explicitly ordered watch MUST use an
+    // order-sensitive digest on every runtime, so a pure re-order emits. The
+    // page declares the query's ordering because the compiled SQL cannot
+    // distinguish an explicit ORDER BY from an implicit tie-breaker.
+    final ordered = req.args['ordered'] == true;
     final watcher = CompiledWatcher(
       pocket,
       pocket.requireTable(plan.store).schema,
@@ -36,6 +41,7 @@ mixin WorkerWatchHandlers on WorkerEngineHost {
       plan.projection,
       plan.decodeColumns,
       (items) => _emitWorkerEvent(sink, watchId, items),
+      ordered: ordered,
     );
     final registration = _ActiveWatcher(() async {
       watcher.dispose();

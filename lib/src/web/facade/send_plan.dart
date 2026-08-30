@@ -11,6 +11,7 @@ Future<Map<String, Object?>> sendCompiledPlan(
   int? sessionId,
   int? pageLimit,
   int? watchId,
+  bool ordered = false,
 }) async {
   final res = await pocket
       .send(watchId != null ? WireOp.watchQuery : WireOp.compiledQuery, {
@@ -27,6 +28,7 @@ Future<Map<String, Object?>> sendCompiledPlan(
     'projection': plan.projection,
     'decodeColumns': plan.decodeColumns,
     'shape': plan.shape,
+    'ordered': ordered,
     if (sessionId != null) 'sessionId': sessionId,
     if (pageLimit != null) 'pageLimit': pageLimit,
     if (watchId != null) 'watchId': watchId,

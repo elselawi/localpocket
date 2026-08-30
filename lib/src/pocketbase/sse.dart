@@ -15,6 +15,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import '../sync/backoff.dart';
 import '../sync/sync_backend.dart';
 import 'auth.dart';
 import 'pb_client.dart';
@@ -65,8 +66,12 @@ class PbRealtime {
     double Function(int attempt)? jitter,
   })  : jitter = jitter ?? _defaultJitter,
         delayFor = delayFor ??
-            _exponentialBackoff(
-                backoffBase, backoffCap, jitter ?? _defaultJitter);
+            ((int attempt) => exponentialBackoffDelay(
+                  base: backoffBase,
+                  cap: backoffCap,
+                  attempt: attempt,
+                  jitter: jitter ?? _defaultJitter,
+                ));
 
   /// PocketBase HTTP client for auth token resolution and transport.
   final PbClient client;
@@ -143,24 +148,6 @@ class PbRealtime {
   }
 
   static double _defaultJitter(int attempt) => 0.5 + Random().nextDouble();
-
-  /// Default reconnect backoff, mirroring `SyncConfig.delayFor`:
-  /// `min(base * 2^(attempt-1), cap) * jitter`, with jitter clamped to
-  /// `0.5..1.5` and attempts below 1 treated as 1. Overflow-safe.
-  static Duration Function(int attempt) _exponentialBackoff(
-          Duration base, Duration cap, double Function(int attempt) jitter) =>
-      (int attempt) {
-        final n = attempt < 1 ? 1 : attempt;
-        final baseUs = base.inMicroseconds < 0 ? 0 : base.inMicroseconds;
-        final capUs = cap.inMicroseconds < 0 ? 0 : cap.inMicroseconds;
-        var exp = baseUs > capUs ? capUs : baseUs;
-        for (var i = 1; i < n && exp < capUs; i++) {
-          final doubled = exp * 2;
-          exp = doubled > capUs ? capUs : doubled;
-        }
-        final j = jitter(n).clamp(0.5, 1.5).toDouble();
-        return Duration(microseconds: (exp * j).round());
-      };
 
   Future<void> _connectOnce() async {
     final token = await client.authToken();

@@ -22,6 +22,7 @@ class CompiledWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
     this._projection,
     this._decodeColumns,
     this._emit, {
+    this.ordered = false,
     void Function(Object error, StackTrace stackTrace)? onError,
     super.coalesceWindow,
   }) : _onError = onError;
@@ -33,6 +34,11 @@ class CompiledWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
   final List<String>? _decodeColumns;
   final void Function(List<Map<String, Object?>> items) _emit;
   final void Function(Object error, StackTrace stackTrace)? _onError;
+
+  /// Whether the watched query has an explicit order. When true the digest is
+  /// order-sensitive: a pure re-order of the same rows emits. Mirrors the
+  /// native watcher's `_query.hasExplicitOrder` policy (§4.6).
+  final bool ordered;
 
   @override
   bool shouldInvalidate(ChangeSet cs) => cs.store == _schema.name;
@@ -62,7 +68,7 @@ class CompiledWatcher extends CoalescedWatcher<List<Map<String, Object?>>> {
   @override
   String computeDigest(List<Map<String, Object?>> data) =>
       computeSnapshotDigest(data,
-          ordered: false,
+          ordered: ordered,
           onDigestBytes: (b) => pocket.perf.watchDigestBytes += b);
 
   @override

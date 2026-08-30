@@ -27,7 +27,7 @@ Future<void> main() async {
     try {
       final statuses = <Map<String, Object?>>[];
       final statusSub = pocket.syncStatus.listen(statuses.add);
-      await pocket.start(
+      await pocket.startSync(
         baseUrl: 'http://127.0.0.1:8125',
         scopeId: 'browser-sync',
         token: 'valid-token',

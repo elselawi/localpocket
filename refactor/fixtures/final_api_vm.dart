@@ -36,7 +36,9 @@ final class Tasks extends StoreDef<Tasks> {
       [title, done, priority, dueAt, tags];
 
   @override
-  List<IndexSpec> get indexes => [store.indexSpec([done, priority])];
+  List<IndexSpec> get indexes => [
+        store.indexSpec([done, priority])
+      ];
 
   @override
   FtsSpec? get fts => store.ftsSpec([title]);
@@ -94,7 +96,9 @@ Future<void> exerciseAll() async {
   final rows = await tasks.getAll([id, id]);
   await tasks.upsert([Writes.id(id), Tasks.priority.set(4)]);
   await tasks.patch(id, [Tasks.done.set(true)]);
-  await tasks.patchAll({id: [Tasks.done.set(true)]});
+  await tasks.patchAll({
+    id: [Tasks.done.set(true)]
+  });
   await tasks.archive(id);
   await tasks.restore(id);
   await tasks.purge(id);

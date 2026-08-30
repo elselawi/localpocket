@@ -82,7 +82,8 @@ class WebQueryBuilder
             return [for (final i in raw) _decodeItem(i)];
           };
           try {
-            final res = await sendCompiledPlan(_pocket, plan, watchId: watchId);
+            final res = await sendCompiledPlan(_pocket, plan,
+                watchId: watchId, ordered: _core.hasExplicitOrder);
             final items =
                 ((res['items'] as List?) ?? const []).map(_decodeItem).toList();
             if (!controller.isClosed) {

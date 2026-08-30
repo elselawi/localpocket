@@ -4,6 +4,8 @@ library;
 
 import 'dart:math';
 
+import 'backoff.dart';
+
 /// {@template localpocket.sync_config}
 /// Configuration for pull, push, retry, sweep, and sync scheduling.
 ///
@@ -102,17 +104,14 @@ class SyncConfig {
       }
       return const Duration(seconds: 1);
     }
-    final n = attempt < 1 ? 1 : attempt;
-    final baseUs =
-        backoffBase.inMicroseconds < 0 ? 0 : backoffBase.inMicroseconds;
-    final capUs = backoffCap.inMicroseconds < 0 ? 0 : backoffCap.inMicroseconds;
-    var exp = baseUs > capUs ? capUs : baseUs;
-    for (var i = 1; i < n && exp < capUs; i++) {
-      final doubled = exp * 2;
-      exp = doubled > capUs ? capUs : doubled;
-    }
-    final j = jitter(n).clamp(0.5, 1.5).toDouble();
-    return Duration(microseconds: (exp * j).round());
+    // The shared overflow-safe exponential primitive — the SAME one the
+    // realtime reconnect loop uses (refactor plan §4.12).
+    return exponentialBackoffDelay(
+      base: backoffBase,
+      cap: backoffCap,
+      attempt: attempt,
+      jitter: jitter,
+    );
   }
 
   /// Parses a `Retry-After` header value: integer seconds or an HTTP-date.

@@ -291,6 +291,11 @@ abstract class WorkerEngineHost {
     final projectionRaw = args['projection'];
     final limitRaw = args['limit'];
     final shapeRaw = args['shape'];
+    // §4.5 (refactor plan): EVERY field the page sends must survive the
+    // temporary compiled-plan bridge. `decodeColumns` drives the
+    // projection-aware decoder in the runner/watcher; dropping it silently
+    // disabled projected decoding on web.
+    final decodeColumnsRaw = args['decodeColumns'];
     final typeName = type! as String;
     return QueryPlan(
       typeName: typeName,
@@ -304,6 +309,8 @@ abstract class WorkerEngineHost {
           List<Object?>.unmodifiable(parameters.map(decodeWireValue).toList()),
       limit: limitRaw is int ? limitRaw : null,
       projection: projectionRaw is List ? projectionRaw.cast<String>() : null,
+      decodeColumns:
+          decodeColumnsRaw is List ? decodeColumnsRaw.cast<String>() : null,
       shape: shapeRaw is String ? shapeRaw : '',
     );
   }
