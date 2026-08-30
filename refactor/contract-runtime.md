@@ -286,3 +286,78 @@ RemoteRuntimeClient`.
 - The `RecordingSink` type is load-bearing in harness tests (`byOp`
   assertions), so the injectable-sink option is typed as a `RecordingSink`
   subclass rather than the interface.
+
+---
+
+# Web runtime for the destination facade (2026-08-30)
+
+`LocalPocket.open` now dispatches through a conditional platform opener, and
+on web the page binds to the worker over the typed contract. The
+`final_api_web` fixture vocabulary is executable. Gates: analyze 0, suite
+`+2744 ~83`, local web gate PASS (including the new "destination facade web
+compile" check), API snapshot PASS, full browser matrix 17 pages x 3
+browsers PASS.
+
+## What landed
+
+- `lib/src/api/open_platform.dart` — conditional export dispatch
+  (`open_native.dart` default, `open_web.dart` under `dart.library.js_interop`).
+- `lib/src/api/open_native.dart` — direct runtime; just
+  `openWith(options, LocalRuntimeClient.new)`.
+- `lib/src/api/open_web.dart` — the worker bootstrap: asset resolution
+  (reuses `resolveAssetAsBlobUrl`/`loadAssetAsBlobUrl`), cipher envelope
+  (reuses `buildFieldCipherEnvelope`; an unserializable cipher config fails
+  typed at open), serialized open options (stores, maxDocBytes,
+  destructiveBackup, backupDbName, fieldCipher) through
+  `connectToRecommended`, then `LocalPocket.internal(RemoteRuntimeClient(...))`
+  over `Database.customRequest`. Worker events flow through the
+  `handleCustomRequest` tap into `runtime.handleWorkerEvent`; `database.closed`
+  closes the runtime. No kernel opens in-process and no SQL is compiled on
+  the page.
+- `lib/src/api/local_pocket.dart` — `LocalPocket._` became
+  `LocalPocket.internal(runtime)`, the cross-library seam for the platform
+  openers; `open` delegates to `openPlatform`; `openWith` unchanged (kernel-
+  backed, used by the conformance harness).
+- `tool/web_smoke/api_smoke_main.dart` + `pages/web_api_smoke.html` — the
+  destination-facade browser smoke: open via `LocalPocketOptions(bootstrap:
+  ...)`, capabilities.isWeb, CRUD/batch/upsert, query with kernel-minted
+  cursors + `page.next()`, count, FTS search, full-durability transaction
+  with savepoint rollback, ordered watch with reorder re-emission,
+  committed-change events, close + typed post-close failure.
+- `tool/local_web_gate.dart` — new "destination facade web compile" check;
+  `tool/browser_web_gate.dart` — the new page in the matrix (17 pages).
+- `lib/src/web/controller.dart` — BUG FIX: one `WorkerEventSink` per client
+  connection (see below); shipped worker asset regenerated + hash updated.
+
+## Bug found by the browser smoke: N-times event delivery
+
+The worker broadcasts events to every sink in its `_connections` set, but
+the JS boundary created a fresh `_ConnectionSink` per `customRequest` call —
+the set grew with every request and each event was delivered N times (N =
+request count so far). Latent since the old stack: duplicate deliveries were
+content-identical, so old consumers (which assert on content, not counts)
+never noticed. The destination smoke asserted exact reorder behavior and
+caught it: a duplicate of the pre-patch window satisfied the wait predicate
+before the reordered emission arrived. A raw event-envelope probe page (run
+against the worker in Chromium, then deleted after diagnosis) attributed the
+duplication to the boundary: the kernel watcher emitted each snapshot exactly
+once (VM probes with the same scenario, web profile and contract client
+included, were correct), and the transport delivered each envelope N times.
+Fix: `_connectionSinks.putIfAbsent(connection, ...)` in
+`LocalPocketWorkerDatabase`.
+
+## Decisions and deviations
+
+- The worker boot handshake stays where it is: the kernel opens from the
+  serialized open options at worker start (manifest checks run there), so no
+  contract `OpenRequest` is sent. The contract variant remains for runtimes
+  that register stores after open.
+- `EngineCapabilities` stays contract-shaped (`isWeb` from the kernel's
+  platform profile); the old facade's storage-capability reconciliation
+  (`WebStorageCapabilities`, persistence probe) does not exist on the new
+  facade yet — it belongs to the files family (`durableBlobs` semantics).
+- Blob URL revocation and worker teardown on close are deferred to the
+  close/lifecycle family; `db.close()` currently closes the kernel and marks
+  the runtime closed, and the transport dies with the page.
+- The browser diagnostic probe page was deleted after diagnosis; the
+  finding lives here and in the commit message.
