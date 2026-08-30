@@ -1,4 +1,4 @@
-# HANDOFF — web remote cutover over the runtime contract
+# HANDOFF — Phase 7: cut over the remaining wire families
 
 Read this file top to bottom before touching anything. It is written so an
 agent with no prior session memory can continue the work safely.
@@ -30,10 +30,10 @@ the facade exists in `lib/src/api/`, runs over both runtimes, and is proven
 by `test/conformance/facade_conformance_test.dart`. See the facade section
 at the end of `refactor/contract-runtime.md` for everything that landed.
 
-**Your stage now: the web remote cutover** — point the browser page at the
-same contract (replace the `WireOp`/`wire_args` registry family by family;
-the old wire stays as an adapter until each family passes), then barrel
-switch. The old raw/typed surfaces still work.
+**Your stage now: Phase 7 — cut over the remaining wire families.** The
+old `WireOp`/`wire_args` registry is being replaced family by family; the
+old wire stays as an adapter until each family passes conformance, then its
+machinery dies in the same commit. The old raw/typed surfaces still work.
 
 Cutover slices DONE (2026-08-30):
 
@@ -58,15 +58,15 @@ Cutover slices DONE (2026-08-30):
    for the full account, the audit, the cursor corpus, and the asset-gate
    hardening.
 
-Next: CRUD/batch and the transaction family (which retires
-`compiled_query`/`send_plan.dart`/`QueryPlan`), then
-maintenance/capabilities → conflicts → files → sync → close/lifecycle, then
-barrel switch.
+Remaining (this stage): CRUD/batch → watches/committed events →
+transactions (retires `compiled_query`/`send_plan.dart`/`QueryPlan`) →
+maintenance/capabilities → conflicts → files → sync/auth/status/realtime →
+close/lifecycle. The barrel switch is the NEXT agent's stage (plan Phase 9).
 
 The full destination plan (12 stages, gates, checklists) is in
-`final_refactoring_plan.md`. Stages 0–4 and the stage-5 facade vertical
-slice (native + loopback) are DONE. You are starting stage 6: the web
-remote cutover. Stage-by-stage history lives in `refactor/*.md`.
+`final_refactoring_plan.md`. Stages 0–6 are DONE. You are starting stage 7:
+the family cutovers and web collapse. Stage-by-stage history lives in
+`refactor/*.md`.
 
 ---
 
@@ -105,17 +105,11 @@ remote cutover. Stage-by-stage history lives in `refactor/*.md`.
 
 ---
 
-## 2. Current state (verified 2026-08-30, after the query-family cutover)
+## 2. Current state (verified 2026-08-31, after the query-family cutover)
 
-- Branch `refactor/final-architecture`; working tree clean; HEAD is the
-  gate-hardening commit on top of the query-family commits
-  (`test(web): characterize every compiled-plan bridge field …` →
-  `feat(contract): DistinctRequest carries a full query spec` →
-  `feat(query): structured spec snapshot …` →
-  `feat(web): route root query, search, aggregate, and watch paths …` →
-  `feat(web): delete the compiled-plan watch op …` →
-  `test(conformance): cursor corpus …` →
-  `chore(tool): worker asset gate …`).
+- Branch `refactor/final-architecture`; working tree clean; HEAD `2f67d58`
+  (`docs(ledger): query-family cutover — audit, re-route, cursor corpus,
+  asset gate`).
 - `dart analyze lib test tool` → 0 issues (includes the active compile
   fixture `test/compile_fixtures/final_api_vm.dart`).
 - `dart test` → `+2778 ~83` all passed (83 skips = live/gate/platform tags).
@@ -144,9 +138,10 @@ remote cutover. Stage-by-stage history lives in `refactor/*.md`.
 | Services | `lib/src/core/{mutation_service,read_service,transaction_coordinator}.dart` (parts) | `db.mutations` (put/upsert/putAll/upsertAll/patch/patchAll/archive/restore/purge — need a `Collection` bound to a tx when used in-session), `db.reads` (compiled-plan execution), `db._transactions` (write queue, durability pragma state, group commit, read transactions). |
 | Command dispatcher | `lib/src/kernel/command_handler.dart` (part) | `KernelCommandHandler implements CommandHandler` — exhaustive switch over ALL 28 request variants. Constructed as `db.commands`. |
 | Runtime contract | `lib/src/contract/` (one library, parts) | `Request`(28 sealed variants)/`Result`(17)/`Event`(2), `ContractCodec` (encode/decode + `requestSamples`/`resultSamples`/`eventSamples` + `requestResultTags` correlation map), error codec, wire value codec, `abstract interface class CommandHandler`. **Exports `../core/errors.dart`.** |
-| Runtimes | `lib/src/runtime/runtime_client.dart` | `RuntimeClient` interface; `LocalRuntimeClient` (direct, with correlation check); `LoopbackRuntimeClient` (full wire encode→decode→handle→encode→decode). |
+| Runtimes | `lib/src/runtime/runtime_client.dart` | `RuntimeClient` interface; `LocalRuntimeClient` (direct, with correlation check); `LoopbackRuntimeClient` (full wire encode→decode→handle→encode→decode); `RemoteRuntimeClient` (contract envelope over the page transport — `lib/src/runtime/remote_runtime_client.dart`). |
 | Schema manifests | `lib/src/core/schema_manifest.dart` | `SchemaManifest.compile(schema)`, fingerprint over complete behavior JSON, `unsupportedFeatures` flags, persisted in `lp_meta` key `schema_manifest:<store>`, same-version change rejection, duplicate-store rejection, web rejection of unrepresentable callbacks. `StoreTable.manifest`. |
 | Execution context | `lib/src/core/execution_context.dart` | `ExecutionContext.root()` / `.transaction(executor:, readOnly:)`. `Tx.context`. Query/search builders accept an executor — tx-built builders carry the tx executor (structural fix, pinned by `debugExecutor`). |
+| Re-route seam | `WebFacadeHost.contractRuntime` | ONE shared `RemoteRuntimeClient` per facade (lazy in production, built over `send` in `FakeFacadeHost`). `FakeFacadeHost.contractReply`/`contractErrorReply`/`deliverContractEvent` are the test helpers; `WorkerHarness.customRequest` mirrors the JS boundary. |
 
 ### Contract request inventory (already implemented end-to-end)
 
@@ -160,9 +155,21 @@ remote cutover. Stage-by-stage history lives in `refactor/*.md`.
 Events: `committedChange` (store + ids, post-commit), `watchSnapshot`
 (kernel-shaped rows for a live subscription).
 
-NOT yet in the contract (later stages — do not invent them now unless the
-facade work forces it): file upload/download sessions, conflicts, sync/auth/
-realtime, `getAll` beyond `rows`, revision numbers on `CommittedChange`.
+NOT yet in the contract — YOUR families add them in this stage:
+- CRUD: audit whether `get` needs projection facts beyond what
+  `GetRequest` carries today.
+- Watches/events: `WatchOneRequest` + a single-row snapshot event, and the
+  typed per-store record events derived from one `CommittedChange` (plan
+  §6.8); `revision` numbers on `CommittedChange` are still deferred unless
+  this family forces them.
+- Conflicts: list/get/watch/resolve/accept-local/accept-remote variants with
+  immutable typed snapshots.
+- Files: bounded upload/download session variants (§11.4) + one immutable
+  `FileRef` on both platforms.
+- Sync: start/stop/now/status/pause/resume/updateAuth/setConnectivity +
+  `AuthRequiredEvent`, with a COMPLETE `SyncStatus`/`SyncReport` codec
+  (blocked/discarded/quarantine counters/timestamps).
+- Maintenance: `RunMaintenanceRequest` (it is in the inventory — do it).
 
 ---
 
@@ -350,10 +357,25 @@ switch + planning-artifact deletion).
     (`schema_manifest:<store>` in `lp_meta`) to take the legacy adoption
     path — same-version drift is otherwise rejected by design.
 12. Shipped web asset: `assets/localpocket_worker.js` + `.sha256` are checked
-    in; `tool/web_worker_compile.dart` writes only `build/web/`. Run the web
-    gate after ANY web-layer change.
+    in; `tool/web_worker_compile.dart` writes only `build/web/`. The local
+    web gate now BYTE-COMPARES the fresh compile against the shipped asset
+    (`tool/worker_asset_current_gate.dart`) — regenerate after ANY web-layer
+    change. `.gitattributes` pins the assets binary; do not remove it
+    (`core.autocrlf` corrupts the wasm/worker bytes on checkout).
 13. The suite runs concurrently; tests that spawn `dart` processes must be
     `gate`-tagged and run with `-j 1` (see `dart_test.yaml`).
+14. `(builder..all())` discards the returned copy — builders are immutable,
+    so cascade `..all()` throws the new builder away and a later
+    `.compilePlan()` throws `MissingLimitError`. Chain `.all()` instead.
+    Record `==` does not deep-compare `List` fields — compare `.$1`/`.$2`
+    separately in tuple assertions.
+15. Contract-vs-web name collisions force import prefixes:
+    `encodeWireValue`/`decodeWireValue` exist in BOTH `web/conversions.dart`
+    and `contract/wire_values.dart`; `decodeError` in BOTH
+    `web/protocol.dart` and contract `error_codec.dart`.
+16. During coexistence the worker emits BOTH `record_event` (old) and
+    `contract_event` (contract) for every committed fact — remove each old
+    stream with its family, never before.
 
 ---
 
@@ -361,37 +383,110 @@ switch + planning-artifact deletion).
 
 ```
 dart analyze lib test tool
-dart test                                   # full hermetic suite (~2730 tests)
-dart test test/api test/conformance test/runtime test/contract   # facade inner loop
-dart run tool/local_web_gate.dart
+dart test                                   # full hermetic suite (+2778 ~83)
+dart test test/api test/conformance test/runtime test/contract test/web
+dart run tool/local_web_gate.dart           # 7 checks, incl. shipped-asset byte-compare
 dart run tool/api_snapshot.dart
-dart test --tags real --run-skipped test/e2e/        # live PocketBase (optional)
+dart run tool/browser_web_gate.dart         # before closing the stage (17 pages × 3 browsers)
 ```
 
 ---
 
-## 6. Out of scope for the query-family cutover — the NEXT agent's order of work
+## 6. Phase 7 work plan — family cutovers and web collapse
 
-The query/search/cursors family cutover is done. Work the remaining
-architecture in this order:
+Per-family procedure (plan §12 — repeat for EVERY family):
 
-1. **CRUD/batch cutover** — re-route the old web facade's `get`/`mutate_batch`
-   paths onto `GetRequest`/`MutateRequest`, then delete the old handlers.
-2. **Transaction family cutover** — `txBegin`/`txGet`/`txMutateBatch`/… onto
-   the contract session commands. This retires the LAST compiled-plan
-   callers: session-scoped reads, `send_plan.dart`,
-   `page_from_compiled.dart`, `_parseCompiledPlan`/`_dispatchCompiledQuery`,
-   `WireOp.compiledQuery`, and public `QueryPlan` construction all die here.
-3. **Maintenance/capabilities family** → `AnalyzeRequest`/… and the worker
-   capability handshake.
-4. **Conflicts family**, then **files**, then **sync/auth/status/realtime**,
-   then **close/lifecycle** — activating the remaining fixture vocabulary
-   (sync attachment, `Store.events` record payloads, search snippets).
-5. **Barrel switch** — export `lib/src/api/api.dart` from the package
-   barrel, flip the compile fixture's import to the barrel, retire the
-   `LocalPocket = KernelDatabase` typedef and the web facade's claim on the
-   name, re-baseline coverage, then delete `refactor/` + the plan file.
+1. Define missing request/result/event variants in the contract (sealed,
+   typed fields, stable tags). NO generic argument maps.
+2. Add the exhaustive handler case in `command_handler.dart`.
+3. Add codec round-trip + malformed-input tests in `test/contract/`.
+4. Point the facade's family surface at the contract through
+   `WebFacadeHost.contractRuntime` (mirror the query-family mixins
+   `lib/src/web/facade/query/web_contract_forwarder.dart` and
+   `lib/src/web/facade/search/web_contract_forwarder.dart`).
+5. Run family conformance (direct + loopback + remote) and browser smoke;
+   update `FakeFacadeHost`-driven pin tests in the same commit.
+6. Delete the family's old wire op, worker handler, and facade mirror, and
+   update the `test/typed/web_test.dart` case-160 vocabulary pin in the
+   SAME commit.
 
-Also still out of scope until their families land: `db.flush()`/
-`db.backup()`, `getAll` beyond `rows`, revision numbers on
-`CommittedChange`.
+Fixed order:
+
+1. **CRUD/batch** — `get`/`mutate_batch` → `GetRequest`/`MutateRequest`
+   (exist). Audit: does the old `get` op carry projection/select facts the
+   contract lacks? Extend if missing. Delete `worker_engine_crud.dart`'s
+   `_handleGet`/`_handleMutateBatch` + `WireCollectionMixin`. Update
+   `test/web/web_collection_crud_test.dart`.
+2. **Watches/committed events** — `watch_one` → add `WatchOneRequest` (+ a
+   single-row snapshot event); `watch_cancel` → `WatchCancelRequest`
+   (exists); `record_event`/`worker_event` → the contract `CommittedChange`
+   event plus per-store typed record events per plan §6.8 (one committed
+   envelope feeds both; decide the old/new-record payload here and record
+   it). Delete `_handleWatchOne`/`_handleWatchCancel`, the `worker_event`
+   envelope, and the corresponding `handleWorkerEventEnvelope` branches.
+3. **Transactions** — `tx_begin`/`tx_get`/`tx_mutate_batch`/savepoints/
+   commit/rollback → contract session commands (exist; sessions are
+   strings — the old wire uses int ids). Re-route `WebTx`,
+   `WebTxCollection`, `WebTxQueryBuilder`, `WebTxSearchQueryBuilder`.
+   THIS FAMILY RETIRES THE LAST COMPILED-PLAN CALLERS — delete here:
+   `send_plan.dart`, `page_from_compiled.dart`, `_parseCompiledPlan`/
+   `_dispatchCompiledQuery`/`_compiledOperations`/`_handleCompiledQuery`,
+   `WireOp.compiledQuery`, public `QueryPlan` construction
+   (`query_plan.dart`), the `planPayload` helper,
+   `send_compiled_plan_test.dart`, and the remaining bridge tests in
+   `plan_bridge_test.dart`. Update `test/web/web_tx_test.dart`.
+4. **Maintenance/capabilities** — `analyze`/`wal_checkpoint`/`vacuum`/
+   `prune_outbox`/`compact` → contract (exist); `capabilities` → contract
+   (exists; worker handshake stays authoritative); `health` folds away;
+   `run_maintenance` → add `RunMaintenanceRequest` (inventory lists it —
+   do it, don't hand-wave it); `open` stays the worker boot handshake;
+   consolidate `close` semantics (contract `CloseRequest` is kernel-only
+   today; the old `close` op does full teardown — make one behavior).
+5. **Conflicts** — 6 ops → new contract variants (list/get/watch/resolve/
+   accept-local/accept-remote) with typed immutable conflict snapshots.
+   Delete `conflicts_bridge.dart`, `worker_engine_conflicts.dart`, the
+   `WebConflicts` mirror. Update `web_conflicts_facade_test.dart` /
+   `conflicts_protocol_test.dart`.
+6. **Files** — bounded upload/download sessions per plan §11.4
+   (`FileBeginUpload`/`FileChunk`/`FileFinish`/`FileAbort`; `FilesList`/
+   `FileOpen`/`FileChunkEvent`/`FileCredit`; remove/gc/cap/status). One
+   immutable `FileRef` on both platforms; the page never buffers a whole
+   file. Delete `worker_engine_files.dart` + the upload-session registry,
+   `WebLocalPocketFiles` mirror, `web_files_attach_test.dart`'s old-wire
+   pins.
+7. **Sync/auth/status/realtime** — 9 ops + `auth_required` → contract
+   (start/stop/now/status/pause/resume/updateAuth/setConnectivity +
+   `AuthRequiredEvent`). Complete `SyncStatus`/`SyncReport` codec incl.
+   `blocked`/`discarded`/quarantine counters/timestamps. Delete
+   `worker_engine_sync.dart`, `sync_status_codec.dart`, `typed_sync_web.dart`,
+   `WebSyncSurface`.
+8. **Close/lifecycle** — last: the worker becomes a small envelope loop
+   (§11.1); delete `controller.dart`/`connector.dart`/`lifecycle.dart`
+   leftovers the earlier families made redundant. Gate: the page contains
+   transport/bootstrap code only.
+
+Expected friction (all learned the hard way):
+
+- Re-routing trips the VM pins that drive proxy classes against
+  `FakeFacadeHost`: `web_collection_crud_test.dart`, `web_tx_test.dart`,
+  `web_conflicts_facade_test.dart`, `web_files_attach_test.dart`,
+  `upload_session_test.dart`, `worker_event_dispatch_test.dart`,
+  `worker_engine_test.dart`, `watch_protocol_test.dart`. Update them to the
+  contract envelope in the same commit as the re-route.
+- `WebSender` lives in `web_sender.dart`, NOT `protocol.dart`.
+- `RecordingSink` in the harness is load-bearing (`byOp` assertions);
+  injectable sinks must subclass it.
+- Windows: write files with `[System.Text.UTF8Encoding]::new($false)` when
+  scripting; golden files are CRLF via `readGolden()`.
+- Record ids in tests must match `[a-z0-9]{15}` — use `rid(label, n)`.
+- Every family ends with a small green commit; append files/decisions/
+  deviations/gotchas to `refactor/contract-runtime.md`, tick the family in
+  `refactor/worker_op_inventory.md`, and refresh this file's §2/§6 for the
+  next agent.
+
+Out of scope for this stage: the barrel switch (plan Phase 9 — keep the
+`LocalPocket = KernelDatabase` typedef and the web facade's claim on the
+name), the deferred contract fields (`MutateRequest.durability`,
+`VacuumRequest.pages`, `PruneOutboxRequest.maxEntries`, `CompactRequest.nowMs`)
+unless a family genuinely forces them, `db.flush()`/`db.backup()`, `getAll`
+beyond `rows`, and revision numbers on `CommittedChange`.
