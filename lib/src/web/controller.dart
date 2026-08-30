@@ -159,6 +159,12 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   final WorkerEngine _engine;
 
+  /// One event sink per client connection. The engine broadcasts worker
+  /// events to every registered sink and keys the set on sink identity, so
+  /// each connection must register exactly once — a fresh sink per request
+  /// would grow the set on every call and deliver every event N times.
+  final Map<ClientConnection, WorkerEventSink> _connectionSinks = {};
+
   @override
   CommonDatabase get database => rawDatabase;
 
@@ -178,8 +184,10 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
           0, WireErrorCode.protocolEnvelope, 'Payload must be a map');
     }
 
-    final reply =
-        await _engine.handleRequest(_ConnectionSink(connection), dartMap);
+    final reply = await _engine.handleRequest(
+        _connectionSinks.putIfAbsent(
+            connection, () => _ConnectionSink(connection)),
+        dartMap);
     return _encodeReply(reply);
   }
 
