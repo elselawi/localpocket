@@ -25,6 +25,14 @@ Future<void> main() async {
       '-o',
       '${Directory.systemTemp.path}/localpocket_facade_web.js'
     ],
+    'destination facade web compile': [
+      'compile',
+      'js',
+      '-O4',
+      'tool/web_smoke/api_smoke_main.dart',
+      '-o',
+      '${Directory.systemTemp.path}/localpocket_api_web.js'
+    ],
     'production worker compile': ['run', 'tool/web_worker_compile.dart'],
     'web asset hashes': ['run', 'tool/web_asset_gate.dart'],
   };

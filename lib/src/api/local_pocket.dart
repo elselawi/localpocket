@@ -12,6 +12,7 @@ import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';
 import '../typed/store_def.dart';
 import 'events.dart';
+import 'open_platform.dart';
 import 'options.dart';
 import 'store.dart';
 import 'transaction.dart';
@@ -26,15 +27,20 @@ export '../core/schema.dart' show CollectionSchema;
 /// [transaction] and [read], and listen for committed facts on [changes].
 /// {@endtemplate}
 final class LocalPocket {
-  LocalPocket._(this._runtime, {required Duration requestTimeout});
+  /// Binds the facade to an already-running runtime. Library-internal seam:
+  /// the platform openers (`open_native.dart`, `open_web.dart`) construct the
+  /// facade once their runtime is up — on web the kernel lives behind the
+  /// worker transport, so nothing is opened in-process.
+  LocalPocket.internal(this._runtime);
 
-  /// Opens a database with the direct in-process runtime.
+  /// Opens a database on the current platform: the direct in-process runtime
+  /// on native targets, the typed contract over the dedicated worker on web.
   static Future<LocalPocket> open(LocalPocketOptions options) =>
-      openWith(options, LocalRuntimeClient.new);
+      openPlatform(options);
 
   /// Opens a database over a caller-supplied runtime — the seam that lets
-  /// the same facade run against the wire round-trip runtime, and later the
-  /// browser worker runtime.
+  /// the same facade run against the wire round-trip runtime, and the
+  /// conformance harness prove every facade body over the worker path.
   static Future<LocalPocket> openWith(
     LocalPocketOptions options,
     RuntimeClient Function(CommandHandler handler) createRuntime,
@@ -54,10 +60,7 @@ final class LocalPocket {
       workerAssetPath: options.bootstrap.workerAssetPath,
     );
     try {
-      return LocalPocket._(
-        createRuntime(db.commands),
-        requestTimeout: options.bootstrap.requestTimeout,
-      );
+      return LocalPocket.internal(createRuntime(db.commands));
     } catch (_) {
       await db.close();
       rethrow;

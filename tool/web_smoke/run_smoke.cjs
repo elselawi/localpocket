@@ -58,7 +58,8 @@ async function run(name, browserType, pagePath, signal) {
     const pageExclude = process.env.SMOKE_EXCLUDE_PAGE;
     const browsers = [['Chromium', chromium], ['Firefox', firefox], ['WebKit', webkit]]
         .filter(([name]) => !browserFilter || name.toLowerCase() === browserFilter.toLowerCase());
-    const pages = [['web_facade_smoke.html', '__facade_smoke'],
+    const pages = [['web_api_smoke.html', '__api_smoke'],
+    ['web_facade_smoke.html', '__facade_smoke'],
     ['web_watch_smoke.html', '__watch_smoke'],
     ['web_typed_smoke.html', '__typed_smoke'],
     ['web_parity_smoke.html', '__parity_smoke'],

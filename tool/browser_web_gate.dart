@@ -10,6 +10,7 @@ import 'dart:io';
 Future<void> main() async {
   final root = Directory.current.absolute;
   final smokeSources = <String>[
+    'api_smoke_main.dart',
     'facade_smoke_main.dart',
     'watch_smoke_main.dart',
     'typed_smoke_main.dart',
@@ -78,7 +79,7 @@ Future<void> main() async {
 
   try {
     await serverReady.future.timeout(const Duration(seconds: 10));
-    const browserPageCount = 16;
+    const browserPageCount = 17;
     const browserCount = 3;
     stdout.writeln(
         'BROWSER MATRIX Chromium Firefox WebKit × $browserPageCount smoke pages ($browserCount browsers, ${browserPageCount * browserCount} scenarios)');
