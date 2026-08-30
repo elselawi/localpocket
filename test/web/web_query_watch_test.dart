@@ -16,11 +16,12 @@ void main() {
   });
 
   contract.WatchRequest watchEnvelope() {
-    final (op, args) = fake.sent.where((s) => s.$1 == WireOp.contractRequest).last;
+    final (op, args) =
+        fake.sent.where((s) => s.$1 == WireOp.contractRequest).last;
     expect(op, WireOp.contractRequest);
     final encoded = args['request']! as Map;
-    final req = contract.ContractCodec
-        .decodeRequest(encoded.cast<String, Object?>());
+    final req =
+        contract.ContractCodec.decodeRequest(encoded.cast<String, Object?>());
     expect(req, isA<contract.WatchRequest>());
     return req as contract.WatchRequest;
   }
@@ -68,8 +69,8 @@ void main() {
 
   List<String> cancelSubscriptions() => fake.sent
       .where((s) => s.$1 == WireOp.contractRequest)
-      .map((s) => contract.ContractCodec
-          .decodeRequest((s.$2['request']! as Map).cast<String, Object?>()))
+      .map((s) => contract.ContractCodec.decodeRequest(
+          (s.$2['request']! as Map).cast<String, Object?>()))
       .whereType<contract.WatchCancelRequest>()
       .map((r) => r.subscription)
       .toList();
@@ -79,8 +80,8 @@ void main() {
     var next = 0;
     fake.onSend = (op, args) async {
       if (op != WireOp.contractRequest) return null;
-      final req = contract.ContractCodec
-          .decodeRequest((args['request']! as Map).cast<String, Object?>());
+      final req = contract.ContractCodec.decodeRequest(
+          (args['request']! as Map).cast<String, Object?>());
       if (req is contract.WatchRequest) {
         return startedReply('sub-${++next}');
       }

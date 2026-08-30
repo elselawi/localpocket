@@ -41,9 +41,9 @@ void main() {
     final (op, args) = fake.sent.single;
     expect(op, WireOp.contractRequest);
     final encoded = args['request']! as Map;
-    final req = contract.ContractCodec
-        .decodeRequest(encoded.cast<String, Object?>())
-        as contract.SearchRequest;
+    final req =
+        contract.ContractCodec.decodeRequest(encoded.cast<String, Object?>())
+            as contract.SearchRequest;
     expect(req.store, 'widgets');
     expect(req.spec.term, 'engines');
     expect(req.spec.limit, 10);
@@ -57,9 +57,8 @@ void main() {
   test('missing or empty hits decode to an empty list', () async {
     fake.responses[WireOp.contractRequest] =
         FakeFacadeHost.contractReply(const contract.SearchHitsResult([]));
-    final empty = await WebSearchBuilder(fake, ftsSchema, 'engines')
-        .limit(5)
-        .fetch();
+    final empty =
+        await WebSearchBuilder(fake, ftsSchema, 'engines').limit(5).fetch();
     expect(empty, isEmpty);
   });
 

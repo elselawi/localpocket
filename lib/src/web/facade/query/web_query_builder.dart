@@ -15,7 +15,9 @@ import 'web_contract_forwarder.dart';
 /// the kernel compiles it — the page never builds or ships SQL.
 /// {@endtemplate}
 class WebQueryBuilder
-    with QueryForwarder<WebQueryBuilder>, WebContractQueryForwarder<WebQueryBuilder> {
+    with
+        QueryForwarder<WebQueryBuilder>,
+        WebContractQueryForwarder<WebQueryBuilder> {
   /// Creates a web query builder bound to [pocket] for [schema].
   ///
   /// {@macro localpocket.web_query_builder}

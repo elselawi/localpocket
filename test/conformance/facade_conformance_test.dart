@@ -198,6 +198,214 @@ void main() {
         orderSpec;
       });
 
+      test('cursor corpus: nullable sorts, uniform descending, and the '
+          'implicit id tie-breaker', () async {
+        db = await open();
+        addTearDown(db.close);
+        final tasks = db.store(Tasks.store);
+        await tasks.put([Tasks.title.set('null-1')]);
+        await tasks.put([Tasks.title.set('tie-a'), Tasks.priority.set(1)]);
+        await tasks.put([Tasks.title.set('tie-b'), Tasks.priority.set(1)]);
+        await tasks.put([Tasks.title.set('top'), Tasks.priority.set(3)]);
+        await tasks.put([Tasks.title.set('zero'), Tasks.priority.set(0)]);
+
+        Future<List<Object?>> walk(QuerySpec<Tasks> spec) async {
+          final priorities = <Object?>[];
+          var page = await tasks.query(spec);
+          while (true) {
+            for (final r in page.items) {
+              priorities.add(r(Tasks.priority));
+            }
+            final next = await page.next();
+            if (next == null) return priorities;
+            page = next;
+          }
+        }
+
+        final desc = await walk(QuerySpec<Tasks>(
+          orderBy: [Tasks.priority.desc],
+          limit: 2,
+        ));
+        expect(desc, [3, 1, 1, 0, null],
+            reason: 'uniform DESC keeps NULLs last and ties adjacent; the '
+                'implicit id tie-break makes the walk deterministic');
+
+        final asc = await walk(QuerySpec<Tasks>(
+          orderBy: [Tasks.priority.asc],
+          limit: 2,
+        ));
+        expect(asc, [null, 0, 1, 1, 3],
+            reason: 'uniform ASC keeps NULLs first');
+
+        // Ties on priority resolve by id, ascending, in every runtime.
+        final tieIds = [
+          for (final row in (await tasks.query(QuerySpec<Tasks>(
+            where: [Tasks.priority.eq(1)],
+            orderBy: [Tasks.priority.asc],
+            limit: Limits.unbounded,
+          )))
+              .items)
+            row.id,
+        ];
+        expect(tieIds, hasLength(2));
+        expect(tieIds[0].compareTo(tieIds[1]), lessThan(0),
+            reason: 'the implicit id tie-break orders equal priorities');
+      });
+
+      test('cursor corpus: mixed directions walk the full order', () async {
+        db = await open();
+        addTearDown(db.close);
+        final tasks = db.store(Tasks.store);
+        await tasks.put([Tasks.title.set('z-top'), Tasks.priority.set(3)]);
+        await tasks.put([Tasks.title.set('a-zero'), Tasks.priority.set(0)]);
+        await tasks.put([Tasks.title.set('m-top'), Tasks.priority.set(3)]);
+        await tasks.put([Tasks.title.set('b-mid'), Tasks.priority.set(1)]);
+
+        Future<List<String>> walk(QuerySpec<Tasks> spec) async {
+          final titles = <String>[];
+          var page = await tasks.query(spec);
+          while (true) {
+            for (final r in page.items) {
+              titles.add(r(Tasks.title));
+            }
+            final next = await page.next();
+            if (next == null) return titles;
+            page = next;
+          }
+        }
+
+        final spec = QuerySpec<Tasks>(
+          orderBy: [Tasks.priority.asc, Tasks.title.desc],
+          limit: 2,
+        );
+        final walked = await walk(spec);
+        final full = [
+          for (final row
+              in (await tasks.query(QuerySpec<Tasks>(
+                orderBy: [Tasks.priority.asc, Tasks.title.desc],
+                limit: Limits.unbounded,
+              )))
+                  .items)
+            row(Tasks.title),
+        ];
+        expect(walked, full,
+            reason: 'the paged walk reproduces the unbounded mixed-order '
+                'sequence with no gaps or duplicates');
+        expect(walked, ['a-zero', 'b-mid', 'z-top', 'm-top'],
+            reason: 'priority asc, then title desc within each priority');
+      });
+
+      test('cursor corpus: empty terminal pages and stale-shape rejection',
+          () async {
+        db = await open();
+        addTearDown(db.close);
+        final tasks = db.store(Tasks.store);
+        final created = <Row<Tasks>>[];
+        for (var i = 0; i < 5; i++) {
+          created.add(await tasks.put([Tasks.title.set('row $i')]));
+        }
+
+        final page1 = await tasks.query(QuerySpec<Tasks>(limit: 2));
+        expect(page1.hasNext, isTrue);
+
+        // Shrink the table so the cursor's continuation is empty.
+        for (final row in created.skip(2)) {
+          await tasks.purge(row.id);
+        }
+        final terminal = await page1.next();
+        expect(terminal, isNotNull);
+        expect(terminal!.items, isEmpty,
+            reason: 'a cursor past the (now shorter) table yields an empty '
+                'terminal page');
+        expect(terminal.hasNext, isFalse);
+        expect(terminal.hasPrev, isFalse,
+            reason: 'an empty forward terminal page proves nothing before it');
+        expect(terminal.nextCursor, isNull);
+        expect(terminal.prevCursor, isNull);
+        expect(await terminal.next(), isNull,
+            reason: 'the terminal page does not continue');
+
+        // A cursor minted under one projection is stale under another
+        // (projection is part of the shape fingerprint).
+        final minted = await tasks.query(QuerySpec<Tasks>(
+          select: [Tasks.title],
+          orderBy: [Tasks.title.asc],
+          limit: 1,
+        ));
+        expect(minted.nextCursor, isNotNull);
+        final pageWithProjection = await runtime.send(QueryRequest(
+          store: 'tasks',
+          spec: QuerySpecData(
+            order: [QueryOrderTermData('title')],
+            select: ['title'],
+            limit: 1,
+            cursor: minted.nextCursor!.token,
+          ),
+        ));
+        expect(pageWithProjection.items, isNotEmpty,
+            reason: 'the same projection replays the cursor fine');
+
+        // Replay the same token WITHOUT the projection: stale shape.
+        await expectLater(
+          runtime.send(QueryRequest(
+            store: 'tasks',
+            spec: QuerySpecData(
+              order: [QueryOrderTermData('title')],
+              limit: 1,
+              cursor: minted.nextCursor!.token,
+            ),
+          )),
+          throwsA(isA<StaleCursorError>()),
+          reason: 'dropping the projection changes the shape fingerprint',
+        );
+      });
+
+      test('cursor corpus: cursors persist across reopen', () async {
+        final dir = await tempDbPath();
+        addTearDown(dir.cleanup);
+        final path = dir.path;
+
+        db = await open(path: path);
+        final tasks = db.store(Tasks.store);
+        for (var i = 0; i < 4; i++) {
+          await tasks.put([Tasks.title.set('row $i')]);
+        }
+        final page1 = await tasks.query(QuerySpec<Tasks>(
+          orderBy: [Tasks.title.asc],
+          limit: 2,
+        ));
+        final token = page1.nextCursor!.token;
+        final firstTitles =
+            page1.items.map((r) => r(Tasks.title)).toList();
+        await db.close();
+
+        // Reopen the same file and continue from the persisted cursor.
+        db = await open(path: path);
+        addTearDown(db.close);
+        final reopened = db.store(Tasks.store);
+        final page2 = await reopened.query(QuerySpec<Tasks>(
+          orderBy: [Tasks.title.asc],
+          limit: 2,
+        ));
+        final page3 = await runtime.send(QueryRequest(
+          store: 'tasks',
+          spec: QuerySpecData(
+            order: [QueryOrderTermData('title')],
+            limit: 2,
+            cursor: token,
+          ),
+        ));
+        expect(page3.hasNext, isFalse);
+        final all = [
+          ...firstTitles,
+          ...page3.items.map((r) => r['title'] as String),
+        ];
+        expect(all, ['row 0', 'row 1', 'row 2', 'row 3'],
+            reason: 'the cursor token outlives the database session');
+        expect(page2.items.map((r) => r(Tasks.title)).toList(),
+            ['row 0', 'row 1']);
+      });
+
       test('transactions and savepoints behave identically', () async {
         db = await open();
         addTearDown(db.close);

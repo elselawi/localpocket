@@ -195,6 +195,7 @@ class FakeFacadeHost implements WebFacadeHost {
   /// Records of every `filesList` call.
   final List<({String store, String recordId, String field})> filesListCalls =
       [];
+
   /// Records of every `filesOpen` call.
   final List<
       ({
@@ -204,6 +205,7 @@ class FakeFacadeHost implements WebFacadeHost {
         int index,
         String? refId
       })> filesOpenCalls = [];
+
   /// Records of every `filesRemove` call.
   final List<
       ({
@@ -213,8 +215,10 @@ class FakeFacadeHost implements WebFacadeHost {
         int index,
         String? refId
       })> filesRemoveCalls = [];
+
   /// Records of every `filesGc` call (blobGrace + tmpGrace).
   final List<({Duration blobGrace, Duration tmpGrace})> filesGcCalls = [];
+
   /// Records of every `filesEnforceStorageCap` call (maxBytes).
   final List<({int maxBytes})> filesEnforceStorageCapCalls = [];
 

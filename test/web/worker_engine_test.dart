@@ -927,8 +927,7 @@ void main() {
     }
 
     Future<contract.OkResult> cancelContractWatch(String subscription) async {
-      final request =
-          contract.WatchCancelRequest(subscription: subscription);
+      final request = contract.WatchCancelRequest(subscription: subscription);
       final reply = (await h.customRequest({
         'v': webProtocolVersion,
         'i': 0,
@@ -945,14 +944,15 @@ void main() {
 
     List<contract.WatchSnapshot> snapshots(String subscription) => [
           for (final e in h.sink.byOp(WireOp.contractEvent))
-            if (contract.ContractCodec
-                .decodeEvent((e['event']! as Map).cast<String, Object?>())
+            if (contract.ContractCodec.decodeEvent(
+                    (e['event']! as Map).cast<String, Object?>())
                 case contract.WatchSnapshot s
                 when s.subscription == subscription)
               s,
         ];
 
-    test('a contract watch emits its initial snapshot and dedupes unrelated '
+    test(
+        'a contract watch emits its initial snapshot and dedupes unrelated '
         'changes', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'apple', qty: 1), id: id);
@@ -963,15 +963,13 @@ void main() {
             value: 'apple')),
         limit: 50,
       ));
-      await waitUntil(
-          () async => snapshots(started.subscription).isNotEmpty);
+      await waitUntil(() async => snapshots(started.subscription).isNotEmpty);
       var current = snapshots(started.subscription);
       expect(current.single.items.single['name'], 'apple');
 
       // A mutation matching the query emits a fresh snapshot.
       await h.put('widgets', record(name: 'apple', qty: 2, id: id), id: id);
-      await waitUntil(
-          () async => snapshots(started.subscription).length >= 2);
+      await waitUntil(() async => snapshots(started.subscription).length >= 2);
       current = snapshots(started.subscription);
       expect(current.last.items.single['qty'], 2);
 
@@ -1013,15 +1011,13 @@ void main() {
 
     test('a projected contract watch emits projected rows', () async {
       final id = generateRecordId();
-      await h.put('widgets', record(name: 'apple', qty: 1, price: 1.5),
-          id: id);
+      await h.put('widgets', record(name: 'apple', qty: 1, price: 1.5), id: id);
 
       final started = await startContractWatch(contract.QuerySpecData(
         select: ['name'],
         limit: 50,
       ));
-      await waitUntil(
-          () async => snapshots(started.subscription).isNotEmpty);
+      await waitUntil(() async => snapshots(started.subscription).isNotEmpty);
       final s = snapshots(started.subscription).single;
       expect(s.items.single.keys, ['name']);
     });
@@ -1056,8 +1052,7 @@ void main() {
             value: 'apple')),
         limit: 50,
       ));
-      await waitUntil(
-          () async => snapshots(started.subscription).isNotEmpty);
+      await waitUntil(() async => snapshots(started.subscription).isNotEmpty);
       await cancelContractWatch(started.subscription);
 
       final emitted = snapshots(started.subscription).length;

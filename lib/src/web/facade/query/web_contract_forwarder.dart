@@ -76,7 +76,8 @@ QuerySpecData lowerBuilderToSpec(
   return QuerySpecData(
     predicate: predicate,
     order: [
-      for (final o in core.orderNodes) QueryOrderTermData(o.field, desc: o.desc),
+      for (final o in core.orderNodes)
+        QueryOrderTermData(o.field, desc: o.desc),
     ],
     limit: core.limitValue,
     all: core.allMode,
@@ -113,8 +114,8 @@ mixin WebContractQueryForwarder<T extends Object> on QueryForwarder<T> {
 
   /// Executes the query and returns one page of records.
   Future<Page> fetch({String? cursor}) async {
-    final res = await _runtime.send(_request(
-        lowerBuilderToSpec(queryCore, cursor: cursor)));
+    final res = await _runtime
+        .send(_request(lowerBuilderToSpec(queryCore, cursor: cursor)));
     return pageFromContractRows(res);
   }
 
@@ -125,15 +126,14 @@ mixin WebContractQueryForwarder<T extends Object> on QueryForwarder<T> {
   /// from, using backward keyset pagination. The kernel flips the order,
   /// walks the cursor's previous tuple, and reports exact page facts.
   Future<Page> keysetBefore(String cursor) async {
-    final res = await _runtime.send(_request(lowerBuilderToSpec(queryCore,
-        cursor: cursor, backward: true)));
+    final res = await _runtime.send(_request(
+        lowerBuilderToSpec(queryCore, cursor: cursor, backward: true)));
     return pageFromContractRows(res);
   }
 
   /// Counts records matching the current filters.
   Future<int> count() async =>
-      (await _runtime
-              .send(CountRequest(store: queryCore.store, spec: _spec())))
+      (await _runtime.send(CountRequest(store: queryCore.store, spec: _spec())))
           .value;
 
   /// Counts distinct values of [field] matching the current filters.
@@ -143,22 +143,19 @@ mixin WebContractQueryForwarder<T extends Object> on QueryForwarder<T> {
           .value;
 
   /// Returns the distinct values of [field] matching the current filters.
-  Future<List<Object?>> distinct(String field) async =>
-      (await _runtime.send(DistinctRequest(
-              store: queryCore.store, field: field, spec: _spec())))
-          .values;
+  Future<List<Object?>> distinct(String field) async => (await _runtime.send(
+          DistinctRequest(store: queryCore.store, field: field, spec: _spec())))
+      .values;
 
   /// Returns IDs matching the current query.
   Future<List<String>> ids() async =>
-      (await _runtime
-              .send(IdsRequest(store: queryCore.store, spec: _spec())))
+      (await _runtime.send(IdsRequest(store: queryCore.store, spec: _spec())))
           .ids;
 
   /// Returns SQLite's `EXPLAIN QUERY PLAN` output for this query.
-  Future<String> explain() async =>
-      (await _runtime
-              .send(ExplainRequest(store: queryCore.store, spec: _spec())))
-          .plan;
+  Future<String> explain() async => (await _runtime
+          .send(ExplainRequest(store: queryCore.store, spec: _spec())))
+      .plan;
 
   Future<num?> _aggregate(AggregateFn fn, String field) async =>
       (await _runtime.send(AggregateRequest(

@@ -90,8 +90,7 @@ void main() {
       final original = QueryBuilder.compileOnly(schema)
           .where('qty', eq: 3)
           .orderBy('qty', desc: true)
-          .select(['id', 'name'])
-          .limit(9);
+          .select(['id', 'name']).limit(9);
 
       final rebuiltSql = rebuild(original).debugCompile();
       final directSql = original.debugCompile();
@@ -104,10 +103,14 @@ void main() {
       final pocket = await openPocket();
       addTearDown(pocket.close);
       final col = pocket.collection('widgets');
-      await col.put(record(name: 'a', qty: 5, madeOn: 100, id: generateRecordId()));
-      await col.put(record(name: 'b', qty: 9, madeOn: 100, id: generateRecordId()));
-      await col.put(record(name: 'c', qty: 1, madeOn: 200, id: generateRecordId()));
-      await col.put(record(name: 'd', qty: 5, madeOn: 300, id: generateRecordId()));
+      await col
+          .put(record(name: 'a', qty: 5, madeOn: 100, id: generateRecordId()));
+      await col
+          .put(record(name: 'b', qty: 9, madeOn: 100, id: generateRecordId()));
+      await col
+          .put(record(name: 'c', qty: 1, madeOn: 200, id: generateRecordId()));
+      await col
+          .put(record(name: 'd', qty: 5, madeOn: 300, id: generateRecordId()));
 
       final original = col
           .query()
@@ -123,8 +126,7 @@ void main() {
           .wherePredicate(
               nodes.length == 1 ? nodes.single : AllPredicate(nodes))
           .orderBy('qty', desc: true)
-          .select(['id', 'name'])
-          .limit(9);
+          .select(['id', 'name']).limit(9);
 
       final expected = await original.fetch();
       final actual = await rebuilt.fetch();

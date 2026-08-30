@@ -22,8 +22,8 @@ void main() {
     expect(op, WireOp.contractRequest);
     final encoded = args['request'];
     expect(encoded, isA<Map>());
-    final request = contract.ContractCodec
-        .decodeRequest((encoded! as Map).cast<String, Object?>());
+    final request = contract.ContractCodec.decodeRequest(
+        (encoded! as Map).cast<String, Object?>());
     expect(request, isA<T>());
     return request as T;
   }
@@ -191,8 +191,8 @@ void main() {
     });
 
     test('distinct sends the field with the builder spec', () async {
-      fake.responses[WireOp.contractRequest] = FakeFacadeHost
-          .contractReply(const contract.DistinctResult(['a', 'b']));
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost.contractReply(
+          const contract.DistinctResult(['a', 'b']));
       final values = await WebQueryBuilder(fake, widgetsSchema())
           .where('qty', gte: 3)
           .distinct('name');
@@ -212,8 +212,8 @@ void main() {
     });
 
     test('ids sends the spec and returns the id strings', () async {
-      fake.responses[WireOp.contractRequest] =
-          FakeFacadeHost.contractReply(const contract.IdsResult(['a', 'b', 'c']));
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost.contractReply(
+          const contract.IdsResult(['a', 'b', 'c']));
       final ids = await WebQueryBuilder(fake, widgetsSchema()).all().ids();
       expect(ids, ['a', 'b', 'c']);
       final req = sentRequest<contract.IdsRequest>();
@@ -221,8 +221,8 @@ void main() {
     });
 
     test('explain returns the kernel plan string', () async {
-      fake.responses[WireOp.contractRequest] = FakeFacadeHost
-          .contractReply(const contract.ExplainResult('SCAN widgets'));
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost.contractReply(
+          const contract.ExplainResult('SCAN widgets'));
       final plan =
           await WebQueryBuilder(fake, widgetsSchema()).limit(5).explain();
       expect(plan, 'SCAN widgets');
@@ -236,8 +236,8 @@ void main() {
           FakeFacadeHost.contractReply(const contract.AggregateResult(12.5));
       final builder = WebQueryBuilder(fake, widgetsSchema());
       expect(await builder.sum('qty'), 12.5);
-      expect(
-          sentRequest<contract.AggregateRequest>().fn, contract.AggregateFn.sum);
+      expect(sentRequest<contract.AggregateRequest>().fn,
+          contract.AggregateFn.sum);
       expect(await builder.avg('qty'), 12.5);
       expect(await builder.min('qty'), 12.5);
       expect(await builder.max('qty'), 12.5);
