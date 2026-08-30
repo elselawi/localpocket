@@ -22,6 +22,7 @@ import 'schema_manifest.dart';
 import 'store.dart';
 import 'system_tables.dart';
 import 'transaction.dart';
+import 'watch.dart';
 import 'write_queue.dart';
 import 'query/query_builder/query_builder.dart';
 import 'query/query_builder/predicate_tree.dart';

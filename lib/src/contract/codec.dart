@@ -60,6 +60,7 @@ abstract final class ContractCodec {
     TransactionSavepointRequest(session: 'x', name: 'n'),
     TransactionRollbackToRequest(session: 'x', name: 'n'),
     TransactionReleaseRequest(session: 'x', name: 'n'),
+    WatchOneRequest(store: 's', id: 'i'),
     WatchRequest(store: 's', spec: QuerySpecData()),
     WatchCancelRequest(subscription: 'x'),
     AnalyzeRequest(),
@@ -104,7 +105,14 @@ abstract final class ContractCodec {
 
   /// One representative instance per event variant.
   static const List<Event> eventSamples = [
-    CommittedChange(store: 's', ids: ['i']),
+    CommittedChange(
+      store: 's',
+      id: 'i',
+      origin: ChangeOrigin.local,
+      action: ChangeAction.create,
+      newRecord: {'id': 'i'},
+      changedFields: {'name'},
+    ),
     WatchSnapshot(subscription: 'x', items: []),
   ];
 
@@ -277,6 +285,8 @@ abstract final class ContractCodec {
             TransactionRollbackToRequest(session: session, name: name),
           _ => TransactionReleaseRequest(session: session, name: name),
         };
+      case 'watchOne':
+        return WatchOneRequest(store: _store(m), id: _required(m, 'id'));
       case 'watch':
         return WatchRequest(
             store: _store(m), spec: QuerySpecData.fromJson(m['spec']));
@@ -469,12 +479,28 @@ abstract final class ContractCodec {
     switch (tag) {
       case CommittedChange.tagValue:
         final store = payload['store'];
-        final ids = payload['ids'];
-        if (store is! String || ids is! List) {
+        final id = payload['id'];
+        final changedFields = payload['changedFields'];
+        if (store is! String || id is! String) {
           throw WireException('Malformed committedChange payload.');
         }
+        final oldRecord = payload['oldRecord'];
+        final newRecord = payload['newRecord'];
         return CommittedChange(
-            store: store, ids: [for (final i in ids) i as String]);
+          store: store,
+          id: id,
+          origin: _changeOrigin(payload['origin']),
+          action: _changeAction(payload['action']),
+          oldRecord: oldRecord == null
+              ? null
+              : _stringMap(oldRecord, 'oldRecord'),
+          newRecord: newRecord == null
+              ? null
+              : _stringMap(newRecord, 'newRecord'),
+          changedFields: changedFields is List
+              ? {for (final f in changedFields) f as String}
+              : const {},
+        );
       case WatchSnapshot.tagValue:
         final subscription = payload['subscription'];
         final items = payload['items'];
@@ -496,4 +522,16 @@ abstract final class ContractCodec {
     }
     throw WireException('Malformed field "$field".');
   }
+
+  static ChangeOrigin _changeOrigin(Object? v) => switch (v) {
+        final String s when ChangeOrigin.values.any((o) => o.name == s) =>
+          ChangeOrigin.values.byName(s),
+        _ => throw WireException('Malformed committedChange origin.'),
+      };
+
+  static ChangeAction _changeAction(Object? v) => switch (v) {
+        final String s when ChangeAction.values.any((o) => o.name == s) =>
+          ChangeAction.values.byName(s),
+        _ => throw WireException('Malformed committedChange action.'),
+      };
 }

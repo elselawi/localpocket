@@ -1,7 +1,10 @@
 import 'dart:async';
 
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/core/change_bus.dart';
+import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/web/conversions.dart';
+import 'package:localpocket/src/web/facade/web_contract_events.dart';
 import 'package:localpocket/src/web/lifecycle.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
@@ -150,35 +153,37 @@ void main() {
       await authRequired.close();
     });
 
-    test('record_event is re-emitted on the change bus', () async {
+    test(
+        'committed facts ride the contract stream: bindRecordEventStream '
+        're-publishes them on the change bus', () async {
       final changeBus = ChangeBus();
       final events = <RecordChangeEvent>[];
       changeBus.events.listen(events.add);
 
-      handleWorkerEventEnvelope(
-        {
-          'v': webProtocolVersion,
-          'op': WireOp.recordEvent,
-          'event': encodeWireValue({
-            'store': 'widgets',
-            'id': 'abc',
-            'action': 'create',
-            'origin': 'local',
-            'changedFields': <Object?>['name'],
-          }),
-        },
-        workerStreams: const {},
-        workerEventDecoders: const {},
-        authRequiredController: StreamController<void>.broadcast(),
-        syncStatusController:
-            StreamController<Map<String, Object?>>.broadcast(),
-        changeBus: changeBus,
-      );
+      // A contract runtime whose transport records nothing and answers
+      // nothing; only its event stream matters here.
+      final runtime = RemoteRuntimeClient(transport: (_) async => null);
+      bindRecordEventStream(runtime: runtime, changeBus: changeBus);
+
+      runtime.handleWorkerEvent({
+        'v': webProtocolVersion,
+        'op': WireOp.contractEvent,
+        'event': contract.ContractCodec.encodeEvent(contract.CommittedChange(
+          store: 'widgets',
+          id: 'abc',
+          origin: contract.ChangeOrigin.local,
+          action: contract.ChangeAction.create,
+          newRecord: const {'id': 'abc', 'name': 'x'},
+          changedFields: const {'name'},
+        )),
+      });
 
       await pumpEventQueue();
       expect(events, hasLength(1));
       expect(events.single.store, 'widgets');
       expect(events.single.id, 'abc');
+      expect(events.single.action, ChangeAction.create);
+      expect(events.single.newRecord, {'id': 'abc', 'name': 'x'});
       changeBus.close();
     });
 
@@ -232,7 +237,7 @@ void main() {
       await controller.close();
     });
 
-    test('malformed record_event payloads are ignored instead of crashing',
+    test('an unknown op after the record-event retirement is ignored',
         () async {
       final changeBus = ChangeBus();
       final events = <RecordChangeEvent>[];
@@ -242,7 +247,7 @@ void main() {
         () => handleWorkerEventEnvelope(
           {
             'v': webProtocolVersion,
-            'op': WireOp.recordEvent,
+            'op': 'record_event',
             'event': encodeWireValue({'id': 'abc'}),
           },
           workerStreams: const {},
@@ -253,6 +258,8 @@ void main() {
           changeBus: changeBus,
         ),
         returnsNormally,
+        reason: 'the retired record_event envelope is plain unknown-op noise '
+            'now: committed facts ride the contract stream',
       );
 
       await pumpEventQueue();

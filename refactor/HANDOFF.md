@@ -65,10 +65,20 @@ Cutover slices DONE (2026-08-30):
    `MutateRequest.durability` added). `WireCollectionMixin` is narrowed to
    the tx surface and dies with the tx family (recorded deviation). See the
    "CRUD/batch cutover" ledger section.
+5. **Watches/committed-events family cutover**: `watchOne` rides
+   `WatchOneRequest` + single-row `WatchSnapshot` events (empty items =
+   absent); `CommittedChange` now carries per-record detail (origin, action,
+   old/new payloads, changedFields) and the facade binds its record-event
+   streams to the contract event stream. `WireOp.watchOne`,
+   `WireOp.recordEvent`, `_handleWatchOne`, and the `record_event`
+   broadcast are deleted; `worker_event`/int-id `watch_cancel` survive for
+   `conflicts_watch` only. See the "Watches and committed events cutover"
+   ledger section for the payload decision.
 
-Remaining (this stage): watches/committed events →
+Remaining (this stage):
 transactions (retires `compiled_query`/`send_plan.dart`/`QueryPlan`) →
-maintenance/capabilities → conflicts → files → sync/auth/status/realtime →
+maintenance/capabilities → conflicts (retires `worker_event`/
+`watch_cancel`/`conflicts_*`) → files → sync/auth/status/realtime →
 close/lifecycle. The barrel switch is the NEXT agent's stage (plan Phase 9).
 
 The full destination plan (12 stages, gates, checklists) is in
@@ -380,9 +390,10 @@ switch + planning-artifact deletion).
     `encodeWireValue`/`decodeWireValue` exist in BOTH `web/conversions.dart`
     and `contract/wire_values.dart`; `decodeError` in BOTH
     `web/protocol.dart` and contract `error_codec.dart`.
-16. During coexistence the worker emits BOTH `record_event` (old) and
-    `contract_event` (contract) for every committed fact — remove each old
-    stream with its family, never before.
+16. During coexistence the worker used to emit BOTH `record_event` (old)
+    and `contract_event` (contract) for every committed fact. DONE: committed
+    facts now flow ONLY as contract events; conflicts watches are the last
+    `worker_event` producer.
 
 ---
 
@@ -428,13 +439,19 @@ Fixed order:
    `WireOp.mutateBatch`. DEVIATION: `WireCollectionMixin` survives, narrowed
    to `WebTxCollection` (its int session ids come from the worker's tx
    handshake) — it is deleted with the tx family.
-2. **Watches/committed events** — `watch_one` → add `WatchOneRequest` (+ a
-   single-row snapshot event); `watch_cancel` → `WatchCancelRequest`
-   (exists); `record_event`/`worker_event` → the contract `CommittedChange`
-   event plus per-store typed record events per plan §6.8 (one committed
-   envelope feeds both; decide the old/new-record payload here and record
-   it). Delete `_handleWatchOne`/`_handleWatchCancel`, the `worker_event`
-   envelope, and the corresponding `handleWorkerEventEnvelope` branches.
+2. **Watches/committed events** — DONE (2026-08-31, see the ledger's
+   "Watches and committed events cutover" section). `WatchOneRequest` added
+   (single-row `WatchSnapshot` events; empty items = absent; kernel
+   validates the record decodes before registering). `CommittedChange`
+   carries per-record detail — origin/action/old/new/changedFields — and
+   the kernel derives it from the detailed change-bus stream; the
+   destination facade's `ChangeNotification` derives per record. Deleted:
+   `WireOp.watchOne`, `WireOp.recordEvent`, `_handleWatchOne`, the
+   `record_event` broadcast, `worker_engine_watch.dart`,
+   `initializeWebWatch`, `watch_protocol_test.dart`,
+   `watch_initialization_test.dart`. DEVIATION: `worker_event` + int-id
+   `watch_cancel` survive for `conflicts_watch` only (deleted with the
+   conflicts family).
 3. **Transactions** — `tx_begin`/`tx_get`/`tx_mutate_batch`/savepoints/
    commit/rollback → contract session commands (exist; sessions are
    strings — the old wire uses int ids). Re-route `WebTx`,

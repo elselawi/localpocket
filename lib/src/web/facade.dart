@@ -9,6 +9,7 @@ import 'package:localpocket/src/web/facade/query/web_query_builder.dart';
 import 'package:localpocket/src/web/facade/search/web_search_builder.dart';
 import 'package:localpocket/src/web/facade/web_collections.dart';
 import 'package:localpocket/src/web/facade/web_conflicts.dart';
+import 'package:localpocket/src/web/facade/web_contract_events.dart';
 import 'package:localpocket/src/web/facade/web_files.dart';
 import 'package:localpocket/src/web/facade/web_storage_capabilities.dart';
 import 'package:localpocket/src/web/facade/web_sync_surface.dart';
@@ -68,6 +69,27 @@ class LocalPocket
       onWorkerClosed: _failWorkerStreams,
       requestTimeout: requestTimeout,
     );
+    // The shared contract runtime exists for the facade's whole life: every
+    // committed fact flows through its event stream, so the record-event
+    // streams are bound here too. One committed envelope feeds them all.
+    _contractRuntime = _buildContractRuntime();
+    bindRecordEventStream(runtime: _contractRuntime!, changeBus: changeBus);
+  }
+
+  /// The shared contract runtime over the worker transport.
+  RemoteRuntimeClient _buildContractRuntime() {
+    late final RemoteRuntimeClient runtime;
+    runtime = RemoteRuntimeClient(
+      transport: (envelope) async {
+        final raw = await _remoteDb.customRequest(envelope.jsify());
+        return raw?.dartify();
+      },
+      onWorkerClosed: () {
+        unawaited(runtime.close());
+      },
+      requestTimeout: _sender.requestTimeout,
+    );
+    return runtime;
   }
 
   /// Filesystem path identifying the worker-owned database.
@@ -109,26 +131,15 @@ class LocalPocket
   /// Pure-Dart request/response core over the worker transport.
   late final WebSender _sender;
 
-  /// The shared contract runtime backing the query/search/watch families.
-  /// Constructed on first use (pure old-wire apps never build one); its
-  /// transport is the same worker channel [send] uses.
+  /// The shared contract runtime backing the query/search/watch families and
+  /// the committed-fact event stream. Built at construction.
   RemoteRuntimeClient? _contractRuntime;
 
   @override
   RemoteRuntimeClient get contractRuntime {
     final existing = _contractRuntime;
     if (existing != null) return existing;
-    late final RemoteRuntimeClient runtime;
-    runtime = RemoteRuntimeClient(
-      transport: (envelope) async {
-        final raw = await _remoteDb.customRequest(envelope.jsify());
-        return raw?.dartify();
-      },
-      onWorkerClosed: () {
-        unawaited(runtime.close());
-      },
-      requestTimeout: _sender.requestTimeout,
-    );
+    final runtime = _buildContractRuntime();
     _contractRuntime = runtime;
     return runtime;
   }

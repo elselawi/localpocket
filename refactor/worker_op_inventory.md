@@ -16,8 +16,8 @@ requestTag, typed payload}` with a named result and a typed error codec (§7.4).
 | `capabilities` | folded into `OpenRequest`/`CapabilitiesRequest` → `CapabilitiesResult` | page never guesses (§4.11) |
 | `health` | folded into lifecycle ping on `OpenRequest` (DELETE as separate op) | |
 | `close` | `CloseRequest` → `CloseResult` | fails all pending + streams with `DatabaseWorkerClosedException` |
-| event `worker_event` | `Event` stream (sealed `Event` variants) | replaces generic envelope |
-| event `record_event` | `CommittedChange` | one committed envelope feeds native invalidation + web events (§4.4, Rule 7) |
+| event `worker_event` | `Event` stream (sealed `Event` variants) | query/single-record watches now cancel over the contract; the envelope remains for `conflicts_watch` until that family cuts over (recorded deviation) |
+| event `record_event` | `CommittedChange` | ✔ CUT OVER (2026-08-31) — the contract's `CommittedChange` now carries per-record detail (origin, action, old/new payloads, changedFields); one committed envelope feeds every record-event stream. Old stream deleted. |
 
 Error tags `protocol_mismatch`, `worker_closed`, `protocol_envelope`, `aborted`
 → typed errors `ProtocolMismatchError`, `DatabaseWorkerClosedException`,
@@ -61,8 +61,8 @@ with the string registry).
 | Op | Destination command | Notes |
 |---|---|---|
 | `watch_query` | `WatchRequest(ir)` → subscription id; snapshot events are kernel-shaped pages | ordered query ⇒ order-sensitive digest (§10.5) |
-| `watch_one` | `WatchOneRequest(store, id)` | |
-| `watch_cancel` | `CancelWatchRequest(subscriptionId)` | |
+| `watch_one` | `WatchOneRequest(store, id)` | ✔ CUT OVER (2026-08-31) — snapshots are single-row `WatchSnapshot` events on the contract stream (an empty item list means "absent"); the kernel validates the record decodes before registering |
+| `watch_cancel` | `CancelWatchRequest(subscriptionId)` | query + single-record watches cancel over the contract `WatchCancelRequest`; the int-id op remains only for conflicts watches |
 
 Watches inside transactions are rejected with the same typed error on both
 runtimes (§6.7).
@@ -124,7 +124,8 @@ runtimes (§6.7).
 
 ## Phase 7 cutover order (fixed)
 
-CRUD/batch ✔ (2026-08-31) → query/search/cursors ✔ (2026-08-30) → watches/events →
+CRUD/batch ✔ (2026-08-31) → query/search/cursors ✔ (2026-08-30) → watches/events ✔
+(2026-08-31; `worker_event`/int-id `watch_cancel` survive for conflicts only) →
 transactions → maintenance/capabilities → conflicts → files/streams →
 sync/auth/status/realtime → close/lifecycle. Old and new envelopes may coexist
 per family; both must call the same kernel services.

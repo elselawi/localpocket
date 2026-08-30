@@ -64,13 +64,14 @@ void failWorkerStreams({
 }
 
 /// Dispatches one decoded worker→client event envelope to the matching watch
-/// stream / status controller / change bus.
+/// stream / status controller.
 ///
 /// Mirrors the facade's `_handleWorkerEvent` core: `worker_event` events are
 /// wire-decoded and added to the watch's [workerStreams] controller (through
 /// its optional [workerEventDecoders] transform); `sync_status`/`auth_required`
-/// events update the status controllers; `record_event` events are re-emitted
-/// on the [ChangeBus]. Unknown ops, version mismatches, and malformed shapes
+/// events update the status controllers. Committed facts no longer travel
+/// here — they ride the contract event stream, which the facade binds to its
+/// change bus directly. Unknown ops, version mismatches, and malformed shapes
 /// are ignored (a malformed unsolicited event must not tear down unrelated
 /// requests).
 void handleWorkerEventEnvelope(
@@ -95,25 +96,6 @@ void handleWorkerEventEnvelope(
     if (status is Map && !syncStatusController.isClosed) {
       syncStatusController.add(
           status.map((k, v) => MapEntry(k.toString(), decodeWireValue(v))));
-    }
-    return;
-  }
-  if (event['op'] == WireOp.recordEvent) {
-    final rawEvent = event['event'];
-    if (rawEvent is! Map) {
-      return;
-    }
-    final decoded = decodeWireValue(rawEvent);
-    if (decoded is! Map) {
-      return;
-    }
-    final recordMap = decoded.map((k, v) => MapEntry(k.toString(), v));
-    try {
-      final recordEvent = RecordChangeEvent.fromJson(recordMap);
-      changeBus.emitEvent(recordEvent);
-    } catch (_) {
-      // Ignore malformed or incompatible unsolicited record events so unrelated
-      // watcher traffic continues unaffected.
     }
     return;
   }
@@ -171,25 +153,6 @@ Future<void> closeWebResources({
     markClosed();
   }
   await disposePageResources();
-}
-
-/// Runs watch initialization with cleanup ownership established before the
-/// first snapshot is requested. If initialization fails, the registration is
-/// removed by [cleanup] before the error is allowed to escape.
-Future<T> initializeWebWatch<T>({
-  required void Function() start,
-  required void Function() register,
-  required Future<T> Function() initialize,
-  required Future<void> Function() cleanup,
-}) async {
-  try {
-    start();
-    register();
-    return await initialize();
-  } catch (_) {
-    await cleanup();
-    rethrow;
-  }
 }
 
 /// Tracks pending watch registrations and unregistrations across the asynchronous

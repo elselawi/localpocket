@@ -447,6 +447,23 @@ final class TransactionReleaseRequest extends Request<OkResult> {
 // watches
 // ---------------------------------------------------------------------------
 
+/// Watches one record: the subscription's snapshots carry the current state
+/// of the record (an empty item list means "absent").
+final class WatchOneRequest extends Request<WatchStartedResult> {
+  const WatchOneRequest({required this.store, required this.id});
+
+  final String store;
+  final String id;
+
+  @override
+  String get tag => 'watchOne';
+  @override
+  String get resultTag => WatchStartedResult.tagValue;
+
+  @override
+  Map<String, Object?> toJson() => {'store': store, 'id': id};
+}
+
 final class WatchRequest extends Request<WatchStartedResult> {
   const WatchRequest({required this.store, required this.spec});
 

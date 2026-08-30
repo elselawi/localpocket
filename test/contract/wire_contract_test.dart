@@ -208,6 +208,47 @@ void main() {
         throwsA(isA<WireException>()),
       );
     });
+
+    test('decoding with malformed typed fields fails', () {
+      expect(
+        () => ContractCodec.decodeEvent({
+          'tag': 'committedChange',
+          'payload': encodeWireValue({
+            'store': 's',
+            'id': 'i',
+            'origin': 'sideways',
+            'action': 'create',
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'an unknown change origin fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeEvent({
+          'tag': 'committedChange',
+          'payload': encodeWireValue({
+            'store': 's',
+            'id': 'i',
+            'origin': 'local',
+            'action': 'teleport',
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'an unknown change action fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeEvent({
+          'tag': 'committedChange',
+          'payload': encodeWireValue({
+            'store': 's',
+            'origin': 'local',
+            'action': 'create',
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a missing record id fails typed',
+      );
+    });
   });
 
   group('wire values', () {

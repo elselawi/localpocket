@@ -30,7 +30,6 @@ class WireOp {
   static const String close = 'close';
   static const String health = 'health';
   static const String workerEvent = 'worker_event';
-  static const String recordEvent = 'record_event';
   static const String capabilities = 'capabilities';
 
   /// The single read operation: an engine-compiled query plan (SQL + bound
@@ -57,7 +56,10 @@ class WireOp {
   static const String txRollback = 'tx_rollback';
 
   // Reactive Watchers
-  static const String watchOne = 'watch_one';
+
+  /// Cancels an old-wire watch registration. The query and single-record
+  /// watches cancel over the contract (`WatchCancelRequest`); conflicts
+  /// watches still use this int-id channel until the conflicts cutover.
   static const String watchCancel = 'watch_cancel';
   // Sync & auth
   static const String syncStart = 'sync_start';
@@ -114,7 +116,6 @@ class WireOp {
     close,
     health,
     workerEvent,
-    recordEvent,
     capabilities,
     compiledQuery,
     analyze,
@@ -131,7 +132,6 @@ class WireOp {
     txRelease,
     txCommit,
     txRollback,
-    watchOne,
     watchCancel,
     syncStart,
     syncStop,

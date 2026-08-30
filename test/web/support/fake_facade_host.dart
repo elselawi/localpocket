@@ -7,6 +7,7 @@ import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/typed/registry.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
+import 'package:localpocket/src/web/facade/web_contract_events.dart';
 import 'package:localpocket/src/web/lifecycle.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
@@ -85,12 +86,20 @@ class FakeFacadeHost implements WebFacadeHost {
 
   /// The shared contract runtime over this fake's [send] — the same binding
   /// the production facade creates over its worker transport. Contract sends
-  /// are recorded in [sent] like every other envelope.
+  /// are recorded in [sent] like every other envelope, and the change bus is
+  /// bound to the contract's committed-change stream exactly as the
+  /// production facade binds it.
   @override
-  late final RemoteRuntimeClient contractRuntime = RemoteRuntimeClient(
-    transport: (envelope) async => send(envelope['op']! as String,
-        (envelope['a']! as Map).cast<String, Object?>()),
-  );
+  late final RemoteRuntimeClient contractRuntime = _buildContractRuntime();
+
+  RemoteRuntimeClient _buildContractRuntime() {
+    final runtime = RemoteRuntimeClient(
+      transport: (envelope) async => send(envelope['op']! as String,
+          (envelope['a']! as Map).cast<String, Object?>()),
+    );
+    bindRecordEventStream(runtime: runtime, changeBus: changeBus);
+    return runtime;
+  }
 
   /// The wire-success envelope for a contract [result] — the shape the
   /// worker's contract handler returns inside a [WebResponse].

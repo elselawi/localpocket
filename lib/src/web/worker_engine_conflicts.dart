@@ -4,9 +4,18 @@
 /// watch`. All delegate to the core `pocket.conflicts` API; records cross the
 /// wire via `encodeConflictRecord` (conflicts_bridge.dart). The conflicts
 /// watch stream is forwarded with the shared `WorkerEngineHost._emitWorkerEvent`
-/// envelope (main file), so its wire shape matches `watch_query`/`watch_one`
-/// exactly.
+/// envelope (main file), and its int-id registration/cancel machinery lives
+/// here too until the conflicts family cuts over to the typed contract.
 part of 'worker_engine.dart';
+
+/// {@template localpocket.__active_watcher}
+/// Active old-wire watcher registration in the worker (conflicts watches).
+/// {@endtemplate}
+class _ActiveWatcher {
+  /// {@macro localpocket.__active_watcher}
+  _ActiveWatcher(this.cancel);
+  final Future<void> Function() cancel;
+}
 
 /// Conflict handlers (see the file doc above).
 mixin WorkerConflictsHandlers on WorkerEngineHost {
@@ -71,5 +80,18 @@ mixin WorkerConflictsHandlers on WorkerEngineHost {
       await sub.cancel();
     });
     return {'watchId': watchId};
+  }
+
+  /// Cancels an old-wire watcher registration by int id. Query and
+  /// single-record watches cancel over the contract; this int-id channel
+  /// remains for conflicts watches until that family cuts over.
+  Future<Object?> _handleWatchCancel(
+      WorkerEventSink sink, WebRequest req) async {
+    final wid = WireArgs(req.args).requireInt('watchId', op: 'watch_cancel');
+    final watcher = _watchers.remove(wid);
+    if (watcher != null) {
+      await watcher.cancel();
+    }
+    return {'ok': true};
   }
 }

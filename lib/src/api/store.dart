@@ -339,14 +339,16 @@ final class Store<S extends StoreDef<S>> {
     return controller.stream;
   }
 
-  /// Committed changes to this store.
+  /// Committed changes to this store: one notification per committed record
+  /// change (the record payloads ride the contract's committed-change
+  /// event).
   Stream<ChangeNotification> get changes => _runtime.events
       .where((event) => event is CommittedChange)
       .cast<CommittedChange>()
       .where((event) => event.store == name)
       .map((event) => ChangeNotification(
             storeName: event.store,
-            ids: List<String>.unmodifiable(event.ids),
+            ids: [event.id],
           ));
 
   // -- internals ------------------------------------------------------------

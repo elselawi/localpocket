@@ -198,77 +198,79 @@ void main() {
   });
 
   group('WebCollection.watchOne', () {
-    test(
-        'registers a watch id, sends watch_one, decodes the initial item, '
-        'delivers later worker events, and cancels via watch_cancel', () async {
-      final record = {
-        'id': 'abc',
-        'name': 'apple',
-        'made_on': DateTime.utc(2026, 2, 3),
-      };
-      fake.responses[WireOp.watchOne] = {'item': encodeWireValue(record)};
+    setUp(() {
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost.contractReply(
+          const contract.WatchStartedResult(subscription: 'w1'));
+    });
 
-      final watchId = fake.nextRequestId;
+    test(
+        'sends a WatchOneRequest, delivers the kernel snapshots, and cancels '
+        'with a WatchCancelRequest', () async {
       final events = <Map<String, Object?>?>[];
       final sub = col.watchOne('abc').listen(events.add);
-
       await pumpEventQueue();
 
-      // Registration sent the watch_one envelope with store/id.
-      final watchOne = fake.sent.where((s) => s.$1 == WireOp.watchOne).single;
-      expect(watchOne.$2, {
-        'watchId': watchId,
-        'store': 'widgets',
-        'id': 'abc',
-      });
-      expect(fake.workerStreams.containsKey(watchId), isTrue);
+      // Registration sent one typed watch request with store/id.
+      final req = sentRequest(fake, 0) as contract.WatchOneRequest;
+      expect(req.store, 'widgets');
+      expect(req.id, 'abc');
 
-      // The initial item was decoded (including the wire DateTime) and added.
+      // Snapshots arrive as contract events on the shared runtime stream;
+      // the initial one (emitted by the kernel on registration) is decoded
+      // including its wire DateTime.
+      fake.deliverContractEvent(contract.WatchSnapshot(subscription: 'w1', items: [
+        {
+          'id': 'abc',
+          'name': 'apple',
+          'made_on': DateTime.utc(2026, 2, 3),
+        }
+      ]));
+      await pumpEventQueue();
       expect(events, hasLength(1));
       expect(events.single!['id'], 'abc');
-      expect(events.single!['name'], 'apple');
       expect(events.single!['made_on'], DateTime.utc(2026, 2, 3));
 
-      // A later worker event is decoded and delivered.
-      final updated = {...record, 'name': 'apple-2'};
-      fake.deliverWorkerEvent(watchId, updated);
+      // A later snapshot (record updated) is delivered as well.
+      fake.deliverContractEvent(contract.WatchSnapshot(subscription: 'w1', items: [
+        {
+          'id': 'abc',
+          'name': 'apple-2',
+        }
+      ]));
       await pumpEventQueue();
       expect(events, hasLength(2));
       expect(events.last!['name'], 'apple-2');
 
-      // Cancelling unregisters the watch and sends watch_cancel.
+      // Snapshots of other subscriptions are ignored.
+      fake.deliverContractEvent(
+          const contract.WatchSnapshot(subscription: 'w2', items: []));
+      await pumpEventQueue();
+      expect(events, hasLength(2));
+
+      // Cancelling unregisters the watch and sends the typed cancel.
       await sub.cancel();
       await pumpEventQueue();
-      expect(fake.workerStreams.containsKey(watchId), isFalse);
-      final cancel = fake.sent.where((s) => s.$1 == WireOp.watchCancel).single;
-      expect(cancel.$2, {'watchId': watchId});
+      final cancel = sentRequest(fake, fake.sent.length - 1)
+          as contract.WatchCancelRequest;
+      expect(cancel.subscription, 'w1');
     });
 
-    test('a null initial item is delivered as null (record absent)', () async {
-      fake.responses[WireOp.watchOne] = {'item': null};
+    test('an empty snapshot is delivered as null (record absent)', () async {
       final events = <Map<String, Object?>?>[];
       final sub = col.watchOne('gone').listen(events.add);
       await pumpEventQueue();
-      expect(events, hasLength(1));
-      expect(events.single, isNull);
-      await sub.cancel();
-    });
-
-    test('malformed watch_one payloads are treated as null instead of crashing',
-        () async {
-      fake.responses[WireOp.watchOne] = 'unexpected';
-      final events = <Map<String, Object?>?>[];
-      final sub = col.watchOne('broken').listen(events.add);
+      fake.deliverContractEvent(
+          const contract.WatchSnapshot(subscription: 'w1', items: []));
       await pumpEventQueue();
       expect(events, hasLength(1));
       expect(events.single, isNull);
       await sub.cancel();
     });
 
-    test('a failing watch_one send surfaces as a stream error', () async {
+    test('a failing watch request surfaces as a stream error', () async {
       final boom = StateError('worker down');
       fake.onSend = (op, args) async {
-        if (op == WireOp.watchOne) throw boom;
+        if (op == WireOp.contractRequest) throw boom;
         return fake.responses[op];
       };
       final events = <Object?>[];
@@ -285,14 +287,11 @@ void main() {
     test(
         'cancelling before registration completes runs the delayed '
         'unregister', () async {
-      // Hold the watch_one send open so the registration stays in-flight.
+      // Hold the watch request open so the registration stays in-flight.
       final gate = Completer<void>();
       fake.onSend = (op, args) async {
-        if (op == WireOp.watchOne) await gate.future;
+        if (op == WireOp.contractRequest) await gate.future;
         return fake.responses[op];
-      };
-      fake.responses[WireOp.watchOne] = {
-        'item': encodeWireValue({'id': 'a'})
       };
 
       final sub = col.watchOne('abc').listen((_) {});
@@ -302,32 +301,41 @@ void main() {
       gate.complete();
       await pumpEventQueue();
 
-      final cancels =
-          fake.sent.where((s) => s.$1 == WireOp.watchCancel).toList();
+      final cancels = fake.sent
+          .map((s) => s.$2['request'])
+          .whereType<Map>()
+          .map((m) => contract.ContractCodec.decodeRequest(
+              m.cast<String, Object?>()))
+          .whereType<contract.WatchCancelRequest>()
+          .toList();
       expect(cancels, hasLength(1),
           reason: 'the deferred unregister cancels the watch');
-      expect(cancels.single.$2, {'watchId': fake.nextRequestId - 1});
+      expect(cancels.single.subscription, 'w1');
     });
   });
 
   group('WebCollection misc facade surface', () {
-    test('recordEvents streams the host change-bus events', () async {
+    test('recordEvents derives from the contract committed-change stream',
+        () async {
       final events = <RecordChangeEvent>[];
       final sub = col.recordEvents.listen(events.add);
       addTearDown(sub.cancel);
 
-      fake.changeBus.emitEvent(RecordChangeEvent(
+      fake.deliverContractEvent(contract.CommittedChange(
         store: 'widgets',
         id: 'a',
-        origin: ChangeOrigin.local,
-        action: ChangeAction.create,
+        origin: contract.ChangeOrigin.local,
+        action: contract.ChangeAction.create,
         newRecord: {'name': 'x'},
         changedFields: {'name'},
       ));
       await pumpEventQueue();
       expect(events, hasLength(1),
-          reason: 'recordEvents is backed by the host event stream');
+          reason: 'recordEvents is fed by the contract committed-change '
+              'stream, one committed envelope feeds them all');
       expect(events.single.id, 'a');
+      expect(events.single.origin, ChangeOrigin.local);
+      expect(events.single.newRecord, {'name': 'x'});
     });
 
     test('query() returns a usable query builder', () async {

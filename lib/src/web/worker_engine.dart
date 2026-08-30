@@ -30,7 +30,6 @@
 /// - `worker_engine_crud.dart` — store registration (`open`).
 /// - `worker_engine_maintenance.dart` — health/capabilities + maintenance.
 /// - `worker_engine_tx.dart` — interactive transaction sessions.
-/// - `worker_engine_watch.dart` — single-record watchers (`watch_one`).
 /// - `worker_engine_sync.dart` — sync engine lifecycle + auth.
 /// - `worker_engine_files.dart` — chunked upload + file metadata RPCs.
 /// - `worker_engine_conflicts.dart` — conflict inspection + resolution.
@@ -39,7 +38,7 @@
 ///
 /// Any helper used by two or more areas lives on [WorkerEngineHost] — never
 /// copied into a mixin: `_applyMutation` (`tx_mutate_batch`),
-/// `_emitWorkerEvent` (`watch_one`/`conflicts_watch`), `_requireSession`
+/// `_emitWorkerEvent` (`conflicts_watch`), `_requireSession`
 /// (every `tx_*` handler + compiled-query tx reads), `_parseCompiledPlan`
 /// (`compiled_query`), and `_stopSync` (sync handlers + `close`). The mixins
 /// are `on WorkerEngineHost` and share one library with it, so they access
@@ -53,7 +52,6 @@ import 'dart:typed_data';
 import 'package:sqlite3/common.dart';
 
 import '../contract/contract.dart' as contract;
-import '../core/change_bus.dart';
 import '../core/database_adapter.dart';
 import '../core/errors.dart';
 import '../core/hashing.dart';
@@ -63,7 +61,6 @@ import '../core/query_plan.dart';
 import '../core/schema_manifest.dart';
 import '../core/schema.dart';
 import '../core/store.dart';
-import '../core/watch.dart';
 import '../files/files_api.dart' show FileRef;
 import '../pocketbase/auth.dart';
 import '../pocketbase/backend.dart';
@@ -83,7 +80,6 @@ part 'worker_engine_files.dart';
 part 'worker_engine_maintenance.dart';
 part 'worker_engine_sync.dart';
 part 'worker_engine_tx.dart';
-part 'worker_engine_watch.dart';
 
 /// Sink for worker→client events.
 ///
@@ -222,7 +218,6 @@ abstract class WorkerEngineHost {
   StreamSubscription<SyncStatus>? _syncStatusSubscription;
   SyncStatus? _lastSyncStatus;
   final Set<WorkerEventSink> _connections = {};
-  StreamSubscription<RecordChangeEvent>? _eventSubscription;
   StreamSubscription<contract.Event>? _contractEventSubscription;
 
   // ------------------------------------------------------- compiled-query --
@@ -359,8 +354,6 @@ abstract class WorkerEngineHost {
           .completeError(DatabaseWorkerClosedException('Database closed.'));
     }
     _activeSession = null;
-    await _eventSubscription?.cancel();
-    _eventSubscription = null;
     await _contractEventSubscription?.cancel();
     _contractEventSubscription = null;
     _connections.clear();
@@ -468,9 +461,9 @@ abstract class WorkerEngineHost {
 
   /// Emits a worker→client `worker_event` snapshot envelope for [watchId].
   ///
-  /// Shared by `watch_query`, `watch_one`, and `conflicts_watch` so the
-  /// envelope shape (protocol version, op, watch id, encoded value) stays in
-  /// one place.
+  /// Query watches and single-record watches travel the typed contract
+  /// (`WatchSnapshot` events on the contract stream); this envelope remains
+  /// for `conflicts_watch` until that family cuts over.
   void _emitWorkerEvent(WorkerEventSink sink, int watchId, Object? value) {
     sink.emit({
       'v': webProtocolVersion,
@@ -509,7 +502,6 @@ final class WorkerEngine extends WorkerEngineHost
         WorkerCrudHandlers,
         WorkerMaintenanceHandlers,
         WorkerTxHandlers,
-        WorkerWatchHandlers,
         WorkerSyncHandlers,
         WorkerFilesHandlers,
         WorkerConflictsHandlers {
@@ -527,23 +519,14 @@ final class WorkerEngine extends WorkerEngineHost
   ///
   /// Envelope parsing, protocol-version checking, and typed error
   /// categorization all happen here so VM tests exercise the exact same path
-  /// the browser worker runs. [sink] is registered for record-event broadcast
-  /// (idempotent per connection) and receives watcher/sync/conflicts events.
+  /// the browser worker runs. [sink] is registered for contract-event
+  /// broadcast (idempotent per connection) and receives watcher/sync/conflicts
+  /// events.
   Future<WorkerReply> handleRequest(
     WorkerEventSink sink,
     Map<String, Object?> payload,
   ) async {
     _connections.add(sink);
-    _eventSubscription ??= pocket.events.listen((event) {
-      final envelope = <String, Object?>{
-        'v': webProtocolVersion,
-        'op': WireOp.recordEvent,
-        'event': encodeWireValue(event.toJson()),
-      };
-      for (final conn in _connections) {
-        conn.emit(envelope);
-      }
-    });
     _contractEventSubscription ??= pocket.commands.events.listen((event) {
       final envelope = <String, Object?>{
         'v': webProtocolVersion,
@@ -608,7 +591,6 @@ final class WorkerEngine extends WorkerEngineHost
     WireOp.txRelease: _handleTxRelease,
     WireOp.txCommit: _handleTxCommit,
     WireOp.txRollback: _handleTxRollback,
-    WireOp.watchOne: _handleWatchOne,
     WireOp.watchCancel: _handleWatchCancel,
     WireOp.syncStart: _handleSyncStart,
     WireOp.syncStop: _handleSyncStop,

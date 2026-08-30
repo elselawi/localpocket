@@ -560,3 +560,80 @@ API snapshot PASS, browser matrix PASS.
 - Harness `put`/`get` helpers now speak the contract (all call sites
   unchanged); `controller_test.dart` pins the `contract_request` envelope
   JSON round-trip; the case-160 vocabulary pin drops `get`/`mutate_batch`.
+---
+
+# Watches and committed events cutover over the contract (2026-08-31)
+
+Single-record watches and committed facts ride the typed contract: the web
+facade's `watchOne` sends `WatchOneRequest` and consumes single-row
+`WatchSnapshot` events on the shared runtime stream, and every committed fact
+travels as one contract `CommittedChange` envelope (the old `record_event`
+stream and the `watch_one` op are deleted). Gates: analyze 0, suite
+`+2768 ~83`, local web gate 7/7 (asset regenerated), API snapshot PASS,
+browser matrix PASS.
+
+## Payload decision (recorded, per the family checklist)
+`CommittedChange` is now ONE PER RECORD and carries the full detail:
+`store`, `id`, `origin` (local/remote/resolution), `action`
+(create/update/archive/restore/purge/hide), `oldRecord`, `newRecord`,
+`changedFields`. The kernel command handler now derives the contract event
+stream from the change bus's DETAILED record-event stream instead of the
+coarse store+ids stream — the old/new payloads ride the envelope, so no
+second detailed stream exists or is needed (plan 6.8's "one committed
+envelope feeds both"). Consequences:
+- The destination facade's `ChangeNotification` derives per record
+  (`ids == [event.id]`); its doc records that payloads ride the contract
+  event. Revision numbers remain deferred (not forced).
+- The kernel-side `wantsRecordEvents` gate is now effectively always true
+  inside a kernel database (the command handler is a permanent detailed-bus
+  listener); the cost is constructing record payloads per commit even when
+  no one listens — accepted, since the web worker always needed them.
+
+## WatchOneRequest design
+- `WatchOneRequest(store, id)` -> `WatchStartedResult` (kernel-minted
+  string subscription, same as query watches); snapshots arrive as
+  `WatchSnapshot(subscription, items)` with at most one row; an EMPTY item
+  list means the record is absent (null on the facade stream) — no new
+  single-row event variant was needed.
+- The kernel handler validates the record decodes (one root read) BEFORE
+  registering, so a corrupt record fails the request typed instead of
+  poisoning the event stream; a later refresh failure cancels the
+  subscription (no broken-stream leak). This preserves the old
+  "undecodable record fails and cleans up" pin.
+
+## The re-route
+- `WebCollection.watchOne` mirrors the query-watch pattern: registration
+  tracker guards async races, contract snapshot listener per watch id,
+  cancellation sends `WatchCancelRequest`. `workerStreams`/
+  `workerEventDecoders` no longer participate in record watches.
+- Committed facts: the facade builds its contract runtime EAGERLY at
+  construction (committed facts always flow) and binds its event stream to
+  the change bus via `web_contract_events.dart`
+  (`bindRecordEventStream` + `recordEventFromContract`).
+  `FakeFacadeHost` uses the same binding, so tests drive record events
+  through `deliverContractEvent`.
+- Worker deletions: `WireOp.watchOne`, `WireOp.recordEvent`,
+  `_handleWatchOne`, the `record_event` broadcast subscription, and
+  `worker_engine_watch.dart` (with `initializeWebWatch` in lifecycle.dart).
+  The contract-event broadcast subscription is unchanged.
+- DEVIATION (recorded): `worker_event` and the int-id `watch_cancel` op
+  survive ONLY for `conflicts_watch` (its handlers moved into
+  `worker_engine_conflicts.dart`); both die with the conflicts family.
+
+## Tests moved in the same commit
+- `web_collection_crud_test.dart`: watchOne pins are contract-driven
+  (typed request, snapshot delivery incl. subscription filtering, empty
+  snapshot -> null, typed cancel, deferred unregister); the recordEvents
+  pin drives `deliverContractEvent(CommittedChange(...))`.
+- `worker_engine_test.dart`: watch_one tests run over `h.runtime` +
+  contract-event snapshots; the E4 broadcast pin now asserts the decoded
+  contract `CommittedChange`.
+- `worker_event_dispatch_test.dart`: the record_event branch pins are
+  replaced by `bindRecordEventStream` unit coverage; the retired
+  `record_event` envelope is asserted to be ignored as unknown-op noise.
+- `loopback_test.dart`: committed-change pins updated to the per-record
+  envelope (id, action, payload).
+- Contract codec: malformed committedChange payloads (unknown origin,
+  unknown action, missing id) fail typed.
+- Deleted: `watch_protocol_test.dart` (old-envelope pins),
+  `watch_initialization_test.dart` (helper deleted with watch_one).

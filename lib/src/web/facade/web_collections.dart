@@ -1,13 +1,12 @@
 import 'dart:async';
 
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/core/change_bus.dart';
 import 'package:localpocket/src/core/schema.dart';
-import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/query/web_query_builder.dart';
 import 'package:localpocket/src/web/facade/search/web_search_builder.dart';
 import 'package:localpocket/src/web/facade/web_contract_crud_forwarder.dart';
-import 'package:localpocket/src/web/protocol.dart';
 
 /// {@template localpocket.web_collection}
 /// Main-thread collection proxy.
@@ -32,7 +31,9 @@ class WebCollection with ChangeBusAwareStore, WebContractCrudForwarder {
   @override
   Stream<RecordChangeEvent> get recordEvents => _pocket.events;
 
-  /// Watches a single record by [id].
+  /// Watches a single record by [id] over the typed contract. The kernel
+  /// mints the subscription id and emits one-row snapshots (an empty snapshot
+  /// means the record is absent) on the shared runtime stream.
   Stream<Map<String, Object?>?> watchOne(String id) {
     late final StreamController<Map<String, Object?>?> controller;
     final watchId = _pocket.nextRequestId++;
@@ -41,26 +42,20 @@ class WebCollection with ChangeBusAwareStore, WebContractCrudForwarder {
       onListen: () => _pocket.watchTracker.runRegistration(
         watchId: watchId,
         register: () async {
-          _pocket.workerStreams[watchId] = controller;
           try {
-            final raw = await _pocket.send(WireOp.watchOne, {
-              'watchId': watchId,
-              'store': name,
-              'id': id,
-            });
-            if (raw is! Map) {
-              if (!controller.isClosed) {
-                controller.add(null);
-              }
-              return;
-            }
-            final decoded = decodeWireValue(raw['item']);
-            final item = decoded is Map
-                ? decoded.map((k, v) => MapEntry(k.toString(), v))
-                : null;
-            if (!controller.isClosed) {
-              controller.add(item);
-            }
+            final started = await _pocket.contractRuntime
+                .send(contract.WatchOneRequest(store: name, id: id));
+            _subscriptions[watchId] = (
+              subscription: started.subscription,
+              // ignore: cancel_subscriptions
+              listener: _pocket.contractRuntime.events.listen((e) {
+                if (e is contract.WatchSnapshot &&
+                    e.subscription == started.subscription &&
+                    !controller.isClosed) {
+                  controller.add(e.items.isEmpty ? null : e.items.first);
+                }
+              }),
+            );
           } catch (e) {
             if (!controller.isClosed) controller.addError(e);
           }
@@ -83,11 +78,19 @@ class WebCollection with ChangeBusAwareStore, WebContractCrudForwarder {
   }
 
   Future<void> _cancelWatch(int watchId) async {
-    _pocket.workerStreams.remove(watchId);
+    final registration = _subscriptions.remove(watchId);
+    if (registration == null) return;
+    await registration.listener.cancel();
     try {
-      await _pocket.send(WireOp.watchCancel, {'watchId': watchId});
+      await _pocket.contractRuntime.send(contract.WatchCancelRequest(
+          subscription: registration.subscription));
     } catch (_) {}
   }
+
+  /// Contract subscription registration per facade watch id (id + listener).
+  final Map<int,
+          ({String subscription, StreamSubscription<contract.Event> listener})>
+      _subscriptions = {};
 
   /// Builds a query against this collection.
   WebQueryBuilder query() => WebQueryBuilder(_pocket, schema);

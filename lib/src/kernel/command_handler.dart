@@ -41,10 +41,20 @@ class _SavepointSession {
 class KernelCommandHandler implements CommandHandler {
   /// Internal: constructed by [KernelDatabase].
   KernelCommandHandler(this.context) {
-    // Committed changes feed the event stream; nothing is emitted before the
-    // causing transaction has committed (the change bus guarantees this).
-    _changeSub = context.changeBus.stream.listen((cs) {
-      _events.add(CommittedChange(store: cs.store, ids: cs.ids.toList()));
+    // Committed changes feed the event stream with the record's old/new
+    // payloads; nothing is emitted before the causing transaction has
+    // committed (the change bus guarantees this). One envelope per affected
+    // record: record-event streams and change notifications derive from it.
+    _changeSub = context.changeBus.events.listen((event) {
+      _events.add(CommittedChange(
+        store: event.store,
+        id: event.id,
+        origin: event.origin,
+        action: event.action,
+        oldRecord: event.oldRecord == null ? null : Map.of(event.oldRecord!),
+        newRecord: event.newRecord == null ? null : Map.of(event.newRecord!),
+        changedFields: Set.of(event.changedFields),
+      ));
     });
   }
 
@@ -52,9 +62,9 @@ class KernelCommandHandler implements CommandHandler {
   final KernelContext context;
 
   final _events = StreamController<Event>.broadcast();
-  late final StreamSubscription<ChangeSet> _changeSub;
+  late final StreamSubscription<RecordChangeEvent> _changeSub;
   final _sessions = <String, _TxSession>{};
-  final _watches = <String, StreamSubscription<List<Map<String, Object?>>>>{};
+  final _watches = <String, StreamSubscription<dynamic>>{};
   int _counter = 0;
 
   @override
@@ -164,6 +174,7 @@ class KernelCommandHandler implements CommandHandler {
           _rollbackTo(session, name),
         TransactionReleaseRequest(:final session, :final name) =>
           _release(session, name),
+        WatchOneRequest(:final store, :final id) => _watchOne(store, id),
         WatchRequest(:final store, :final spec) => _watch(store, spec),
         WatchCancelRequest(:final subscription) => _unwatch(subscription),
         AnalyzeRequest(:final store) =>
@@ -523,6 +534,34 @@ class KernelCommandHandler implements CommandHandler {
   }
 
   // -- watches ----------------------------------------------------------------
+
+  /// Watches one record. Snapshots carry the record's current state; an
+  /// empty item list means the record is absent (never created or purged).
+  Future<Result> _watchOne(String store, String id) async {
+    final table = context.database.requireTable(store);
+    // The initial fetch validates the record decodes: a corrupt record fails
+    // the request typed instead of poisoning the event stream later.
+    await _collection(store).get(id);
+    final subscription = 'w${++_counter}';
+    final watcher = OneWatcher(context.database, table, id);
+    late final StreamSubscription<dynamic> sub;
+    sub = watcher.startStream().listen(
+          (item) {
+            _events.add(WatchSnapshot(
+              subscription: subscription,
+              items: item == null ? const [] : [item],
+            ));
+          },
+          onError: (Object _) {
+            // A refresh failure kills the watch: cancel it so the broken
+            // subscription stops emitting instead of leaking.
+            unawaited(sub.cancel());
+            _watches.remove(subscription);
+          },
+        );
+    _watches[subscription] = sub;
+    return Future.value(WatchStartedResult(subscription: subscription));
+  }
 
   Future<Result> _watch(String store, QuerySpecData spec) {
     final id = 'w${++_counter}';

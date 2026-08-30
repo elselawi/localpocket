@@ -268,22 +268,25 @@ void main() {
       );
     });
 
-    test('mutations broadcast recordEvent to the sink (E4)', () async {
+    test('mutations broadcast the contract committed change (E4)', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'apple'), id: id);
       // Group commit emits post-commit notifications after the commit
       // boundary; give the broadcast a turn to land.
       await Future<void>.delayed(Duration.zero);
 
-      final events = h.sink.byOp(WireOp.recordEvent);
+      final events = h.sink.byOp(WireOp.contractEvent);
       expect(events, isNotEmpty);
       final ev = events.last['event'];
       expect(ev, isA<Map>());
-      final event = (ev! as Map).map((k, v) => MapEntry(k.toString(), v));
-      expect(event['store'], 'widgets');
-      expect(event['id'], id);
-      expect(event['action'], 'create');
-      expect(event['origin'], 'local');
+      final event = contract.ContractCodec.decodeEvent(
+          (ev! as Map).cast<String, Object?>());
+      expect(event, isA<contract.CommittedChange>());
+      final change = event as contract.CommittedChange;
+      expect(change.store, 'widgets');
+      expect(change.id, id);
+      expect(change.action, contract.ChangeAction.create);
+      expect(change.origin, contract.ChangeOrigin.local);
     });
 
     test(
@@ -962,29 +965,27 @@ void main() {
           reason: 'No emissions after watch cancel');
     });
 
-    test('watch_one: initial item + update emission', () async {
+    test('contract watch_one: initial item + update emission', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'one', qty: 1), id: id);
 
-      const watchId = 10;
-      final result = (await h.sendOk(h.req(WireOp.watchOne, args: {
-        'watchId': watchId,
-        'store': 'widgets',
-        'id': id,
-      })))! as Map<String, Object?>;
-      expect((decodeWireValue(result['item']) as Map)['name'], 'one');
+      final started = await h.runtime
+          .send(contract.WatchOneRequest(store: 'widgets', id: id));
+      // The kernel emits the initial snapshot on registration.
+      await waitUntil(() async => snapshots(started.subscription).isNotEmpty);
+      expect(snapshots(started.subscription).single.items.single['name'],
+          'one');
 
       await h.put('widgets', record(name: 'one-updated', qty: 2), id: id);
-      // The watcher emits its initial snapshot on registration, then the
-      // update — wait for the second (update) emission.
-      await waitUntil(() async => h.sink.byOp(WireOp.workerEvent).length >= 2);
-      final ev = h.sink.byOp(WireOp.workerEvent).last;
-      expect(ev['watchId'], watchId);
-      final item = decodeWireValue(ev['value']) as Map?;
-      expect(item?['name'], 'one-updated');
+      await waitUntil(
+          () async => snapshots(started.subscription).length >= 2);
+      expect(
+          snapshots(started.subscription).last.items.single['name'],
+          'one-updated');
     });
 
-    test('watch_one with an undecodable record fails and cleans up', () async {
+    test('a contract watch_one over an undecodable record fails typed',
+        () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'x', qty: 1), id: id);
       // Corrupt the meta JSON column out-of-band (valid SQLite TEXT, but
@@ -993,19 +994,16 @@ void main() {
           'UPDATE "widgets" SET meta = ? WHERE id = ?', ['not-json', id]);
       h.pocket.notifyExternalChange({'widgets'});
 
-      const watchId = 13;
-      final err = await h.sendError(h.req(WireOp.watchOne, args: {
-        'watchId': watchId,
-        'store': 'widgets',
-        'id': id,
-      }));
-      expect(err, isA<WorkerError>());
-
-      // The failed registration was cleaned up (no leaked watcher).
-      final cancel = (await h
-              .sendOk(h.req(WireOp.watchCancel, args: {'watchId': watchId})))!
-          as Map<String, Object?>;
-      expect(cancel['ok'], isTrue);
+      // The registration validates the record first: the request fails with
+      // a typed error instead of registering a broken watcher.
+      await expectLater(
+        h.runtime.send(contract.WatchOneRequest(store: 'widgets', id: id)),
+        throwsA(isA<Exception>()),
+      );
+      // Cancelling an unknown subscription is a safe no-op.
+      final cancel = await h.runtime
+          .send(const contract.WatchCancelRequest(subscription: 'w0'));
+      expect(cancel.tag, 'ok');
     });
   });
 

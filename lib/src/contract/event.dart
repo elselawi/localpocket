@@ -10,21 +10,56 @@ sealed class Event {
   Map<String, Object?> toJson();
 }
 
-/// A committed change: emitted only after the transaction that caused it has
-/// committed, for exactly the ids affected. One envelope feeds watch
-/// invalidation, record-event streams, and remote listeners alike.
+/// A committed change to one record: emitted only after the transaction that
+/// caused it has committed. One envelope feeds record-event streams, change
+/// notifications, and remote listeners alike — the old/new record payloads
+/// ride with it, so no second detailed stream exists or is needed.
 final class CommittedChange extends Event {
-  const CommittedChange({required this.store, required this.ids});
+  const CommittedChange({
+    required this.store,
+    required this.id,
+    required this.origin,
+    required this.action,
+    this.oldRecord,
+    this.newRecord,
+    this.changedFields = const {},
+  });
 
   static const String tagValue = 'committedChange';
   @override
   String get tag => tagValue;
 
+  /// Store whose committed state changed.
   final String store;
-  final List<String> ids;
+
+  /// The affected record.
+  final String id;
+
+  /// Where the change came from (local code, remote ingestion, resolution).
+  final ChangeOrigin origin;
+
+  /// The mutation action performed on the record.
+  final ChangeAction action;
+
+  /// Previous logical state before this change (null if newly created).
+  final Map<String, Object?>? oldRecord;
+
+  /// New logical state after this change (null if hard-purged).
+  final Map<String, Object?>? newRecord;
+
+  /// Field names the change touched.
+  final Set<String> changedFields;
 
   @override
-  Map<String, Object?> toJson() => {'store': store, 'ids': ids};
+  Map<String, Object?> toJson() => {
+        'store': store,
+        'id': id,
+        'origin': origin.name,
+        'action': action.name,
+        if (oldRecord != null) 'oldRecord': oldRecord,
+        if (newRecord != null) 'newRecord': newRecord,
+        'changedFields': changedFields.toList()..sort(),
+      };
 }
 
 /// A watch snapshot: fully shaped by the kernel (rows plus ordering), emitted

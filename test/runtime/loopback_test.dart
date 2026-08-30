@@ -236,8 +236,12 @@ void main() {
           MutateRequest(
               store: 'widgets', mutation: MutationPut({'id': id, 'name': 'e'})),
         );
-        await _waitFor(() => events.any((e) => e.ids.contains(id)));
+        // One committed envelope per affected record, carrying the record's
+        // payload detail.
+        await _waitFor(() => events.any((e) => e.id == id));
         expect(events.last.store, 'widgets');
+        expect(events.last.action, ChangeAction.create);
+        expect(events.last.newRecord?['name'], 'e');
       }
     });
 

@@ -119,13 +119,15 @@ final class LocalPocket {
   Future<T> read<T>(Future<T> Function(Transaction tx) action) =>
       _runSession(action, const TransactionBeginRequest(readOnly: true));
 
-  /// Committed changes across every store.
+  /// Committed changes across every store: one notification per committed
+  /// record change (the record payloads ride the contract's committed-change
+  /// event).
   Stream<ChangeNotification> get changes => _runtime.events
       .where((event) => event is CommittedChange)
       .cast<CommittedChange>()
       .map((event) => ChangeNotification(
             storeName: event.store,
-            ids: List<String>.unmodifiable(event.ids),
+            ids: [event.id],
           ));
 
   /// Runs the database's query planner across its indexes.
