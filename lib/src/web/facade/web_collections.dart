@@ -6,13 +6,13 @@ import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/query/web_query_builder.dart';
 import 'package:localpocket/src/web/facade/search/web_search_builder.dart';
-import 'package:localpocket/src/web/facade/web_collection_mixin.dart';
+import 'package:localpocket/src/web/facade/web_contract_crud_forwarder.dart';
 import 'package:localpocket/src/web/protocol.dart';
 
 /// {@template localpocket.web_collection}
 /// Main-thread collection proxy.
 /// {@endtemplate}
-class WebCollection with ChangeBusAwareStore, WireCollectionMixin {
+class WebCollection with ChangeBusAwareStore, WebContractCrudForwarder {
   /// Creates a collection facade bound to [pocket] for [schema].
   ///
   /// {@macro localpocket.web_collection}
@@ -28,12 +28,6 @@ class WebCollection with ChangeBusAwareStore, WireCollectionMixin {
 
   @override
   String get name => schema.name;
-
-  @override
-  String get getOp => WireOp.get;
-
-  @override
-  String get mutateOp => WireOp.mutateBatch;
 
   @override
   Stream<RecordChangeEvent> get recordEvents => _pocket.events;

@@ -27,7 +27,7 @@
 ///   the shared helpers that two or more areas depend on; plus
 ///   [WorkerEngine], the public entry point with the envelope parse,
 ///   dispatch table, and per-op routing.
-/// - `worker_engine_crud.dart` — `get`, `mutate_batch`, `open`.
+/// - `worker_engine_crud.dart` — store registration (`open`).
 /// - `worker_engine_maintenance.dart` — health/capabilities + maintenance.
 /// - `worker_engine_tx.dart` — interactive transaction sessions.
 /// - `worker_engine_watch.dart` — single-record watchers (`watch_one`).
@@ -38,7 +38,7 @@
 /// ## DRY rule (anti-drift)
 ///
 /// Any helper used by two or more areas lives on [WorkerEngineHost] — never
-/// copied into a mixin: `_applyMutation` (`mutate_batch` + `tx_mutate_batch`),
+/// copied into a mixin: `_applyMutation` (`tx_mutate_batch`),
 /// `_emitWorkerEvent` (`watch_one`/`conflicts_watch`), `_requireSession`
 /// (every `tx_*` handler + compiled-query tx reads), `_parseCompiledPlan`
 /// (`compiled_query`), and `_stopSync` (sync handlers + `close`). The mixins
@@ -421,9 +421,8 @@ abstract class WorkerEngineHost {
   /// Applies one wire mutation to [col].
   ///
   /// [m] is a single element of a `mutations` array: `action` plus the
-  /// action's `id`/`record`. Shared by `mutate_batch` (single-op fast path,
-  /// multi-op transaction path) and `tx_mutate_batch` so the action
-  /// vocabulary stays in exactly one place. Unknown actions fail with a typed
+  /// action's `id`/`record`. `tx_mutate_batch` is the only caller, so the
+  /// action vocabulary stays in exactly one place. Unknown actions fail with a typed
   /// [ValidationException] — never a silent no-op. Malformed elements (a
   /// non-map, a non-string `action`/`id`, or a `record` that does not decode
   /// to a map) fail with a typed [ProtocolEnvelopeException] — never a raw
@@ -593,8 +592,6 @@ final class WorkerEngine extends WorkerEngineHost
       _handlers = {
     WireOp.health: _handleHealth,
     WireOp.capabilities: _handleCapabilities,
-    WireOp.get: _handleGet,
-    WireOp.mutateBatch: _handleMutateBatch,
     WireOp.compiledQuery: _handleCompiledQuery,
     WireOp.open: _handleOpen,
     WireOp.analyze: _handleAnalyze,

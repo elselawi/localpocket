@@ -127,7 +127,7 @@ void main() {
     });
   });
 
-  group('WorkerEngine — CRUD over the wire', () {
+  group('WorkerEngine — CRUD over the contract', () {
     late WorkerHarness h;
 
     setUp(() async {
@@ -150,31 +150,19 @@ void main() {
       expect(doc['qty'], 5);
     });
 
-    test('single-op batches: patch, archive, restore, purge', () async {
+    test('single mutations: patch, archive, restore, purge', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'widget', qty: 1), id: id);
 
-      Future<void> single(String action, Map<String, Object?> args) async {
-        await h.sendOk(h.req(WireOp.mutateBatch, args: {
-          'store': 'widgets',
-          'mutations': [
-            {
-              'action': action,
-              ...args,
-            }
-          ],
-        }));
-      }
+      Future<void> mutate(contract.Mutation mutation) => h.runtime
+          .send(contract.MutateRequest(store: 'widgets', mutation: mutation));
 
       // patch
-      await single('patch', {
-        'id': id,
-        'record': encodeWireValue({'qty': 9})
-      });
+      await mutate(contract.MutationPatch(id, {'qty': 9}));
       expect((await h.get('widgets', id))!['qty'], 9);
 
       // archive
-      await single('archive', {'id': id});
+      await mutate(contract.MutationArchive(id));
       final archived = (await h.pocket
               .collection('widgets')
               .query()
@@ -185,30 +173,24 @@ void main() {
       expect(archived.single['archived'], isTrue);
 
       // restore
-      await single('restore', {'id': id});
+      await mutate(contract.MutationRestore(id));
       final restored = await h.get('widgets', id);
       expect(restored, isNotNull);
 
       // purge
-      await single('purge', {'id': id});
+      await mutate(contract.MutationPurge(id));
       expect(await h.get('widgets', id), isNull);
     });
 
-    test('upsert wire action merges into existing and creates when missing',
-        () async {
+    test('upsert merges into existing and creates when missing', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'widget', qty: 1), id: id);
 
       // Merge: only `qty` changes, `name` survives.
-      await h.sendOk(h.req(WireOp.mutateBatch, args: {
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'upsert',
-            'record': encodeWireValue({'id': id, 'qty': 9})
-          }
-        ],
-      }));
+      await h.runtime.send(contract.MutateRequest(
+        store: 'widgets',
+        mutation: contract.MutationUpsert({'id': id, 'qty': 9}),
+      ));
       final merged = await h.get('widgets', id);
       expect(merged!['name'], 'widget',
           reason: 'upsert preserves unspecified fields');
@@ -216,138 +198,74 @@ void main() {
 
       // Create-when-missing.
       final fresh = generateRecordId();
-      await h.sendOk(h.req(WireOp.mutateBatch, args: {
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'upsert',
-            'record': encodeWireValue(record(name: 'fresh', id: fresh))
-          }
-        ],
-      }));
+      await h.runtime.send(contract.MutateRequest(
+        store: 'widgets',
+        mutation: contract.MutationUpsert(record(name: 'fresh', id: fresh)),
+      ));
       expect((await h.get('widgets', fresh))!['name'], 'fresh');
     });
 
-    test('multi-op batches run atomically in one transaction', () async {
+    test(
+        'a contract transaction session commits a multi-step batch '
+        'atomically', () async {
       final a = generateRecordId();
       final b = generateRecordId();
-      await h.sendOk(h.req(WireOp.mutateBatch, args: {
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue(record(name: 'a', qty: 1, id: a))
-          },
-          {
-            'action': 'put',
-            'record': encodeWireValue(record(name: 'b', qty: 2, id: b))
-          },
-          {
-            'action': 'patch',
-            'id': a,
-            'record': encodeWireValue({'qty': 11})
-          },
-        ],
-      }));
+      final session = (await h.runtime
+              .send(const contract.TransactionBeginRequest(readOnly: false)))
+          .session;
+      Future<void> mutate(contract.Mutation mutation) =>
+          h.runtime.send(contract.MutateRequest(
+              store: 'widgets', mutation: mutation, session: session));
+      await mutate(contract.MutationPut(record(name: 'a', qty: 1, id: a)));
+      await mutate(contract.MutationPut(record(name: 'b', qty: 2, id: b)));
+      await mutate(contract.MutationPatch(a, {'qty': 11}));
+      await h.runtime.send(contract.TransactionCommitRequest(session: session));
 
       expect((await h.get('widgets', a))!['qty'], 11);
       expect((await h.get('widgets', b))!['qty'], 2);
     });
 
-    test('unknown mutation action → ValidationException (E15)', () async {
-      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
-        'store': 'widgets',
-        'mutations': [
-          {'action': 'explode', 'id': generateRecordId()}
-        ],
-      }));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ValidationException');
-      expect(err.message, contains('Unknown mutation action'));
+    test('a failing session mutation rolls the whole batch back', () async {
+      final a = generateRecordId();
+      final session = (await h.runtime
+              .send(const contract.TransactionBeginRequest(readOnly: false)))
+          .session;
+      await h.runtime.send(contract.MutateRequest(
+        store: 'widgets',
+        mutation: contract.MutationPut(record(name: 'a', qty: 1, id: a)),
+        session: session,
+      ));
+      // A schema violation inside the session fails typed...
+      await expectLater(
+        h.runtime.send(contract.MutateRequest(
+          store: 'widgets',
+          mutation: contract.MutationPut({'id': generateRecordId()}),
+          session: session,
+        )),
+        throwsA(isA<ValidationException>()),
+      );
+      // ...and the facade settles the session with a rollback, so the
+      // earlier put of the batch never lands.
+      await h.runtime
+          .send(contract.TransactionRollbackRequest(session: session));
+      final page = await h.pocket.collection('widgets').query().all().fetch();
+      expect(page.items, isEmpty);
     });
 
     test('get of a missing record succeeds with a null result', () async {
-      final reply = await h.send(h.req(WireOp.get, args: {
-        'store': 'widgets',
-        'id': generateRecordId(),
-      }));
-      expect(reply, isA<WorkerSuccess>());
-      expect((reply as WorkerSuccess).result, isNull);
+      final row = await h.get('widgets', generateRecordId());
+      expect(row, isNull);
     });
 
-    test('missing required field → ValidationException', () async {
-      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue({'id': generateRecordId()})
-          }
-        ],
-      }));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ValidationException');
-    });
-
-    test('missing store arg → ProtocolEnvelopeException (WireArgs)', () async {
-      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue({'id': generateRecordId(), 'name': 'x'})
-          }
-        ],
-      }));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ProtocolEnvelopeException');
-    });
-
-    test('non-string mutation action → typed ProtocolEnvelopeException',
+    test('a mutation violating a schema rule fails with a typed error',
         () async {
-      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 42,
-            'record': encodeWireValue({'id': generateRecordId(), 'name': 'x'})
-          }
-        ],
-      }));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ProtocolEnvelopeException');
-      expect(err.message, isNot(contains('TypeError')));
-      expect(err.message, contains('action'));
-    });
-
-    test('non-map mutation element → typed ProtocolEnvelopeException',
-        () async {
-      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
-        'store': 'widgets',
-        'mutations': ['not-a-map'],
-      }));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ProtocolEnvelopeException');
-      expect(err.message, isNot(contains('TypeError')));
-    });
-
-    test('non-map element in a multi-op batch fails inside the transaction',
-        () async {
-      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
-        'store': 'widgets',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue({'id': generateRecordId(), 'name': 'x'})
-          },
-          'not-a-map',
-        ],
-      }));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ProtocolEnvelopeException');
-      expect(err.message, isNot(contains('TypeError')));
-      // The batch ran atomically: the first put must not have been applied.
-      final page = await h.pocket.collection('widgets').query().all().fetch();
-      expect(page.items, isEmpty);
+      await expectLater(
+        h.runtime.send(contract.MutateRequest(
+          store: 'widgets',
+          mutation: contract.MutationPut({'id': generateRecordId()}),
+        )),
+        throwsA(isA<ValidationException>()),
+      );
     });
 
     test('mutations broadcast recordEvent to the sink (E4)', () async {
@@ -369,39 +287,21 @@ void main() {
     });
 
     test(
-        'durability: full on a single-op batch commits via the durable '
-        'transaction path', () async {
+        'a contract transaction begun at full durability commits through '
+        'the durable path', () async {
       final id = generateRecordId();
-      await h.sendOk(h.req(WireOp.mutateBatch, args: {
-        'store': 'widgets',
-        // An explicit durability request must NOT take the no-transaction
-        // fast path: it rides pocket.transaction so synchronous=FULL applies.
-        'durability': 'full',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue(record(name: 'durable', qty: 1, id: id))
-          },
-        ],
-      }));
+      final session = (await h.runtime.send(
+              const contract.TransactionBeginRequest(
+                  readOnly: false,
+                  durability: contract.TransactionDurability.full)))
+          .session;
+      await h.runtime.send(contract.MutateRequest(
+        store: 'widgets',
+        mutation: contract.MutationPut(record(name: 'durable', qty: 1, id: id)),
+        session: session,
+      ));
+      await h.runtime.send(contract.TransactionCommitRequest(session: session));
       expect((await h.get('widgets', id))!['name'], 'durable');
-    });
-
-    test('unknown durability value → typed ProtocolEnvelopeException',
-        () async {
-      final err = await h.sendError(h.req(WireOp.mutateBatch, args: {
-        'store': 'widgets',
-        'durability': 'eventually',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue({'id': generateRecordId(), 'name': 'x'})
-          }
-        ],
-      }));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ProtocolEnvelopeException');
-      expect(err.message, contains('durability'));
     });
   });
 
@@ -1622,13 +1522,19 @@ void main() {
       final h = await WorkerHarness.open();
       await h.put('widgets', record(name: 'a'), id: generateRecordId());
 
-      final reply = await h.close();
-      expect(reply, isA<WorkerSuccess>());
+      final closeReply = await h.close();
+      expect(closeReply, isA<WorkerSuccess>());
 
-      final err = await h.sendError(h.req(WireOp.get,
-          args: {'store': 'widgets', 'id': generateRecordId()}));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.message, isNotEmpty);
+      final reply = await h.send(h.req(WireOp.contractRequest, args: {
+        'request': contract.ContractCodec.encodeRequest(
+            contract.GetRequest(store: 'widgets', id: generateRecordId())),
+      }));
+      expect(reply, isA<WorkerSuccess>());
+      final outcome =
+          ((reply as WorkerSuccess).result! as Map).cast<String, Object?>();
+      expect(outcome['error'], isA<Map>(),
+          reason: 'the kernel failure rides the contract envelope as a typed '
+              'error, never as a silent success');
     });
   });
 }

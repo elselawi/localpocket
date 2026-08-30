@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/contract/contract.dart' as contract;
+import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:localpocket/src/web/worker_engine.dart';
@@ -141,29 +143,29 @@ class WorkerHarness {
     return err;
   }
 
-  /// Convenience: a single `put` mutation through `mutate_batch`.
+  /// Convenience: a single put through a contract mutate request (the same
+  /// envelope the facade's CRUD surface sends).
   Future<void> put(
     String store,
     Map<String, Object?> record, {
     String? id,
   }) async {
     final full = {...record, if (id != null) 'id': id};
-    await sendOk(req(WireOp.mutateBatch, args: {
-      'store': store,
-      'mutations': [
-        {
-          'action': 'put',
-          'record': encodeWireValue(full),
-        }
-      ],
-    }));
+    await runtime.send(contract.MutateRequest(
+      store: store,
+      mutation: contract.MutationPut(full),
+    ));
   }
 
-  /// Convenience: fetch a single record through `get`, decoded.
-  Future<Map<String, Object?>?> get(String store, String id) async {
-    final raw = await sendOk(req(WireOp.get, args: {'store': store, 'id': id}));
-    return decodeWireValue(raw) as Map<String, Object?>?;
-  }
+  /// Convenience: fetch a single record through a contract get request.
+  Future<Map<String, Object?>?> get(String store, String id) async =>
+      (await runtime.send(contract.GetRequest(store: store, id: id))).row;
+
+  /// The typed contract runtime over [customRequest] — the same binding the
+  /// page-side facade creates over its worker transport.
+  late final RemoteRuntimeClient runtime = RemoteRuntimeClient(
+    transport: customRequest,
+  );
 
   /// Feeds one wire envelope through the JS boundary's exact path: parse →
   /// dispatch → reply → response envelope. This is the transport a page-side

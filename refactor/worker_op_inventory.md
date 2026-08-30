@@ -28,9 +28,9 @@ with the string registry).
 
 | Op | Destination command → result | Notes |
 |---|---|---|
-| `get` | `GetRequest(store, id, select?, context?)` → `RowResult` | adds `getAll` via `RowsRequest` (exists natively, missing on wire) |
-| `mutate_batch` | `MutateRequest(store, mutation, context?)` → `MutationResult` | carries typed `Mutation`, not an args map |
-| `compiled_query` | `QueryRequest(store, ir, context?)` → `QueryPageResult` | **page stops receiving SQL plans**; kernel shapes rows/`hasNext`/`hasPrev`/cursors (§10.3) |
+| `get` | `GetRequest(store, id, select?, context?)` → `RowResult` | ✔ CUT OVER (2026-08-31) — old op carried no projection facts (audit in ledger); deleted with `_handleGet`. |
+| `mutate_batch` | `MutateRequest(store, mutation, context?)` → `MutationResult` | ✔ CUT OVER (2026-08-31) — facade batches map to `MutationPutAll`/`MutationUpsertAll`/`MutationPatchAll`; explicit `DurabilityClass.full` rides a contract tx session. Deleted with `_handleMutateBatch`/`_parseDurability`. |
+| `compiled_query` | `QueryRequest(store, ir, context?)` → `QueryPageResult` | ✔ CUT OVER (2026-08-30) — remains ONLY for transaction-scoped reads; retires with the tx family. |
 
 ## 3. Maintenance family (6 ops)
 
@@ -124,7 +124,7 @@ runtimes (§6.7).
 
 ## Phase 7 cutover order (fixed)
 
-CRUD/batch → query/search/cursors → watches/events → transactions →
-maintenance/capabilities → conflicts → files/streams → sync/auth/status/realtime
-→ close/lifecycle. Old and new envelopes may coexist per family; both must call
-the same kernel services.
+CRUD/batch ✔ (2026-08-31) → query/search/cursors ✔ (2026-08-30) → watches/events →
+transactions → maintenance/capabilities → conflicts → files/streams →
+sync/auth/status/realtime → close/lifecycle. Old and new envelopes may coexist
+per family; both must call the same kernel services.

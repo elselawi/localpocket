@@ -2,12 +2,15 @@ import 'package:localpocket/src/core/local_pocket.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 
-/// Shared wire-CRUD surface for the main-thread collection proxies.
+/// Wire-CRUD surface for the transaction-bound collection proxy.
 ///
-/// [WebCollection] (top-level) and [WebTxCollection] (transaction-bound) send
-/// the same request envelopes; only the wire op names and the optional
-/// [sessionId] differ. Keeping the CRUD bodies here means a new mutation is
-/// added once, never twice.
+/// The root collection speaks the typed contract
+/// (`WebContractCrudForwarder`); [WebTxCollection] still lowers its
+/// reads/writes to the interactive-transaction wire ops (`tx_get`,
+/// `tx_mutate_batch`) because its int session id is minted by the worker's
+/// tx handshake. When the transaction surface rides the contract sessions
+/// (string-keyed, kernel-minted), this adapter is deleted with the ops it
+/// speaks.
 mixin WireCollectionMixin {
   /// The facade host used to send wire requests.
   WebFacadeHost get pocket;
@@ -15,10 +18,10 @@ mixin WireCollectionMixin {
   /// Collection name carried in every envelope.
   String get name;
 
-  /// Single-record read op (`WireOp.get` or `WireOp.txGet`).
+  /// Single-record read op (`WireOp.txGet`).
   String get getOp;
 
-  /// Batched-mutation op (`WireOp.mutateBatch` or `WireOp.txMutateBatch`).
+  /// Batched-mutation op (`WireOp.txMutateBatch`).
   String get mutateOp;
 
   /// Transaction session id included in every envelope, or null when this

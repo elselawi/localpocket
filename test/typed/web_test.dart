@@ -23,8 +23,6 @@ void main() {
         'worker_event',
         'record_event',
         'capabilities',
-        'get',
-        'mutate_batch',
         'compiled_query',
         'analyze',
         'wal_checkpoint',

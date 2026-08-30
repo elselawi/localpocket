@@ -496,3 +496,67 @@ worker asset is current" byte-compare), API snapshot PASS, browser matrix
 - `watch()` attaches its event listener only after `WatchRequest` resolves
   (same pattern as the destination facade's `store.watch`); the kernel
   watcher emits the initial snapshot as an event, matching that pattern.
+
+---
+
+# CRUD/batch cutover over the contract (2026-08-31)
+
+The root web collection's reads and mutations ride the typed contract: every
+`WebCollection` get/put/putAll/upsert/upsertAll/patch/patchAll/archive/
+restore/purge now issues `GetRequest`/`MutateRequest` through the shared
+`RemoteRuntimeClient`, and the wire ops `get`/`mutate_batch` are deleted.
+Gates: analyze 0, suite `+2775 ~83`, local web gate 7/7 (asset regenerated),
+API snapshot PASS, browser matrix PASS.
+
+## Contract audit (family 1 checklist item)
+- Projection/select facts: the old `get` op carried only `store` + `id` —
+  no projection exists on the old path, so `GetRequest` needs none.
+- Batch semantics: the old `mutate_batch` multi-op path opened ONE
+  transaction over the element list. The contract expresses each facade
+  batch as one typed mutation (`MutationPutAll`/`MutationUpsertAll`/
+  `MutationPatchAll`), which the kernel executes through the same
+  collection mutators in one transaction — atomicity preserved. Mixed-kind
+  batches have no single contract variant (by design); the tx family's
+  session commands are the atomic multi-step channel.
+- Reply shape: `{'ok': true}` becomes `MutationResult(ids)`; the facade
+  ignores it (void methods), and the id list is now available to callers.
+- Errors: contract application failures ride a SUCCESS reply
+  (`r.error`); `RemoteRuntimeClient` reconstructs the typed kernel error.
+  The old envelope turned them into `WorkerError` — pins updated.
+
+## The re-route
+- `lib/src/web/facade/web_contract_crud_forwarder.dart` —
+  `WebContractCrudForwarder` mixin: one contract envelope per CRUD call over
+  `WebFacadeHost.contractRuntime`. `DurabilityClass.full` writes begin a
+  contract transaction session (`TransactionBeginRequest(readOnly: false,
+  durability: full)`) -> session-bound `MutateRequest` -> commit, with a
+  guaranteed rollback before rethrow — this preserves the old worker
+  behavior ("explicit durability must ride the transaction path") WITHOUT
+  adding the deferred `MutateRequest.durability` field.
+- `WebCollection` mixes the contract forwarder; `WireCollectionMixin` is
+  narrowed to `WebTxCollection` (its int session ids are minted by the
+  worker's tx handshake, so it cannot move until the tx family re-routes
+  sessions as kernel-minted strings). DEVIATION from the plan text: the
+  mixin dies with the tx family, not this one — the ops it spoke for the
+  root collection (`get`/`mutate_batch`) are gone now.
+- Worker deletions: `WireOp.get`, `WireOp.mutateBatch`, `_handleGet`,
+  `_handleMutateBatch`, `_parseDurability`; `worker_engine_crud.dart`
+  keeps only the `open` handshake (store registration + manifest
+  fingerprint check). `_applyMutation` stays (tx-only now).
+
+## Tests moved in the same commit
+- `web_collection_crud_test.dart` pins the decoded contract requests
+  (`sentRequest` helper), the null-row get miss, the durable-session
+  request sequence, and the rollback-and-rethrow path.
+- `worker_engine_test.dart`: the CRUD group drives `MutateRequest`/
+  `GetRequest`/session commands through `h.runtime` (a
+  `RemoteRuntimeClient` bound to `customRequest` — the same binding the
+  page facade uses). Atomic multi-step batches and the durable commit pin
+  moved to contract tx sessions; the old envelope's malformed-input pins
+  (unknown/non-string action, non-map element, missing store arg, unknown
+  durability string) died with their machinery — their typed-decode
+  coverage lives in `test/contract/wire_contract_test.dart` (unknown
+  mutation kind, non-map record, patch without id).
+- Harness `put`/`get` helpers now speak the contract (all call sites
+  unchanged); `controller_test.dart` pins the `contract_request` envelope
+  JSON round-trip; the case-160 vocabulary pin drops `get`/`mutate_batch`.

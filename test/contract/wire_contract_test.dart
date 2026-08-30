@@ -111,6 +111,39 @@ void main() {
         throwsA(isA<WireException>()),
         reason: 'a non-map distinct spec fails typed',
       );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'mutate',
+          'payload': encodeWireValue({
+            'store': 's',
+            'mutation': {'kind': 'explode', 'id': 'x'},
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'an unknown mutation kind fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'mutate',
+          'payload': encodeWireValue({
+            'store': 's',
+            'mutation': {'kind': 'put', 'record': 'not-a-map'},
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a non-map mutation record fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'mutate',
+          'payload': encodeWireValue({
+            'store': 's',
+            'mutation': {'kind': 'patch', 'changes': <String, Object?>{}},
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a patch without an id fails typed',
+      );
     });
   });
 

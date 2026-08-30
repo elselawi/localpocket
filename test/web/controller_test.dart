@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/core/schema.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/protocol.dart';
@@ -35,39 +36,42 @@ void main() {
     expect(openReq.version, webProtocolVersion);
     expect(openReq.args['stores'], isList);
 
-    // 2. Verify mutation batch envelope
+    // 2. Verify the typed contract envelope round-trips through WebRequest
+    //    JSON like every other op.
     final mutateReq = WebRequest(
       version: webProtocolVersion,
       requestId: 2,
-      op: WireOp.mutateBatch,
+      op: WireOp.contractRequest,
       args: {
-        'store': 'notes',
-        'mutations': [
-          {
-            'action': 'put',
-            'record': encodeWireValue({
+        'request': contract.ContractCodec.encodeRequest(
+          contract.MutateRequest(
+            store: 'notes',
+            mutation: contract.MutationPut({
               'id': 'note1',
               'title': 'Hello',
               'priority': 1,
               'done': false,
             }),
-          },
-          {
-            'action': 'patch',
-            'id': 'note1',
-            'record': encodeWireValue({'done': true}),
-          },
-          {
-            'action': 'archive',
-            'id': 'note1',
-          },
-        ],
+          ),
+        ),
       },
     );
 
     final mutateDecoded = WebRequest.fromJson(mutateReq.toJson());
-    expect(mutateDecoded.op, WireOp.mutateBatch);
-    expect((mutateDecoded.args['mutations'] as List).length, 3);
+    expect(mutateDecoded.op, WireOp.contractRequest);
+    final decodedRequest = contract.ContractCodec.decodeRequest(
+        (mutateDecoded.args['request']! as Map).cast<String, Object?>());
+    expect(decodedRequest.tag, 'mutate');
+    expect(
+        ((decodedRequest as contract.MutateRequest).mutation
+                as contract.MutationPut)
+            .record,
+        {
+          'id': 'note1',
+          'title': 'Hello',
+          'priority': 1,
+          'done': false,
+        });
 
     // 3. Verify the compiled query plan envelope (single read operation)
     final queryReq = WebRequest(

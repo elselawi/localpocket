@@ -33,10 +33,6 @@ class WireOp {
   static const String recordEvent = 'record_event';
   static const String capabilities = 'capabilities';
 
-  // Collection CRUD & Mutation Batches
-  static const String get = 'get';
-  static const String mutateBatch = 'mutate_batch';
-
   /// The single read operation: an engine-compiled query plan (SQL + bound
   /// args + schema fingerprint). Every query, aggregate, search, and
   /// transaction read travels as this envelope.
@@ -120,8 +116,6 @@ class WireOp {
     workerEvent,
     recordEvent,
     capabilities,
-    get,
-    mutateBatch,
     compiledQuery,
     analyze,
     walCheckpoint,

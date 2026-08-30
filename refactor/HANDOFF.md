@@ -57,8 +57,16 @@ Cutover slices DONE (2026-08-30):
    transaction-scoped reads — see the "Query family cutover" ledger section
    for the full account, the audit, the cursor corpus, and the asset-gate
    hardening.
+4. **CRUD/batch family cutover**: `WebCollection`'s reads and mutations ride
+   `GetRequest`/`MutateRequest` through the shared contract runtime; the
+   `get`/`mutate_batch` wire ops and their worker handlers are deleted.
+   Audit verdict: the old `get` op carried no projection facts. Explicit
+   `DurabilityClass.full` writes ride a contract tx session (no
+   `MutateRequest.durability` added). `WireCollectionMixin` is narrowed to
+   the tx surface and dies with the tx family (recorded deviation). See the
+   "CRUD/batch cutover" ledger section.
 
-Remaining (this stage): CRUD/batch → watches/committed events →
+Remaining (this stage): watches/committed events →
 transactions (retires `compiled_query`/`send_plan.dart`/`QueryPlan`) →
 maintenance/capabilities → conflicts → files → sync/auth/status/realtime →
 close/lifecycle. The barrel switch is the NEXT agent's stage (plan Phase 9).
@@ -105,25 +113,24 @@ the family cutovers and web collapse. Stage-by-stage history lives in
 
 ---
 
-## 2. Current state (verified 2026-08-31, after the query-family cutover)
+## 2. Current state (verified 2026-08-31, after the CRUD/batch cutover)
 
-- Branch `refactor/final-architecture`; working tree clean; HEAD `2f67d58`
-  (`docs(ledger): query-family cutover — audit, re-route, cursor corpus,
-  asset gate`).
+- Branch `refactor/final-architecture`; working tree clean; HEAD
+  `feat(web): CRUD/batch rides the typed contract; get/mutate_batch deleted`
+  (see `git log` for the exact sha).
 - `dart analyze lib test tool` → 0 issues (includes the active compile
   fixture `test/compile_fixtures/final_api_vm.dart`).
-- `dart test` → `+2778 ~83` all passed (83 skips = live/gate/platform tags).
-- `dart run tool/local_web_gate.dart` → PASS (7 checks, now including the
-  byte-compare "shipped worker asset is current" gate).
+- `dart test` → `+2775 ~83` all passed (83 skips = live/gate/platform tags).
+- `dart run tool/local_web_gate.dart` → PASS (7 checks, incl. the byte-compare
+  "shipped worker asset is current" gate).
 - `dart run tool/api_snapshot.dart` → PASS (snapshot unchanged).
 - `dart run tool/browser_web_gate.dart` → 17 pages × 3 browsers PASS
   (includes the destination-facade smoke `web_api_smoke`).
-- NEW this pass: `lib/src/web/facade/query/web_contract_forwarder.dart`,
-  `lib/src/web/facade/search/web_contract_forwarder.dart`,
-  `tool/worker_asset_current_gate.dart`, `.gitattributes` (binary asset
-  pins), the `QueryBuilder` structured snapshot, `DistinctRequest.spec`,
-  the conformance cursor corpus, and the removed watch machinery
-  (`compiled_watcher.dart`, `WireOp.watchQuery`).
+- NEW this pass: `lib/src/web/facade/web_contract_crud_forwarder.dart` (the
+  contract CRUD mixin incl. the durable-session path), the harness
+  contract runtime (`WorkerHarness.runtime` over `customRequest`), and the
+  removed CRUD machinery (`WireOp.get`, `WireOp.mutateBatch`,
+  `_handleGet`, `_handleMutateBatch`, `_parseDurability`).
 - Known wall-clock flakes (pass in isolation; re-run before diagnosing):
   `test/pocketbase/sse_test.dart` fast-path,
   `test/pocketbase/backend_lifecycle_test.dart` authChanged,
@@ -412,11 +419,15 @@ Per-family procedure (plan §12 — repeat for EVERY family):
 
 Fixed order:
 
-1. **CRUD/batch** — `get`/`mutate_batch` → `GetRequest`/`MutateRequest`
-   (exist). Audit: does the old `get` op carry projection/select facts the
-   contract lacks? Extend if missing. Delete `worker_engine_crud.dart`'s
-   `_handleGet`/`_handleMutateBatch` + `WireCollectionMixin`. Update
-   `test/web/web_collection_crud_test.dart`.
+1. **CRUD/batch** — DONE (2026-08-31, see the ledger's "CRUD/batch cutover"
+   section). Audit: the old `get` op carried NO projection/select facts, so
+   `GetRequest` needed nothing. Facade batches map to `MutationPutAll`/
+   `MutationUpsertAll`/`MutationPatchAll`; `DurabilityClass.full` rides a
+   contract tx session. Deleted: `worker_engine_crud.dart`'s
+   `_handleGet`/`_handleMutateBatch`/`_parseDurability`, `WireOp.get`,
+   `WireOp.mutateBatch`. DEVIATION: `WireCollectionMixin` survives, narrowed
+   to `WebTxCollection` (its int session ids come from the worker's tx
+   handshake) — it is deleted with the tx family.
 2. **Watches/committed events** — `watch_one` → add `WatchOneRequest` (+ a
    single-row snapshot event); `watch_cancel` → `WatchCancelRequest`
    (exists); `record_event`/`worker_event` → the contract `CommittedChange`

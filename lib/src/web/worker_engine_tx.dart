@@ -9,7 +9,7 @@
 /// semantics: `ROLLBACK TO` also `RELEASE`s (see `_handleTxRollbackTo`) so
 /// savepoint names can never accumulate or collide across nested
 /// transactions. Mutations reuse `WorkerEngineHost._applyMutation` (main
-/// file) so the action vocabulary matches `mutate_batch` exactly.
+/// file) so the action vocabulary stays in exactly one place.
 part of 'worker_engine.dart';
 
 /// {@template localpocket.__tx_session}

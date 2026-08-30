@@ -10,6 +10,15 @@ import 'package:test/test.dart';
 import '../support/helpers.dart';
 import 'support/fake_facade_host.dart';
 
+/// Decodes the contract request carried by [fake]'s i-th sent envelope and
+/// asserts it really traveled as a `contract_request`.
+contract.Request sentRequest(FakeFacadeHost fake, int i) {
+  final (op, args) = fake.sent[i];
+  expect(op, WireOp.contractRequest);
+  return contract.ContractCodec.decodeRequest(
+      (args['request']! as Map).cast<String, Object?>());
+}
+
 void main() {
   late FakeFacadeHost fake;
   late WebCollection col;
@@ -17,114 +26,174 @@ void main() {
   setUp(() {
     fake = FakeFacadeHost({'widgets': widgetsSchema()});
     col = WebCollection.ins(fake, widgetsSchema());
+    // Default reply for mutation requests; individual tests override it.
+    fake.responses[WireOp.contractRequest] =
+        FakeFacadeHost.contractReply(const contract.MutationResult(ids: []));
   });
 
   group('WebCollection CRUD envelopes', () {
-    test('put sends a single put mutation with a wire-encoded record',
-        () async {
+    test('put sends one typed mutate request carrying the record', () async {
       final record = {'id': 'abc', 'name': 'apple', 'qty': 3};
       await col.put(record);
 
-      final (op, args) = fake.sent.single;
-      expect(op, WireOp.mutateBatch);
-      expect(args['store'], 'widgets');
-      expect(args, isNot(contains('sessionId')));
-      final mutations = (args['mutations']! as List).cast<Map>();
-      expect(mutations.single, {
-        'action': 'put',
-        'record': encodeWireValue(record),
-      });
+      final req = sentRequest(fake, 0) as contract.MutateRequest;
+      expect(req.store, 'widgets');
+      expect(req.session, isNull,
+          reason: 'the root path lets the kernel open its own transaction');
+      expect((req.mutation as contract.MutationPut).record, record);
     });
 
-    test('putAll sends one put mutation per record', () async {
+    test('putAll sends one batch mutation with every record', () async {
       final r1 = {'id': 'a', 'name': 'apple'};
       final r2 = {'id': 'b', 'name': 'banana'};
       await col.putAll([r1, r2]);
 
-      final (op, args) = fake.sent.single;
-      expect(op, WireOp.mutateBatch);
-      final mutations = (args['mutations']! as List).cast<Map>();
-      expect(mutations, hasLength(2));
-      expect(mutations[0], {'action': 'put', 'record': encodeWireValue(r1)});
-      expect(mutations[1], {'action': 'put', 'record': encodeWireValue(r2)});
+      final req = sentRequest(fake, 0) as contract.MutateRequest;
+      expect((req.mutation as contract.MutationPutAll).records, [r1, r2]);
     });
 
-    test('patch sends a patch action with the wire-encoded changes', () async {
+    test('patch sends a typed patch mutation with the changes', () async {
       final changes = {'name': 'updated', 'made_on': DateTime.utc(2026, 1, 1)};
       await col.patch('abc', changes);
 
-      final (op, args) = fake.sent.single;
-      expect(op, WireOp.mutateBatch);
-      final mutations = (args['mutations']! as List).cast<Map>();
-      expect(mutations.single, {
-        'action': 'patch',
-        'id': 'abc',
-        'record': encodeWireValue(changes),
-      });
+      final req = sentRequest(fake, 0) as contract.MutateRequest;
+      final patch = req.mutation as contract.MutationPatch;
+      expect(patch.id, 'abc');
+      expect(patch.changes, changes);
     });
 
-    test('upsert sends a single upsert mutation with a wire-encoded record',
-        () async {
+    test('upsert sends a typed upsert mutation', () async {
       final record = {'id': 'abc', 'name': 'apple', 'qty': 3};
       await col.upsert(record);
 
-      final (op, args) = fake.sent.single;
-      expect(op, WireOp.mutateBatch);
-      final mutations = (args['mutations']! as List).cast<Map>();
-      expect(mutations.single, {
-        'action': 'upsert',
-        'record': encodeWireValue(record),
-      });
+      final req = sentRequest(fake, 0) as contract.MutateRequest;
+      expect((req.mutation as contract.MutationUpsert).record, record);
     });
 
-    test('upsertAll sends one upsert mutation per record', () async {
+    test('upsertAll sends one batch upsert mutation', () async {
       final r1 = {'id': 'a', 'name': 'apple'};
       final r2 = {'id': 'b', 'name': 'banana'};
       await col.upsertAll([r1, r2]);
 
-      final (op, args) = fake.sent.single;
-      expect(op, WireOp.mutateBatch);
-      final mutations = (args['mutations']! as List).cast<Map>();
-      expect(mutations, hasLength(2));
-      expect(mutations[0], {'action': 'upsert', 'record': encodeWireValue(r1)});
-      expect(mutations[1], {'action': 'upsert', 'record': encodeWireValue(r2)});
+      final req = sentRequest(fake, 0) as contract.MutateRequest;
+      expect((req.mutation as contract.MutationUpsertAll).records, [r1, r2]);
     });
 
-    test('archive/restore/purge send the correct action strings', () async {
+    test('archive/restore/purge send the typed variants', () async {
       await col.archive('a1');
       await col.restore('a2');
       await col.purge('a3');
 
       expect(fake.sent, hasLength(3));
-      final archiveArgs = fake.sent[0].$2;
-      final restoreArgs = fake.sent[1].$2;
-      final purgeArgs = fake.sent[2].$2;
-
-      expect((archiveArgs['mutations']! as List).cast<Map>().single,
-          {'action': 'archive', 'id': 'a1'});
-      expect((restoreArgs['mutations']! as List).cast<Map>().single,
-          {'action': 'restore', 'id': 'a2'});
-      expect((purgeArgs['mutations']! as List).cast<Map>().single,
-          {'action': 'purge', 'id': 'a3'});
+      expect(sentRequest(fake, 0) as contract.MutateRequest,
+          isA<contract.MutateRequest>());
+      expect(
+          ((sentRequest(fake, 0) as contract.MutateRequest).mutation
+                  as contract.MutationArchive)
+              .id,
+          'a1');
+      expect(
+          ((sentRequest(fake, 1) as contract.MutateRequest).mutation
+                  as contract.MutationRestore)
+              .id,
+          'a2');
+      expect(
+          ((sentRequest(fake, 2) as contract.MutateRequest).mutation
+                  as contract.MutationPurge)
+              .id,
+          'a3');
     });
 
-    test('get decodes the wire result into a map with nested types', () async {
-      fake.responses[WireOp.get] =
-          encodeWireValue({'id': 'abc', 'name': 'apple', 'made_on': 1});
+    test('get decodes the row result with nested wire types', () async {
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost.contractReply(
+        contract.RowResult({
+          'id': 'abc',
+          'name': 'apple',
+          'made_on': DateTime.utc(2026, 1, 1),
+        }),
+      );
       final row = await col.get('abc');
 
-      expect(fake.sent.single.$1, WireOp.get);
-      expect(fake.sent.single.$2, {'store': 'widgets', 'id': 'abc'});
+      final req = sentRequest(fake, 0) as contract.GetRequest;
+      expect(req.store, 'widgets');
+      expect(req.id, 'abc');
       expect(row, isNotNull);
       expect(row!['id'], 'abc');
       expect(row['name'], 'apple');
+      expect(row['made_on'], DateTime.utc(2026, 1, 1));
     });
 
-    test('get returns null for a null wire result', () async {
-      fake.responses[WireOp.get] = null;
+    test('get returns null for an absent record', () async {
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(const contract.RowResult(null));
       final row = await col.get('missing');
       expect(row, isNull);
-      expect(fake.sent.single.$1, WireOp.get);
+      expect(sentRequest(fake, 0) as contract.GetRequest,
+          isA<contract.GetRequest>());
+    });
+
+    test(
+        'put at full durability commits through a contract transaction '
+        'session', () async {
+      fake.onSend = (op, args) async {
+        final req = contract.ContractCodec.decodeRequest(
+            (args['request']! as Map).cast<String, Object?>());
+        return switch (req) {
+          contract.TransactionBeginRequest() => FakeFacadeHost.contractReply(
+              const contract.TransactionBeginResult(session: 'tx1')),
+          contract.MutateRequest() => FakeFacadeHost.contractReply(
+              const contract.MutationResult(ids: [])),
+          contract.TransactionCommitRequest() =>
+            FakeFacadeHost.contractReply(const contract.OkResult()),
+          _ => throw StateError('unexpected contract request ${req.tag}'),
+        };
+      };
+
+      await col.put({'id': 'abc', 'name': 'apple'},
+          durability: DurabilityClass.full);
+
+      expect(fake.sent, hasLength(3));
+      final begin = sentRequest(fake, 0) as contract.TransactionBeginRequest;
+      expect(begin.durability, contract.TransactionDurability.full);
+      expect(begin.readOnly, isFalse);
+      final mutate = sentRequest(fake, 1) as contract.MutateRequest;
+      expect(mutate.session, 'tx1');
+      expect((mutate.mutation as contract.MutationPut).record, {
+        'id': 'abc',
+        'name': 'apple',
+      });
+      final commit = sentRequest(fake, 2) as contract.TransactionCommitRequest;
+      expect(commit.session, 'tx1');
+    });
+
+    test(
+        'a failing durable write rolls the session back and rethrows the '
+        'typed error', () async {
+      fake.onSend = (op, args) async {
+        final req = contract.ContractCodec.decodeRequest(
+            (args['request']! as Map).cast<String, Object?>());
+        return switch (req) {
+          contract.TransactionBeginRequest() => FakeFacadeHost.contractReply(
+              const contract.TransactionBeginResult(session: 'tx1')),
+          contract.MutateRequest() => FakeFacadeHost.contractErrorReply(
+              contract.ValidationException('record rejected')),
+          contract.TransactionRollbackRequest() =>
+            FakeFacadeHost.contractReply(const contract.OkResult()),
+          _ => throw StateError('unexpected contract request ${req.tag}'),
+        };
+      };
+
+      await expectLater(
+        col.put({'id': 'abc', 'name': 'apple'},
+            durability: DurabilityClass.full),
+        throwsA(isA<ValidationException>()),
+      );
+
+      expect(fake.sent, hasLength(3));
+      final rollback =
+          sentRequest(fake, 2) as contract.TransactionRollbackRequest;
+      expect(rollback.session, 'tx1',
+          reason: 'the failed session is settled before the error rethrows');
     });
   });
 
