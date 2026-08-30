@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/web_collections.dart';
 import 'package:localpocket/src/web/protocol.dart';
@@ -261,21 +262,23 @@ void main() {
     });
 
     test('query() returns a usable query builder', () async {
-      fake.responses[WireOp.compiledQuery] = {'value': 2};
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(const contract.CountResult(2));
       final n = await col.query().count();
       expect(n, 2);
-      expect(fake.sent.single.$1, WireOp.compiledQuery);
+      expect(fake.sent.single.$1, WireOp.contractRequest);
     });
 
     test('search() returns a search builder bound to the schema', () async {
       final fts = widgetsSchema(fts: FtsSpec(['name']));
       final ftsFake = FakeFacadeHost({'widgets': fts});
       final ftsCol = WebCollection.ins(ftsFake, fts);
-      ftsFake.responses[WireOp.compiledQuery] = {'results': <Object?>[]};
+      ftsFake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(const contract.SearchHitsResult([]));
 
       final results = await ftsCol.search('engines').limit(5).fetch();
       expect(results, isEmpty);
-      expect(ftsFake.sent.single.$2['operation'], 'search');
+      expect(ftsFake.sent.single.$1, WireOp.contractRequest);
     });
   });
 }

@@ -3,15 +3,17 @@ import 'package:localpocket/src/core/query/search_builder/search_forwarder.dart'
 import 'package:localpocket/src/core/schema.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 
-import 'web_search_forwarder.dart';
+import 'web_contract_forwarder.dart';
 
 /// {@template localpocket.web_search_builder}
-/// Main-thread search query builder.
+/// Main-thread search query builder. The core [SearchBuilder] holds the
+/// structured search state; the facade lowers it into a serializable spec
+/// and the kernel compiles it.
 /// {@endtemplate}
 class WebSearchBuilder
     with
         SearchForwarder<WebSearchBuilder>,
-        WebCompiledSearchForwarder<WebSearchBuilder> {
+        WebContractSearchForwarder<WebSearchBuilder> {
   /// Creates a web search builder bound to [pocket], [schema], and [term].
   ///
   /// {@macro localpocket.web_search_builder}

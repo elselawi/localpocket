@@ -1,25 +1,21 @@
 import 'dart:async';
 
+import 'package:localpocket/src/contract/contract.dart';
 import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/core/query/query_builder/query_forwarder.dart';
 import 'package:localpocket/src/core/schema.dart';
-import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
-import 'package:localpocket/src/web/facade/send_plan.dart';
-import 'package:localpocket/src/web/protocol.dart';
 
-import 'web_query_forwarder.dart';
+import 'web_contract_forwarder.dart';
 
 /// {@template localpocket.web_query_builder}
 /// Main-thread query builder that forwards the full native query language to
-/// the engine compiler. The core [QueryBuilder] is the single hand-maintained
-/// copy of the query language; the web facade holds a compile-only instance and
-/// sends the resulting plans to the worker.
+/// the kernel over the typed contract. The core [QueryBuilder] holds the
+/// structured query state; the facade lowers it into a serializable spec and
+/// the kernel compiles it — the page never builds or ships SQL.
 /// {@endtemplate}
 class WebQueryBuilder
-    with
-        QueryForwarder<WebQueryBuilder>,
-        WebCompiledQueryForwarder<WebQueryBuilder> {
+    with QueryForwarder<WebQueryBuilder>, WebContractQueryForwarder<WebQueryBuilder> {
   /// Creates a web query builder bound to [pocket] for [schema].
   ///
   /// {@macro localpocket.web_query_builder}
@@ -44,51 +40,43 @@ class WebQueryBuilder
   /// Returns the collection name this query targets.
   String get store => schema.name;
 
-  /// Decodes one wire item into a string-keyed record map. [decodeWireValue]
-  /// already stringifies keys and decodes nested values; this narrows the
-  /// result to the record type the watch stream carries.
-  static Map<String, Object?> _decodeItem(Object? raw) {
-    final decoded = decodeWireValue(raw);
-    if (decoded is! Map) {
-      return const <String, Object?>{};
-    }
-    return decoded.map((k, v) => MapEntry(k.toString(), v));
-  }
-
-  /// Watches query results reactively.
+  /// Watches query results reactively over the typed contract. The kernel
+  /// mints the subscription id and emits [WatchSnapshot] events on the shared
+  /// runtime stream; an unbounded watch defaults to 50 rows, matching native
+  /// watch semantics.
   Stream<List<Map<String, Object?>>> watch() {
     late final StreamController<List<Map<String, Object?>>> controller;
     final watchId = _pocket.nextRequestId++;
 
-    // Native watch semantics: an unbounded watch query defaults to 50 rows.
-    final limit = _core.limitValue;
-    final allMode = _core.allMode;
-    final plan =
-        _core.compilePlan(limitOverride: allMode ? null : (limit ?? 50));
+    final spec = lowerBuilderToSpec(_core);
+    final watchSpec = QuerySpecData(
+      predicate: spec.predicate,
+      order: spec.order,
+      limit: spec.all ? null : (spec.limit ?? 50),
+      all: spec.all,
+      select: spec.select,
+      includeArchived: spec.includeArchived,
+      includeHidden: spec.includeHidden,
+    );
 
     controller = StreamController<List<Map<String, Object?>>>(
       onListen: () => _pocket.watchTracker.runRegistration(
         watchId: watchId,
         register: () async {
-          _pocket.workerStreams[watchId] = controller;
-          // Later worker-originated snapshots arrive as a raw wire list; the
-          // decoder re-typed them so they match the stream's element type on
-          // every runtime (dart2js erases generic checks, but the VM and
-          // dart2wasm do not).
-          _pocket.workerEventDecoders[watchId] = (raw) {
-            if (raw is! List) {
-              return const <Map<String, Object?>>[];
-            }
-            return [for (final i in raw) _decodeItem(i)];
-          };
           try {
-            final res = await sendCompiledPlan(_pocket, plan,
-                watchId: watchId, ordered: _core.hasExplicitOrder);
-            final items =
-                ((res['items'] as List?) ?? const []).map(_decodeItem).toList();
-            if (!controller.isClosed) {
-              controller.add(items);
-            }
+            final started = await _pocket.contractRuntime
+                .send(WatchRequest(store: schema.name, spec: watchSpec));
+            _subscriptions[watchId] = (
+              id: started.subscription,
+              // ignore: cancel_subscriptions
+              listener: _pocket.contractRuntime.events.listen((e) {
+                if (e is WatchSnapshot &&
+                    e.subscription == started.subscription &&
+                    !controller.isClosed) {
+                  controller.add(e.items);
+                }
+              }),
+            );
           } catch (e) {
             if (!controller.isClosed) controller.addError(e);
           }
@@ -111,10 +99,16 @@ class WebQueryBuilder
   }
 
   Future<void> _cancelWatch(int watchId) async {
-    _pocket.workerStreams.remove(watchId);
-    _pocket.workerEventDecoders.remove(watchId);
+    final registration = _subscriptions.remove(watchId);
+    if (registration == null) return;
+    await registration.listener.cancel();
     try {
-      await _pocket.send(WireOp.watchCancel, {'watchId': watchId});
+      await _pocket.contractRuntime
+          .send(WatchCancelRequest(subscription: registration.id));
     } catch (_) {}
   }
+
+  /// Contract subscription registration per facade watch id (id + listener).
+  final Map<int, ({String id, StreamSubscription<Event> listener})>
+      _subscriptions = {};
 }

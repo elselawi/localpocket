@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/contract/contract.dart' as contract;
+import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/typed/registry.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
@@ -80,6 +82,45 @@ class FakeFacadeHost implements WebFacadeHost {
 
   @override
   int nextRequestId = 1000;
+
+  /// The shared contract runtime over this fake's [send] — the same binding
+  /// the production facade creates over its worker transport. Contract sends
+  /// are recorded in [sent] like every other envelope.
+  @override
+  late final RemoteRuntimeClient contractRuntime = RemoteRuntimeClient(
+    transport: (envelope) async => send(envelope['op']! as String,
+        (envelope['a']! as Map).cast<String, Object?>()),
+  );
+
+  /// The wire-success envelope for a contract [result] — the shape the
+  /// worker's contract handler returns inside a [WebResponse].
+  static Map<String, Object?> contractReply(contract.Result result) => {
+        'v': webProtocolVersion,
+        'i': 0,
+        'r': {
+          'result': contract.ContractCodec.encodeResult(result),
+        },
+      };
+
+  /// The wire-success envelope for a contract application [error] (the
+  /// worker returns contract errors inside a SUCCESS reply).
+  static Map<String, Object?> contractErrorReply(Object error) => {
+        'v': webProtocolVersion,
+        'i': 0,
+        'r': {
+          'error': contract.encodeError(error),
+        },
+      };
+
+  /// Delivers one contract event through the runtime's event stream, exactly
+  /// as the worker's `contract_event` broadcast would.
+  void deliverContractEvent(contract.Event event) {
+    contractRuntime.handleWorkerEvent({
+      'v': webProtocolVersion,
+      'op': WireOp.contractEvent,
+      'event': contract.ContractCodec.encodeEvent(event),
+    });
+  }
 
   @override
   Stream<RecordChangeEvent> get events => changeBus.events;

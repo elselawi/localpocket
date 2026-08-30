@@ -1,3 +1,4 @@
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
 import 'package:localpocket/src/core/schema.dart';
 import 'package:localpocket/src/web/facade/search/web_search_builder.dart';
@@ -22,26 +23,30 @@ void main() {
       final results = await WebSearchBuilder(fake, ftsSchema, term).fetch();
       expect(results, const <SearchResult>[]);
       expect(fake.sent, isEmpty,
-          reason: 'no plan may be sent for a blank search term');
+          reason: 'no request may be sent for a blank search term');
     }
   });
 
-  test('a non-blank term compiles via the core and sends compiled_query',
+  test('a non-blank term sends a typed search spec and decodes the hits',
       () async {
-    fake.responses[WireOp.compiledQuery] = <String, Object?>{
-      'results': [
-        {'id': 'a', 'score': 1},
-        {'id': 'b', 'score': 2.5},
-      ],
-    };
+    fake.responses[WireOp.contractRequest] = FakeFacadeHost.contractReply(
+      const contract.SearchHitsResult([
+        contract.SearchHitData(id: 'a', score: 1),
+        contract.SearchHitData(id: 'b', score: 2.5),
+      ]),
+    );
     final results =
         await WebSearchBuilder(fake, ftsSchema, 'engines').limit(10).fetch();
 
     final (op, args) = fake.sent.single;
-    expect(op, WireOp.compiledQuery);
-    expect(args['operation'], 'search');
-    expect(args['store'], 'widgets');
-    expect(args['sql'], contains('MATCH ?'));
+    expect(op, WireOp.contractRequest);
+    final encoded = args['request']! as Map;
+    final req = contract.ContractCodec
+        .decodeRequest(encoded.cast<String, Object?>())
+        as contract.SearchRequest;
+    expect(req.store, 'widgets');
+    expect(req.spec.term, 'engines');
+    expect(req.spec.limit, 10);
 
     expect(results, hasLength(2));
     expect(results[0], const SearchResult(id: 'a', score: 1.0),
@@ -49,16 +54,13 @@ void main() {
     expect(results[1], const SearchResult(id: 'b', score: 2.5));
   });
 
-  test('missing or empty results decode to an empty list', () async {
-    fake.responses[WireOp.compiledQuery] = {'results': null};
-    final nullResults =
-        await WebSearchBuilder(fake, ftsSchema, 'engines').limit(5).fetch();
-    expect(nullResults, isEmpty);
-
-    fake.responses[WireOp.compiledQuery] = {'results': <Object?>[]};
-    final emptyResults =
-        await WebSearchBuilder(fake, ftsSchema, 'engines').limit(5).fetch();
-    expect(emptyResults, isEmpty);
+  test('missing or empty hits decode to an empty list', () async {
+    fake.responses[WireOp.contractRequest] =
+        FakeFacadeHost.contractReply(const contract.SearchHitsResult([]));
+    final empty = await WebSearchBuilder(fake, ftsSchema, 'engines')
+        .limit(5)
+        .fetch();
+    expect(empty, isEmpty);
   });
 
   group('SearchForwarder delegation', () {

@@ -129,6 +129,23 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
     return _limit;
   }
 
+  // --------------------------------------- web spec-lowering snapshot ------
+
+  /// The store this search targets.
+  String get store => _schema.name;
+
+  /// The configured result limit, or null when unset or in all-mode.
+  int? get limitValue => _limit;
+
+  /// Whether the search explicitly opted out of a result limit.
+  bool get allMode => _all;
+
+  /// The archived-scope flag.
+  bool get includeArchivedFlag => _includeArchived;
+
+  /// The hidden-scope flag.
+  bool get includeHiddenFlag => _includeHidden;
+
   (String, List<Object?>) _compile({int? limitOverride}) {
     // Query-side parity: the term passes through the same normalization the
     // write-side triggers applied, so declared equivalences (e.g. Arabic alef

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
+import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/open_core.dart';
 import 'package:localpocket/src/web/facade/query/web_query_builder.dart';
@@ -107,6 +108,30 @@ class LocalPocket
 
   /// Pure-Dart request/response core over the worker transport.
   late final WebSender _sender;
+
+  /// The shared contract runtime backing the query/search/watch families.
+  /// Constructed on first use (pure old-wire apps never build one); its
+  /// transport is the same worker channel [send] uses.
+  RemoteRuntimeClient? _contractRuntime;
+
+  @override
+  RemoteRuntimeClient get contractRuntime {
+    final existing = _contractRuntime;
+    if (existing != null) return existing;
+    late final RemoteRuntimeClient runtime;
+    runtime = RemoteRuntimeClient(
+      transport: (envelope) async {
+        final raw = await _remoteDb.customRequest(envelope.jsify());
+        return raw?.dartify();
+      },
+      onWorkerClosed: () {
+        unawaited(runtime.close());
+      },
+      requestTimeout: _sender.requestTimeout,
+    );
+    _contractRuntime = runtime;
+    return runtime;
+  }
 
   /// Opens or creates a database on web by spawning the dedicated engine worker.
   ///
@@ -323,6 +348,7 @@ class LocalPocket
       final value = raw.dartify();
       if (value is! Map) return;
       final event = value.map((k, v) => MapEntry(k.toString(), v));
+      _contractRuntime?.handleWorkerEvent(event);
       handleWorkerEventEnvelope(
         event,
         workerStreams: workerStreams,

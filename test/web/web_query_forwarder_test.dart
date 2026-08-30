@@ -1,6 +1,6 @@
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
 import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
-import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade/query/web_query_builder.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
@@ -15,40 +15,59 @@ void main() {
     fake = FakeFacadeHost({'widgets': widgetsSchema()});
   });
 
-  Map<String, Object?> planArgs(String op) {
-    final (opSent, args) = fake.sent.where((s) => s.$1 == op).single;
-    expect(opSent, op);
-    return args;
+  /// The contract request the last facade call sent, decoded back through the
+  /// codec (the exact reverse of the worker's envelope handling).
+  T sentRequest<T extends contract.Request>() {
+    final (op, args) = fake.sent.last;
+    expect(op, WireOp.contractRequest);
+    final encoded = args['request'];
+    expect(encoded, isA<Map>());
+    final request = contract.ContractCodec
+        .decodeRequest((encoded! as Map).cast<String, Object?>());
+    expect(request, isA<T>());
+    return request as T;
   }
 
+  const emptyRows = contract.QueryRowsResult(
+    items: [],
+    hasNext: false,
+    hasPrev: false,
+    nextCursor: null,
+    prevCursor: null,
+  );
+
   group('fetch', () {
-    test('compiles with limit+1, sends pageLimit, and builds a Page', () async {
-      final r1 = {'id': 'a', 'name': 'apple'};
-      fake.responses[WireOp.compiledQuery] = {
-        'items': [encodeWireValue(r1)],
-        'hasNext': false,
-      };
+    test('sends a typed query spec and wraps the kernel page facts', () async {
+      const r1 = {'id': 'a', 'name': 'apple'};
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost.contractReply(
+        const contract.QueryRowsResult(
+          items: [r1],
+          hasNext: false,
+          hasPrev: false,
+          nextCursor: null,
+          prevCursor: null,
+        ),
+      );
 
       final page =
           await WebQueryBuilder(fake, widgetsSchema()).limit(10).fetch();
 
-      final args = planArgs(WireOp.compiledQuery);
-      expect(args['operation'], 'query');
-      expect(args['limit'], 11, reason: 'page compile fetches limit + 1');
-      expect(args['pageLimit'], 10);
-      expect(args['sql'], contains('LIMIT 11'));
+      final req = sentRequest<contract.QueryRequest>();
+      expect(req.spec.limit, 10);
+      expect(req.spec.cursor, isNull);
+      expect(req.spec.backward, isFalse);
 
       expect(page.items, hasLength(1));
       expect(page.items.single['name'], 'apple');
       expect(page.hasNext, isFalse);
       expect(page.nextCursor, isNull);
+      expect(page.hasPrev, isFalse);
+      expect(page.prevCursor, isNull);
     });
 
     test('an empty result is an empty page', () async {
-      fake.responses[WireOp.compiledQuery] = {
-        'items': <Object?>[],
-        'hasNext': false,
-      };
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(emptyRows);
       final page =
           await WebQueryBuilder(fake, widgetsSchema()).limit(5).fetch();
       expect(page.items, isEmpty);
@@ -56,28 +75,29 @@ void main() {
       expect(page.nextCursor, isNull);
     });
 
-    test('hasNext with wire-encoded boundary rows produces a nextCursor',
-        () async {
-      final r1 = {'id': 'a', 'name': 'apple'};
-      fake.responses[WireOp.compiledQuery] = {
-        'items': [encodeWireValue(r1)],
-        'hasNext': true,
-        'lastRow': encodeWireValue({'name': 'apple', 'id': 'a'}),
-        'firstRow': encodeWireValue({'name': 'apple', 'id': 'a'}),
-      };
+    test('kernel-minted cursors ride the page verbatim', () async {
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost.contractReply(
+        const contract.QueryRowsResult(
+          items: [
+            {'id': 'a', 'name': 'apple'},
+          ],
+          hasNext: true,
+          hasPrev: true,
+          nextCursor: 'next-token',
+          prevCursor: 'prev-token',
+        ),
+      );
       final page = await WebQueryBuilder(fake, widgetsSchema())
           .orderBy('name')
           .limit(5)
           .fetch();
       expect(page.hasNext, isTrue);
-      expect(page.nextCursor, isNotNull);
-      expect(page.hasPrev, isFalse);
-      expect(page.prevCursor, isNull);
+      expect(page.nextCursor, 'next-token');
+      expect(page.hasPrev, isTrue);
+      expect(page.prevCursor, 'prev-token');
     });
 
-    test('keysetAfter passes the cursor through to the compiled plan',
-        () async {
-      // Build a cursor with the same query shape as the facade builder.
+    test('keysetAfter sends the cursor with backward:false', () async {
       final core =
           QueryBuilder.compileOnly(widgetsSchema()).orderBy('name').limit(10);
       final cursor = core.cursorForCompiledRow({
@@ -88,25 +108,28 @@ void main() {
         'id': 'b',
       });
 
-      fake.responses[WireOp.compiledQuery] = {
-        'items': <Object?>[],
-        'hasNext': false,
-      };
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost.contractReply(
+        const contract.QueryRowsResult(
+          items: [],
+          hasNext: false,
+          hasPrev: true,
+          nextCursor: null,
+          prevCursor: 'prev-token',
+        ),
+      );
       final page = await WebQueryBuilder(fake, widgetsSchema())
           .orderBy('name')
           .limit(10)
           .keysetAfter(cursor);
 
-      expect(page.hasNext, isFalse);
-      final args = planArgs(WireOp.compiledQuery);
-      // The keyset predicate is baked into the plan SQL and the last-row sort
-      // values are bound as args (cursor passed through).
-      expect(args['sql'], contains('>'));
-      expect(args['args'], contains('apple'));
-      expect(args['args'], contains('a'));
+      final req = sentRequest<contract.QueryRequest>();
+      expect(req.spec.cursor, cursor);
+      expect(req.spec.backward, isFalse);
+      expect(page.hasPrev, isTrue);
+      expect(page.prevCursor, 'prev-token');
     });
 
-    test('keysetBefore compiles the flipped walk, reverses, and probes',
+    test('keysetBefore sends the cursor with backward:true in one request',
         () async {
       final core =
           QueryBuilder.compileOnly(widgetsSchema()).orderBy('name').limit(10);
@@ -115,128 +138,114 @@ void main() {
         {'name': 'apricot', 'id': 'b'},
       );
 
-      // First send: the backward window (walks the flipped order, so the
-      // worker's first row is the window's last row in declared order).
-      // Second send: the one-row forward probe from the window's last row.
-      var call = 0;
-      fake.onSend = (op, args) async {
-        call++;
-        if (call == 1) {
-          return {
-            'items': [
-              encodeWireValue({'id': 'c', 'name': 'apricot'}),
-              encodeWireValue({'id': 'b', 'name': 'apple'}),
-            ],
-            'hasNext': true,
-            'firstRow': encodeWireValue({'name': 'apricot', 'id': 'c'}),
-            'lastRow': encodeWireValue({'name': 'apple', 'id': 'b'}),
-          };
-        }
-        return {
-          'items': <Object?>[],
-          'hasNext': false,
-          'firstRow': null,
-          'lastRow': null,
-        };
-      };
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost.contractReply(
+        const contract.QueryRowsResult(
+          items: [
+            {'id': 'b', 'name': 'apple'},
+            {'id': 'c', 'name': 'apricot'},
+          ],
+          hasNext: false,
+          hasPrev: true,
+          nextCursor: null,
+          prevCursor: 'prev-token',
+        ),
+      );
       final page = await WebQueryBuilder(fake, widgetsSchema())
           .orderBy('name')
           .limit(2)
           .keysetBefore(cursor);
 
-      final sends =
-          fake.sent.where((s) => s.$1 == WireOp.compiledQuery).toList();
-      expect(sends, hasLength(2));
-      final windowArgs = sends[0].$2;
-      expect(windowArgs['sql'], contains('ORDER BY "name" DESC, "id" DESC'),
-          reason: 'the backward window flips every direction');
-      expect(windowArgs['args'], contains('apricot'),
-          reason: 'the pv tuple seeds the walk');
-      expect(page.hasPrev, isTrue,
-          reason: 'the window reported an overflow row');
+      final req = sentRequest<contract.QueryRequest>();
+      expect(req.spec.cursor, cursor);
+      expect(req.spec.backward, isTrue);
+
+      final sends = fake.sent.where((s) => s.$1 == WireOp.contractRequest);
+      expect(sends, hasLength(1),
+          reason: 'the kernel answers backward walks in one round trip');
+      expect(page.hasPrev, isTrue);
       expect(page.items.map((r) => r['id']).toList(), ['b', 'c'],
           reason: 'rows come back in the declared (forward) order');
-
-      final probeArgs = sends[1].$2;
-      expect(probeArgs['sql'], contains('ORDER BY "name" ASC, "id" ASC'),
-          reason: 'the probe is a forward keyset read');
-      expect(probeArgs['args'], contains('apricot'),
-          reason: 'the probe anchors at the window last-row tuple');
-      expect(probeArgs['sql'], contains('LIMIT 1'));
-      expect(page.hasNext, isFalse,
-          reason: 'the probe found no row after the window');
+      expect(page.prevCursor, 'prev-token');
+      expect(page.hasNext, isFalse);
       expect(page.nextCursor, isNull);
-      expect(page.prevCursor, isNotNull);
     });
   });
 
   group('scalar reads', () {
-    test('count reads the value key and defaults to 0 when missing', () async {
-      fake.responses[WireOp.compiledQuery] = {'value': 7};
+    test('count sends a typed count request', () async {
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(const contract.CountResult(7));
       expect(await WebQueryBuilder(fake, widgetsSchema()).count(), 7);
-      expect(planArgs(WireOp.compiledQuery)['operation'], 'count');
-
-      fake.responses[WireOp.compiledQuery] = {};
-      expect(await WebQueryBuilder(fake, widgetsSchema()).count(), 0);
+      final req = sentRequest<contract.CountRequest>();
+      expect(req.spec.limit, isNull);
     });
 
-    test('countDistinct reads the value key', () async {
-      fake.responses[WireOp.compiledQuery] = {'value': 3};
+    test('countDistinct sends the field with the spec', () async {
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(const contract.CountResult(3));
       final n =
           await WebQueryBuilder(fake, widgetsSchema()).countDistinct('qty');
       expect(n, 3);
-      expect(planArgs(WireOp.compiledQuery)['operation'], 'countDistinct');
+      final req = sentRequest<contract.CountDistinctRequest>();
+      expect(req.field, 'qty');
     });
 
-    test('distinct decodes every wire value', () async {
-      fake.responses[WireOp.compiledQuery] = {
-        'values': [encodeWireValue('a'), encodeWireValue('b')],
-      };
-      final values =
-          await WebQueryBuilder(fake, widgetsSchema()).distinct('name');
+    test('distinct sends the field with the builder spec', () async {
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost
+          .contractReply(const contract.DistinctResult(['a', 'b']));
+      final values = await WebQueryBuilder(fake, widgetsSchema())
+          .where('qty', gte: 3)
+          .distinct('name');
       expect(values, ['a', 'b']);
-      expect(planArgs(WireOp.compiledQuery)['operation'], 'distinct');
+      final req = sentRequest<contract.DistinctRequest>();
+      expect(req.field, 'name');
+      expect(req.spec.predicate, isA<contract.LeafSpecData>(),
+          reason: 'the distinct scan honors the builder filters');
     });
 
     test('distinct on an empty result set is empty', () async {
-      fake.responses[WireOp.compiledQuery] = {'values': <Object?>[]};
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(const contract.DistinctResult([]));
       final values =
           await WebQueryBuilder(fake, widgetsSchema()).distinct('name');
       expect(values, isEmpty);
     });
 
-    test('ids returns the id strings', () async {
-      fake.responses[WireOp.compiledQuery] = {
-        'ids': ['a', 'b', 'c'],
-      };
+    test('ids sends the spec and returns the id strings', () async {
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(const contract.IdsResult(['a', 'b', 'c']));
       final ids = await WebQueryBuilder(fake, widgetsSchema()).all().ids();
       expect(ids, ['a', 'b', 'c']);
-      expect(planArgs(WireOp.compiledQuery)['operation'], 'ids');
+      final req = sentRequest<contract.IdsRequest>();
+      expect(req.spec.all, isTrue);
     });
 
-    test('explain returns the plan string', () async {
-      fake.responses[WireOp.compiledQuery] = {'plan': 'SCAN widgets'};
+    test('explain returns the kernel plan string', () async {
+      fake.responses[WireOp.contractRequest] = FakeFacadeHost
+          .contractReply(const contract.ExplainResult('SCAN widgets'));
       final plan =
           await WebQueryBuilder(fake, widgetsSchema()).limit(5).explain();
       expect(plan, 'SCAN widgets');
-      expect(planArgs(WireOp.compiledQuery)['operation'], 'explain');
+      sentRequest<contract.ExplainRequest>();
     });
   });
 
   group('aggregates', () {
-    test('sum/avg/min/max return the numeric value from the value key',
-        () async {
-      fake.responses[WireOp.compiledQuery] = {'value': 12.5};
+    test('sum/avg/min/max send their aggregate variants', () async {
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(const contract.AggregateResult(12.5));
       final builder = WebQueryBuilder(fake, widgetsSchema());
       expect(await builder.sum('qty'), 12.5);
-      expect(planArgs(WireOp.compiledQuery)['operation'], 'sum');
+      expect(
+          sentRequest<contract.AggregateRequest>().fn, contract.AggregateFn.sum);
       expect(await builder.avg('qty'), 12.5);
       expect(await builder.min('qty'), 12.5);
       expect(await builder.max('qty'), 12.5);
     });
 
-    test('aggregates return null when the value row is absent', () async {
-      fake.responses[WireOp.compiledQuery] = {'value': null};
+    test('aggregates return null when the value is absent', () async {
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(const contract.AggregateResult(null));
       final builder = WebQueryBuilder(fake, widgetsSchema());
       expect(await builder.sum('qty'), isNull);
       expect(await builder.avg('qty'), isNull);
@@ -245,7 +254,8 @@ void main() {
     });
 
     test('an int value is preserved as a num', () async {
-      fake.responses[WireOp.compiledQuery] = {'value': 42};
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(const contract.AggregateResult(42));
       expect(await WebQueryBuilder(fake, widgetsSchema()).sum('qty'), 42);
     });
   });
@@ -264,11 +274,9 @@ void main() {
       expect(args, containsAll(<Object?>['apple', 'pear', '%pp%']));
     });
 
-    test('orWhere forwards a group list to the compiled plan', () async {
-      fake.responses[WireOp.compiledQuery] = {
-        'items': <Object?>[],
-        'hasNext': false,
-      };
+    test('orWhere lowers into the spec predicate as an OR node', () async {
+      fake.responses[WireOp.contractRequest] =
+          FakeFacadeHost.contractReply(emptyRows);
       final page = await WebQueryBuilder(fake, widgetsSchema())
           .orWhere(<Map<String, Object?>>[
             <String, Object?>{'name': 'apple'},
@@ -277,9 +285,9 @@ void main() {
           .all()
           .fetch();
       expect(page.items, isEmpty);
-      final args = planArgs(WireOp.compiledQuery);
-      expect(args['sql'], contains('OR'));
-      expect(args['args'], containsAll(<Object?>['apple', 1]));
+      final req = sentRequest<contract.QueryRequest>();
+      expect(req.spec.predicate, isA<contract.AnySpecData>(),
+          reason: 'an orWhere group lowers to an OR node');
     });
 
     test(

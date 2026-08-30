@@ -1,4 +1,4 @@
-import 'package:localpocket/src/web/conversions.dart';
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/web/facade/query/web_query_builder.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
@@ -15,115 +15,149 @@ void main() {
     builder = WebQueryBuilder(fake, widgetsSchema());
   });
 
-  Map<String, Object?> watchEnvelope() {
-    final (op, args) = fake.sent.where((s) => s.$1 == WireOp.watchQuery).last;
-    expect(op, WireOp.watchQuery);
-    return args;
+  contract.WatchRequest watchEnvelope() {
+    final (op, args) = fake.sent.where((s) => s.$1 == WireOp.contractRequest).last;
+    expect(op, WireOp.contractRequest);
+    final encoded = args['request']! as Map;
+    final req = contract.ContractCodec
+        .decodeRequest(encoded.cast<String, Object?>());
+    expect(req, isA<contract.WatchRequest>());
+    return req as contract.WatchRequest;
   }
 
-  test('an unbounded watch compiles the plan with the native default limit 50',
+  Map<String, Object?> startedReply(String subscription) =>
+      FakeFacadeHost.contractReply(
+          contract.WatchStartedResult(subscription: subscription));
+
+  test('an unbounded watch lowers the spec with the native default limit 50',
       () async {
-    final watchId = fake.nextRequestId;
-    fake.responses[WireOp.watchQuery] = {'items': <Object?>[]};
+    fake.responses[WireOp.contractRequest] = startedReply('sub-1');
 
     final emissions = <List<Map<String, Object?>>>[];
     final sub = builder.watch().listen(emissions.add);
     await pumpEventQueue();
 
-    final args = watchEnvelope();
-    expect(args['watchId'], watchId);
-    expect(args['limit'], 50);
-    expect(args['operation'], 'query');
-    expect(args['store'], 'widgets');
-    expect(args['sql'], contains('LIMIT 50'));
-    expect(args, isNot(contains('pageLimit')));
+    final req = watchEnvelope();
+    expect(req.store, 'widgets');
+    expect(req.spec.limit, 50);
+    expect(req.spec.all, isFalse);
 
     await sub.cancel();
   });
 
-  test('an all() watch compiles the plan without any limit override', () async {
-    fake.responses[WireOp.watchQuery] = {'items': <Object?>[]};
+  test('an all() watch keeps the spec unbounded', () async {
+    fake.responses[WireOp.contractRequest] = startedReply('sub-1');
     final sub = builder.all().watch().listen((_) {});
     await pumpEventQueue();
 
-    final args = watchEnvelope();
-    expect(args['limit'], isNull);
-    expect(args['sql'], isNot(contains('LIMIT')));
+    final req = watchEnvelope();
+    expect(req.spec.all, isTrue);
+    expect(req.spec.limit, isNull);
     await sub.cancel();
   });
 
-  test('an explicit limit(n) watch keeps that limit in the plan', () async {
-    fake.responses[WireOp.watchQuery] = {'items': <Object?>[]};
+  test('an explicit limit(n) watch keeps that limit in the spec', () async {
+    fake.responses[WireOp.contractRequest] = startedReply('sub-1');
     final sub = builder.limit(7).watch().listen((_) {});
     await pumpEventQueue();
 
-    final args = watchEnvelope();
-    expect(args['limit'], 7);
-    expect(args['sql'], contains('LIMIT 7'));
+    final req = watchEnvelope();
+    expect(req.spec.limit, 7);
     await sub.cancel();
   });
 
-  test('watch ids increment across registrations', () async {
-    fake.responses[WireOp.watchQuery] = {'items': <Object?>[]};
+  List<String> cancelSubscriptions() => fake.sent
+      .where((s) => s.$1 == WireOp.contractRequest)
+      .map((s) => contract.ContractCodec
+          .decodeRequest((s.$2['request']! as Map).cast<String, Object?>()))
+      .whereType<contract.WatchCancelRequest>()
+      .map((r) => r.subscription)
+      .toList();
+
+  test('each registration is answered with its own kernel subscription',
+      () async {
+    var next = 0;
+    fake.onSend = (op, args) async {
+      if (op != WireOp.contractRequest) return null;
+      final req = contract.ContractCodec
+          .decodeRequest((args['request']! as Map).cast<String, Object?>());
+      if (req is contract.WatchRequest) {
+        return startedReply('sub-${++next}');
+      }
+      return FakeFacadeHost.contractReply(const contract.OkResult());
+    };
+
     final sub1 = builder.watch().listen((_) {});
     await pumpEventQueue();
-    final id1 = watchEnvelope()['watchId']! as int;
     await sub1.cancel();
+    await pumpEventQueue();
+    expect(cancelSubscriptions(), ['sub-1']);
 
     final sub2 = builder.watch().listen((_) {});
     await pumpEventQueue();
-    final id2 = watchEnvelope()['watchId']! as int;
-
-    expect(id2, id1 + 1);
     await sub2.cancel();
+    await pumpEventQueue();
+    expect(cancelSubscriptions(), ['sub-1', 'sub-2']);
   });
 
-  test('the initial snapshot is wire-decoded and added to the stream',
+  test('the initial snapshot and later emissions ride the event stream',
       () async {
-    final r1 = {
-      'id': 'a',
-      'name': 'apple',
-      'made_on': DateTime.utc(2026, 1, 1)
-    };
+    final r1 = {'id': 'a', 'name': 'apple'};
     final r2 = {'id': 'b', 'name': 'banana'};
-    fake.responses[WireOp.watchQuery] = {
-      'items': [encodeWireValue(r1), encodeWireValue(r2)],
-    };
+    fake.responses[WireOp.contractRequest] = startedReply('sub-1');
 
     final emissions = <List<Map<String, Object?>>>[];
-    final watchId = fake.nextRequestId;
     final sub = builder.limit(50).watch().listen(emissions.add);
     await pumpEventQueue();
 
+    fake.deliverContractEvent(
+        contract.WatchSnapshot(subscription: 'sub-1', items: [r1, r2]));
+    await pumpEventQueue();
     expect(emissions, hasLength(1));
     expect(emissions.single, hasLength(2));
     expect(emissions.single[0]['name'], 'apple');
-    expect(emissions.single[0]['made_on'], DateTime.utc(2026, 1, 1));
     expect(emissions.single[1]['id'], 'b');
 
-    // Later worker events (a fresh snapshot list) are delivered too.
+    // A later snapshot for the same subscription is delivered too.
     final r3 = {'id': 'c', 'name': 'cherry'};
-    fake.deliverWorkerEvent(watchId, [r3]);
+    fake.deliverContractEvent(
+        contract.WatchSnapshot(subscription: 'sub-1', items: [r3]));
     await pumpEventQueue();
     expect(emissions, hasLength(2));
     expect(emissions.last.single['name'], 'cherry');
 
+    // Snapshots for another subscription never leak into this stream.
+    fake.deliverContractEvent(
+        contract.WatchSnapshot(subscription: 'other', items: [r1]));
+    await pumpEventQueue();
+    expect(emissions, hasLength(2));
+
     await sub.cancel();
   });
 
-  test('cancelling the watch sends watch_cancel and drops the stream',
+  test('cancelling the watch sends a typed watch-cancel and drops the stream',
       () async {
-    fake.responses[WireOp.watchQuery] = {'items': <Object?>[]};
-    final watchId = fake.nextRequestId;
+    fake.responses[WireOp.contractRequest] = startedReply('sub-1');
     final sub = builder.watch().listen((_) {});
     await pumpEventQueue();
 
-    expect(fake.workerStreams.containsKey(watchId), isTrue);
     await sub.cancel();
     await pumpEventQueue();
 
-    expect(fake.workerStreams.containsKey(watchId), isFalse);
-    final cancel = fake.sent.where((s) => s.$1 == WireOp.watchCancel).single;
-    expect(cancel.$2, {'watchId': watchId});
+    final cancels = fake.sent
+        .map((s) => s.$1 == WireOp.contractRequest && s.$2['request'] is Map
+            ? contract.ContractCodec.decodeRequest(
+                (s.$2['request']! as Map).cast<String, Object?>())
+            : null)
+        .whereType<contract.WatchCancelRequest>()
+        .toList();
+    expect(cancels.single.subscription, 'sub-1');
+
+    // Emissions after cancel are dropped.
+    fake.deliverContractEvent(
+        contract.WatchSnapshot(subscription: 'sub-1', items: [
+      {'id': 'z', 'name': 'zebra'}
+    ]));
+    await pumpEventQueue();
   });
 }
