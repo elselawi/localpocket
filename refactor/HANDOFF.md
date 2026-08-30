@@ -32,10 +32,10 @@ at the end of `refactor/contract-runtime.md` for everything that landed.
 
 **Your stage now: the web remote cutover** — point the browser page at the
 same contract (replace the `WireOp`/`wire_args` registry family by family;
-the old wire stays as an adapter until each family passes), then query IR,
-then barrel switch. The old raw/typed surfaces still work.
+the old wire stays as an adapter until each family passes), then barrel
+switch. The old raw/typed surfaces still work.
 
-First cutover slices DONE (2026-08-30):
+Cutover slices DONE (2026-08-30):
 
 1. The worker answers `contract_request` envelopes through the kernel's own
    command handler, emits `contract_event` envelopes for committed facts,
@@ -48,13 +48,20 @@ First cutover slices DONE (2026-08-30):
    boots the kernel in the worker and binds the page to a
    `RemoteRuntimeClient` — the destination-API web vocabulary is executable
    and proven by a browser smoke page in the matrix
-   (`tool/web_smoke/api_smoke_main.dart`). The browser run also exposed and
-   fixed a latent N-times event-delivery bug in the worker's JS boundary
-   (`controller.dart` now registers ONE sink per connection).
+   (`tool/web_smoke/api_smoke_main.dart`).
+3. **Query/search/cursors family cutover**: the root web facade's query,
+   search, aggregate, distinct, and watch paths run over the typed contract
+   (a shared `RemoteRuntimeClient` on `WebFacadeHost`), the page no longer
+   compiles SQL or mints cursors, and `WireOp.watchQuery` +
+   `CompiledWatcher` are deleted. `WireOp.compiledQuery` remains ONLY for
+   transaction-scoped reads — see the "Query family cutover" ledger section
+   for the full account, the audit, the cursor corpus, and the asset-gate
+   hardening.
 
-See the two remote-cutover ledger sections at the end of
-`refactor/contract-runtime.md`. Next: re-route the page-side old-wire
-families (CRUD/batch first, then query/search/cursors), then query IR.
+Next: CRUD/batch and the transaction family (which retires
+`compiled_query`/`send_plan.dart`/`QueryPlan`), then
+maintenance/capabilities → conflicts → files → sync → close/lifecycle, then
+barrel switch.
 
 The full destination plan (12 stages, gates, checklists) is in
 `final_refactoring_plan.md`. Stages 0–4 and the stage-5 facade vertical
@@ -98,23 +105,31 @@ remote cutover. Stage-by-stage history lives in `refactor/*.md`.
 
 ---
 
-## 2. Current state (verified 2026-08-30, after the facade stage)
+## 2. Current state (verified 2026-08-30, after the query-family cutover)
 
 - Branch `refactor/final-architecture`; working tree clean; HEAD is the
-  compile-fixture activation commit on top of the facade commits
-  (`feat(contract): serializable predicate tree …` →
-  `test(compile_fixtures): activate the VM destination-API compile fixture`).
-- `dart analyze lib test tool` → 0 issues (now includes the active
-  compile fixture `test/compile_fixtures/final_api_vm.dart`).
-- `dart test` → `+2744 ~83` all passed (83 skips = live/gate/platform tags;
-  the count grew by the remote conformance group over the worker engine).
-- `dart run tool/local_web_gate.dart` → PASS (worker compile + asset hashes).
-- `dart run tool/api_snapshot.dart` → PASS (snapshot unchanged; the new
-  facade is intentionally NOT exported from the barrel yet).
-- NEW this pass: `lib/src/api/` (facade: options, LocalPocket, Store, Row,
-  QuerySpec/Page/Cursor, Transaction, events), contract predicate tree,
-  `DistinctRequest.limit`, `TransactionBeginRequest.durability`,
-  `FieldNotSelectedError`, `test/conformance/`, `test/compile_fixtures/`.
+  gate-hardening commit on top of the query-family commits
+  (`test(web): characterize every compiled-plan bridge field …` →
+  `feat(contract): DistinctRequest carries a full query spec` →
+  `feat(query): structured spec snapshot …` →
+  `feat(web): route root query, search, aggregate, and watch paths …` →
+  `feat(web): delete the compiled-plan watch op …` →
+  `test(conformance): cursor corpus …` →
+  `chore(tool): worker asset gate …`).
+- `dart analyze lib test tool` → 0 issues (includes the active compile
+  fixture `test/compile_fixtures/final_api_vm.dart`).
+- `dart test` → `+2778 ~83` all passed (83 skips = live/gate/platform tags).
+- `dart run tool/local_web_gate.dart` → PASS (7 checks, now including the
+  byte-compare "shipped worker asset is current" gate).
+- `dart run tool/api_snapshot.dart` → PASS (snapshot unchanged).
+- `dart run tool/browser_web_gate.dart` → 17 pages × 3 browsers PASS
+  (includes the destination-facade smoke `web_api_smoke`).
+- NEW this pass: `lib/src/web/facade/query/web_contract_forwarder.dart`,
+  `lib/src/web/facade/search/web_contract_forwarder.dart`,
+  `tool/worker_asset_current_gate.dart`, `.gitattributes` (binary asset
+  pins), the `QueryBuilder` structured snapshot, `DistinctRequest.spec`,
+  the conformance cursor corpus, and the removed watch machinery
+  (`compiled_watcher.dart`, `WireOp.watchQuery`).
 - Known wall-clock flakes (pass in isolation; re-run before diagnosing):
   `test/pocketbase/sse_test.dart` fast-path,
   `test/pocketbase/backend_lifecycle_test.dart` authChanged,
@@ -355,20 +370,24 @@ dart test --tags real --run-skipped test/e2e/        # live PocketBase (optional
 
 ---
 
-## 6. Out of scope for the facade stage — now the NEXT agent's order of work
+## 6. Out of scope for the query-family cutover — the NEXT agent's order of work
 
-The facade stage is done. Work the remaining architecture in this order:
+The query/search/cursors family cutover is done. Work the remaining
+architecture in this order:
 
-1. **Web remote cutover** — replace the `WireOp`/`wire_args` registry
-   family by family so the browser page runs on this contract; the old wire
-   stays as an adapter until each family passes. `LocalPocket.openWith` +
-   a worker-backed `RuntimeClient` is the integration seam.
-2. **Query IR** — replace the compiled-plan bridge (`QueryPlan` stays
-   internal; the predicate tree in `QuerySpecData` is the seed).
-3. **Family-by-family web collapse** — files/conflicts/sync command
-   families enter the contract, activating the remaining fixture vocabulary
+1. **CRUD/batch cutover** — re-route the old web facade's `get`/`mutate_batch`
+   paths onto `GetRequest`/`MutateRequest`, then delete the old handlers.
+2. **Transaction family cutover** — `txBegin`/`txGet`/`txMutateBatch`/… onto
+   the contract session commands. This retires the LAST compiled-plan
+   callers: session-scoped reads, `send_plan.dart`,
+   `page_from_compiled.dart`, `_parseCompiledPlan`/`_dispatchCompiledQuery`,
+   `WireOp.compiledQuery`, and public `QueryPlan` construction all die here.
+3. **Maintenance/capabilities family** → `AnalyzeRequest`/… and the worker
+   capability handshake.
+4. **Conflicts family**, then **files**, then **sync/auth/status/realtime**,
+   then **close/lifecycle** — activating the remaining fixture vocabulary
    (sync attachment, `Store.events` record payloads, search snippets).
-4. **Barrel switch** — export `lib/src/api/api.dart` from the package
+5. **Barrel switch** — export `lib/src/api/api.dart` from the package
    barrel, flip the compile fixture's import to the barrel, retire the
    `LocalPocket = KernelDatabase` typedef and the web facade's claim on the
    name, re-baseline coverage, then delete `refactor/` + the plan file.

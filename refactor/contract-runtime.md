@@ -361,3 +361,138 @@ Fix: `_connectionSinks.putIfAbsent(connection, ...)` in
   the runtime closed, and the transport dies with the page.
 - The browser diagnostic probe page was deleted after diagnosis; the
   finding lives here and in the commit message.
+
+---
+
+# Query family cutover over the contract (2026-08-30)
+
+The query/search/cursors family is re-routed onto the typed contract: the
+root web facade's query, search, aggregate, distinct, and watch paths now
+issue `QueryRequest`/`CountRequest`/`CountDistinctRequest`/`DistinctRequest`/
+`IdsRequest`/`AggregateRequest`/`ExplainRequest`/`SearchRequest`/
+`WatchRequest` through a shared `RemoteRuntimeClient`; the page no longer
+compiles SQL, shapes pages, or mints cursors. The compiled-plan watch op is
+gone. Gates: analyze 0, suite `+2778 ~83`, local web gate 7/7 (new "shipped
+worker asset is current" byte-compare), API snapshot PASS, browser matrix
+17 pages × 3 browsers PASS.
+
+## What landed
+
+### Bridge characterization (before any deletion)
+- `test/web/plan_bridge_test.dart` — per-operation round-trip parity: the
+  same plan object executed through the worker's parse → dispatch → runner
+  must equal the direct runner's result (count/countDistinct/distinct/ids/
+  sum/avg/min/max/explain/search, session-scoped, projected, unbounded).
+  Validation pins: missing optional fields execute; non-string shape /
+  non-int limit / non-list projection are tolerated; args-not-a-list and
+  malformed tagged args are rejected at the envelope.
+- `test/web/send_compiled_plan_test.dart` — the exact payload key set, tagged
+  wire args (datetime/bigint/null/list), null limit/projection/decodeColumns,
+  and per-operation payload facts.
+
+### Contract audit + extension
+- Field-by-field `QuerySpecData` vs `QueryPlan` audit: every fact the kernel
+  needs is already carried (projection via `select`, scope flags, `cursor` +
+  `backward`, limit/all, search term + options, full predicate tree, order).
+  `compilerVersion`/`schemaVersion`/`schemaFingerprint`/`decodeColumns`/
+  `shape`/`pageLimit` are N/A or kernel-owned by design: the kernel is the
+  only compiler, manifests are checked at open, cursor bags carry
+  schema/shape (replayed-shape mismatch throws `StaleCursorError`), and the
+  ordered-watch digest derives from `spec.order`.
+- The ONE gap: `DistinctRequest` carried only a bare limit, but the old
+  facade's `distinct(field)` honors builder filters/scope. It now carries a
+  full `QuerySpecData spec` (codec round-trip + malformed-input tests in
+  `test/contract/wire_contract_test.dart`; the kernel compiles the spec).
+
+### Builder snapshot (temporary lowering bridge)
+- `QueryBuilder` records a structured mirror of its DSL calls
+  (`filterNodes`: leaves/negations/or-groups as `PredicateNode`s in call
+  order; `orderNodes`, `selectFields`, `includeArchivedFlag`,
+  `includeHiddenFlag`). `neq`/`isNotNull` capture as negations (the tree
+  compiler has no such spellings). Pinned by
+  `test/core/query/spec_snapshot_test.dart` (single-leaf byte-identity +
+  execution parity for composite/interleaved cases).
+- `SearchBuilder` gained `store`/`limitValue`/`allMode`/scope getters.
+
+### The re-route
+- `lib/src/web/facade/query/web_contract_forwarder.dart` — `lowerPredicateNode`
+  (core tree → contract tree), `lowerBuilderToSpec`, `pageFromContractRows`,
+  and the `WebContractQueryForwarder` mixin (fetch/keysetAfter/keysetBefore/
+  count/countDistinct/distinct/ids/explain/sum/avg/min/max over the shared
+  runtime). `keysetBefore` is now ONE round trip (the kernel walks the
+  flipped order and probes itself).
+- `lib/src/web/facade/search/web_contract_forwarder.dart` — search over
+  `SearchRequest`; the blank-term early return (no send) is preserved.
+- `WebQueryBuilder` uses the contract mixin and watches over `WatchRequest` +
+  `WatchSnapshot` events (kernel-minted subscription ids; cancellation sends
+  `WatchCancelRequest`; the registration tracker still guards async races;
+  the unbounded-watch default of 50 rows rides in the spec). `WebSearchBuilder`
+  uses the contract search mixin.
+- `WebFacadeHost.contractRuntime` — one shared `RemoteRuntimeClient` per
+  facade. The production facade builds it lazily over the same worker channel
+  and feeds every worker event into it; `FakeFacadeHost` builds one over its
+  own `send` plus `contractReply`/`contractErrorReply`/`deliverContractEvent`
+  test helpers.
+- Worker deletions: `WireOp.watchQuery` + `_handleWatchQuery` +
+  `CompiledWatcher` + `compiled_watcher_test.dart` are gone; the wire
+  vocabulary pin (case 160) updated in the same commit. Watch coverage moved
+  to contract-driven tests in `worker_engine_test.dart` (initial snapshot,
+  digest dedupe, ordered reorder re-emission, projection, typed
+  unknown-field error, cancel).
+
+### Cursor corpus (all three runtimes)
+- `test/conformance/facade_conformance_test.dart` now walks nullable sorts
+  (NULLs first ASC / last DESC), uniform descending + implicit id
+  tie-break, mixed directions (paged walk == unbounded sequence), empty
+  terminal pages after the table shrinks (an empty page has no facts),
+  stale projection/shape rejection, and cursors persisted across
+  close/reopen (file-backed) — on direct, loopback, and remote.
+
+### Gate hardening
+- `tool/worker_asset_current_gate.dart` (new, wired into
+  `tool/local_web_gate.dart`): the freshly compiled
+  `build/web/localpocket_worker.js` must match `assets/localpocket_worker.js`
+  (CRLF-normalized byte comparison) or the gate fails — a stale shipped
+  asset silently served old worker code before.
+- `.gitattributes` (new): `assets/sqlite3.wasm binary` and
+  `assets/localpocket_worker.js -text` — `core.autocrlf=true` was corrupting
+  the checked-out wasm/worker bytes (the committed blobs were pristine; only
+  checkout converted them). `web_asset_gate` hashes raw bytes, which is
+  correct now that checkout is byte-exact.
+
+## Decisions and deviations
+- **`compiled_query` stays in the registry.** Its last callers are
+  transaction-scoped reads (`WebTxQueryBuilder`/`WebTxSearchQueryBuilder`
+  through `sendCompiledPlan` with `sessionId`); the transaction family cuts
+  over later. `send_plan.dart`, `page_from_compiled.dart`,
+  `_parseCompiledPlan`/`_dispatchCompiledQuery`/`_compiledOperations`, and
+  public `QueryPlan` construction all stay for the same reason and die with
+  the transaction family. The checklist items about deleting them are
+  therefore partial: watchQuery is gone; compiledQuery waits for its last
+  caller.
+- `WatchRequest` needs no `ordered` flag: the kernel derives the
+  order-sensitive digest from `spec.order` (the page-side flag existed only
+  because the worker saw bare SQL).
+- The facade's `keysetBefore` now costs one round trip (was two: window +
+  probe). Behavior preserved; mechanics moved into the kernel.
+- Old-wire and contract envelopes coexist: `record_event` (old) and
+  `contract_event` (contract) both broadcast until the remaining families
+  move.
+
+## Gotchas learned this pass
+- `(builder..all())` discards the returned copy — `all()` returns a NEW
+  immutable builder, so a cascade drops it. Chain instead.
+- Record equality is structural except for `List` fields: comparing
+  `debugCompile()` tuples with `expect` fails on different list instances;
+  compare `.$1`/`.$2` separately.
+- `core.autocrlf=true` + no `.gitattributes` corrupts binary assets on
+  checkout (the wasm gained CRLFs; the manifest is computed over raw bytes).
+  Pin assets binary; hash raw bytes in asset gates.
+- PowerShell piping binary to `Get-FileHash` treats the piped input as a
+  PATH; hash via a temp file instead.
+- The `QueryPlan`-era `shape` fingerprint included where-clause SQL — with
+  page-side compilation gone only the kernel validates cursor shapes, so
+  page-side fingerprint differences are irrelevant.
+- `watch()` attaches its event listener only after `WatchRequest` resolves
+  (same pattern as the destination facade's `store.watch`); the kernel
+  watcher emits the initial snapshot as an event, matching that pattern.
