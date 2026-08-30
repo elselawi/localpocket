@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:localpocket/src/core/canonical_json.dart';
 import 'package:localpocket/src/core/codec.dart';
+import 'package:localpocket/src/core/database_adapter.dart';
 import 'package:localpocket/src/core/ddl_compiler.dart';
 import 'package:localpocket/src/core/errors.dart';
 import 'package:localpocket/src/core/hashing.dart';
@@ -14,6 +15,7 @@ import 'package:localpocket/src/core/sql_utils.dart';
 import 'package:localpocket/src/core/store.dart';
 import 'package:localpocket/src/core/watch.dart';
 import 'package:collection/collection.dart';
+import 'package:meta/meta.dart';
 
 /// {@template localpocket.where_clause}
 /// A SQL predicate and its bound arguments.
@@ -60,8 +62,10 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// Internal constructor used by [Collection.query].
   ///
   /// {@macro localpocket.query_builder}
-  QueryBuilder.internal(this._pocket, StoreTable table)
+  QueryBuilder.internal(this._pocket, StoreTable table,
+      {DatabaseExecutor? executor})
       : _schema = table.schema,
+        _executor = executor,
         _where = [],
         _orGroups = [],
         _order = [],
@@ -80,6 +84,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   QueryBuilder.compileOnly(CollectionSchema<Object?> schema)
       : _pocket = null,
         _schema = schema,
+        _executor = null,
         _where = [],
         _orGroups = [],
         _order = [],
@@ -95,6 +100,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   QueryBuilder._(
     this._pocket,
     this._schema,
+    this._executor,
     this._where,
     this._orGroups,
     this._order,
@@ -110,6 +116,30 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
 
   final LocalPocket? _pocket;
   final CollectionSchema<Object?> _schema;
+
+  /// The execution context's executor. Non-null only when this builder was
+  /// created from a transaction-scoped [Collection] — the query then runs
+  /// through the TRANSACTION executor and can never fall back to the outer
+  /// database (plan §4.2 / §5.3).
+  final DatabaseExecutor? _executor;
+
+  /// Structural pin for tests: the executor this query will run through.
+  /// Null means the outer database (root context).
+  @visibleForTesting
+  DatabaseExecutor? get debugExecutor => _executor;
+
+  /// Runs one query through this builder's execution context: the transaction
+  /// executor when bound, otherwise the outer database. Hook and perf
+  /// bookkeeping is preserved on both paths.
+  Future<List<Map<String, Object?>>> _runQuery(String sql,
+      [List<Object?>? args]) {
+    final pocket = _requirePocket;
+    final executor = _executor;
+    if (executor == null) return pocket.traceQuery(sql, args);
+    pocket.testHooks?.onQuery?.call(sql);
+    pocket.perf.recordQuery();
+    return executor.rawQuery(sql, args ?? const []);
+  }
 
   final List<WhereClause> _where;
   final List<WhereClause> _orGroups;
@@ -143,6 +173,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
       QueryBuilder._(
         _pocket,
         _schema,
+        _executor,
         where ?? List<WhereClause>.from(_where),
         orGroups ?? List<WhereClause>.from(_orGroups),
         order ?? List<OrderClause>.from(_order),
@@ -691,7 +722,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     if (pocket == null) {
       throw StateError('A compile-only QueryBuilder cannot execute fetch().');
     }
-    final rows = await pocket.traceQuery(sql, args);
+    final rows = await _runQuery(sql, args);
     var hasNext = limit != null && rows.length > limit;
     var hasPrev = _cursor != null;
     final pageRows = limit == null ? rows : rows.take(limit).toList();
@@ -791,7 +822,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     args.addAll(ksArgs);
     final sql = 'SELECT 1 FROM ${DdlCompiler.quote(_schema.name)}'
         ' WHERE ${where.join(' AND ')} LIMIT 1';
-    final rows = await pocket.traceQuery(sql, args);
+    final rows = await _runQuery(sql, args);
     return rows.isNotEmpty;
   }
 
@@ -836,7 +867,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// Counts records matching the current filters.
   Future<int> count() async {
     final (sql, args) = _compile(forCount: true);
-    final rows = await _requirePocket.traceQuery(sql, args);
+    final rows = await _runQuery(sql, args);
     return firstIntValue(rows) ?? 0;
   }
 
@@ -845,7 +876,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     _checkQueryable(field);
     final (sql, args) =
         _compile(forCount: true, countDistinct: true, aggField: field);
-    final rows = await _requirePocket.traceQuery(sql, args);
+    final rows = await _runQuery(sql, args);
     return firstIntValue(rows) ?? 0;
   }
 
@@ -868,7 +899,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     final limit = copy._all ? null : (copy._limit ?? 1000);
     final (sql, args) = copy._compile(limitOverride: limit);
     final distinctSql = sql.replaceFirst('SELECT ', 'SELECT DISTINCT ');
-    final rows = await copy._requirePocket.traceQuery(distinctSql, args);
+    final rows = await copy._runQuery(distinctSql, args);
     return [for (final r in rows) r[field]];
   }
 
@@ -896,7 +927,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
           field: field);
     }
     final (sql, args) = _compile(aggregate: fn, aggField: field);
-    final rows = await _requirePocket.traceQuery(sql, args);
+    final rows = await _runQuery(sql, args);
     final v = rows.isEmpty ? null : rows.first['v'];
     return v as num?;
   }
@@ -917,7 +948,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   Future<List<String>> ids() async {
     final copy = _copyWith(select: ['id']);
     final (sql, args) = copy._compile();
-    final rows = await copy._requirePocket.traceQuery(sql, args);
+    final rows = await copy._runQuery(sql, args);
     return [for (final r in rows) r['id']! as String];
   }
 
@@ -928,8 +959,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   Future<String> explain() async {
     final limit = _resolveLimit();
     final (sql, args) = _compile(limitOverride: limit);
-    final rows =
-        await _requirePocket.traceQuery('EXPLAIN QUERY PLAN $sql', args);
+    final rows = await _runQuery('EXPLAIN QUERY PLAN $sql', args);
     return rows.map((r) => r['detail']).join('\n');
   }
 

@@ -18,6 +18,8 @@ import 'watch.dart';
 import '../sync/outbox.dart';
 import '../sync/sync_tables.dart';
 
+part 'mutation_service.dart';
+
 /// What kind of local mutation is being applied.
 enum MutationAction {
   /// Creates a record when absent, or replaces it when present.
@@ -1328,13 +1330,14 @@ class Collection with ChangeBusAwareStore {
   /// Starts a fluent query against this collection.
   ///
   /// Example: `tasks.query().where('done', eq: false).limit(20).fetch()`.
-  QueryBuilder query() => QueryBuilder.internal(_pocket, _table);
+  QueryBuilder query() =>
+      QueryBuilder.internal(_pocket, _table, executor: _exec);
 
   /// Starts a full-text search on the collection's configured FTS fields.
   ///
   /// The schema must define [FtsSpec] and the SQLite engine must provide FTS5.
   SearchBuilder search(String term) =>
-      SearchBuilder.internal(_pocket, _schema, term);
+      SearchBuilder.internal(_pocket, _schema, term, executor: _exec);
 
   /// Watches the record at [id], re-emitting only when that record changes.
   Stream<Map<String, Object?>?> watchOne(String id) =>

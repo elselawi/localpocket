@@ -3,6 +3,7 @@ import 'dart:async';
 import 'database_adapter.dart';
 
 import 'change_bus.dart';
+import 'execution_context.dart';
 import 'local_pocket.dart';
 import 'store.dart';
 import '../typed/typed.dart';
@@ -38,6 +39,17 @@ class Tx {
 
   /// The database executor scoped to this transaction.
   DatabaseExecutor get executor => _executor;
+
+  /// The explicit execution context for this transaction (plan §5.3).
+  ///
+  /// Every operation legal inside a transaction routes through this context:
+  /// the transaction executor — never the outer database executor. Queries
+  /// and searches created from this handle (`tx.collection(...).query()`,
+  /// `.search()`) carry this context with them.
+  ExecutionContext get context => ExecutionContext.transaction(
+        executor: _executor,
+        readOnly: readOnly,
+      );
 
   /// Returns the currently active [Tx] for [pocket], or null outside a
   /// transaction.

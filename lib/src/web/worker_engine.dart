@@ -54,7 +54,6 @@ import 'dart:typed_data';
 import 'package:sqlite3/common.dart';
 
 import '../core/change_bus.dart';
-import '../core/compiled_query_runner.dart';
 import '../core/database_adapter.dart';
 import '../core/errors.dart';
 import '../core/hashing.dart';
@@ -331,7 +330,9 @@ abstract class WorkerEngineHost {
 
     final pageLimitRaw = args['pageLimit'];
     final pageLimit = pageLimitRaw is int ? pageLimitRaw : null;
-    return executeCompiledQuery(pocket, run, plan, pageLimit: pageLimit);
+    // Phase 2 (plan §12 step 7/8): the worker reaches the SAME kernel read
+    // service native uses — plan execution cannot drift between platforms.
+    return pocket.reads.executeCompiled(plan, run: run, pageLimit: pageLimit);
   }
 
   // ------------------------------------------------------ cross-cutting --

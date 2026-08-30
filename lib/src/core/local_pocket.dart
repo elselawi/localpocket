@@ -12,10 +12,12 @@ import 'codec.dart';
 import 'change_bus.dart';
 import 'cipher.dart';
 import 'ddl_compiler.dart';
+import 'compiled_query_runner.dart';
 import 'errors.dart';
 import 'fts_normalizer.dart';
 import 'migrator.dart';
 import 'perf_counters.dart';
+import 'query_plan.dart';
 import 'schema.dart';
 import 'store.dart';
 import 'system_tables.dart';
@@ -28,6 +30,12 @@ import '../sync/sync_tables.dart';
 import '../files/blob_store.dart';
 import '../files/files_api.dart';
 import '../typed/typed.dart';
+
+part 'kernel_context.dart';
+
+part 'read_service.dart';
+
+part 'transaction_coordinator.dart';
 
 /// Default clock: wall-clock epoch milliseconds.
 int _defaultNow() => DateTime.now().millisecondsSinceEpoch;
@@ -198,7 +206,13 @@ Object? _copyValue(Object? v) {
   return v;
 }
 
-/// The main LocalPocket database handle.
+/// The semantic kernel owner (Phase 2 of the final refactoring plan).
+///
+/// This is the concrete database implementation that previously rode under
+/// the public name `LocalPocket`. The public name is now a transitional
+/// alias; the final public facade (Phase 5) will be a separate class over a
+/// private `RuntimeClient`, and `KernelDatabase` becomes the internal
+/// kernel-facing owner constructed identically by native and the web worker.
 ///
 /// Open a database by injecting the platform's [DatabaseFactory], register one
 /// or more [CollectionSchema] objects, and then access data through
@@ -214,10 +228,10 @@ Object? _copyValue(Object? v) {
 /// final page = await tasks.query().limit(20).fetch();
 /// ```
 ///
-/// [LocalPocket] owns the SQLite connection and serializes writes. Always call
+/// The database owns the SQLite connection and serializes writes. Always call
 /// [close] when the application or test no longer needs the database.
-class LocalPocket with ChangeBusAwareLP {
-  LocalPocket._({
+class KernelDatabase with ChangeBusAwareLP {
+  KernelDatabase._({
     required this.path,
     required this.db,
     required this.capabilities,
@@ -231,11 +245,47 @@ class LocalPocket with ChangeBusAwareLP {
     this.groupCommitWindow = Duration.zero,
   }) : perf = PerfCounters() {
     writeQueue = WriteQueue(onQueueDepthChanged: perf.queueChanged);
+    kernel = KernelContext(
+      database: this,
+      db: db,
+      capabilities: capabilities,
+      writeQueue: writeQueue,
+      perf: perf,
+      maxDocBytes: maxDocBytes,
+      destructiveBackup: destructiveBackup,
+      now: now,
+      testHooks: testHooks,
+      blobStore: blobStore,
+      fieldCipher: fieldCipher,
+      cryptoProvider: cryptoProvider,
+      groupCommitWindow: groupCommitWindow,
+    );
+    _transactions = TransactionCoordinator(kernel);
+    mutations = MutationService(kernel);
+    reads = ReadService(kernel);
     outbox = Outbox.internal(this);
     opQueue = OpQueue.internal(this);
     conflicts = Conflicts.internal(this);
     files = LocalPocketFiles.internal(this, blobStore: blobStore);
   }
+
+  /// The shared dependency set every kernel service receives. Native and the
+  /// web worker construct it identically; services depend on this context,
+  /// never on the concrete database facade.
+  late final KernelContext kernel;
+
+  /// The transaction coordinator: write queue settlement, durability
+  /// transitions, group commit, and read transactions.
+  late final TransactionCoordinator _transactions;
+
+  /// Internal kernel access to the transaction coordinator.
+  TransactionCoordinator get transactionCoordinator => _transactions;
+
+  /// The kernel mutation owner (the only domain mutation path).
+  late final MutationService mutations;
+
+  /// The kernel read owner (compiled-plan execution and result shaping).
+  late final ReadService reads;
 
   /// The database path supplied to [open].
   final String path;
@@ -296,11 +346,8 @@ class LocalPocket with ChangeBusAwareLP {
   /// [LocalPocket], keyed by store name, enforced by reference identity.
   final TypedStoreRegistry typedRegistry = TypedStoreRegistry();
 
-  /// Tracked `synchronous` pragma state so redundant transitions are skipped.
-  /// Writes are serialized through the WriteQueue and the
-  /// connection is LocalPocket-owned (open() applies `synchronous=NORMAL`), so
-  /// this state is authoritative for all write transactions.
-  String _synchronous = 'NORMAL';
+  /// Tracked `synchronous` pragma state lives on the [TransactionCoordinator]
+  /// (durability transitions are a transaction concern).
 
   /// Whether `PRAGMA optimize` completed during [close].
   @visibleForTesting
@@ -340,7 +387,7 @@ class LocalPocket with ChangeBusAwareLP {
   /// );
   /// ```
   ///
-  static Future<LocalPocket> open({
+  static Future<KernelDatabase> open({
     required String path,
     required List<CollectionSchema<Object?>> stores,
     Database? database,
@@ -376,7 +423,7 @@ class LocalPocket with ChangeBusAwareLP {
       for (final ddl in syncSystemDdl) {
         await db.execute(ddl);
       }
-      final pocket = LocalPocket._(
+      final pocket = KernelDatabase._(
         path: path,
         db: db,
         capabilities: caps,
@@ -666,46 +713,7 @@ class LocalPocket with ChangeBusAwareLP {
     DurabilityClass durability = DurabilityClass.normal,
   }) {
     _guardOutsideTx();
-    // BISECT: no coalescing — each transaction flushes immediately.
-    if (const bool.fromEnvironment('LP_BISECT', defaultValue: false)) {
-      final group = _CommitGroup(this, durability);
-      final member = _CommitMember(action);
-      group.members.add(member);
-      final done = group.flush();
-      unawaited(done.catchError((Object _) {}));
-      return member.completer.future.then((value) => value as T);
-    }
-    final group = _pendingGroup;
-    if (group != null && group.durability == durability && !group.sealed) {
-      final member = _CommitMember(action);
-      group.members.add(member);
-      return member.completer.future.then((value) => value as T);
-    }
-    return _startGroup(action, durability);
-  }
-
-  /// The currently open (not yet flushed) commit group, if any.
-  _CommitGroup? _pendingGroup;
-
-  /// Starts a new commit group and schedules its flush at the end of the
-  /// current event-loop turn (or after the configured coalescing window),
-  /// giving concurrently-submitted mutations the chance to join before the
-  /// transaction opens.
-  Future<T> _startGroup<T>(
-      Future<dynamic> Function(Tx tx) action, DurabilityClass durability) {
-    // A different-durability submission cannot join the pending group; with a
-    // coalescing window enabled, flush the pending group early so this call
-    // does not stall behind the other group's window (FIFO is preserved — the
-    // pending group holds the queue slot first).
-    if (groupCommitWindow > Duration.zero) {
-      _pendingGroup?.flushEarly();
-    }
-    final group = _CommitGroup(this, durability);
-    _pendingGroup = group;
-    group.reserve();
-    final member = _CommitMember(action);
-    group.members.add(member);
-    return member.completer.future.then((value) => value as T);
+    return _transactions.transaction(action, durability: durability);
   }
 
   /// Runs [action] in a read-only transaction.
@@ -721,20 +729,7 @@ class LocalPocket with ChangeBusAwareLP {
   /// ```
   Future<T> read<T>(Future<T> Function(Tx tx) action) {
     _guardOutsideTx();
-    // Reads share the single connection and therefore must be serialized with
-    // writes through the same queue: a read transaction held open on the
-    // connection would otherwise make a queued write's BEGIN IMMEDIATE fail
-    // with "cannot start a transaction within a transaction".
-    // With a coalescing window open, a read also flushes the pending group
-    // first so read-your-writes holds without waiting out the window.
-    if (groupCommitWindow > Duration.zero) {
-      _pendingGroup?.flushEarly();
-    }
-    return writeQueue.run(() => db.transaction((txn) async {
-          final changes = <ChangeSet>[];
-          final tx = Tx.internal(this, txn, changes, readOnly: true);
-          return tx.runInZone(() => action(tx));
-        }));
+    return _transactions.read(action);
   }
 
   /// Executes SQL, notifying the test [TestHooks.onExecute] observer.
@@ -912,33 +907,18 @@ class LocalPocket with ChangeBusAwareLP {
     return count;
   }
 
+  /// The compiled per-store tables. Internal kernel access.
+  Map<String, StoreTable> get tablesForKernel => _tables;
+
+  /// Internal kernel entry for the outside-a-transaction guard.
+  void guardOutsideTxForKernel() => _guardOutsideTx();
+
   /// Throws when a handle-level operation is attempted inside a transaction.
   void _guardOutsideTx() {
     if (Tx.current(this) != null) {
       throw StateError(
           'LocalPocket calls are not allowed inside a transaction; use the Tx handle.');
     }
-  }
-
-  /// Write transactions committed since the last opportunistic passive WAL
-  /// checkpoint (see `_applyPragmas` — auto-checkpointing is off).
-  int _writesSinceCheckpoint = 0;
-
-  /// How many committed write transactions may elapse before the next
-  /// opportunistic `wal_checkpoint(PASSIVE)` is attempted. Keeps the WAL
-  /// bounded at ~64 × (row image + page) without ever checkpointing inline.
-  static const int _passiveCheckpointEveryWrites = 64;
-
-  /// Called after every committed write transaction. Once enough writes have
-  /// accumulated, schedules a non-blocking passive checkpoint off the
-  /// writer's path: PASSIVE never blocks, so this cannot stall the next
-  /// commit, and a closed/unavailable handle is swallowed silently.
-  void _noteWriteCommitted() {
-    if (++_writesSinceCheckpoint < _passiveCheckpointEveryWrites) return;
-    _writesSinceCheckpoint = 0;
-    Timer.run(() {
-      unawaited(walCheckpointPassive().catchError((Object _) {}));
-    });
   }
 
   /// Invalidates watchers after changes made outside this [LocalPocket]
@@ -979,8 +959,9 @@ class LocalPocket with ChangeBusAwareLP {
 /// {@endtemplate}
 class _CommitGroup {
   /// {@macro localpocket.__commit_group}
-  _CommitGroup(this.pocket, this.durability);
-  final LocalPocket pocket;
+  _CommitGroup(this.coordinator, this.durability);
+  final TransactionCoordinator coordinator;
+  KernelContext get context => coordinator.context;
   final DurabilityClass durability;
   final members = <_CommitMember>[];
 
@@ -997,7 +978,7 @@ class _CommitGroup {
   void reserve() {
     final barrier = Completer<void>();
     _barrier = barrier;
-    unawaited(pocket.writeQueue.run(() async {
+    unawaited(context.writeQueue.run(() async {
       await barrier.future;
       // Member completers already received any per-member error; swallow the
       // queue-level rethrow so it never becomes an unhandled async error.
@@ -1010,7 +991,7 @@ class _CommitGroup {
     // whole burst. A positive coalescing window keeps the barrier open even
     // longer so bursts across turns can join (a read or a
     // different-durability submission flushes it early).
-    final window = pocket.groupCommitWindow;
+    final window = context.groupCommitWindow;
     if (window > Duration.zero) {
       Timer(window, flushEarly);
     } else {
@@ -1025,7 +1006,9 @@ class _CommitGroup {
   void flushEarly() {
     if (_barrierDone) return;
     _barrierDone = true;
-    if (identical(pocket._pendingGroup, this)) pocket._pendingGroup = null;
+    if (identical(coordinator._pendingGroup, this)) {
+      coordinator._pendingGroup = null;
+    }
     _barrier?.complete();
   }
 
@@ -1040,17 +1023,17 @@ class _CommitGroup {
     if (members.isEmpty) return;
     final solo = members.length == 1;
     if (!solo) {
-      pocket.perf.groupCommits++;
-      pocket.perf.groupCommitMembers += members.length;
+      context.perf.groupCommits++;
+      context.perf.groupCommitMembers += members.length;
     }
     // Already inside the WriteQueue slot taken by [reserve] — never re-enter
     // the queue here (it would deadlock on our own reserved slot).
     final sw = Stopwatch()..start();
-    final inMemory = pocket.path == ':memory:';
+    final inMemory = context.database.path == ':memory:';
     final useFull = durability == DurabilityClass.full && !inMemory;
-    if (useFull && pocket._synchronous != 'FULL') {
-      await pocket.traceExecute('PRAGMA synchronous=FULL');
-      pocket._synchronous = 'FULL';
+    if (useFull && coordinator._synchronous != 'FULL') {
+      await context.traceExecute('PRAGMA synchronous=FULL');
+      coordinator._synchronous = 'FULL';
     }
     final changes = <ChangeSet>[];
     final recordEvents = <RecordChangeEvent>[];
@@ -1060,9 +1043,10 @@ class _CommitGroup {
     // state (a real bug: the sync engine drained an empty outbox).
     final outcomes = <(_CommitMember, Object?, Object?, StackTrace?)>[];
     try {
-      await pocket.db.transaction((txn) async {
-        final tx =
-            Tx.internal(pocket, txn, changes, recordEvents: recordEvents);
+      await context.db.transaction((txn) async {
+        final tx = Tx.internal(
+            context.database, txn, changes,
+            recordEvents: recordEvents);
         if (solo) {
           try {
             final result = await tx.runInZone(() => members.single.action(tx));
@@ -1072,7 +1056,7 @@ class _CommitGroup {
             // Right before the transaction ROLLBACKs: throw to simulate a
             // ROLLBACK failure (disk I/O, quota) so the caller observes a
             // failure instead of a false success.
-            pocket.testHooks?.rollbackCrashPoint?.call();
+            context.testHooks?.rollbackCrashPoint?.call();
             rethrow;
           }
         } else {
@@ -1089,7 +1073,7 @@ class _CommitGroup {
         // Right before COMMIT executes: throw to simulate a COMMIT failure
         // (OPFS quota, disk I/O, corruption) — the whole transaction rolls
         // back and every caller observes the thrown error.
-        pocket.testHooks?.commitCrashPoint?.call();
+        context.testHooks?.commitCrashPoint?.call();
       });
       // COMMIT has executed: now resolve every caller.
       for (final (m, result, err, st) in outcomes) {
@@ -1100,11 +1084,11 @@ class _CommitGroup {
         }
       }
       for (final cs in changes) {
-        pocket._tables[cs.store]?.readCache.invalidate(cs.ids);
-        pocket.changeBus.emit(cs);
+        context.tables[cs.store]?.readCache.invalidate(cs.ids);
+        context.changeBus.emit(cs);
       }
       for (final event in recordEvents) {
-        pocket.changeBus.emitEvent(event);
+        context.changeBus.emitEvent(event);
       }
     } catch (e, st) {
       // The transaction failed at BEGIN/COMMIT/rollback level and every
@@ -1125,17 +1109,17 @@ class _CommitGroup {
       }
       rethrow;
     } finally {
-      if (useFull && pocket._synchronous != 'NORMAL') {
+      if (useFull && coordinator._synchronous != 'NORMAL') {
         try {
-          await pocket.traceExecute('PRAGMA synchronous=NORMAL');
-          pocket._synchronous = 'NORMAL';
+          await context.traceExecute('PRAGMA synchronous=NORMAL');
+          coordinator._synchronous = 'NORMAL';
         } catch (_) {}
       }
-      pocket.perf.recordWriteTransaction(sw.elapsedMicroseconds);
+      context.perf.recordWriteTransaction(sw.elapsedMicroseconds);
       // WAL auto-checkpointing is disabled; opportunistically bound the WAL
       // from here (off the writer's critical path — the schedule is deferred
       // to the next event-loop turn).
-      pocket._noteWriteCommitted();
+      coordinator._noteWriteCommitted();
       // Safety net: a BEGIN-level failure (e.g. closed handle) unwinds before
       // any member ran. No caller may hang on an uncompleted completer.
       for (final member in members) {
@@ -1152,3 +1136,10 @@ class _CommitMember {
   final Future<dynamic> Function(Tx tx) action;
   final completer = Completer<dynamic>();
 }
+
+/// Transitional alias: the public name `LocalPocket` previously referred to
+/// the concrete class above (and still does on the web via a separate
+/// facade). The final public facade (Phase 5) becomes a distinct class over a
+/// private `RuntimeClient`; at that point this alias dies with the raw
+/// surface. All legacy raw/typed clients and tests keep compiling through it.
+typedef LocalPocket = KernelDatabase;

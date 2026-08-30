@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:localpocket/src/core/canonical_json.dart';
+import 'package:localpocket/src/core/database_adapter.dart';
 import 'package:localpocket/src/core/ddl_compiler.dart';
 import 'package:localpocket/src/core/errors.dart';
 import 'package:localpocket/src/core/hashing.dart';
@@ -8,6 +9,7 @@ import 'package:localpocket/src/core/local_pocket.dart';
 import 'package:localpocket/src/core/query_plan.dart';
 import 'package:localpocket/src/core/query/search_builder/search_dsl.dart';
 import 'package:localpocket/src/core/schema.dart';
+import 'package:meta/meta.dart';
 import 'package:sqlite3/common.dart';
 
 /// {@template localpocket.search_result}
@@ -44,7 +46,9 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
   /// Internal constructor used by [Collection.search].
   ///
   /// {@macro localpocket.search_builder}
-  SearchBuilder.internal(this._pocket, this._schema, this._term) {
+  SearchBuilder.internal(this._pocket, this._schema, this._term,
+      {DatabaseExecutor? executor})
+      : _executor = executor {
     if (_schema.fts == null) {
       throw FtsUnavailableError(
           'Store "${_schema.name}" does not have FTS enabled.');
@@ -61,6 +65,7 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
   SearchBuilder.compileOnly(CollectionSchema<Object?> schema, String term)
       : _pocket = null,
         _schema = schema,
+        _executor = null,
         _term = term {
     if (_schema.fts == null) {
       throw FtsUnavailableError(
@@ -70,6 +75,16 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
 
   final LocalPocket? _pocket;
   final CollectionSchema<Object?> _schema;
+
+  /// The execution context's executor. Non-null only when created from a
+  /// transaction-scoped [Collection] — the search then runs through the
+  /// TRANSACTION executor and can never fall back to the outer database
+  /// (plan §4.2 / §5.3).
+  final DatabaseExecutor? _executor;
+
+  /// Structural pin for tests: the executor this search will run through.
+  @visibleForTesting
+  DatabaseExecutor? get debugExecutor => _executor;
   final String _term;
   int? _limit;
   bool _all = false;
@@ -214,7 +229,10 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
     }
     final (sql, args) = _compile();
     try {
-      final rows = await pocket.traceQuery(sql, args);
+      final executor = _executor;
+      final rows = executor == null
+          ? await pocket.traceQuery(sql, args)
+          : await executor.rawQuery(sql, args);
       return [
         for (final r in rows)
           SearchResult(

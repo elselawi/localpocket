@@ -27,6 +27,7 @@ exported, or shipped.
 | `file_ownership_map.md` | Every current production file → destination file or deletion phase | §12 Phase 0.7, §15.3 |
 | `naming_and_policy.md` | Final naming table + manifest/callback policy | §12 Phase 0.5–0.6 |
 | `phase1_ledger.md` | §4 item-by-item disposition: named test, FIX/PIN/EXISTS/DESTINATION, owner phase | §12 Phase 1, §4 |
+| `phase2_ledger.md` | KernelDatabase rename, KernelContext, ExecutionContext, TransactionCoordinator/MutationService/ReadService extraction | §12 Phase 2 |
 | `fixtures/final_api_vm.dart` | Destination-API compile fixture (VM) | §12 Phase 0.5 |
 | `fixtures/final_api_web.dart` | Destination-API compile fixture (JavaScript/worker) | §12 Phase 0.5 |
 
