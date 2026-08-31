@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:localpocket/src/sync/status.dart';
 import 'package:localpocket/src/web/lifecycle.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:localpocket/src/web/web_sender.dart';
@@ -36,7 +37,7 @@ void main() {
       );
       sender.markClosedLocal();
       await expectLater(
-        sender.send(WireOp.syncNow),
+        sender.send(WireOp.open),
         throwsA(isA<DatabaseWorkerClosedException>()),
       );
       expect(transportCalls, 0);
@@ -56,14 +57,14 @@ void main() {
           };
         },
       );
-      await sender.send(WireOp.syncNow);
-      await sender.send(WireOp.syncNow, {'store': 'widgets'});
+      await sender.send(WireOp.open);
+      await sender.send(WireOp.open, {'store': 'widgets'});
 
       expect(received, hasLength(2));
       expect(received[0].requestId, 1);
       expect(received[1].requestId, 2);
-      expect(received[0].op, WireOp.syncNow);
-      expect(received[1].op, WireOp.syncNow);
+      expect(received[0].op, WireOp.open);
+      expect(received[1].op, WireOp.open);
       expect(received[1].args, {'store': 'widgets'});
       expect(received[0].toJson()['v'], webProtocolVersion);
       expect(received[0].toJson()['a'], const <String, Object?>{});
@@ -82,7 +83,7 @@ void main() {
         onWorkerClosed: () => closedCallback++,
       );
       await expectLater(
-        sender.send(WireOp.syncNow),
+        sender.send(WireOp.open),
         throwsA(isA<DatabaseWorkerClosedException>()
             .having((e) => e.message, 'message', contains('worker is closed'))),
       );
@@ -90,7 +91,7 @@ void main() {
       expect(closedCallback, 1);
       // A later send fails immediately (already closed).
       await expectLater(
-        sender.send(WireOp.syncNow),
+        sender.send(WireOp.open),
         throwsA(isA<DatabaseWorkerClosedException>()),
       );
       expect(closedCallback, 1,
@@ -106,7 +107,7 @@ void main() {
         transport: (_) async => throw boom,
         onWorkerClosed: () => closedCallback++,
       );
-      await expectLater(sender.send(WireOp.syncNow), throwsA(same(boom)));
+      await expectLater(sender.send(WireOp.open), throwsA(same(boom)));
       expect(sender.isClosed, isFalse);
       expect(closedCallback, 0);
     });
@@ -132,9 +133,9 @@ void main() {
       );
 
       await expectLater(
-        sender.send(WireOp.syncNow),
+        sender.send(WireOp.open),
         throwsA(isA<DatabaseWorkerTimeoutException>()
-            .having((e) => e.op, 'op', WireOp.syncNow)
+            .having((e) => e.op, 'op', WireOp.open)
             .having((e) => e.requestId, 'requestId', 1)
             .having(
                 (e) => e.timeout, 'timeout', const Duration(milliseconds: 20))),
@@ -143,7 +144,7 @@ void main() {
       expect(sender.isClosed, isFalse,
           reason: 'a timeout must not close the sender');
 
-      final result = await sender.send(WireOp.syncNow, {'store': 'widgets'});
+      final result = await sender.send(WireOp.open, {'store': 'widgets'});
       expect(result, {'ok': true});
       expect(calls, 2);
     });
@@ -160,14 +161,14 @@ void main() {
           };
         },
       );
-      final result = await sender.send(WireOp.syncNow);
+      final result = await sender.send(WireOp.open);
       expect(result, {'ok': true});
     });
 
     test('a null response is rejected as a protocol envelope error', () async {
       final sender = WebSender(transport: (_) async => null);
       await expectLater(
-        sender.send(WireOp.syncNow),
+        sender.send(WireOp.open),
         throwsA(isA<ProtocolEnvelopeException>()
             .having((e) => e.message, 'message', contains('Null response'))),
       );
@@ -178,7 +179,7 @@ void main() {
         'error', () async {
       final sender = WebSender(transport: (_) async => 'not-a-map');
       await expectLater(
-        sender.send(WireOp.syncNow),
+        sender.send(WireOp.open),
         throwsA(isA<ProtocolEnvelopeException>().having(
             (e) => e.message, 'message', contains('Malformed response'))),
       );
@@ -194,7 +195,7 @@ void main() {
         },
       );
       await expectLater(
-        sender.send(WireOp.syncNow),
+        sender.send(WireOp.open),
         throwsA(isA<ProtocolMismatchException>()),
       );
     });
@@ -213,7 +214,7 @@ void main() {
         },
       );
       await expectLater(
-        sender.send(WireOp.syncNow),
+        sender.send(WireOp.open),
         throwsA(isA<RemoteLocalPocketException>()
             .having((e) => e.code, 'code', 'StorageError')),
       );
@@ -232,7 +233,7 @@ void main() {
         },
       );
       await expectLater(
-        sender.send(WireOp.syncNow),
+        sender.send(WireOp.open),
         throwsA(isA<DatabaseWorkerClosedException>()),
       );
     });
@@ -245,7 +246,7 @@ void main() {
           'r': {'pruned': 3},
         },
       );
-      final result = await sender.send(WireOp.syncNow);
+      final result = await sender.send(WireOp.open);
       expect(result, {'pruned': 3});
     });
 
@@ -265,7 +266,7 @@ void main() {
 
   group('failWorkerStreams', () {
     test('fails the status controllers with the terminal error', () async {
-      final syncStatus = StreamController<Map<String, Object?>>.broadcast();
+      final syncStatus = StreamController<SyncStatus>.broadcast();
       final authRequired = StreamController<void>.broadcast();
 
       final syncErrors = <Object?>[];

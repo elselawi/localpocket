@@ -17,11 +17,11 @@ const int pbMaxPage = 500;
 /// Base class for typed synchronization failures.
 /// {@endtemplate}
 sealed class SyncError implements Exception {
-
   /// Creates a synchronization failure.
   ///
   /// {@macro localpocket.sync_error}
   SyncError([this.message = 'sync error']);
+
   /// Human-readable failure description.
   final String message;
   @override
@@ -42,6 +42,7 @@ class TransientNetworkError extends SyncError {
 class ServerBusyError extends SyncError {
   /// {@macro localpocket.server_busy_error}
   ServerBusyError([this.retryAfter, super.message = 'server busy']);
+
   /// Retry-After seconds, when provided by the server.
   final String? retryAfter;
 }
@@ -117,10 +118,10 @@ class BatchFailedError extends SyncError {
 /// retries instead of blindly overwriting the concurrent edit.
 /// {@endtemplate}
 class RemoteVersionConflict extends SyncError {
-
   /// {@macro localpocket.remote_version_conflict}
   RemoteVersionConflict({String message = 'version conflict', this.current})
       : super(message);
+
   /// The remote record at the version that caused the rejection, when the
   /// backend can provide it.
   final RemoteRecord? current;
@@ -134,7 +135,6 @@ class RemoteVersionConflict extends SyncError {
 /// Capabilities negotiated with a synchronization backend.
 /// {@endtemplate}
 class BackendCapabilities {
-
   /// Creates a backend capability snapshot.
   ///
   /// {@macro localpocket.backend_capabilities}
@@ -143,6 +143,7 @@ class BackendCapabilities {
     this.maxBatch = 25,
     this.maxPage = 200,
   });
+
   /// Whether transactional remote batch writes are available.
   final bool batchEnabled;
 
@@ -157,7 +158,6 @@ class BackendCapabilities {
 /// Replayable file source for streamed backend uploads.
 /// {@endtemplate}
 class StreamFileUpload {
-
   /// Creates a streamed upload description.
   ///
   /// {@macro localpocket.stream_file_upload}
@@ -166,6 +166,7 @@ class StreamFileUpload {
     required this.length,
     required this.streamFactory,
   });
+
   /// Filename sent to the remote service.
   final String filename;
 
@@ -180,7 +181,6 @@ class StreamFileUpload {
 /// A record received from or sent to a synchronization backend.
 /// {@endtemplate}
 class RemoteRecord {
-
   /// Creates a remote record value.
   ///
   /// {@macro localpocket.remote_record}
@@ -191,6 +191,7 @@ class RemoteRecord {
     required this.data,
     this.imgs = const [],
   });
+
   /// Remote record ID.
   final String id;
 
@@ -208,6 +209,7 @@ class RemoteRecord {
 
   /// Copies this record while replacing selected fields.
   RemoteRecord copyWith({String? updated, Map<String, Object?>? data}) =>
+
       /// {@macro localpocket.remote_record}
       RemoteRecord(
         id: id,
@@ -223,7 +225,6 @@ class RemoteRecord {
 /// One desired record state prepared for a backend push.
 /// {@endtemplate}
 class PushOp {
-
   /// {@macro localpocket.push_op}
   const PushOp({
     required this.opId,
@@ -233,6 +234,7 @@ class PushOp {
     this.baseUpdated,
     this.upsert = false,
   });
+
   /// Stable local operation ID — the server-side idempotency key for batch
   /// pushes (see [SyncBackend.pushBatch]).
   final String opId;
@@ -257,7 +259,6 @@ class PushOp {
 /// Result of one remote push operation.
 /// {@endtemplate}
 class PushResult {
-
   /// {@macro localpocket.push_result}
   const PushResult({
     required this.opId,
@@ -266,6 +267,7 @@ class PushResult {
     this.error,
     this.pushedJson,
   });
+
   /// Operation ID supplied in the corresponding [PushOp].
   final String opId;
 
@@ -289,10 +291,10 @@ enum BackendHintKind { changed, deleted, authChanged }
 /// Backend event hint that triggers pull or fast-path processing.
 /// {@endtemplate}
 class BackendHint {
-
   /// {@macro localpocket.backend_hint}
   const BackendHint(this.store,
       [this.kind = BackendHintKind.changed, this.record]);
+
   /// Affected collection.
   final String store;
 
@@ -502,4 +504,33 @@ abstract class SyncBackend {
 
   /// Realtime doorbell; may be an empty stream (polling fallback).
   Stream<BackendHint> hints();
+}
+
+/// The neutral credential source the runtime owns: adapters bridge it onto
+/// their own credential types. The bearer value never persists or logs.
+abstract interface class SyncTokenSource {
+  /// The current bearer value (empty when the caller has none).
+  Future<String> currentToken();
+
+  /// Identity used for sync-scoped bookkeeping.
+  String get identity;
+}
+
+/// Builds a [SyncBackend] for the runtime's sync start command and releases
+/// adapter-owned state (realtime connection, HTTP client) on stop. The
+/// adapter layer supplies the implementation; the runtime depends only on
+/// this seam, never on a concrete adapter.
+abstract interface class SyncBackendFactory {
+  /// Creates the backend and opens its realtime connection: sync start OWNS
+  /// realtime, so construction and connection are one step.
+  Future<SyncBackend> create({
+    required Uri baseUrl,
+    required SyncTokenSource tokenSource,
+    required List<String> stores,
+    required String identity,
+  });
+
+  /// Releases backend resources created by [create]. Safe to call once per
+  /// stopped engine; a no-op for backends with nothing to release.
+  Future<void> dispose(SyncBackend backend);
 }

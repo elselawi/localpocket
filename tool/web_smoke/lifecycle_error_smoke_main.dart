@@ -22,6 +22,14 @@ Future<void> main() async {
     } catch (error) {
       received = error;
     }
+    // Contract errors reconstruct as TYPED kernel errors: a StateError stays
+    // a StateError instead of the old envelope's exception wrapper.
+    if (expectedType == 'StateError') {
+      if (received is! StateError) {
+        throw StateError('Expected StateError, got $received');
+      }
+      return;
+    }
     if (received is! RemoteLocalPocketException ||
         received.code != expectedType) {
       throw StateError(

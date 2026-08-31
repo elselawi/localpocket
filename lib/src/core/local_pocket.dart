@@ -27,10 +27,12 @@ import 'write_queue.dart';
 import 'query/query_builder/query_builder.dart';
 import 'query/query_builder/predicate_tree.dart';
 import 'query/search_builder/search_builder.dart';
+import '../sync/engine.dart';
 import '../sync/op_queue.dart';
 import '../sync/outbox.dart';
 import '../sync/conflicts.dart';
 import '../sync/sync_tables.dart';
+import '../sync/sync_backend.dart' show SyncBackendFactory, SyncTokenSource;
 import '../files/blob_store.dart';
 import '../files/files_api.dart';
 import '../typed/typed.dart';
@@ -256,6 +258,7 @@ class KernelDatabase with ChangeBusAwareLP {
     this.fieldCipher,
     this.cryptoProvider,
     this.groupCommitWindow = Duration.zero,
+    this.syncBackendFactory,
   }) : perf = PerfCounters() {
     writeQueue = WriteQueue(onQueueDepthChanged: perf.queueChanged);
     kernel = KernelContext(
@@ -324,6 +327,12 @@ class KernelDatabase with ChangeBusAwareLP {
 
   /// Whether destructive migrations may create their backup copy.
   final bool destructiveBackup;
+
+  /// The adapter-supplied sync backend factory, or null when this runtime
+  /// has no sync adapter configured (sync start commands fail typed). The
+  /// kernel depends only on the seam in `sync/sync_backend.dart`, never on a
+  /// concrete adapter.
+  final SyncBackendFactory? syncBackendFactory;
 
   /// Optional test-only crash and tracing hooks.
   final TestHooks? testHooks;
@@ -420,6 +429,7 @@ class KernelDatabase with ChangeBusAwareLP {
     String? workerAssetPath,
     int Function()? now,
     Duration groupCommitWindow = Duration.zero,
+    SyncBackendFactory? syncBackendFactory,
   }) async {
     if (encrypted && platform == PlatformProfile.web) {
       throw UnsupportedError('SQLCipher is unsupported on web platform.');
@@ -452,6 +462,7 @@ class KernelDatabase with ChangeBusAwareLP {
         fieldCipher: fieldCipher,
         cryptoProvider: cryptoProvider,
         groupCommitWindow: groupCommitWindow,
+        syncBackendFactory: syncBackendFactory,
       );
       await _recordCoreMigration(db, pocket.now);
       for (final schema in stores) {

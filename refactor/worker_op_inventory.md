@@ -72,16 +72,19 @@ runtimes (§6.7).
 
 ## 6. Sync family (9 ops / events)
 
+All nine CUT OVER (2026-08-31); the old ops and the `sync_status` event are
+deleted. The kernel owns the sync engine; the runtime depends on the
+`SyncBackendFactory` seam in `sync/sync_backend.dart`, never on the adapter.
+
 | Op | Destination command → result | Notes |
 |---|---|---|
-| `sync_start` | `SyncStartRequest` → `SyncStartResult` | starts sync **and** realtime (§6.9) |
-| `sync_stop` | `SyncStopRequest` → `SyncStopResult` | |
-| `sync_now` | `SyncNowRequest` → `SyncReportResult` | full report incl. `blocked`, `discarded`, quarantine counters |
-| `sync_status` | `SyncStatusRequest` → `SyncStatusResult` (or status rides the event stream) | complete codec test required (§4.9) |
-| `sync_pause` / `sync_resume` | `SyncPauseRequest` / `SyncResumeRequest` | |
-| `sync_update_auth` | `SyncUpdateAuthRequest(token)` | dedicated typed auth bridge; token never persisted (§6.9) |
-| `sync_set_connectivity` | `SyncSetConnectivityRequest(online)` | |
-| event `auth_required` | `AuthRequiredEvent` | page calls its token provider |
+| `sync_start` | `SyncStartRequest` → `SyncStartResult` | ✔ starts sync **and** realtime (§6.9); the factory opens the connection |
+| `sync_stop` | `SyncStopRequest` → `OkResult` | ✔ adapter dispose rides the factory |
+| `sync_now` | `SyncNowRequest` → `SyncReportResult` | ✔ full report incl. `blocked`, `discarded`, dead-letter counters |
+| `sync_status` | `SyncStatusRequest` → `SyncStatusResult`; snapshots also PUSH as `SyncStatusEvent` | ✔ complete `SyncStatusData` codec |
+| `sync_pause` / `sync_resume` | `SyncPauseRequest` / `SyncResumeRequest` | ✔ |
+| `sync_update_auth` | `SyncUpdateAuthRequest(token)` | ✔ dedicated typed auth bridge; token never persisted (§ | `sync_set_connectivity` | `SyncSetConnectivityRequest(online)` | ✔ |
+| event `auth_required` | `AuthRequiredEvent` | ✔ page calls its token provider |
 
 ## 7. File family (10 ops)
 
@@ -138,6 +141,7 @@ CRUD/batch ✔ (2026-08-31) → query/search/cursors ✔ (2026-08-30) → watche
 maintenance/capabilities ✔ (2026-08-31; storage facts joined the contract and
 `capabilities` retired with the files family) → conflicts ✔ (2026-08-31;
 `worker_event` is fully retired) → files/streams ✔ (2026-08-31; upload sessions
-and download flow control are kernel-owned) → sync/auth/status/realtime →
-close/lifecycle. Old and new envelopes may coexist per family; both must call
-the same kernel services.
+and download flow control are kernel-owned) → sync/auth/status/realtime ✔
+(2026-08-31; the kernel owns the engine behind the `SyncBackendFactory` seam)
+→ close/lifecycle. Old and new envelopes may coexist per family; both must
+call the same kernel services.

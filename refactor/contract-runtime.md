@@ -924,3 +924,113 @@ upload cleanup (sessions are kernel state now, settled by the kernel close).
 - `dart test` on a single test name (`-N`) passes while the whole group fails
   when a `late final` group-local is reassigned per test — group-local mutable
   state must be nullable/cleared in `setUp`.
+
+---
+
+# Sync/auth/status cutover over the contract (2026-08-31)
+
+The whole sync surface rides the typed contract and the KERNEL owns the sync
+engine: the nine `sync_*`/auth string ops, the `sync_status` wire event, the
+`auth_required` wire event, `worker_engine_sync.dart`, `sync_status_codec.dart`,
+`typed_sync_web.dart`, and `WebSyncSurface` are all deleted. The worker now
+answers only `open`, `contract_request`, and `close`. Gates: analyze 0, suite
+`+2735 ~83`, local web gate 7/7 (asset regenerated), API snapshot PASS,
+browser matrix PASS.
+
+## Contract additions (contract/sync.dart)
+- `SyncStatusData` / `SyncReportData`: COMPLETE wire-safe mirrors of the sync
+  status/report models (state machine position, pending/conflicts/hidden/
+  blocked counters, dead-letter and discarded counts, `lastError`, and both
+  sync timestamps). `SyncStatusData.of`/`toSyncStatus` (and the report pair)
+  map at the boundary; the contract library re-exports `sync/status.dart` so
+  the models ride its public surface. Decoding is STRICT: unknown engine
+  states, non-int counters, and non-map payloads fail with `WireException`.
+- Requests: `SyncStartRequest(baseUrl, scopeId?, token?)` ->
+  `SyncStartResult(state)`, `SyncStopRequest`/`SyncPauseRequest`/
+  `SyncResumeRequest`/`SyncSetConnectivityRequest(online)`/`SyncUpdateAuthRequest(token?)`
+  -> `OkResult`, `SyncNowRequest` -> `SyncReportResult`, `SyncStatusRequest` ->
+  `SyncStatusResult` (closed-state data when sync never started — the old op's
+  shape).
+- Events: `SyncStatusEvent(status)` and `AuthRequiredEvent()`. Status is BOTH
+  request-pullable and event-pushed (recorded choice per inventory §6): the
+  page's status stream needs push semantics; the request gives a bootstrap
+  snapshot. The event's status map travels PRE-ENCODED through
+  `encodeWireValue` so the DateTime timestamps survive the JSON/JS transport.
+- `start()` semantics: sync start OWNS realtime — the backend factory opens
+  the SSE connection as part of the start command; there is no separate
+  realtime command and the page cannot open a second connection. The token
+  crosses ONLY via `SyncUpdateAuthRequest` (and the start command's optional
+  initial token) — never persisted, never logged.
+
+## Kernel ownership + the adapter seam (layering)
+- The kernel command handler now owns the engine lifecycle: `_syncStart`
+  builds the engine, subscribes its status stream into the contract event
+  stream (`SyncStatusEvent`), and forwards `onAuthRequired` as
+  `AuthRequiredEvent`; `_stopSync` (shared by `SyncStopRequest` and handler
+  close) stops the engine, releases the adapter backend, and clears the
+  token bridge. One implementation, no drift between stop and close.
+- LAYERING (R1/R3 forbid core→pocketbase): the runtime depends on the new
+  `SyncBackendFactory`/`SyncTokenSource` seam in `sync/sync_backend.dart` —
+  `create` builds the backend AND opens realtime (one step, because sync
+  start owns realtime), `dispose` releases adapter state (stopRealtime +
+  client close). The adapter supplies `PocketBaseSyncBackendFactory`
+  (pocketbase/backend.dart), which bridges the runtime-owned token source
+  onto its `TokenProvider` by reading the current value fresh on every token
+  request. `KernelDatabase.open` takes the optional factory; the web worker
+  boot (`controller.dart`) and the test harness pass it. A runtime without a
+  factory fails sync start typed (`StateError('No sync backend is configured
+  for this runtime.')`).
+- The kernel token bridge (`_KernelTokenSource`) replaces the value via the
+  auth-update command; the value is never persisted or logged.
+
+## The re-route
+- Facade verbs (`startSync/stopSync/syncNow/pauseSync/resumeSync/
+  setConnectivity/updateAuth`) send typed requests; `syncNow` returns the
+  typed `SyncReport` from `SyncReportData`. `startSync` validates baseUrl
+  first with the same `ValidationException('syncStart requires baseUrl.')`
+  the old worker threw (a null baseUrl cannot cross a typed field).
+- `_syncStatusController` is now `StreamController<SyncStatus>` and
+  `syncStatus` is `Stream<SyncStatus>` — both controllers are fed from the
+  shared contract event stream (subscribed at construction, one listener).
+  `handleWorkerEventEnvelope` is DELETED: `_handleWorkerEvent` only forwards
+  to the contract runtime. `failWorkerStreams`/`terminateWorkerStreams` keep
+  failing the (retyped) controllers on unexpected worker close.
+- The typed platform seam's web branch moved from the deleted
+  `typed_sync_web.dart` to `typed/sync_engine_remote.dart`: a
+  `PocketBaseSyncEngine` implementing `PocketBaseSyncHost` over the new
+  `RemoteSyncSurface` seam (`RuntimeClient get contractRuntime`, satisfied by
+  the facade). start → `SyncStartRequest`; auth events trigger an in-page
+  token refresh pushed back via `SyncUpdateAuthRequest`; `startRealtime` stays
+  a documented no-op. The old map-shaped `WebSyncSurface` and
+  `sync_status_codec.dart` are gone.
+
+## Worker deletions
+`worker_engine_sync.dart` (all nine handlers + `_WebTokenProvider`),
+`_stopSync` from `WorkerEngineHost`, the nine `WireOp.sync*`/`authRequired`
+constants, `sync_status_codec.dart`, `typed_sync_web.dart`,
+`web_sync_surface.dart`. The `close` handler no longer stops sync — the
+kernel close settles it (the first consolidation step toward the envelope
+loop).
+
+## Tests moved in the same commit
+- `test/contract/sync_contract_test.dart` (new): complete status/report codec
+  round-trips (every field), timestamp survival through a JSON round trip of
+  the event envelope, and malformed-payload typed failures.
+- `worker_engine_test.dart`: both sync groups drive `h.runtime` — validation
+  (typed StateError before start, closed status), the mock-server lifecycle
+  (start/status-pull/status-push/syncNow report/pause/resume/connectivity/
+  auth update/restart/stop), and the auth-required `AuthRequiredEvent` pin.
+- `sync_auth_test.dart` rewritten: contract envelope round-trips for every
+  sync request + both events + the `contract_request` carrier.
+- `typed_sync_remote_test.dart` (new, replaces `typed_sync_web_test.dart`):
+  the remote `PocketBaseSyncEngine` pins over a fake `RemoteSyncSurface`
+  (typed start command, status mapping, auth-refresh push-back, no-op
+  realtime, stop/restart).
+- `worker_event_dispatch_test.dart`: the envelope-dispatch group is deleted
+  with `handleWorkerEventEnvelope`; the committed-fact binding pins remain
+  plus a pin that the retired `sync_status`/`auth_required` envelopes are
+  unknown-op noise.
+- `web_sender_test.dart`'s `failWorkerStreams` group retyped to
+  `StreamController<SyncStatus>`; the case-160 pin drops the ten deleted ops;
+  the wire_smoke/lifecycle smokes were updated for the retyped status stream
+  and the typed (non-wrapped) `StateError`.

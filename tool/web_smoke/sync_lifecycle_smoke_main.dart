@@ -3,6 +3,7 @@ import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
 import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/sync/status.dart';
 import 'package:localpocket/src/web/facade.dart';
 
 Future<void> main() async {
@@ -25,7 +26,7 @@ Future<void> main() async {
       stores: [schema],
     );
     try {
-      final statuses = <Map<String, Object?>>[];
+      final statuses = <SyncStatus>[];
       final statusSub = pocket.syncStatus.listen(statuses.add);
       await pocket.startSync(
         baseUrl: 'http://127.0.0.1:8125',

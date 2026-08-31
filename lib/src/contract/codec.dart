@@ -89,6 +89,14 @@ abstract final class ContractCodec {
       FileGcRequest(),
       EnforceStorageCapRequest(maxBytes: 1),
       StorageStatusRequest(),
+      SyncStartRequest(baseUrl: 'http://x'),
+      SyncStopRequest(),
+      SyncNowRequest(),
+      SyncPauseRequest(),
+      SyncResumeRequest(),
+      SyncUpdateAuthRequest(token: 't'),
+      SyncSetConnectivityRequest(online: true),
+      SyncStatusRequest(),
     ],
     // Binary payloads cannot be const; the chunk sample rides outside the
     // const spread.
@@ -144,6 +152,9 @@ abstract final class ContractCodec {
     FileGcResult(cleaned: 0),
     FileCapResult(evicted: 0),
     StorageStatusResult(durable: false),
+    SyncStartResult(state: SyncEngineState.idle),
+    SyncReportResult(report: SyncReportData(pushed: 1)),
+    SyncStatusResult(status: SyncStatusData.closed),
   ];
 
   /// One representative instance per event variant.
@@ -161,6 +172,8 @@ abstract final class ContractCodec {
         changedFields: {'name'},
       ),
       WatchSnapshot(subscription: 'x', items: []),
+      SyncStatusEvent(status: SyncStatusData.closed),
+      AuthRequiredEvent(),
     ],
     FileChunkEvent(stream: 'x', chunk: Uint8List.fromList([9])),
   ];
@@ -297,6 +310,35 @@ abstract final class ContractCodec {
         return EnforceStorageCapRequest(maxBytes: maxBytes);
       case 'fileStorageStatus':
         return const StorageStatusRequest();
+      case 'syncStart':
+        final baseUrl = m['baseUrl'];
+        if (baseUrl is! String) {
+          throw WireException('Malformed syncStart payload.');
+        }
+        return SyncStartRequest(
+          baseUrl: baseUrl,
+          scopeId: m['scopeId'] is String ? m['scopeId']! as String : null,
+          token: m['token'] is String ? m['token']! as String : null,
+        );
+      case 'syncStop':
+        return const SyncStopRequest();
+      case 'syncNow':
+        return const SyncNowRequest();
+      case 'syncPause':
+        return const SyncPauseRequest();
+      case 'syncResume':
+        return const SyncResumeRequest();
+      case 'syncUpdateAuth':
+        return SyncUpdateAuthRequest(
+            token: m['token'] is String ? m['token']! as String : null);
+      case 'syncSetConnectivity':
+        final online = m['online'];
+        if (online is! bool) {
+          throw WireException('Malformed syncSetConnectivity payload.');
+        }
+        return SyncSetConnectivityRequest(online: online);
+      case 'syncStatus':
+        return const SyncStatusRequest();
       case 'get':
         return GetRequest(
           store: _store(m),
@@ -666,6 +708,26 @@ abstract final class ContractCodec {
         return FileCapResult(evicted: evicted);
       case StorageStatusResult.tagValue:
         return StorageStatusResult(durable: m['durable'] == true);
+      case SyncStartResult.tagValue:
+        final state = m['state'];
+        if (state is! String) {
+          throw WireException('Malformed syncStart payload.');
+        }
+        return SyncStartResult(state: _engineState(state));
+      case SyncReportResult.tagValue:
+        final report = m['report'];
+        if (report is! Map) {
+          throw WireException('Malformed syncReport payload.');
+        }
+        return SyncReportResult(
+            report: SyncReportData.fromJson(_stringMap(report, 'report')));
+      case SyncStatusResult.tagValue:
+        final status = m['status'];
+        if (status is! Map) {
+          throw WireException('Malformed syncStatus payload.');
+        }
+        return SyncStatusResult(
+            status: SyncStatusData.fromJson(_stringMap(status, 'status')));
       default:
         throw WireException('Unknown result tag: $tag');
     }
@@ -746,6 +808,15 @@ abstract final class ContractCodec {
           error:
               payload['error'] is String ? payload['error']! as String : null,
         );
+      case SyncStatusEvent.tagValue:
+        final status = payload['status'];
+        if (status is! Map) {
+          throw WireException('Malformed syncStatusEvent payload.');
+        }
+        return SyncStatusEvent(
+            status: SyncStatusData.fromJson(_stringMap(status, 'status')));
+      case AuthRequiredEvent.tagValue:
+        return const AuthRequiredEvent();
       default:
         throw WireException('Unknown event tag: $tag');
     }

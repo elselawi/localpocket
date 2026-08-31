@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import '../core/change_bus.dart';
-import 'conversions.dart';
+import '../sync/status.dart';
 import 'protocol.dart';
 
 /// Terminates worker-owned stream controllers upon worker termination or unexpected close.
@@ -10,7 +9,7 @@ import 'protocol.dart';
 /// every active stream controller ensuring deterministic "error then done"
 /// terminal semantics.
 void terminateWorkerStreams({
-  required StreamController<Map<String, Object?>> syncStatusController,
+  required StreamController<SyncStatus> syncStatusController,
   required StreamController<void> authRequiredController,
   Object? error,
 }) {
@@ -32,7 +31,7 @@ void terminateWorkerStreams({
 /// worker close only reports the terminal error and clears registrations, so
 /// the later graceful teardown can close each controller exactly once.
 void failWorkerStreams({
-  required StreamController<Map<String, Object?>> syncStatusController,
+  required StreamController<SyncStatus> syncStatusController,
   required StreamController<void> authRequiredController,
   Object? error,
 }) {
@@ -43,42 +42,6 @@ void failWorkerStreams({
   }
   if (!authRequiredController.isClosed) {
     authRequiredController.addError(terminalError);
-  }
-}
-
-/// Dispatches one decoded worker→client event envelope to the matching watch
-/// stream / status controller.
-///
-/// Mirrors the facade's `_handleWorkerEvent` core: `worker_event` events are
-/// wire-decoded and added to the watch's [workerStreams] controller (through
-/// its optional [workerEventDecoders] transform); `sync_status`/`auth_required`
-/// events update the status controllers. Committed facts no longer travel
-/// here — they ride the contract event stream, which the facade binds to its
-/// change bus directly. Unknown ops, version mismatches, and malformed shapes
-/// are ignored (a malformed unsolicited event must not tear down unrelated
-/// requests).
-void handleWorkerEventEnvelope(
-  Map<String, Object?> event, {
-  required StreamController<void> authRequiredController,
-  required StreamController<Map<String, Object?>> syncStatusController,
-  required ChangeBus changeBus,
-}) {
-  if (event['v'] != webProtocolVersion) {
-    return;
-  }
-  if (event['op'] == WireOp.authRequired) {
-    if (!authRequiredController.isClosed) {
-      authRequiredController.add(null);
-    }
-    return;
-  }
-  if (event['op'] == WireOp.syncStatus) {
-    final status = event['status'];
-    if (status is Map && !syncStatusController.isClosed) {
-      syncStatusController.add(
-          status.map((k, v) => MapEntry(k.toString(), decodeWireValue(v))));
-    }
-    return;
   }
 }
 

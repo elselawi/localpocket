@@ -20,16 +20,20 @@ import 'package:collection/collection.dart';
 import 'package:localpocket/src/core/change_bus.dart'
     show ChangeAction, ChangeOrigin;
 import 'package:localpocket/src/core/errors.dart';
+import 'package:localpocket/src/sync/status.dart';
 
 // The typed error hierarchy crosses the runtime boundary via the error
-// codec, so it is part of the contract's public surface.
+// codec, so it is part of the contract's public surface. The sync status
+// models back the sync status/report payloads.
 export '../core/change_bus.dart' show ChangeAction, ChangeOrigin;
 export '../core/errors.dart';
+export '../sync/status.dart';
 
 part 'wire_values.dart';
 part 'mutation.dart';
 part 'conflict.dart';
 part 'file.dart';
+part 'sync.dart';
 part 'query_spec.dart';
 part 'request.dart';
 part 'result.dart';

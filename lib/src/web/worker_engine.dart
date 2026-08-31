@@ -21,13 +21,10 @@
 /// import only this file). The engine is a [WorkerEngineHost] base (state +
 /// cross-area helpers) plus area handler mixins declared in the parts:
 ///
-/// - `worker_engine.dart` (this file) — the [WorkerEngineHost] base: the
-///   engine, cross-cutting teardown (`close`, `stopSync`), and the shared
-///   helpers that two or more areas depend on; plus [WorkerEngine], the
-///   public entry point with the envelope parse, dispatch table, and per-op
-///   routing.
+/// - `worker_engine.dart` (this file) — the [WorkerEngineHost] base plus
+///   [WorkerEngine], the public entry point with the envelope parse, dispatch
+///   table, and per-op routing.
 /// - `worker_engine_crud.dart` — store registration (`open`).
-/// - `worker_engine_sync.dart` — sync engine lifecycle + auth.
 ///
 /// Reads, writes, and transaction sessions have no dedicated handlers:
 /// they travel as typed contract requests and the kernel command handler
@@ -53,16 +50,10 @@ import '../core/errors.dart';
 import '../core/local_pocket.dart';
 import '../core/schema_manifest.dart';
 import '../core/schema.dart';
-import '../pocketbase/auth.dart';
-import '../pocketbase/backend.dart';
-import '../sync/engine.dart';
-import '../sync/status.dart';
 import 'protocol.dart';
-import 'sync_status_codec.dart';
 import 'wire_args.dart';
 
 part 'worker_engine_crud.dart';
-part 'worker_engine_sync.dart';
 
 /// Sink for worker→client events.
 ///
@@ -190,10 +181,6 @@ abstract class WorkerEngineHost {
   /// The LocalPocket engine served by this worker.
   final LocalPocket pocket;
 
-  SyncEngine? _syncEngine;
-  _WebTokenProvider? _tokenProvider;
-  StreamSubscription<SyncStatus>? _syncStatusSubscription;
-  SyncStatus? _lastSyncStatus;
   final Set<WorkerEventSink> _connections = {};
   StreamSubscription<contract.Event>? _contractEventSubscription;
 
@@ -207,9 +194,8 @@ abstract class WorkerEngineHost {
   /// into every area's state; keeping it in one place guarantees a single
   /// shutdown order that `close` and worker teardown can rely on.
   Future<Object?> _handleClose(WorkerEventSink sink, WebRequest req) async {
-    await _stopSync();
-    // Interactive transaction sessions are kernel-owned: closing the kernel
-    // settles them.
+    // The kernel owns every feature surface now (sync, upload sessions,
+    // watches, transactions): closing it settles them all.
     await _contractEventSubscription?.cancel();
     _contractEventSubscription = null;
     _connections.clear();
@@ -243,27 +229,6 @@ abstract class WorkerEngineHost {
       return {'error': contract.encodeError(e)};
     }
   }
-
-  /// Stops the active sync engine and its realtime connection, clearing the
-  /// token bridge and cached status. Shared by `sync_start` (restart), every
-  /// `sync_stop`, and `close` — one implementation, so sync teardown cannot
-  /// drift between the sync handlers and shutdown.
-  Future<void> _stopSync() async {
-    final engine = _syncEngine;
-    _syncEngine = null;
-    await _syncStatusSubscription?.cancel();
-    _syncStatusSubscription = null;
-    if (engine != null) {
-      final backend = engine.backend;
-      await engine.stop();
-      if (backend is PocketBaseRawBackend) {
-        await backend.stopRealtime();
-        backend.close();
-      }
-    }
-    _tokenProvider = null;
-    _lastSyncStatus = null;
-  }
 }
 
 /// {@template localpocket.worker_engine}
@@ -277,8 +242,7 @@ abstract class WorkerEngineHost {
 /// (`_handlers`), which need the complete method set assembled from every
 /// mixin.
 /// {@endtemplate}
-final class WorkerEngine extends WorkerEngineHost
-    with WorkerCrudHandlers, WorkerSyncHandlers {
+final class WorkerEngine extends WorkerEngineHost with WorkerCrudHandlers {
   /// Creates a worker request-execution engine.
   ///
   /// {@macro localpocket.worker_engine}
@@ -348,14 +312,6 @@ final class WorkerEngine extends WorkerEngineHost
   late final Map<String, Future<Object?> Function(WorkerEventSink, WebRequest)>
       _handlers = {
     WireOp.open: _handleOpen,
-    WireOp.syncStart: _handleSyncStart,
-    WireOp.syncStop: _handleSyncStop,
-    WireOp.syncNow: _handleSyncNow,
-    WireOp.syncPause: _handleSyncPause,
-    WireOp.syncResume: _handleSyncResume,
-    WireOp.syncSetConnectivity: _handleSyncSetConnectivity,
-    WireOp.syncUpdateAuth: _handleSyncUpdateAuth,
-    WireOp.syncStatus: _handleSyncStatus,
     WireOp.contractRequest: _handleContract,
     WireOp.close: _handleClose,
   };

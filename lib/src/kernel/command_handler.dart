@@ -12,6 +12,23 @@ class _RollbackSignal implements Exception {
   const _RollbackSignal();
 }
 
+/// Minimal runtime-owned token source. The caller remains responsible for
+/// refresh; the current bearer value is replaced through the auth-update
+/// command and is never persisted or logged. The adapter's factory bridges
+/// this onto its own credential type.
+final class _KernelTokenSource implements SyncTokenSource {
+  _KernelTokenSource(this._value);
+  String? _value;
+
+  void replace(String? token) => _value = token;
+
+  @override
+  Future<String> currentToken() async => _value ?? '';
+
+  @override
+  String get identity => 'kernel';
+}
+
 /// A held-open interactive transaction.
 class _TxSession {
   _TxSession(this.id, this.readOnly);
@@ -68,6 +85,10 @@ class KernelCommandHandler implements CommandHandler {
   final _fileUploads = FileUploadSessionRegistry();
   Timer? _uploadExpiryTimer;
   final _fileDownloads = <String, _FileDownload>{};
+  SyncEngine? _syncEngine;
+  _KernelTokenSource? _syncTokenSource;
+  StreamSubscription<SyncStatus>? _syncStatusSubscription;
+  SyncStatus? _lastSyncStatus;
   int _counter = 0;
 
   @override
@@ -291,6 +312,25 @@ class KernelCommandHandler implements CommandHandler {
             .then((evicted) => FileCapResult(evicted: evicted)),
         StorageStatusRequest() => context.database.files.isBlobStorageDurable
             .then((durable) => StorageStatusResult(durable: durable)),
+        SyncStartRequest(
+          :final baseUrl,
+          :final scopeId,
+          :final token,
+        ) =>
+          _syncStart(baseUrl, scopeId, token),
+        SyncStopRequest() => _stopSync().then((_) => const OkResult()),
+        SyncNowRequest() => _syncNow(),
+        SyncPauseRequest() =>
+          _syncLifecycle(() => _requireSyncEngine().pause()),
+        SyncResumeRequest() =>
+          _syncLifecycle(() => _requireSyncEngine().resume()),
+        SyncUpdateAuthRequest(:final token) => _syncUpdateAuth(token),
+        SyncSetConnectivityRequest(:final online) =>
+          _syncLifecycle(() => _requireSyncEngine().setConnectivity(online)),
+        SyncStatusRequest() => Future.value(SyncStatusResult(
+            status: _lastSyncStatus == null
+                ? SyncStatusData.closed
+                : SyncStatusData.of(_lastSyncStatus!))),
       };
 
   // -- lifecycle ------------------------------------------------------------
@@ -861,6 +901,94 @@ class KernelCommandHandler implements CommandHandler {
         lastError: ref.lastError,
       );
 
+  // -- sync -------------------------------------------------------------------
+
+  /// Starts the sync engine and its realtime connection: sync start OWNS
+  /// realtime, there is no separate realtime command. A running engine is
+  /// stopped first, so a restart cannot double-drive the outbox. The backend
+  /// is built through the adapter factory the runtime was constructed with —
+  /// the kernel never names a concrete adapter.
+  Future<Result> _syncStart(
+    String baseUrl,
+    String? scopeId,
+    String? token,
+  ) async {
+    if (baseUrl.isEmpty) {
+      throw ValidationException('syncStart requires baseUrl.');
+    }
+    final factory = context.database.syncBackendFactory;
+    if (factory == null) {
+      throw StateError('No sync backend is configured for this runtime.');
+    }
+    await _stopSync();
+    final identity = scopeId ?? 'web-sync';
+    final tokenSource = _KernelTokenSource(token);
+    final backend = await factory.create(
+      baseUrl: Uri.parse(baseUrl),
+      tokenSource: tokenSource,
+      stores: context.database.storeNames.toList(),
+      identity: identity,
+    );
+    final engine = SyncEngine(
+      pocket: context.database,
+      backend: backend,
+      onAuthRequired: () {
+        _events.add(const AuthRequiredEvent());
+      },
+    );
+    _syncTokenSource = tokenSource;
+    _syncEngine = engine;
+    _syncStatusSubscription = engine.status.listen((status) {
+      _lastSyncStatus = status;
+      _events.add(SyncStatusEvent(status: SyncStatusData.of(status)));
+    });
+    await engine.start();
+    return SyncStartResult(state: engine.state);
+  }
+
+  SyncEngine _requireSyncEngine() =>
+      _syncEngine ?? (throw StateError('Sync is not started.'));
+
+  Future<Result> _syncNow() async {
+    final report = await _requireSyncEngine().syncNow();
+    return SyncReportResult(report: SyncReportData.of(report));
+  }
+
+  Future<Result> _syncLifecycle(Future<void> Function() action) async {
+    await action();
+    return const OkResult();
+  }
+
+  Future<Result> _syncUpdateAuth(String? token) async {
+    final tokenSource = _syncTokenSource;
+    final engine = _requireSyncEngine();
+    if (tokenSource == null) {
+      throw StateError('Sync is not started.');
+    }
+    tokenSource.replace(token);
+    await engine.markAuthValid();
+    return const OkResult();
+  }
+
+  /// Stops the active sync engine, releasing adapter state through the
+  /// factory that created the backend, and clearing the token bridge and
+  /// cached status. Shared by `syncStop` and handler close — one
+  /// implementation, so sync teardown cannot drift between the command and
+  /// shutdown.
+  Future<void> _stopSync() async {
+    final engine = _syncEngine;
+    _syncEngine = null;
+    await _syncStatusSubscription?.cancel();
+    _syncStatusSubscription = null;
+    if (engine != null) {
+      final backend = engine.backend;
+      await engine.stop();
+      await context.database.syncBackendFactory?.dispose(backend);
+    }
+    _syncTokenSource = null;
+    _lastSyncStatus = null;
+  }
+
   // -- conflicts ---------------------------------------------------------------
 
   ConflictData _conflictData(ConflictRecord c) => ConflictData(
@@ -932,6 +1060,7 @@ class KernelCommandHandler implements CommandHandler {
 
   @override
   Future<void> close() async {
+    await _stopSync();
     for (final sub in _watches.values) {
       await sub.cancel();
     }

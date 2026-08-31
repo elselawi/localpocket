@@ -11,7 +11,6 @@ import 'package:localpocket/src/web/facade/web_conflicts.dart';
 import 'package:localpocket/src/web/facade/web_contract_events.dart';
 import 'package:localpocket/src/web/facade/web_files.dart';
 import 'package:localpocket/src/web/facade/web_storage_capabilities.dart';
-import 'package:localpocket/src/web/facade/web_sync_surface.dart';
 import 'package:localpocket/src/web/facade/web_transactions.dart';
 import 'package:sqlite3_web/sqlite3_web.dart';
 import 'package:web/web.dart' as web;
@@ -31,19 +30,18 @@ import '../typed/query_surface.dart';
 import '../typed/typed.dart';
 import '../typed/typed_collection.dart' show TypedStoreSurface;
 import '../typed/typed_search.dart' show TypedSearchSurface;
+import '../typed/sync_engine_remote.dart' show RemoteSyncSurface;
 import 'assets.dart';
 import 'cipher_bridge.dart';
 import 'connector.dart';
-import 'conversions.dart';
 import 'lifecycle.dart';
 import 'protocol.dart';
-import 'sync_status_codec.dart';
 import 'web_sender.dart';
 
 /// Web facade for a worker-owned LocalPocket database on the browser.
 class LocalPocket
     with ChangeBusAwareLP
-    implements WebFacadeHost, WebSyncSurface {
+    implements WebFacadeHost, RemoteSyncSurface {
   /// Creates a web facade around an already connected worker database.
   LocalPocket._({
     required this.path,
@@ -70,9 +68,21 @@ class LocalPocket
     );
     // The shared contract runtime exists for the facade's whole life: every
     // committed fact flows through its event stream, so the record-event
-    // streams are bound here too. One committed envelope feeds them all.
+    // streams are bound here too, and the sync status/auth notifications are
+    // fed from the same stream. One committed envelope feeds them all.
     _contractRuntime = _buildContractRuntime();
     bindRecordEventStream(runtime: _contractRuntime!, changeBus: changeBus);
+    _contractRuntime!.events.listen((event) {
+      if (event is contract.SyncStatusEvent) {
+        if (!_syncStatusController.isClosed) {
+          _syncStatusController.add(event.status.toSyncStatus());
+        }
+      } else if (event is contract.AuthRequiredEvent) {
+        if (!_authRequiredController.isClosed) {
+          _authRequiredController.add(null);
+        }
+      }
+    });
   }
 
   /// The shared contract runtime over the worker transport.
@@ -114,8 +124,8 @@ class LocalPocket
   @override
   final WatchSubscriptionTracker watchTracker = WatchSubscriptionTracker();
 
-  final StreamController<Map<String, Object?>> _syncStatusController =
-      StreamController<Map<String, Object?>>.broadcast();
+  final StreamController<SyncStatus> _syncStatusController =
+      StreamController<SyncStatus>.broadcast();
   final StreamController<void> _authRequiredController =
       StreamController<void>.broadcast();
 
@@ -356,17 +366,10 @@ class LocalPocket
       if (value is! Map) return;
       final event = value.map((k, v) => MapEntry(k.toString(), v));
       _contractRuntime?.handleWorkerEvent(event);
-      handleWorkerEventEnvelope(
-        event,
-        authRequiredController: _authRequiredController,
-        syncStatusController: _syncStatusController,
-        changeBus: changeBus,
-      );
     } catch (_) {
       // A malformed unsolicited event must not tear down unrelated requests.
-      // Watch streams ride the contract runtime, which guards its own decode
-      // path; the status controllers fail through `_failWorkerStreams` when
-      // the worker itself goes away.
+      // The contract runtime guards its own decode path; the status/auth
+      // streams fail through `_failWorkerStreams` when the worker goes away.
     }
   }
 
@@ -487,66 +490,58 @@ class LocalPocket
 
   /// Starts the synchronization engine in the worker with the given credentials.
   ///
-  /// Note: Supported configuration is one tab running sync.
-  @override
+  /// Sync start owns realtime: the engine opens its SSE connection as part of
+  /// the start command. Note: Supported configuration is one tab running sync.
   Future<void> startSync(
       {String? baseUrl, String? scopeId, String? token}) async {
-    await send(WireOp.syncStart, {
-      if (baseUrl != null) 'baseUrl': baseUrl,
-      if (scopeId != null) 'scopeId': scopeId,
-      if (token != null) 'token': token,
-    });
+    if (baseUrl == null || baseUrl.isEmpty) {
+      throw ValidationException('syncStart requires baseUrl.');
+    }
+    await contractRuntime.send(contract.SyncStartRequest(
+      baseUrl: baseUrl,
+      scopeId: scopeId,
+      token: token,
+    ));
   }
 
   /// Stops the synchronization engine in the worker.
-  @override
   Future<void> stopSync() async {
-    await send(WireOp.syncStop);
+    await contractRuntime.send(const contract.SyncStopRequest());
   }
 
   /// Triggers a manual synchronization cycle immediately and returns the
-  /// decoded cycle report from the worker.
-  @override
+  /// typed cycle report from the worker-owned engine.
   Future<SyncReport> syncNow() async {
-    final raw = await send(WireOp.syncNow);
-    final decoded = decodeWireValue(raw);
-    return decodeSyncReport(
-      decoded is Map
-          ? decoded.map((k, v) => MapEntry(k.toString(), v))
-          : const {},
-    );
+    final res = await contractRuntime.send(const contract.SyncNowRequest());
+    return res.report.toSyncReport();
   }
 
   /// Updates the authentication token on the worker after a refresh or login.
-  @override
   Future<void> updateAuth(String? token) async {
-    await send(WireOp.syncUpdateAuth, {'token': token});
+    await contractRuntime.send(contract.SyncUpdateAuthRequest(token: token));
   }
 
   /// Pauses periodic and event-driven sync cycles.
-  @override
   Future<void> pauseSync() async {
-    await send(WireOp.syncPause);
+    await contractRuntime.send(const contract.SyncPauseRequest());
   }
 
   /// Resumes synchronization cycles.
-  @override
   Future<void> resumeSync() async {
-    await send(WireOp.syncResume);
+    await contractRuntime.send(const contract.SyncResumeRequest());
   }
 
   /// Informs the sync engine of online/offline connectivity changes.
-  @override
   Future<void> setConnectivity(bool online) async {
-    await send(WireOp.syncSetConnectivity, {'online': online});
+    await contractRuntime
+        .send(contract.SyncSetConnectivityRequest(online: online));
   }
 
-  /// Worker-owned synchronization status snapshots.
-  @override
-  Stream<Map<String, Object?>> get syncStatus => _syncStatusController.stream;
+  /// Worker-owned synchronization status snapshots, pushed as contract
+  /// events from the engine's status stream.
+  Stream<SyncStatus> get syncStatus => _syncStatusController.stream;
 
   /// Emits when the worker cannot refresh a rejected sync token.
-  @override
   Stream<void> get authRequired => _authRequiredController.stream;
 
   /// Closes the worker connection and releases browser resources.

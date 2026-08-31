@@ -16,6 +16,7 @@ import '../core/errors.dart';
 import '../core/local_pocket.dart';
 import '../core/schema.dart';
 import '../files/web_blob_store.dart';
+import '../pocketbase/backend.dart' show PocketBaseSyncBackendFactory;
 import 'cipher_bridge.dart';
 import 'open_options.dart';
 import 'protocol.dart';
@@ -96,7 +97,9 @@ final class LocalPocketDatabaseController extends DatabaseController {
       // when OPFS is unavailable.
       final blobStore = WebBlobStore();
 
-      // Boot the LocalPocket engine around this DirectSqliteDatabase.
+      // Boot the LocalPocket engine around this DirectSqliteDatabase. The
+      // PocketBase backend factory lets the kernel's sync start command build
+      // its engine backend without the runtime importing the adapter.
       final pocket = await LocalPocket.open(
         path: path,
         database: db,
@@ -106,6 +109,7 @@ final class LocalPocketDatabaseController extends DatabaseController {
         fieldCipher: fieldCipher,
         maxDocBytes: maxDocBytes,
         destructiveBackup: destructiveBackup,
+        syncBackendFactory: const PocketBaseSyncBackendFactory(),
       );
       handedToPocket = true;
 

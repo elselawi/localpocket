@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/src/contract/contract.dart' as contract;
+import 'package:localpocket/src/pocketbase/backend.dart'
+    show PocketBaseSyncBackendFactory;
 import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/protocol.dart';
@@ -87,6 +89,7 @@ class WorkerHarness {
       now: now,
       testHooks: testHooks,
       maxDocBytes: maxDocBytes,
+      syncBackendFactory: const PocketBaseSyncBackendFactory(),
     );
     final engine = WorkerEngine(
       rawDatabase: rawDb,

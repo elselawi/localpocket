@@ -391,3 +391,57 @@ final class PocketBaseRawBackend extends PBBackend {
   @override
   List<String> get storeNames => stores;
 }
+
+/// The runtime-facing sync backend factory: the kernel's sync start command
+/// builds its engine backend through this seam, and releases adapter state
+/// (the realtime connection and HTTP client) through [dispose]. This keeps
+/// the adapter layer out of the runtime's import graph (R1/R3).
+class PocketBaseSyncBackendFactory implements SyncBackendFactory {
+  /// Creates the PocketBase backend factory.
+  const PocketBaseSyncBackendFactory();
+
+  @override
+  Future<SyncBackend> create({
+    required Uri baseUrl,
+    required SyncTokenSource tokenSource,
+    required List<String> stores,
+    required String identity,
+  }) async {
+    final backend = PocketBaseRawBackend(
+      baseUrl: baseUrl,
+      tokenProvider: _SourceTokenProvider(tokenSource),
+      stores: stores,
+      identity: identity,
+    );
+    // Sync start owns realtime: the SSE connection opens with the backend.
+    await backend.startRealtime();
+    return backend;
+  }
+
+  @override
+  Future<void> dispose(SyncBackend backend) async {
+    if (backend is PocketBaseRawBackend) {
+      await backend.stopRealtime();
+      backend.close();
+    }
+  }
+}
+
+/// Bridges the runtime-owned token source onto the adapter's
+/// [TokenProvider]: the current value is always read fresh, so an auth
+/// update crosses without rebuilding the backend.
+final class _SourceTokenProvider implements TokenProvider {
+  _SourceTokenProvider(this._source);
+
+  final SyncTokenSource _source;
+
+  @override
+  Future<Token> currentToken() async => Token(await _source.currentToken());
+
+  @override
+  Future<Token> refreshToken(Token current) async =>
+      Token(await _source.currentToken());
+
+  @override
+  String get identity => _source.identity;
+}

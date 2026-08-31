@@ -652,37 +652,37 @@ void main() {
       });
     });
 
-    test('sync_start without baseUrl → ValidationException (E15)', () async {
-      final err = await h.sendError(h.req(WireOp.syncStart, args: {}));
-      expect(err.details?['type'], 'ValidationException');
-      expect(err.message, contains('baseUrl'));
-
-      final err2 =
-          await h.sendError(h.req(WireOp.syncStart, args: {'baseUrl': ''}));
-      expect(err2.details?['type'], 'ValidationException');
+    test('sync start without baseUrl → ValidationException (E15)', () async {
+      await expectLater(
+        h.runtime.send(const contract.SyncStartRequest(baseUrl: '')),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.message, 'message', contains('baseUrl'))),
+      );
     });
 
     test('sync ops before start → StateError (E15)', () async {
-      for (final op in [
-        WireOp.syncNow,
-        WireOp.syncPause,
-        WireOp.syncResume,
-        WireOp.syncUpdateAuth,
+      for (final request in <contract.Request>[
+        const contract.SyncNowRequest(),
+        const contract.SyncPauseRequest(),
+        const contract.SyncResumeRequest(),
+        const contract.SyncUpdateAuthRequest(token: 'x'),
+        const contract.SyncSetConnectivityRequest(online: true),
       ]) {
-        final err = await h.sendError(h.req(op, args: {'token': 'x'}));
-        expect(err.details?['type'], 'StateError', reason: op);
-        expect(err.message, contains('Sync is not started'));
+        await expectLater(
+          h.runtime.send(request),
+          throwsA(isA<StateError>().having(
+              (e) => e.message, 'message', contains('Sync is not started'))),
+          reason: '${request.tag} before start fails typed',
+        );
       }
-
-      final connErr = await h
-          .sendError(h.req(WireOp.syncSetConnectivity, args: {'online': true}));
-      expect(connErr.details?['type'], 'StateError');
     });
 
-    test('sync_status before start reports closed', () async {
-      final result =
-          (await h.sendOk(h.req(WireOp.syncStatus)))! as Map<String, Object?>;
-      expect(result['state'], 'closed');
+    test('sync status before start reports closed', () async {
+      final status =
+          (await h.runtime.send(const contract.SyncStatusRequest())).status;
+      expect(status.state, contract.SyncEngineState.closed);
+      expect(status.pending, 0);
+      expect(status.blocked, 0);
     });
   });
 
@@ -699,99 +699,99 @@ void main() {
       addTearDown(server.stop);
     });
 
-    test('sync_start builds a live engine; every lifecycle op round-trips',
+    List<contract.SyncStatusEvent> statusEvents() => [
+          for (final e in h.sink.byOp(WireOp.contractEvent))
+            if (contract.ContractCodec.decodeEvent(
+                    (e['event']! as Map).cast<String, Object?>())
+                case final contract.SyncStatusEvent s)
+              s,
+        ];
+
+    test('sync start builds a live engine; every lifecycle op round-trips',
         () async {
-      final start = (await h.sendOk(h.req(WireOp.syncStart, args: {
-        'baseUrl': server.baseUrl.toString(),
-        'scopeId': 'worker-test',
-        'token': 'jwt',
-      })))! as Map<String, Object?>;
-      expect(start['ok'], isTrue);
-      expect(start['state'], isA<String>());
+      final start = await h.runtime.send(contract.SyncStartRequest(
+        baseUrl: server.baseUrl.toString(),
+        scopeId: 'worker-test',
+        token: 'jwt',
+      ));
+      expect(start.state, isA<contract.SyncEngineState>());
 
-      // Status reflects the running engine and emits over the sink too.
+      // Status reflects the running engine and is pushed as contract events.
       final status =
-          (await h.sendOk(h.req(WireOp.syncStatus)))! as Map<String, Object?>;
-      expect(status['state'], isA<String>());
-      expect(status['pending'], isA<int>());
-      expect(status['conflicts'], isA<int>());
-      expect(status['hidden'], isA<int>());
-      expect(status['blocked'], isA<int>());
-      expect(h.sink.byOp(WireOp.syncStatus), isNotEmpty,
-          reason: 'the engine forwards status events to the client');
+          (await h.runtime.send(const contract.SyncStatusRequest())).status;
+      expect(status.pending, isA<int>());
+      expect(status.conflicts, isA<int>());
+      expect(status.hidden, isA<int>());
+      expect(status.blocked, isA<int>());
+      await waitUntil(() async => statusEvents().isNotEmpty);
+      expect(statusEvents().last.status.state, isA<contract.SyncEngineState>(),
+          reason: 'the engine pushes status events over the contract stream');
 
-      // syncNow returns an encoded report.
+      // syncNow returns a complete report.
       final report =
-          (await h.sendOk(h.req(WireOp.syncNow)))! as Map<String, Object?>;
-      expect(report['pushed'], isA<int>());
-      expect(report['deadLettered'], isA<int>());
-      expect(report['discarded'], isA<int>());
-      expect(report['hadError'], isA<bool>());
+          (await h.runtime.send(const contract.SyncNowRequest())).report;
+      expect(report.pushed, isA<int>());
+      expect(report.deadLettered, isA<int>());
+      expect(report.discarded, isA<int>());
+      expect(report.hadError, isA<bool>());
 
       // Pause/resume/connectivity/auth all succeed once started.
-      Future<Map<String, Object?>> okReply(String op,
-              {Map<String, Object?> args = const {}}) async =>
-          (await h.sendOk(h.req(op, args: args)))! as Map<String, Object?>;
+      Future<void> ok(contract.Request request) => h.runtime.send(request);
 
-      expect((await okReply(WireOp.syncPause))['ok'], isTrue);
-      expect((await okReply(WireOp.syncResume))['ok'], isTrue);
-      expect(
-          (await okReply(WireOp.syncSetConnectivity,
-              args: {'online': false}))['ok'],
-          isTrue);
-      expect(
-          (await okReply(WireOp.syncSetConnectivity,
-              args: {'online': true}))['ok'],
-          isTrue);
-      expect(
-          (await okReply(WireOp.syncUpdateAuth, args: {
-            'token': 'refreshed-jwt',
-          }))['ok'],
-          isTrue);
+      await ok(const contract.SyncPauseRequest());
+      await ok(const contract.SyncResumeRequest());
+      await ok(const contract.SyncSetConnectivityRequest(online: false));
+      await ok(const contract.SyncSetConnectivityRequest(online: true));
+      await ok(const contract.SyncUpdateAuthRequest(token: 'refreshed-jwt'));
 
       // A second syncStart reuses the same engine path (restart).
-      final restart = (await h.sendOk(h.req(WireOp.syncStart, args: {
-        'baseUrl': server.baseUrl.toString(),
-        'scopeId': 'worker-test',
-      })))! as Map<String, Object?>;
-      expect(restart['ok'], isTrue);
+      final restart = await h.runtime.send(contract.SyncStartRequest(
+        baseUrl: server.baseUrl.toString(),
+        scopeId: 'worker-test',
+      ));
+      expect(restart.state, isA<contract.SyncEngineState>());
 
       // syncStop tears the engine down; later ops fail typed again.
-      expect((await okReply(WireOp.syncStop))['ok'], isTrue);
-      final err = await h.sendError(h.req(WireOp.syncNow));
-      expect(err.details?['type'], 'StateError');
+      await ok(const contract.SyncStopRequest());
+      await expectLater(
+        h.runtime.send(const contract.SyncNowRequest()),
+        throwsA(isA<StateError>()),
+      );
     });
 
-    test('an auth-required server emits authRequired and parks the engine',
+    test('an auth-required server emits AuthRequiredEvent and parks the engine',
         () async {
       server.authRequired = true;
       server.validToken = 'expected-token';
 
-      await h.sendOk(h.req(WireOp.syncStart, args: {
-        'baseUrl': server.baseUrl.toString(),
-        'scopeId': 'auth-test',
-        'token': 'wrong-token',
-      }));
+      await h.runtime.send(contract.SyncStartRequest(
+        baseUrl: server.baseUrl.toString(),
+        scopeId: 'auth-test',
+        token: 'wrong-token',
+      ));
 
-      // The engine's onAuthRequired callback forwards a worker event to the
-      // client (the token refresh retry is exercised on the 401 path too).
-      await waitUntil(() async => h.sink.byOp(WireOp.authRequired).isNotEmpty);
-      final authEvents = h.sink.byOp(WireOp.authRequired);
-      expect(authEvents.last['op'], WireOp.authRequired);
-      expect(authEvents.last['v'], webProtocolVersion);
+      // The engine's onAuthRequired callback emits the contract event (the
+      // token refresh retry is exercised on the 401 path too).
+      List<contract.Event> authEvents() => [
+            for (final e in h.sink.byOp(WireOp.contractEvent))
+              contract.ContractCodec.decodeEvent(
+                  (e['event']! as Map).cast<String, Object?>())
+          ].where((e) => e is contract.AuthRequiredEvent).toList();
+      await waitUntil(() async => authEvents().isNotEmpty);
+      expect(authEvents().last, isA<contract.AuthRequiredEvent>());
     });
 
-    test('sync_start without a token still builds a working engine', () async {
-      final start = (await h.sendOk(h.req(WireOp.syncStart, args: {
-        'baseUrl': server.baseUrl.toString(),
-        'scopeId': 'no-token',
-      })))! as Map<String, Object?>;
-      expect(start['ok'], isTrue);
-      // The empty token is materialized by the worker-owned provider.
-      expect((await h.sendOk(h.req(WireOp.syncStatus)))!, isA<Map>());
-      final stop =
-          (await h.sendOk(h.req(WireOp.syncStop)))! as Map<String, Object?>;
-      expect(stop['ok'], isTrue);
+    test('sync start without a token still builds a working engine', () async {
+      final start = await h.runtime.send(contract.SyncStartRequest(
+        baseUrl: server.baseUrl.toString(),
+        scopeId: 'no-token',
+      ));
+      expect(start.state, isA<contract.SyncEngineState>());
+      // The empty token is materialized by the kernel-owned provider.
+      final status =
+          (await h.runtime.send(const contract.SyncStatusRequest())).status;
+      expect(status.state, isA<contract.SyncEngineState>());
+      await h.runtime.send(const contract.SyncStopRequest());
     });
   });
 

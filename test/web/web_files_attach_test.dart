@@ -47,8 +47,9 @@ void main() {
   test('byteArray is uploaded via a bounded session with the defaults',
       () async {
     respondWith((request) => switch (request) {
-          contract.FileBeginUploadRequest() => const contract
-              .FileUploadSessionResult(session: 'u1', maxChunkBytes: 2),
+          contract.FileBeginUploadRequest() =>
+            const contract.FileUploadSessionResult(
+                session: 'u1', maxChunkBytes: 2),
           contract.FileChunkRequest() => const contract.OkResult(),
           contract.FileFinishRequest() => contract.FileRefResult(_sampleRef),
           _ => const contract.OkResult(),
@@ -81,8 +82,9 @@ void main() {
 
   test('a bytes stream is fully collected before being uploaded', () async {
     respondWith((request) => switch (request) {
-          contract.FileBeginUploadRequest() => const contract
-              .FileUploadSessionResult(session: 'u1', maxChunkBytes: 2),
+          contract.FileBeginUploadRequest() =>
+            const contract.FileUploadSessionResult(
+                session: 'u1', maxChunkBytes: 2),
           contract.FileChunkRequest() => const contract.OkResult(),
           contract.FileFinishRequest() => contract.FileRefResult(_sampleRef),
           _ => const contract.OkResult(),
@@ -103,8 +105,7 @@ void main() {
       field: 'imgs',
     );
 
-    final begin =
-        _sentRequests(fake).first as contract.FileBeginUploadRequest;
+    final begin = _sentRequests(fake).first as contract.FileBeginUploadRequest;
     expect(begin.size, 5);
     expect(begin.name, 'photo.png');
     expect(begin.expectedSha256, 'deadbeef');
@@ -124,8 +125,9 @@ void main() {
   test('byteArray takes precedence over a bytes stream when both are given',
       () async {
     respondWith((request) => switch (request) {
-          contract.FileBeginUploadRequest() => const contract
-              .FileUploadSessionResult(session: 'u1', maxChunkBytes: 8),
+          contract.FileBeginUploadRequest() =>
+            const contract.FileUploadSessionResult(
+                session: 'u1', maxChunkBytes: 8),
           contract.FileChunkRequest() => const contract.OkResult(),
           contract.FileFinishRequest() => contract.FileRefResult(_sampleRef),
           _ => const contract.OkResult(),
@@ -144,8 +146,9 @@ void main() {
 
   test('attach forwards allowVolatileBlobs on the typed request', () async {
     respondWith((request) => switch (request) {
-          contract.FileBeginUploadRequest() => const contract
-              .FileUploadSessionResult(session: 'u1', maxChunkBytes: 8),
+          contract.FileBeginUploadRequest() =>
+            const contract.FileUploadSessionResult(
+                session: 'u1', maxChunkBytes: 8),
           contract.FileChunkRequest() => const contract.OkResult(),
           contract.FileFinishRequest() => contract.FileRefResult(_sampleRef),
           _ => const contract.OkResult(),
@@ -239,8 +242,7 @@ void main() {
 
     fake.sent.clear();
     await files.list(store: 'widgets', recordId: 'rec-list', field: 'docs');
-    expect(
-        (_sentRequests(fake).single as contract.FilesListRequest).field,
+    expect((_sentRequests(fake).single as contract.FilesListRequest).field,
         'docs');
   });
 
@@ -305,8 +307,8 @@ void main() {
 
     await expectLater(
       files.open(store: 'widgets', recordId: 'rec-err'),
-      throwsA(isA<StateError>().having(
-          (e) => e.message, 'message', contains('blob vanished'))),
+      throwsA(isA<StateError>()
+          .having((e) => e.message, 'message', contains('blob vanished'))),
     );
   });
 

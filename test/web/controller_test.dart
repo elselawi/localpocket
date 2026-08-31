@@ -77,12 +77,12 @@ void main() {
     final syncNowReq = WebRequest(
       version: webProtocolVersion,
       requestId: 3,
-      op: WireOp.syncNow,
+      op: WireOp.close,
       args: {'store': 'notes'},
     );
 
     final syncNowDecoded = WebRequest.fromJson(syncNowReq.toJson());
-    expect(syncNowDecoded.op, WireOp.syncNow);
+    expect(syncNowDecoded.op, WireOp.close);
     expect(syncNowDecoded.args['store'], 'notes');
 
     // 4. Verify a file contract request round-trips through WebRequest JSON,

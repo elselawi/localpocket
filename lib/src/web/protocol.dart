@@ -29,17 +29,6 @@ class WireOp {
   static const String open = 'open';
   static const String close = 'close';
 
-  // Sync & auth
-  static const String syncStart = 'sync_start';
-  static const String syncStop = 'sync_stop';
-  static const String syncNow = 'sync_now';
-  static const String syncStatus = 'sync_status';
-  static const String authRequired = 'auth_required';
-  static const String syncPause = 'sync_pause';
-  static const String syncResume = 'sync_resume';
-  static const String syncUpdateAuth = 'sync_update_auth';
-  static const String syncSetConnectivity = 'sync_set_connectivity';
-
   /// The typed contract envelope: the request travels exactly as the contract
   /// codec encodes it and the kernel answers through the same command handler
   /// the direct runtime uses. Coexists with the string-op registry until every
@@ -57,15 +46,6 @@ class WireOp {
   static const Set<String> _known = {
     open,
     close,
-    syncStart,
-    syncStop,
-    syncNow,
-    syncStatus,
-    authRequired,
-    syncPause,
-    syncResume,
-    syncUpdateAuth,
-    syncSetConnectivity,
     contractRequest,
     contractEvent,
   };
