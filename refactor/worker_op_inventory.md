@@ -15,7 +15,7 @@ requestTag, typed payload}` with a named result and a typed error codec (§7.4).
 | `open` | `OpenRequest` → `OpenResult` | manifest replaces schema JSON registration; capabilities authoritative |
 | `capabilities` | folded into `CapabilitiesRequest` → `CapabilitiesResult` | ✔ CUT OVER (2026-08-31) — the contract's `CapabilitiesResult` now carries the storage facts (`storage`/`durable`/`journal`) alongside the engine snapshot; the facade reconciles over the contract |
 | `health` | folded into lifecycle ping on `OpenRequest` (DELETE as separate op) | ✔ |
-| `close` | `CloseRequest` → `CloseResult` | fails all pending + streams with `DatabaseWorkerClosedException`; consolidates with the files/lifecycle collapse (family 8) |
+| `close` | `CloseRequest` → `OkResult` | ✔ CUT OVER (2026-08-31) — the kernel's close is the ONE close behavior for every runtime; the worker keeps its envelope loop and `open` handshake |
 | event `worker_event` | `Event` stream (sealed `Event` variants) | query/single-record watches now cancel over the contract; the envelope remains for `conflicts_watch` until that family cuts over (recorded deviation) |
 | event `record_event` | `CommittedChange` | ✔ CUT OVER (2026-08-31) — the contract's `CommittedChange` now carries per-record detail (origin, action, old/new payloads, changedFields); one committed envelope feeds every record-event stream. Old stream deleted. |
 | event `auth_required` | `AuthRequiredEvent` | rides with the sync family |
@@ -143,5 +143,7 @@ maintenance/capabilities ✔ (2026-08-31; storage facts joined the contract and
 `worker_event` is fully retired) → files/streams ✔ (2026-08-31; upload sessions
 and download flow control are kernel-owned) → sync/auth/status/realtime ✔
 (2026-08-31; the kernel owns the engine behind the `SyncBackendFactory` seam)
-→ close/lifecycle. Old and new envelopes may coexist per family; both must
-call the same kernel services.
+→ close/lifecycle ✔ (2026-08-31; the wire registry is `open` +
+`contract_request`/`contract_event` only — the worker is a small envelope
+loop). Old and new envelopes may coexist per family; both must call the same
+kernel services.

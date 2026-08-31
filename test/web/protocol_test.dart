@@ -7,13 +7,13 @@ void main() {
       const request = WebRequest(
         version: webProtocolVersion,
         requestId: 7,
-        op: WireOp.close,
+        op: WireOp.open,
         args: {'store': 'notes'},
       );
       final decoded = WebRequest.fromJson(request.toJson());
       expect(decoded.version, webProtocolVersion);
       expect(decoded.requestId, 7);
-      expect(decoded.op, WireOp.close);
+      expect(decoded.op, WireOp.open);
       expect(decoded.args, {'store': 'notes'});
     });
 
@@ -28,26 +28,22 @@ void main() {
     test('rejects missing, wrong-type, and null fields', () {
       expect(
         () => WebRequest.fromJson(
-            {'i': 1, 'op': WireOp.close, 'a': <String, Object?>{}}),
-        throwsA(isA<ProtocolEnvelopeException>()),
-      );
-      expect(
-        () => WebRequest.fromJson({
-          'v': 'one',
-          'i': 1,
-          'op': WireOp.close,
-          'a': <String, Object?>{}
-        }),
+            {'i': 1, 'op': WireOp.open, 'a': <String, Object?>{}}),
         throwsA(isA<ProtocolEnvelopeException>()),
       );
       expect(
         () => WebRequest.fromJson(
-            {'v': 1, 'i': null, 'op': WireOp.close, 'a': <String, Object?>{}}),
+            {'v': 'one', 'i': 1, 'op': WireOp.open, 'a': <String, Object?>{}}),
         throwsA(isA<ProtocolEnvelopeException>()),
       );
       expect(
         () => WebRequest.fromJson(
-            {'v': 1, 'i': 1, 'op': WireOp.close, 'a': 'nope'}),
+            {'v': 1, 'i': null, 'op': WireOp.open, 'a': <String, Object?>{}}),
+        throwsA(isA<ProtocolEnvelopeException>()),
+      );
+      expect(
+        () => WebRequest.fromJson(
+            {'v': 1, 'i': 1, 'op': WireOp.open, 'a': 'nope'}),
         throwsA(isA<ProtocolEnvelopeException>()),
       );
     });

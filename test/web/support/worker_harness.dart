@@ -195,9 +195,15 @@ class WorkerHarness {
     ).toJson();
   }
 
-  /// Sends the close request and returns the reply.
-  Future<WorkerReply> close() async {
-    final reply = await send(req(WireOp.close));
-    return reply;
-  }
+  /// Sends the kernel close request (the ONE close behavior) and returns the
+  /// raw response envelope: a success reply carries the contract `OkResult`.
+  Future<Object?> close() => customRequest({
+        'v': webProtocolVersion,
+        'i': _counter++,
+        'op': WireOp.contractRequest,
+        'a': {
+          'request': contract.ContractCodec.encodeRequest(
+              const contract.CloseRequest()),
+        },
+      });
 }

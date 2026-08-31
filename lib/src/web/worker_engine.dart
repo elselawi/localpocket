@@ -1,43 +1,33 @@
-/// Pure-Dart request-execution core for the engine-in-worker web stack.
+/// The engine worker's request-execution core: a small typed-envelope loop.
 ///
-/// Everything the worker does with a `WebRequest` — CRUD, compiled-plan
-/// execution, transactions, watches, sync, files, conflicts, close — lives
-/// here against a real `LocalPocket` engine. This library is pure Dart (no
-/// `dart:js_interop`, no `dart:io`) so it is unit-testable on the VM with a
-/// real in-memory engine, which the browser smokes under `tool/web_smoke`
-/// cannot provide (`dart test` vs Playwright).
+/// The worker parses the wire envelope, dispatches it (the `open` handshake
+/// or one typed contract request through the kernel's own command handler),
+/// and replies; every kernel event broadcasts as a `contract_event`
+/// envelope. This library is pure Dart (no `dart:js_interop`, no `dart:io`)
+/// so it is unit-testable on the VM with a real in-memory engine, which the
+/// browser smokes under `tool/web_smoke` cannot provide (`dart test` vs
+/// Playwright).
 ///
 /// The JS boundary stays in `controller.dart`: `LocalPocketWorkerDatabase`
 /// converts the incoming `JSAny` payload to a Dart map, calls
 /// [WorkerEngine.handleRequest], and converts the resulting [WorkerReply]
-/// back to `JSAny`. Worker→client events (record events, watcher snapshots,
-/// sync status, auth required) flow through [WorkerEventSink], which the
-/// controller adapts to `ClientConnection.customRequest`.
+/// back to `JSAny`. Worker→client events (committed facts, watch snapshots,
+/// conflict snapshots, file chunks, sync status, auth required) flow through
+/// [WorkerEventSink], which the controller adapts to
+/// `ClientConnection.customRequest`.
 ///
 /// ## File organization
-///
-/// This one library is split across `part` files so each wire feature area
-/// stays navigable while [WorkerEngine] remains the only public type (tests
-/// import only this file). The engine is a [WorkerEngineHost] base (state +
-/// cross-area helpers) plus area handler mixins declared in the parts:
 ///
 /// - `worker_engine.dart` (this file) — the [WorkerEngineHost] base plus
 ///   [WorkerEngine], the public entry point with the envelope parse, dispatch
 ///   table, and per-op routing.
 /// - `worker_engine_crud.dart` — store registration (`open`).
 ///
-/// Reads, writes, and transaction sessions have no dedicated handlers:
-/// they travel as typed contract requests and the kernel command handler
-/// answers them directly.
-///
-/// ## DRY rule (anti-drift)
-///
-/// Any helper used by two or more areas lives on [WorkerEngineHost] — never
-/// copied into a mixin: `_emitWorkerEvent` (`conflicts_watch`) and
-/// `_stopSync` (sync handlers + `close`). The mixins
-/// are `on WorkerEngineHost` and share one library with it, so they access
-/// its private state directly with zero plumbing. Keeping each shared wire
-/// contract in exactly one place is what stops the areas from drifting apart.
+/// Everything else travels as typed contract requests: reads, writes,
+/// transaction sessions, watches, maintenance, capabilities, conflicts,
+/// files, sync, auth, and close are answered by the kernel command handler —
+/// the same handler the direct runtime calls, with no worker-side
+/// reinterpretation and no worker-owned feature state.
 library;
 
 import 'dart:async';
@@ -149,18 +139,15 @@ Map<String, Object?> deepStringMap(Map<Object?, Object?> raw) {
 }
 
 /// {@template localpocket.worker_engine_host}
-/// Shared engine state + cross-area helpers (library-internal base).
+/// Shared engine state (library-internal base).
 ///
-/// Holds the real [LocalPocket] engine, the worker-owned session state
-/// (interactive transactions, watcher registrations, chunked upload sessions,
-/// the sync engine), the compiled-query core shared by reads and watches,
-/// cross-cutting teardown, and the shared helpers that two or more handler
-/// areas depend on (see the library doc's DRY rule).
+/// Holds the real [LocalPocket] engine, the set of connected event sinks,
+/// and the contract-event broadcast subscription. Every feature surface
+/// (sync, files, conflicts, transactions, watches) is kernel-owned: the
+/// worker holds no feature state of its own.
 ///
-/// [WorkerEngine] extends this class and mixes in the area handler mixins
-/// from the `part` files; those mixins are `on WorkerEngineHost`, so they can
-/// touch this state directly (same library) without exposing any of it
-/// through the public type.
+/// [WorkerEngine] extends this class; the `open` handshake lives in the
+/// `worker_engine_crud.dart` part (`on WorkerEngineHost`, same library).
 /// {@endtemplate}
 abstract class WorkerEngineHost {
   /// Creates a worker engine host backed by [pocket].
@@ -182,26 +169,12 @@ abstract class WorkerEngineHost {
   final LocalPocket pocket;
 
   final Set<WorkerEventSink> _connections = {};
+
+  /// Broadcasts every kernel event to the connected sinks. The subscription
+  /// lives for the whole worker and completes when the kernel's event stream
+  /// closes (the kernel close).
+  // ignore: cancel_subscriptions
   StreamSubscription<contract.Event>? _contractEventSubscription;
-
-  // ------------------------------------------------------ cross-cutting --
-
-  /// Shuts the whole worker down: stops sync, cancels every watcher, clears
-  /// upload sessions, fails an in-flight transaction session, unsubscribes
-  /// from the change bus, and closes the engine.
-  ///
-  /// Lives on the base (not in any area part) because teardown must reach
-  /// into every area's state; keeping it in one place guarantees a single
-  /// shutdown order that `close` and worker teardown can rely on.
-  Future<Object?> _handleClose(WorkerEventSink sink, WebRequest req) async {
-    // The kernel owns every feature surface now (sync, upload sessions,
-    // watches, transactions): closing it settles them all.
-    await _contractEventSubscription?.cancel();
-    _contractEventSubscription = null;
-    _connections.clear();
-    await pocket.close();
-    return {'ok': true};
-  }
 
   // --------------------------------------------------- typed contract wire --
 
@@ -232,15 +205,14 @@ abstract class WorkerEngineHost {
 }
 
 /// {@template localpocket.worker_engine}
-/// The full request-execution core of the engine worker.
+/// The engine worker's small envelope loop.
 ///
-/// This is the only public type of this library (tests and the JS boundary
-/// import only this file). It extends [WorkerEngineHost] (state + shared
-/// helpers) and mixes in the per-area handler mixins declared in the `part`
-/// files listed in the library doc. This class owns the envelope
-/// parse/version check ([handleRequest]) and the op → handler dispatch table
-/// (`_handlers`), which need the complete method set assembled from every
-/// mixin.
+/// Parse the wire envelope → dispatch (`open` handshake or one typed
+/// contract request through the kernel's own command handler) → reply, and
+/// broadcast every kernel event as a `contract_event` envelope. There is no
+/// worker-side reinterpretation, no worker-owned feature state, and no
+/// worker-owned close: closing the runtime is the kernel's `CloseRequest`,
+/// identical on the direct, loopback, and remote paths.
 /// {@endtemplate}
 final class WorkerEngine extends WorkerEngineHost with WorkerCrudHandlers {
   /// Creates a worker request-execution engine.
@@ -313,7 +285,6 @@ final class WorkerEngine extends WorkerEngineHost with WorkerCrudHandlers {
       _handlers = {
     WireOp.open: _handleOpen,
     WireOp.contractRequest: _handleContract,
-    WireOp.close: _handleClose,
   };
 
   Future<Object?> _dispatch(

@@ -435,9 +435,13 @@ void main() {
           .send(const contract.TransactionBeginRequest(readOnly: false));
 
       // Closing while the kernel session is held open settles it: the close
-      // reply is a success and no unhandled async error escapes.
-      final reply = await h3.close();
-      expect(reply, isA<WorkerSuccess>());
+      // command answers the contract OkResult and no unhandled async error
+      // escapes.
+      final reply = (await h3.close())! as Map<String, Object?>;
+      expect(reply['r'], isA<Map>());
+      final result =
+          ((reply['r']! as Map)['result']! as Map).cast<String, Object?>();
+      expect(result['tag'], 'ok');
     });
   });
   group('WorkerEngine — reactive watchers', () {
@@ -1116,8 +1120,10 @@ void main() {
       final h = await WorkerHarness.open();
       await h.put('widgets', record(name: 'a'), id: generateRecordId());
 
-      final closeReply = await h.close();
-      expect(closeReply, isA<WorkerSuccess>());
+      // The contract CloseRequest IS the close behavior (one behavior for
+      // every runtime); it answers the contract OkResult.
+      final closeReply = (await h.close())! as Map<String, Object?>;
+      expect(closeReply['r'], isA<Map>());
 
       final reply = await h.send(h.req(WireOp.contractRequest, args: {
         'request': contract.ContractCodec.encodeRequest(

@@ -1,4 +1,4 @@
-# HANDOFF — Phase 7: cut over the remaining wire families
+# HANDOFF — Phase 7 COMPLETE; next: the barrel switch
 
 Read this file top to bottom before touching anything. It is written so an
 agent with no prior session memory can continue the work safely.
@@ -30,10 +30,14 @@ the facade exists in `lib/src/api/`, runs over both runtimes, and is proven
 by `test/conformance/facade_conformance_test.dart`. See the facade section
 at the end of `refactor/contract-runtime.md` for everything that landed.
 
-**Your stage now: Phase 7 — cut over the remaining wire families.** The
-old `WireOp`/`wire_args` registry is being replaced family by family; the
-old wire stays as an adapter until each family passes conformance, then its
-machinery dies in the same commit. The old raw/typed surfaces still work.
+**Your stage now: Phase 9 — the barrel switch.** The Phase 7 wire-family
+cutover is COMPLETE (2026-08-31): the wire registry is ONLY `open` +
+`contract_request`/`contract_event`, the worker is a small envelope loop
+whose only feature handler is the `open` handshake, and every remaining
+surface (events, sync, files, conflicts, close) travels as typed contract
+commands answered by the kernel's own command handler. The 2026-08-31
+family commits (CRUD/batch, watches, transactions, maintenance, conflicts,
+files `e9c1554`, sync `f47344e`, close/lifecycle) are the record.
 
 Cutover slices DONE (2026-08-30):
 
@@ -112,15 +116,13 @@ Cutover slices DONE (2026-08-30):
    lifecycle helpers. `conflicts_bridge.dart` and
    `worker_engine_conflicts.dart` deleted.
 
-Remaining (this stage):
-files (bounded contract upload/download sessions, `FileRef`, storage
-capabilities for the capabilities op) → sync/auth/status/realtime →
-close/lifecycle (consolidates `close`; the worker becomes a small envelope
-loop). The barrel switch is the NEXT agent's stage (plan Phase 9).
-The full destination plan (12 stages, gates, checklists) is in
-`final_refactoring_plan.md`. Stages 0–6 are DONE. You are starting stage 7:
-the family cutovers and web collapse. Stage-by-stage history lives in
-`refactor/*.md`.
+Remaining: NOTHING in Phase 7 — all eight families are cut over (2026-08-31).
+The next stage is the barrel switch (plan Phase 9): export the destination
+facade from the package barrel, retire the `LocalPocket = KernelDatabase`
+transitional typedef and the old web facade's claim on the name, and delete
+the planning artifacts. The full destination plan (12 stages, gates,
+checklists) is in `final_refactoring_plan.md`. Stages 0–7 are DONE.
+Stage-by-stage history lives in `refactor/*.md`.
 
 ---
 
@@ -161,17 +163,19 @@ the family cutovers and web collapse. Stage-by-stage history lives in
 
 ## 2. Current state (verified 2026-08-31, after the conflicts cutover)
 
-Families 1-5 of the Phase 7 cutover are DONE (CRUD/batch, watches/committed
-events, transactions, maintenance/capabilities, conflicts). The worker now
-emits ONLY `contract_event`; the remaining wire registry is: `open`, `close`,
-`capabilities`, the ten `file_*` ops, the nine `sync_*`/auth ops,
-`contract_request`, `contract_event` — every remaining op is owned by the
-files (6), sync (7), or close/lifecycle (8) cutover.
+ALL EIGHT families of the Phase 7 cutover are DONE (2026-08-31: CRUD/batch,
+watches/committed events, transactions, maintenance/capabilities, conflicts,
+files, sync/auth/status, close/lifecycle). The wire registry is ONLY `open` +
+`contract_request`/`contract_event`; the worker emits ONLY `contract_event`
+and is a small envelope loop whose only feature handler is the `open`
+handshake. The kernel owns every feature surface — including the sync engine
+(behind the `SyncBackendFactory` seam in `sync/sync_backend.dart`, so R1/R3
+hold), the bounded file upload sessions, and the download credit windows.
 
-- Branch `refactor/final-architecture`; working tree clean; see `git log`
-  for the family commits (one commit per family, all gates green).
+- Branch `refactor/final-architecture`; see `git log` for the family commits
+  (one commit per family, all gates green).
 - `dart analyze lib test tool` -> 0 issues.
-- `dart test` -> `+2704 ~83` all passed (83 skips = live/gate/platform tags).
+- `dart test` -> `+2735 ~83` all passed (83 skips = live/gate/platform tags).
 - `dart run tool/local_web_gate.dart` -> PASS (7 checks, incl. the
   byte-compare "shipped worker asset is current" gate; asset regenerated
   after every web-layer change).
@@ -180,12 +184,13 @@ files (6), sync (7), or close/lifecycle (8) cutover.
 - `dart run tool/browser_web_gate.dart` -> 17 pages x 3 browsers PASS
   (re-run after every family; the transaction smoke caught the concurrent-
   session hang, see the ledger).
-- The contract now additionally carries: `WatchOneRequest`,
-  per-record `CommittedChange` (origin/action/old/new/changedFields),
-  `RunMaintenanceRequest`, `ConflictData` + the six conflicts requests and
-  the `ConflictsSnapshot` event. The web facade's `WebTx.session` is a
-  kernel-minted string; the kernel enforces ONE interactive session at a
-  time.
+- The contract additionally carries the whole file family
+  (`FileRefData`, bounded upload sessions, credit-windowed downloads),
+  `SyncStatusData`/`SyncReportData` + the seven sync requests and the
+  `SyncStatusEvent`/`AuthRequiredEvent` events, and storage facts on
+  `CapabilitiesResult`. The web facade's `syncStatus` is a typed
+  `Stream<SyncStatus>` fed by contract events; `close()` sends the contract
+  `CloseRequest` — one close behavior for every runtime.
 - Gotcha: `dart analyze` with several folder arguments can serve stale
   results right after large edits — verify compile state with `dart test`
   on the affected folders before trusting a clean analysis.
@@ -528,23 +533,26 @@ Fixed order:
    `_emitWorkerEvent`, the `worker_event` envelope, the int-id
    `watch_cancel`, `workerStreams`/`workerEventDecoders` plumbing, and the
    `conflicts_protocol_test.dart`/`worker_closed_stream_test.dart` pins.
-6. **Files** — bounded upload/download sessions per plan §11.4
-   (`FileBeginUpload`/`FileChunk`/`FileFinish`/`FileAbort`; `FilesList`/
-   `FileOpen`/`FileChunkEvent`/`FileCredit`; remove/gc/cap/status). One
-   immutable `FileRef` on both platforms; the page never buffers a whole
-   file. Delete `worker_engine_files.dart` + the upload-session registry,
-   `WebLocalPocketFiles` mirror, `web_files_attach_test.dart`'s old-wire
-   pins.
-7. **Sync/auth/status/realtime** — 9 ops + `auth_required` → contract
-   (start/stop/now/status/pause/resume/updateAuth/setConnectivity +
-   `AuthRequiredEvent`). Complete `SyncStatus`/`SyncReport` codec incl.
-   `blocked`/`discarded`/quarantine counters/timestamps. Delete
+6. **Files** — DONE (2026-08-31, see the ledger's "Files cutover" section).
+   Bounded upload sessions and download flow control are kernel-owned
+   (`kernel/file_sessions.dart`); the ten `file_*` ops and `capabilities`
+   (storage facts joined `CapabilitiesResult`) are deleted; the six host
+   file RPCs are gone from `WebFacadeHost`/facade/`FakeFacadeHost`.
+7. **Sync/auth/status/realtime** — DONE (2026-08-31, see the ledger's
+   "Sync/auth/status cutover" section). The kernel owns the sync engine
+   behind the `SyncBackendFactory` seam (R1/R3 hold); the nine sync/auth ops
+   + the `sync_status`/`auth_required` wire events are deleted;
    `worker_engine_sync.dart`, `sync_status_codec.dart`, `typed_sync_web.dart`,
-   `WebSyncSurface`.
-8. **Close/lifecycle** — last: the worker becomes a small envelope loop
-   (§11.1); delete `controller.dart`/`connector.dart`/`lifecycle.dart`
-   leftovers the earlier families made redundant. Gate: the page contains
+   and `WebSyncSurface` are gone; the typed seam's web branch is
+   `typed/sync_engine_remote.dart` over `RemoteSyncSurface`.
+8. **Close/lifecycle** — DONE (2026-08-31, see the ledger's
+   "Close/lifecycle cutover" section). The contract `CloseRequest` is the ONE
+   close behavior; the worker's registry is `open` + `contract_request`
+   only; `terminateWorkerStreams` and the old close op are deleted.
+   Gate met: the worker is a small envelope loop and the page holds
    transport/bootstrap code only.
+
+Phase 7 is COMPLETE. The next stage is the barrel switch (plan Phase 9).
 
 Expected friction (all learned the hard way):
 

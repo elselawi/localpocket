@@ -18,7 +18,6 @@ void main() {
       WireOp.allKnown.toSet(),
       equals(<String>{
         'open',
-        'close',
         'contract_request',
         'contract_event',
       }),

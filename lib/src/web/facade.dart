@@ -544,24 +544,37 @@ class LocalPocket
   /// Emits when the worker cannot refresh a rejected sync token.
   Stream<void> get authRequired => _authRequiredController.stream;
 
-  /// Closes the worker connection and releases browser resources.
+  /// Closes the database and releases browser resources.
+  ///
+  /// ONE close behavior for every runtime: the facade sends the contract
+  /// `CloseRequest`, and the KERNEL stops sync, settles watches, upload
+  /// sessions, and transactions, and shuts the engine down. The worker keeps
+  /// its envelope loop and boot handshake; the page disposes its transport
+  /// and controller resources either way.
   Future<void> close() async {
     if (_sender.isClosed) return;
-    try {
-      await send(WireOp.close);
-    } catch (_) {}
-    _sender.markClosedLocal();
-    changeBus.close();
-    typedRegistry.clearHandles();
-    await _syncStatusController.close();
-    await _authRequiredController.close();
-    for (final url in _blobUrlsToRevoke) {
-      try {
-        web.URL.revokeObjectURL(url);
-      } catch (_) {}
-    }
-    await _remoteDb.dispose();
-    _webSqlite.close();
+    await closeWebResources(
+      sendWorkerClose: () async {
+        await contractRuntime.send(const contract.CloseRequest());
+        await contractRuntime.close();
+      },
+      markClosed: () {
+        _sender.markClosedLocal();
+        changeBus.close();
+        typedRegistry.clearHandles();
+      },
+      disposePageResources: () async {
+        await _syncStatusController.close();
+        await _authRequiredController.close();
+        for (final url in _blobUrlsToRevoke) {
+          try {
+            web.URL.revokeObjectURL(url);
+          } catch (_) {}
+        }
+        await _remoteDb.dispose();
+        _webSqlite.close();
+      },
+    );
   }
 }
 

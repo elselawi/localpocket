@@ -1034,3 +1034,61 @@ loop).
   `StreamController<SyncStatus>`; the case-160 pin drops the ten deleted ops;
   the wire_smoke/lifecycle smokes were updated for the retyped status stream
   and the typed (non-wrapped) `StateError`.
+
+---
+
+# Close/lifecycle cutover over the contract (2026-08-31)
+
+The wire registry is now ONLY `open` + `contract_request`/`contract_event`:
+the old `close` op is deleted, the contract `CloseRequest` is the ONE close
+behavior for every runtime, and the worker is a small envelope loop (parse ->
+dispatch (`open` handshake or one typed contract request through the kernel's
+own command handler) -> reply; broadcast `contract_event`). The page holds
+transport/bootstrap code only. Gates: analyze 0, suite `+2735 ~83`, local web
+gate 7/7 (asset regenerated), API snapshot PASS, browser matrix PASS.
+
+## The consolidation
+- `close()` on the web facade sends the contract `CloseRequest` over the
+  shared runtime (then closes the runtime's own sender/event stream) and
+  disposes page resources through the existing `closeWebResources` ordering
+  helper — worker-close first, facade-closed marker second, page disposal
+  last, disposal guaranteed even when the worker close fails.
+- The kernel close settles EVERYTHING worker-side that used to be torn down
+  by the old op: sync engine + realtime (via the adapter factory's dispose),
+  watches, upload sessions + expiry sweeper, download streams, transaction
+  sessions. Nothing worker-owned remains to tear down — the envelope loop
+  only keeps serving (a post-close contract request surfaces the kernel's
+  typed failure inside the reply, pinned in `worker_engine_test.dart`).
+- The worker's `open` handshake STAYS: the boot handshake is transport, not a
+  feature surface.
+
+## Deletions
+- `WireOp.close` + `WorkerEngineHost._handleClose` (the registry is
+  `{open, contract_request}`); the worker engine docs now describe the
+  envelope loop, not feature areas.
+- `terminateWorkerStreams` (no callers after the sync family moved status
+  onto the contract event stream). `failWorkerStreams` STAYS — it is the
+  unexpected-worker-close path for the page's status/auth controllers, and
+  `closeWebResources` STAYS — the facade's close uses it (the ordering pins
+  in `facade_close_test.dart` remain meaningful).
+- The harness's `close()` now sends the contract `CloseRequest` through the
+  JS-boundary path (`customRequest`), so VM tests exercise the same close
+  behavior the browser runs.
+- Filler ops in envelope tests moved to the remaining registry (`open`/
+  `contract_request`); the case-160 pin drops `close`.
+
+## Gate: page contains transport/bootstrap code only
+The worker's feature handlers are exactly the `open` handshake (schema
+registration + manifest fingerprint check — part of boot). Every feature
+surface is a typed contract command answered by the kernel; the worker owns
+no feature state. Remaining `web/` surface is transport (`web_sender.dart`,
+`connector.dart`), bootstrap (`assets.dart`, `open_options.dart`,
+`cipher_bridge.dart`), and the transitional page facade the barrel switch
+retires.
+
+## Gotchas learned this pass
+- The mock sync server is not reachable from the browser smokes, so the
+  browser matrix exercises the sync verbs only over the error paths — the
+  `lifecycle_error_smoke`'s `expectRemoteError` had to learn that contract
+  errors decode as TYPED kernel errors (`StateError` stays `StateError`, the
+  old `RemoteLocalPocketException[StateError]` wrapper is dead).

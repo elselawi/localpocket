@@ -3,27 +3,6 @@ import 'dart:async';
 import '../sync/status.dart';
 import 'protocol.dart';
 
-/// Terminates worker-owned stream controllers upon worker termination or unexpected close.
-///
-/// Adds [DatabaseWorkerClosedException] (via [failWorkerStreams]) and closes
-/// every active stream controller ensuring deterministic "error then done"
-/// terminal semantics.
-void terminateWorkerStreams({
-  required StreamController<SyncStatus> syncStatusController,
-  required StreamController<void> authRequiredController,
-  Object? error,
-}) {
-  failWorkerStreams(
-    syncStatusController: syncStatusController,
-    authRequiredController: authRequiredController,
-    error: error,
-  );
-  if (!syncStatusController.isClosed) unawaited(syncStatusController.close());
-  if (!authRequiredController.isClosed) {
-    unawaited(authRequiredController.close());
-  }
-}
-
 /// Fails every worker-owned stream with a [DatabaseWorkerClosedException]
 /// without closing the controllers.
 ///

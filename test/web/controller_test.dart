@@ -73,17 +73,17 @@ void main() {
           'done': false,
         });
 
-    // 3. Verify a sync envelope round-trips
-    final syncNowReq = WebRequest(
+    // 3. Verify an open-args envelope round-trips
+    final reopenReq = WebRequest(
       version: webProtocolVersion,
       requestId: 3,
-      op: WireOp.close,
+      op: WireOp.open,
       args: {'store': 'notes'},
     );
 
-    final syncNowDecoded = WebRequest.fromJson(syncNowReq.toJson());
-    expect(syncNowDecoded.op, WireOp.close);
-    expect(syncNowDecoded.args['store'], 'notes');
+    final reopenDecoded = WebRequest.fromJson(reopenReq.toJson());
+    expect(reopenDecoded.op, WireOp.open);
+    expect(reopenDecoded.args['store'], 'notes');
 
     // 4. Verify a file contract request round-trips through WebRequest JSON,
     //    binary chunk included (the same envelope the facade's files surface

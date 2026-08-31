@@ -27,7 +27,6 @@ const int webProtocolVersion = 3;
 /// typed [ProtocolEnvelopeException] rather than silently ignored.
 class WireOp {
   static const String open = 'open';
-  static const String close = 'close';
 
   /// The typed contract envelope: the request travels exactly as the contract
   /// codec encodes it and the kernel answers through the same command handler
@@ -45,7 +44,6 @@ class WireOp {
 
   static const Set<String> _known = {
     open,
-    close,
     contractRequest,
     contractEvent,
   };
