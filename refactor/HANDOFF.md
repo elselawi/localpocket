@@ -159,24 +159,36 @@ the family cutovers and web collapse. Stage-by-stage history lives in
 
 ---
 
-## 2. Current state (verified 2026-08-31, after the CRUD/batch cutover)
+## 2. Current state (verified 2026-08-31, after the conflicts cutover)
 
-- Branch `refactor/final-architecture`; working tree clean; HEAD
-  `feat(web): CRUD/batch rides the typed contract; get/mutate_batch deleted`
-  (see `git log` for the exact sha).
-- `dart analyze lib test tool` → 0 issues (includes the active compile
-  fixture `test/compile_fixtures/final_api_vm.dart`).
-- `dart test` → `+2775 ~83` all passed (83 skips = live/gate/platform tags).
-- `dart run tool/local_web_gate.dart` → PASS (7 checks, incl. the byte-compare
-  "shipped worker asset is current" gate).
-- `dart run tool/api_snapshot.dart` → PASS (snapshot unchanged).
-- `dart run tool/browser_web_gate.dart` → 17 pages × 3 browsers PASS
-  (includes the destination-facade smoke `web_api_smoke`).
-- NEW this pass: `lib/src/web/facade/web_contract_crud_forwarder.dart` (the
-  contract CRUD mixin incl. the durable-session path), the harness
-  contract runtime (`WorkerHarness.runtime` over `customRequest`), and the
-  removed CRUD machinery (`WireOp.get`, `WireOp.mutateBatch`,
-  `_handleGet`, `_handleMutateBatch`, `_parseDurability`).
+Families 1-5 of the Phase 7 cutover are DONE (CRUD/batch, watches/committed
+events, transactions, maintenance/capabilities, conflicts). The worker now
+emits ONLY `contract_event`; the remaining wire registry is: `open`, `close`,
+`capabilities`, the ten `file_*` ops, the nine `sync_*`/auth ops,
+`contract_request`, `contract_event` — every remaining op is owned by the
+files (6), sync (7), or close/lifecycle (8) cutover.
+
+- Branch `refactor/final-architecture`; working tree clean; see `git log`
+  for the family commits (one commit per family, all gates green).
+- `dart analyze lib test tool` -> 0 issues.
+- `dart test` -> `+2704 ~83` all passed (83 skips = live/gate/platform tags).
+- `dart run tool/local_web_gate.dart` -> PASS (7 checks, incl. the
+  byte-compare "shipped worker asset is current" gate; asset regenerated
+  after every web-layer change).
+- `dart run tool/api_snapshot.dart` -> PASS (snapshot unchanged; the new
+  facade is still not exported from the barrel).
+- `dart run tool/browser_web_gate.dart` -> 17 pages x 3 browsers PASS
+  (re-run after every family; the transaction smoke caught the concurrent-
+  session hang, see the ledger).
+- The contract now additionally carries: `WatchOneRequest`,
+  per-record `CommittedChange` (origin/action/old/new/changedFields),
+  `RunMaintenanceRequest`, `ConflictData` + the six conflicts requests and
+  the `ConflictsSnapshot` event. The web facade's `WebTx.session` is a
+  kernel-minted string; the kernel enforces ONE interactive session at a
+  time.
+- Gotcha: `dart analyze` with several folder arguments can serve stale
+  results right after large edits — verify compile state with `dart test`
+  on the affected folders before trusting a clean analysis.
 - Known wall-clock flakes (pass in isolation; re-run before diagnosing):
   `test/pocketbase/sse_test.dart` fast-path,
   `test/pocketbase/backend_lifecycle_test.dart` authChanged,
