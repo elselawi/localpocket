@@ -388,15 +388,8 @@ final class WorkerEngine extends WorkerEngineHost
 
   late final Map<String, Future<Object?> Function(WorkerEventSink, WebRequest)>
       _handlers = {
-    WireOp.health: _handleHealth,
     WireOp.capabilities: _handleCapabilities,
     WireOp.open: _handleOpen,
-    WireOp.analyze: _handleAnalyze,
-    WireOp.walCheckpoint: _handleWalCheckpoint,
-    WireOp.vacuum: _handleVacuum,
-    WireOp.pruneOutbox: _handlePruneOutbox,
-    WireOp.compact: _handleCompact,
-    WireOp.runMaintenance: _handleRunMaintenance,
     WireOp.watchCancel: _handleWatchCancel,
     WireOp.syncStart: _handleSyncStart,
     WireOp.syncStop: _handleSyncStop,

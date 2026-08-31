@@ -73,17 +73,17 @@ void main() {
           'done': false,
         });
 
-    // 3. Verify a maintenance envelope round-trips
-    final analyzeReq = WebRequest(
+    // 3. Verify a sync envelope round-trips
+    final syncNowReq = WebRequest(
       version: webProtocolVersion,
       requestId: 3,
-      op: WireOp.analyze,
+      op: WireOp.syncNow,
       args: {'store': 'notes'},
     );
 
-    final analyzeDecoded = WebRequest.fromJson(analyzeReq.toJson());
-    expect(analyzeDecoded.op, WireOp.analyze);
-    expect(analyzeDecoded.args['store'], 'notes');
+    final syncNowDecoded = WebRequest.fromJson(syncNowReq.toJson());
+    expect(syncNowDecoded.op, WireOp.syncNow);
+    expect(syncNowDecoded.args['store'], 'notes');
 
     // 4. Verify an old-wire watch cancel envelope round-trips (the int-id
     // channel that remains for conflicts watches)

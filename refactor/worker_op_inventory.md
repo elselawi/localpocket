@@ -18,6 +18,7 @@ requestTag, typed payload}` with a named result and a typed error codec (§7.4).
 | `close` | `CloseRequest` → `CloseResult` | fails all pending + streams with `DatabaseWorkerClosedException` |
 | event `worker_event` | `Event` stream (sealed `Event` variants) | query/single-record watches now cancel over the contract; the envelope remains for `conflicts_watch` until that family cuts over (recorded deviation) |
 | event `record_event` | `CommittedChange` | ✔ CUT OVER (2026-08-31) — the contract's `CommittedChange` now carries per-record detail (origin, action, old/new payloads, changedFields); one committed envelope feeds every record-event stream. Old stream deleted. |
+| event `auth_required` | `AuthRequiredEvent` | rides with the sync family |
 
 Error tags `protocol_mismatch`, `worker_closed`, `protocol_envelope`, `aborted`
 → typed errors `ProtocolMismatchError`, `DatabaseWorkerClosedException`,
@@ -34,14 +35,16 @@ with the string registry).
 
 ## 3. Maintenance family (6 ops)
 
-| Op | Destination command → result |
-|---|---|
-| `analyze` | `AnalyzeRequest(store)` → `AnalyzeResult` |
-| `wal_checkpoint` | `WalCheckpointRequest` → `WalCheckpointResult` |
-| `vacuum` | `VacuumRequest` → `VacuumResult` |
-| `prune_outbox` | `PruneOutboxRequest` → `PruneOutboxResult` |
-| `compact` | `CompactRequest(store, …)` → `CompactResult` |
-| `run_maintenance` | `RunMaintenanceRequest` → `RunMaintenanceResult` |
+All six CUT OVER (2026-08-31); the old ops are deleted:
+
+| Op | Destination command → result | Notes |
+|---|---|---|
+| `analyze` | `AnalyzeRequest(store)` → `OkResult` | ✔ |
+| `wal_checkpoint` | `WalCheckpointRequest` → `OkResult` | ✔ |
+| `vacuum` | `VacuumRequest` → `OkResult` | ✔ — `pages` hint not carried (deferred field, no callers) |
+| `prune_outbox` | `PruneOutboxRequest` → `PruneOutboxResult` | ✔ — `maxEntries` already a no-op |
+| `compact` | `CompactRequest(store, olderThanMs)` → `CompactResult` | ✔ — `nowMs` not carried (deferred field, no callers) |
+| `run_maintenance` | `RunMaintenanceRequest(compactOlderThanMs)` → `OkResult` | ✔ — NEW contract variant added by this family |
 
 ## 4. Transaction family (8 ops)
 
@@ -127,6 +130,8 @@ runtimes (§6.7).
 CRUD/batch ✔ (2026-08-31) → query/search/cursors ✔ (2026-08-30) → watches/events ✔
 (2026-08-31; `worker_event`/int-id `watch_cancel` survive for conflicts only) →
 transactions ✔ (2026-08-31; `QueryPlan` stays kernel-internal) →
-maintenance/capabilities → conflicts → files/streams →
-sync/auth/status/realtime → close/lifecycle. Old and new envelopes may coexist
-per family; both must call the same kernel services.
+maintenance/capabilities ✔ (2026-08-31; `capabilities` keeps the rich live
+report until storage facts join the contract; `close` keeps full teardown until
+family 8) → conflicts → files/streams → sync/auth/status/realtime →
+close/lifecycle. Old and new envelopes may coexist per family; both must call
+the same kernel services.

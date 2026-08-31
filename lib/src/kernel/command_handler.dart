@@ -189,6 +189,10 @@ class KernelCommandHandler implements CommandHandler {
         CompactRequest(:final store, :final olderThanMs) => context.database
             .compact(store, olderThan: Duration(milliseconds: olderThanMs))
             .then((removed) => CompactResult(removed: removed)),
+        RunMaintenanceRequest(:final compactOlderThanMs) => context.database
+            .runMaintenance(
+                compactOlderThan: Duration(milliseconds: compactOlderThanMs))
+            .then((_) => const OkResult()),
       };
 
   // -- lifecycle ------------------------------------------------------------

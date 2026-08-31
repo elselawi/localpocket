@@ -28,17 +28,8 @@ const int webProtocolVersion = 3;
 class WireOp {
   static const String open = 'open';
   static const String close = 'close';
-  static const String health = 'health';
   static const String workerEvent = 'worker_event';
   static const String capabilities = 'capabilities';
-
-  // Maintenance
-  static const String analyze = 'analyze';
-  static const String walCheckpoint = 'wal_checkpoint';
-  static const String vacuum = 'vacuum';
-  static const String pruneOutbox = 'prune_outbox';
-  static const String compact = 'compact';
-  static const String runMaintenance = 'run_maintenance';
 
   // Reactive Watchers
 
@@ -99,15 +90,8 @@ class WireOp {
   static const Set<String> _known = {
     open,
     close,
-    health,
     workerEvent,
     capabilities,
-    analyze,
-    walCheckpoint,
-    vacuum,
-    pruneOutbox,
-    compact,
-    runMaintenance,
     watchCancel,
     syncStart,
     syncStop,

@@ -68,6 +68,7 @@ abstract final class ContractCodec {
     VacuumRequest(),
     PruneOutboxRequest(),
     CompactRequest(store: 's', olderThanMs: 0),
+    RunMaintenanceRequest(compactOlderThanMs: 0),
   ];
 
   /// One representative instance per result variant.
@@ -312,6 +313,12 @@ abstract final class ContractCodec {
           throw WireException('Malformed compact payload.');
         }
         return CompactRequest(store: store, olderThanMs: olderThanMs);
+      case 'runMaintenance':
+        final compactOlderThanMs = m['compactOlderThanMs'];
+        if (compactOlderThanMs is! int) {
+          throw WireException('Malformed runMaintenance payload.');
+        }
+        return RunMaintenanceRequest(compactOlderThanMs: compactOlderThanMs);
       default:
         return null;
     }

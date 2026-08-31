@@ -91,10 +91,20 @@ Cutover slices DONE (2026-08-30):
    retired is plan shipping across the runtime boundary. The barrel
    export dies at the Phase 9 gate.
 
+7. **Maintenance/capabilities family cutover**: the facade's
+   `analyze`/`walCheckpoint`/`vacuum`/`pruneOutbox`/`compact`/
+   `runMaintenance` send typed contract requests; `RunMaintenanceRequest`
+   was added to the contract; the six maintenance ops and `health` are
+   deleted from the wire. Deferred fields (`VacuumRequest.pages`,
+   `PruneOutboxRequest.maxEntries`, `CompactRequest.nowMs`) were NOT added
+   — no caller forces them; facade docs record the deferral. DEVIATIONS:
+   `capabilities` keeps its rich live report (browser storage facts are not
+   in the contract's `CapabilitiesResult` yet) and `close` keeps its full
+   teardown (the worker still owns sync/conflicts/upload state) — both
+   retire with the files/family-8 cutovers.
+
 Remaining (this stage):
-maintenance/capabilities (`run_maintenance` needs `RunMaintenanceRequest`;
-`health` folds away; `close` semantics consolidate) → conflicts (retires
-`worker_event`/`watch_cancel`/`conflicts_*`) → files →
+conflicts (retires `worker_event`/`watch_cancel`/`conflicts_*`) → files →
 sync/auth/status/realtime → close/lifecycle. The barrel switch is the NEXT
 agent's stage (plan Phase 9).
 
@@ -482,13 +492,12 @@ Fixed order:
    artifact (ReadService + builders run the native read engine with it);
    what retired is plan shipping across the runtime boundary. The barrel
    export dies at the Phase 9 gate.
-4. **Maintenance/capabilities** — `analyze`/`wal_checkpoint`/`vacuum`/
-   `prune_outbox`/`compact` → contract (exist); `capabilities` → contract
-   (exists; worker handshake stays authoritative); `health` folds away;
-   `run_maintenance` → add `RunMaintenanceRequest` (inventory lists it —
-   do it, don't hand-wave it); `open` stays the worker boot handshake;
-   consolidate `close` semantics (contract `CloseRequest` is kernel-only
-   today; the old `close` op does full teardown — make one behavior).
+4. **Maintenance/capabilities** — DONE (2026-08-31, see the ledger's
+   "Maintenance/capabilities cutover" section). `RunMaintenanceRequest`
+   added; the six maintenance ops + `health` deleted. Deferred fields not
+   added (recorded). DEVIATIONS: `capabilities` keeps the rich live report
+   until storage facts join the contract; `close` keeps full teardown until
+   family 8 (the worker still owns sync/conflicts/upload state).
 5. **Conflicts** — 6 ops → new contract variants (list/get/watch/resolve/
    accept-local/accept-remote) with typed immutable conflict snapshots.
    Delete `conflicts_bridge.dart`, `worker_engine_conflicts.dart`, the

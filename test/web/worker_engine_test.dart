@@ -39,14 +39,6 @@ void main() {
       });
     });
 
-    test('health reports a live engine', () async {
-      final result =
-          (await h.sendOk(h.req(WireOp.health)))! as Map<String, Object?>;
-      expect(result['ok'], isTrue);
-      expect(result['sqliteVersion'], isA<String>());
-      expect(result['journalMode'], isA<String>());
-    });
-
     test('capabilities reports the live engine capability snapshot', () async {
       final result =
           (await h.sendOk(h.req(WireOp.capabilities)))! as Map<String, Object?>;
@@ -62,7 +54,8 @@ void main() {
 
     test('success replies echo the request id', () async {
       final reply =
-          await h.engine.handleRequest(h.sink, h.req(WireOp.health).toJson());
+          await h.engine.handleRequest(
+              h.sink, h.req(WireOp.capabilities).toJson());
       expect(reply, isA<WorkerSuccess>());
       expect((reply as WorkerSuccess).requestId, 0);
     });
@@ -72,7 +65,7 @@ void main() {
       final bad = WebRequest(
         version: webProtocolVersion + 99,
         requestId: 0,
-        op: WireOp.health,
+        op: WireOp.capabilities,
       );
       final err = await h.sendError(bad, code: WireErrorCode.protocolMismatch);
       expect(err.requestId, 0);
@@ -94,10 +87,10 @@ void main() {
 
     test('malformed envelopes fail with protocolEnvelope', () async {
       final payloads = <Map<String, Object?>>[
-        {'i': 1, 'op': WireOp.health, 'a': <String, Object?>{}}, // no v
-        {'v': 'one', 'i': 1, 'op': WireOp.health, 'a': {}}, // v not int
-        {'v': webProtocolVersion, 'op': WireOp.health, 'a': {}}, // no i
-        {'v': webProtocolVersion, 'i': 1, 'op': WireOp.health}, // no args
+        {'i': 1, 'op': WireOp.capabilities, 'a': <String, Object?>{}}, // no v
+        {'v': 'one', 'i': 1, 'op': WireOp.capabilities, 'a': {}}, // v not int
+        {'v': webProtocolVersion, 'op': WireOp.capabilities, 'a': {}}, // no i
+        {'v': webProtocolVersion, 'i': 1, 'op': WireOp.capabilities}, // no args
       ];
       for (final payload in payloads) {
         final err = await h.sendRaw(payload);
@@ -1117,25 +1110,24 @@ void main() {
   });
 
   group('WorkerEngine — maintenance & close', () {
-    test('maintenance ops execute against the engine', () async {
+    test('maintenance requests execute against the engine', () async {
       final h = await WorkerHarness.open();
       addTearDown(() => h.close());
 
       await h.put('widgets', record(name: 'a'), id: generateRecordId());
       await h.put('widgets', record(name: 'b'), id: generateRecordId());
 
-      await h.sendOk(h.req(WireOp.analyze, args: {'store': 'widgets'}));
-      await h.sendOk(h.req(WireOp.walCheckpoint));
-      await h.sendOk(h.req(WireOp.vacuum));
+      await h.runtime.send(contract.AnalyzeRequest(store: 'widgets'));
+      await h.runtime.send(const contract.WalCheckpointRequest());
+      await h.runtime.send(const contract.VacuumRequest());
       final pruned =
-          (await h.sendOk(h.req(WireOp.pruneOutbox)))! as Map<String, Object?>;
-      expect(pruned['pruned'], isA<int>());
-      final compacted = (await h.sendOk(h.req(WireOp.compact, args: {
-        'store': 'widgets',
-        'olderThanMs': 0,
-      })))! as Map<String, Object?>;
-      expect(compacted['compacted'], isA<int>());
-      await h.sendOk(h.req(WireOp.runMaintenance));
+          await h.runtime.send(const contract.PruneOutboxRequest());
+      expect(pruned.removed, isA<int>());
+      final compacted = await h.runtime
+          .send(contract.CompactRequest(store: 'widgets', olderThanMs: 0));
+      expect(compacted.removed, isA<int>());
+      await h.runtime
+          .send(const contract.RunMaintenanceRequest(compactOlderThanMs: 0));
     });
 
     test('open registers additional stores over the wire (E2/E15)', () async {

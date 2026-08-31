@@ -444,17 +444,20 @@ class LocalPocket
 
   /// Updates query statistics for [store], or for all stores when omitted.
   Future<void> analyze([String? store]) async {
-    await send(WireOp.analyze, {'store': store});
+    await contractRuntime.send(contract.AnalyzeRequest(store: store));
   }
 
   /// Runs a passive WAL checkpoint in the worker.
   Future<void> walCheckpoint() async {
-    await send(WireOp.walCheckpoint);
+    await contractRuntime.send(const contract.WalCheckpointRequest());
   }
 
-  /// Reclaims unused database pages, optionally limiting the number of [pages].
+  /// Reclaims unused database pages.
+  ///
+  /// The typed contract runs the kernel's full `VACUUM`; the [pages] hint is
+  /// not carried (`VacuumRequest.pages` is a deferred contract field).
   Future<void> vacuum({int? pages}) async {
-    await send(WireOp.vacuum, {'pages': pages});
+    await contractRuntime.send(const contract.VacuumRequest());
   }
 
   /// Removes orphaned or settled (clean) entries from the sync outbox.
@@ -463,29 +466,28 @@ class LocalPocket
   /// local edit. [maxEntries] is retained for API compatibility but no longer
   /// bounds the outbox.
   Future<int> pruneOutbox({int maxEntries = 10000}) async {
-    final res = (decodeWireValue(
-            (await send(WireOp.pruneOutbox, {'maxEntries': maxEntries}))!))!
-        as Map<String, Object?>;
-    return (res['pruned'] as int?) ?? 0;
+    final res = await contractRuntime.send(const contract.PruneOutboxRequest());
+    return res.removed;
   }
 
   /// Compacts archived records in [store] older than [olderThan].
+  ///
+  /// The contract carries no `nowMs` override (a deferred field); the kernel
+  /// clock decides "older than".
   Future<int> compact(String store,
       {required Duration olderThan, int? nowMs}) async {
-    final res = (decodeWireValue((await send(WireOp.compact, {
-      'store': store,
-      'olderThanMs': olderThan.inMilliseconds,
-      if (nowMs != null) 'nowMs': nowMs,
-    }))!))! as Map<String, Object?>;
-    return (res['compacted'] as int?) ?? 0;
+    final res = await contractRuntime.send(contract.CompactRequest(
+      store: store,
+      olderThanMs: olderThan.inMilliseconds,
+    ));
+    return res.removed;
   }
 
   /// Runs maintenance tasks for the worker-owned database.
   Future<void> runMaintenance(
       {Duration compactOlderThan = const Duration(days: 90)}) async {
-    await send(WireOp.runMaintenance, {
-      'compactOlderThanMs': compactOlderThan.inMilliseconds,
-    });
+    await contractRuntime.send(contract.RunMaintenanceRequest(
+        compactOlderThanMs: compactOlderThan.inMilliseconds));
   }
 
   // -------------------------------------------------- Sync & auth controls

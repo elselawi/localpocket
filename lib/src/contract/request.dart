@@ -557,3 +557,18 @@ final class CompactRequest extends Request<CompactResult> {
   @override
   Map<String, Object?> toJson() => {'store': store, 'olderThanMs': olderThanMs};
 }
+
+/// Runs the full maintenance pass (WAL checkpoint, outbox prune, compaction
+/// of archived records older than [compactOlderThanMs]).
+final class RunMaintenanceRequest extends Request<OkResult> {
+  const RunMaintenanceRequest({required this.compactOlderThanMs});
+
+  final int compactOlderThanMs;
+
+  @override
+  String get tag => 'runMaintenance';
+  @override
+  String get resultTag => OkResult.tagValue;
+  @override
+  Map<String, Object?> toJson() => {'compactOlderThanMs': compactOlderThanMs};
+}

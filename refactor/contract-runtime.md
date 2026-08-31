@@ -704,3 +704,54 @@ direct, loopback, and remote runtimes. The facade's savepoint error path is
 unaffected; the smoke now expects the contract-decoded `StateError` (the
 contract error codec replaces the old `RemoteLocalPocketException` envelope
 mapping).
+---
+
+# Maintenance/capabilities cutover over the contract (2026-08-31)
+
+The maintenance surface rides the typed contract: `analyze`,
+`wal_checkpoint`, `vacuum`, `prune_outbox`, `compact`, and `run_maintenance`
+are deleted from the wire registry, and the facade methods send
+`AnalyzeRequest`/`WalCheckpointRequest`/`VacuumRequest`/`PruneOutboxRequest`/
+`CompactRequest`/`RunMaintenanceRequest` through the shared contract runtime.
+`health` folds away (deleted). Gates: analyze 0, suite `+2722 ~83`, local web
+gate 7/7 (asset regenerated), API snapshot PASS, browser matrix PASS.
+
+## New contract variant
+`RunMaintenanceRequest(compactOlderThanMs)` -> `OkResult`, answered by the
+kernel's `runMaintenance` (the exact method the old worker handler called).
+Codec round-trip coverage rides the request-sample matrix; malformed
+`compactOlderThanMs` fails typed.
+
+## Deferred fields: NOT added (recorded decision)
+- `VacuumRequest.pages`: the web facade keeps its `vacuum({int? pages})`
+  parameter but the typed surface runs the kernel's full `VACUUM`; no
+  caller (tests, examples, smokes) passes `pages`, and the hint is not a
+  correctness fact. Doc records the deferral.
+- `CompactRequest.nowMs`: the facade keeps the parameter; the kernel clock
+  decides "older than". No caller passes it over the wire.
+- `PruneOutboxRequest.maxEntries`: already documented as no longer bounding
+  the outbox — the contract's omission matches current behavior.
+
+## Capabilities and close: recorded deviations
+- `capabilities` STAYS on the old wire (this family): the live report
+  carries browser storage facts (opfs/durable/persistent/journal) that the
+  contract's `CapabilitiesResult` does not model yet, and the facade
+  reconciles them at open. It retires when storage capabilities join the
+  contract (files family / worker collapse).
+- `close` STAYS the full-teardown op: the worker still owns the sync
+  engine, conflicts watchers, and upload sessions, and the kernel's
+  `CloseRequest` cannot tear those down. One close behavior lands with the
+  worker collapse (family 8), when nothing worker-owned remains.
+
+## Worker deletions
+`_handleHealth`, `_handleAnalyze`, `_handleWalCheckpoint`, `_handleVacuum`,
+`_handlePruneOutbox`, `_handleCompact`, `_handleRunMaintenance`;
+`worker_engine_maintenance.dart` keeps only `_handleCapabilities`.
+
+## Tests moved in the same commit
+- `worker_engine_test.dart`: the maintenance pin drives contract requests;
+  the envelope/protocol tests use `capabilities` instead of the deleted
+  `health` op.
+- `web_sender_test.dart`/`wire_protocol_error_test.dart`/`controller_test.dart`:
+  filler ops switched to still-live ops; the case-160 vocabulary pin drops
+  the seven deleted ops.

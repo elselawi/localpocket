@@ -22,7 +22,7 @@ void main() {
         () => WebRequest.fromJson({
           'v': webProtocolVersion,
           'i': -1,
-          'op': WireOp.health,
+          'op': WireOp.capabilities,
           'a': <String, Object?>{},
         }),
         throwsA(isA<ProtocolEnvelopeException>()),
@@ -39,11 +39,11 @@ void main() {
 
     test('rejects malformed request shapes without cast errors', () {
       final malformed = <Map<String, Object?>>[
-        {'v': webProtocolVersion, 'i': 1, 'op': WireOp.health},
+        {'v': webProtocolVersion, 'i': 1, 'op': WireOp.capabilities},
         {
           'v': webProtocolVersion,
           'i': 1,
-          'op': WireOp.health,
+          'op': WireOp.capabilities,
           'a': null,
         },
         {
@@ -55,7 +55,7 @@ void main() {
         {
           'v': '2',
           'i': 1,
-          'op': WireOp.health,
+          'op': WireOp.capabilities,
           'a': <String, Object?>{},
         },
       ];
@@ -170,17 +170,20 @@ void main() {
       const first = WebRequest(
         version: webProtocolVersion,
         requestId: 7,
-        op: WireOp.health,
+        op: WireOp.capabilities,
       );
       const second = WebRequest(
         version: webProtocolVersion,
         requestId: 7,
-        op: WireOp.capabilities,
+        op: WireOp.watchCancel,
+        args: {'watchId': 3},
       );
-      expect(first.requestId, second.requestId);
+      expect(first.requestId, second.requestId,
+          reason: 'the id is caller-owned; the wire never rewrites it');
       expect(first.op, isNot(second.op));
-      expect(WebRequest.fromJson(first.toJson()).op, WireOp.health);
-      expect(WebRequest.fromJson(second.toJson()).op, WireOp.capabilities);
+      expect(WebRequest.fromJson(first.toJson()).op, WireOp.capabilities);
+      expect(WebRequest.fromJson(second.toJson()).op, WireOp.watchCancel);
+      expect(WebRequest.fromJson(second.toJson()).args, {'watchId': 3});
     });
   });
 }
