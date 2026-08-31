@@ -13,9 +13,9 @@ requestTag, typed payload}` with a named result and a typed error codec (§7.4).
 | Op / event | Destination command → result | Notes |
 |---|---|---|
 | `open` | `OpenRequest` → `OpenResult` | manifest replaces schema JSON registration; capabilities authoritative |
-| `capabilities` | folded into `OpenRequest`/`CapabilitiesRequest` → `CapabilitiesResult` | page never guesses (§4.11) |
-| `health` | folded into lifecycle ping on `OpenRequest` (DELETE as separate op) | |
-| `close` | `CloseRequest` → `CloseResult` | fails all pending + streams with `DatabaseWorkerClosedException` |
+| `capabilities` | folded into `CapabilitiesRequest` → `CapabilitiesResult` | ✔ CUT OVER (2026-08-31) — the contract's `CapabilitiesResult` now carries the storage facts (`storage`/`durable`/`journal`) alongside the engine snapshot; the facade reconciles over the contract |
+| `health` | folded into lifecycle ping on `OpenRequest` (DELETE as separate op) | ✔ |
+| `close` | `CloseRequest` → `CloseResult` | fails all pending + streams with `DatabaseWorkerClosedException`; consolidates with the files/lifecycle collapse (family 8) |
 | event `worker_event` | `Event` stream (sealed `Event` variants) | query/single-record watches now cancel over the contract; the envelope remains for `conflicts_watch` until that family cuts over (recorded deviation) |
 | event `record_event` | `CommittedChange` | ✔ CUT OVER (2026-08-31) — the contract's `CommittedChange` now carries per-record detail (origin, action, old/new payloads, changedFields); one committed envelope feeds every record-event stream. Old stream deleted. |
 | event `auth_required` | `AuthRequiredEvent` | rides with the sync family |
@@ -85,19 +85,23 @@ runtimes (§6.7).
 
 ## 7. File family (10 ops)
 
+All eleven CUT OVER (2026-08-31); the old ops are deleted. Bounded upload
+sessions live in the KERNEL now (`kernel/file_sessions.dart`), and downloads
+stream under caller-driven credit.
+
 | Op | Destination command | Notes |
 |---|---|---|
-| `file_upload_begin` | `FileBeginUpload` → session id + accepted limits | bounded sessions (§11.4) |
-| `file_upload_chunk` | `FileChunk(sessionId, bytes)` | binary-aware value codec |
-| `file_upload_finish` | `FileFinish(sessionId)` → immutable `FileRef` | |
-| `file_upload_abort` | `FileAbort(sessionId)` | |
-| `file_list` | `FilesListRequest(recordId, field?)` → `List<FileRef>` | same `FileRef` as native (§4.7) |
-| `file_open` | `FileOpen(ref)` → stream id | |
-| (download chunks) | `FileChunkEvent` + `FileCredit` flow control | page must not receive whole buffered file |
-| `file_remove` | `FileRemoveRequest(ref)` | |
-| `file_gc` | `FileGcRequest(cutoff)` → `GcResult` | |
-| `file_enforce_storage_cap` | `EnforceStorageCapRequest(bytes)` → `CapResult` | |
-| `file_storage_status` | `StorageStatusRequest` → `StorageStatusResult` | honest volatile-storage reporting |
+| `file_upload_begin` | `FileBeginUpload` → `FileUploadSessionResult` | ✔ kernel-minted string session + accepted `maxChunkBytes` |
+| `file_upload_chunk` | `FileChunk(session, bytes)` | ✔ binary-aware value codec (base64 tag) |
+| `file_upload_finish` | `FileFinish(session)` → `FileRefResult` | ✔ typed `FileRefData` |
+| `file_upload_abort` | `FileAbort(session)` | ✔ |
+| `file_list` | `FilesListRequest(recordId, field?)` → `FileRefsResult` | ✔ |
+| `file_open` | `FileOpen(ref)` → `FileOpenResult` | ✔ stream id; chunks flow as events |
+| (download chunks) | `FileChunkEvent` + `FileCreditRequest` flow control | ✔ the page never receives a whole buffered file in one reply |
+| `file_remove` | `FileRemoveRequest(ref)` | ✔ |
+| `file_gc` | `FileGcRequest(cutoff)` → `FileGcResult` | ✔ |
+| `file_enforce_storage_cap` | `EnforceStorageCapRequest(bytes)` → `FileCapResult` | ✔ |
+| `file_storage_status` | `StorageStatusRequest` → `StorageStatusResult` | ✔ honest volatile-storage reporting |
 
 ## 8. Conflict family (6 ops)
 
@@ -131,8 +135,9 @@ All six CUT OVER (2026-08-31); the old ops are deleted.
 
 CRUD/batch ✔ (2026-08-31) → query/search/cursors ✔ (2026-08-30) → watches/events ✔
 (2026-08-31) → transactions ✔ (2026-08-31; `QueryPlan` stays kernel-internal) →
-maintenance/capabilities ✔ (2026-08-31; `capabilities` keeps the rich live
-report until storage facts join the contract; `close` keeps full teardown until
-family 8) → conflicts ✔ (2026-08-31; `worker_event` is fully retired) →
-files/streams → sync/auth/status/realtime → close/lifecycle. Old and new
-envelopes may coexist per family; both must call the same kernel services.
+maintenance/capabilities ✔ (2026-08-31; storage facts joined the contract and
+`capabilities` retired with the files family) → conflicts ✔ (2026-08-31;
+`worker_event` is fully retired) → files/streams ✔ (2026-08-31; upload sessions
+and download flow control are kernel-owned) → sync/auth/status/realtime →
+close/lifecycle. Old and new envelopes may coexist per family; both must call
+the same kernel services.

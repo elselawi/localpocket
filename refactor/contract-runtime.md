@@ -814,3 +814,113 @@ API snapshot PASS, browser matrix PASS.
   the contract committed-fact binding remain; `worker_closed_stream_test.dart`
   and `conflicts_protocol_test.dart` deleted with their machinery; case-160
   pin drops the eight deleted ops.
+---
+
+# Files cutover over the contract (2026-08-31)
+
+The whole file surface rides the typed contract: the ten `file_*` wire ops and
+the `capabilities` op are deleted from the registry. Bounded upload sessions
+and download flow control are now KERNEL-owned (`kernel/file_sessions.dart`),
+the web facade speaks contract envelopes, and the worker answers only `open`,
+the nine sync/auth ops (until the sync cutover), `contract_request`, and
+`close`. Gates: analyze 0, suite `+2730 ~83`, local web gate 7/7 (asset
+regenerated), API snapshot PASS, browser matrix PASS.
+
+## Contract additions (contract/file.dart)
+- `FileRefData`: the immutable wire-safe snapshot of one attachment — the same
+  field facts both platforms use (`refId/store/recordId/field/hash/remoteName/
+  state/nextRetryAt/attemptCount/lastError`). The kernel maps its
+  `files_api.FileRef` rows onto it at the boundary (mirror of `ConflictData`).
+- Upload session: `FileBeginUploadRequest(store, recordId, size, field, name,
+  expectedSha256?, allowVolatileBlobs?)` -> `FileUploadSessionResult(session,
+  maxChunkBytes)` (kernel-minted string session + the accepted chunk limit so
+  the caller never guesses); `FileChunkRequest(session, chunk)` -> `OkResult`
+  (binary chunk via the tagged bytes codec); `FileFinishRequest(session)` ->
+  `FileRefResult`; `FileAbortRequest(session)` -> `OkResult`.
+- Metadata: `FilesListRequest` -> `FileRefsResult`, `FileRemoveRequest` ->
+  `OkResult`, `FileGcRequest(blobGraceMs, tmpGraceMs)` -> `FileGcResult`,
+  `EnforceStorageCapRequest(maxBytes)` -> `FileCapResult`,
+  `StorageStatusRequest` -> `StorageStatusResult(durable)` (honest reporting).
+- Download with flow control: `FileOpenRequest` -> `FileOpenResult(stream)`;
+  chunks arrive as `FileChunkEvent(stream, chunk, last, error?)` events while
+  the caller's credit window has room (`FileCreditRequest(stream, bytes)` ->
+  `OkResult` grants more). The kernel pauses the source subscription when
+  outstanding (un-credited) bytes reach the window (1 MiB default) and ends
+  every stream with a terminal (`last`) event; a failed stream ends with the
+  error carried on the terminal event. The page never receives a whole
+  buffered file in one reply.
+- `CapabilitiesResult` gained the storage facts (`storage`/`durable`/
+  `journal`) the old live capabilities op reported, so that op retired with
+  this family (the recorded deviation from the maintenance cutover is closed).
+
+## Kernel
+- `kernel/file_sessions.dart` (new part of the kernel library): the bounded
+  upload-session registry (`FileUploadSession`/`FileUploadSessionRegistry`)
+  MOVED from `web/lifecycle.dart` — same limits, validations, sliding TTL, and
+  error messages, with kernel-minted string session ids (`u1`, `u2`, ...) —
+  plus the download-stream state. The expiry sweeper timer, session cleanup,
+  and download cancellation all live in the command handler's `close()`.
+- Dispatch: every file request goes to the SAME `pocket.files` service the old
+  worker handlers called (`attach/list/open/remove/gc/enforceStorageCap/
+  isBlobStorageDurable`) — no worker-side reinterpretation remains.
+- `_capabilities()` is now async and reports the live journal mode
+  (`PRAGMA journal_mode` via the adapter port's `selectSync`), the platform
+  storage kind, and honest blob-store durability (a volatile fallback reports
+  `durable: false`).
+- DEVIATION (recorded): the kernel command handler now reports `storage`/
+  `durable`/`journal` but not `persistent`/`multiTab*`/`worker` — those are
+  PAGE facts (navigator.storage.persist, tab topology); the facade keeps its
+  own measurements and `reconcileOpenCapabilities` falls back to them for the
+  keys the contract does not carry.
+
+## The re-route
+- `WebLocalPocketFiles` speaks the contract over `WebFacadeHost.contractRuntime`:
+  metadata RPCs are single requests; `attach` begins a session, chunks at the
+  accepted `maxChunkBytes`, finishes, and best-effort aborts on failure; `open`
+  subscribes to chunk events BEFORE sending the open request (events can
+  overtake the reply across channels — they are buffered per stream), consumes
+  and credits chunks, and ends on the terminal event (a terminal event with
+  `error` throws typed).
+- The six file RPCs (`filesUpload/filesList/filesOpen/filesRemove/filesGc/
+  filesEnforceStorageCap`) are GONE from `WebFacadeHost`, the production
+  facade, and `FakeFacadeHost` — the page-side chunking helper moved into
+  `WebLocalPocketFiles.attach`.
+- Open-path capability reconciliation now sends the contract
+  `CapabilitiesRequest` and feeds the typed result into the same
+  `reconcileOpenCapabilities` map shape.
+
+## Worker deletions
+`worker_engine_files.dart` (all ten handlers + `_encodeFileRef` + the sweeper),
+`worker_engine_maintenance.dart` (`_handleCapabilities` — the file is gone),
+`WireOp.capabilities`, the ten `WireOp.file*` constants, the upload-session
+registry + expiry timer from `WorkerEngineHost`, and the `close` handler's
+upload cleanup (sessions are kernel state now, settled by the kernel close).
+
+## Tests moved in the same commit
+- `test/conformance/file_family_conformance_test.dart` (new): bounded upload +
+  list, credit-windowed download with terminal event, honest storage status,
+  remove/gc/cap, and unknown-session/stream typed failures over direct,
+  loopback, AND remote runtimes.
+- `web_files_attach_test.dart` rewritten against decoded contract requests
+  (session begin/chunk/finish sequence, chunk sizing at the accepted limit,
+  abort-on-failure, early-chunk buffering, credit-back, typed stream error).
+- `upload_session_test.dart` re-homed to the kernel registry (string session
+  ids; every quota/TTL pin preserved).
+- `worker_engine_test.dart`: the file group drives `h.runtime`; the
+  capabilities pin drives the contract request (and asserts the harness's
+  volatile store reports `durable: false`); envelope pins use `open` as the
+  filler op. `controller_test.dart` pins the binary fileChunk contract request
+  through the JS-boundary round-trip. `manifest_handshake_test.dart` reads
+  capabilities over the contract. Case-160 pin drops the eleven deleted ops.
+
+## Gotchas learned this pass
+- `replace_string_in_file` with a non-string `newString` inserts the literal
+  text into the file — verify every edit that grows a file by duplicate
+  content (`facade.dart` briefly carried the file RPC block twice; caught by
+  re-reading the region).
+- Contract sample lists must stay `const`-clean: binary (`Uint8List`) samples
+  cannot be const, so they ride OUTSIDE a `...const <T>[...]` spread in
+  `requestSamples`/`eventSamples` (the result samples are all const-able).
+- `dart test` on a single test name (`-N`) passes while the whole group fails
+  when a `late final` group-local is reassigned per test — group-local mutable
+  state must be nullable/cleared in `setUp`.

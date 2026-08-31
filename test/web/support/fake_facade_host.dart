@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/src/contract/contract.dart' as contract;
@@ -10,28 +9,6 @@ import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/web_contract_events.dart';
 import 'package:localpocket/src/web/lifecycle.dart';
 import 'package:localpocket/src/web/protocol.dart';
-
-/// A recorded `filesUpload` call.
-class RecordedFileUpload {
-  RecordedFileUpload({
-    required this.store,
-    required this.recordId,
-    required this.bytes,
-    required this.field,
-    required this.name,
-    this.expectedSize,
-    this.expectedSha256,
-    this.allowVolatileBlobs = false,
-  });
-  final String store;
-  final String recordId;
-  final List<int> bytes;
-  final String field;
-  final String name;
-  final int? expectedSize;
-  final String? expectedSha256;
-  final bool allowVolatileBlobs;
-}
 
 /// In-memory [WebFacadeHost] for driving the facade proxy classes on the VM.
 ///
@@ -142,125 +119,6 @@ class FakeFacadeHost implements WebFacadeHost {
       throw StateError('No store "$store" registered in this LocalPocket.');
     }
     return s;
-  }
-
-  // ---- file RPCs (recorded) ----
-
-  final List<RecordedFileUpload> filesUploadCalls = [];
-  Map<String, Object?> filesUploadResult = const {};
-
-  @override
-  Future<Map<String, Object?>> filesUpload({
-    required String store,
-    required String recordId,
-    required List<int> bytes,
-    String field = 'imgs',
-    String name = 'blob.bin',
-    int? expectedSize,
-    String? expectedSha256,
-    bool allowVolatileBlobs = false,
-  }) async {
-    filesUploadCalls.add(RecordedFileUpload(
-      store: store,
-      recordId: recordId,
-      bytes: bytes,
-      field: field,
-      name: name,
-      expectedSize: expectedSize,
-      expectedSha256: expectedSha256,
-      allowVolatileBlobs: allowVolatileBlobs,
-    ));
-    return filesUploadResult;
-  }
-
-  /// Records of every `filesList` call.
-  final List<({String store, String recordId, String field})> filesListCalls =
-      [];
-
-  /// Records of every `filesOpen` call.
-  final List<
-      ({
-        String store,
-        String recordId,
-        String field,
-        int index,
-        String? refId
-      })> filesOpenCalls = [];
-
-  /// Records of every `filesRemove` call.
-  final List<
-      ({
-        String store,
-        String recordId,
-        String field,
-        int index,
-        String? refId
-      })> filesRemoveCalls = [];
-
-  /// Records of every `filesGc` call (blobGrace + tmpGrace).
-  final List<({Duration blobGrace, Duration tmpGrace})> filesGcCalls = [];
-
-  /// Records of every `filesEnforceStorageCap` call (maxBytes).
-  final List<({int maxBytes})> filesEnforceStorageCapCalls = [];
-
-  @override
-  Future<List<Map<String, Object?>>> filesList({
-    required String store,
-    required String recordId,
-    String field = 'imgs',
-  }) async {
-    filesListCalls.add((store: store, recordId: recordId, field: field));
-    return const [];
-  }
-
-  @override
-  Future<Uint8List> filesOpen({
-    required String store,
-    required String recordId,
-    String field = 'imgs',
-    int index = 0,
-    String? refId,
-  }) async {
-    filesOpenCalls.add((
-      store: store,
-      recordId: recordId,
-      field: field,
-      index: index,
-      refId: refId,
-    ));
-    return Uint8List(0);
-  }
-
-  @override
-  Future<void> filesRemove({
-    required String store,
-    required String recordId,
-    String field = 'imgs',
-    int index = 0,
-    String? refId,
-  }) async {
-    filesRemoveCalls.add((
-      store: store,
-      recordId: recordId,
-      field: field,
-      index: index,
-      refId: refId,
-    ));
-  }
-
-  @override
-  Future<int> filesGc({
-    Duration blobGrace = const Duration(days: 7),
-    Duration tmpGrace = const Duration(hours: 24),
-  }) async {
-    filesGcCalls.add((blobGrace: blobGrace, tmpGrace: tmpGrace));
-    return 0;
-  }
-
-  @override
-  Future<int> filesEnforceStorageCap({required int maxBytes}) async {
-    filesEnforceStorageCapCalls.add((maxBytes: maxBytes));
-    return 0;
   }
 
   /// The ops sent so far (shorthand for assertions).

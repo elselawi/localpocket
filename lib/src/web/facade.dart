@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:js_interop';
-import 'dart:typed_data';
 
 import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
@@ -294,13 +293,20 @@ class LocalPocket
     // facade matrix. Falls back to the facade's initial values on any failure
     // so open() does not fail just because capability discovery glitched.
     try {
-      final remote = await pocket.send(WireOp.capabilities);
+      final remote = await pocket.contractRuntime
+          .send(const contract.CapabilitiesRequest());
       final reconciled = reconcileOpenCapabilities(
         capabilities: pocket.capabilities,
         storage: pocket.storageCapabilities,
-        remote: remote is Map
-            ? remote.map((k, v) => MapEntry(k.toString(), v))
-            : null,
+        remote: {
+          'sqliteVersion': remote.sqliteVersion,
+          'hasStrict': remote.hasStrict,
+          'walSupported': remote.walSupported,
+          'hasFts5': remote.hasFts5,
+          'storage': remote.storage,
+          'durable': remote.durable,
+          'journal': remote.journal,
+        },
       );
       pocket.capabilities = reconciled.capabilities;
       pocket.storageCapabilities = reconciled.storage;
@@ -533,148 +539,6 @@ class LocalPocket
   @override
   Future<void> setConnectivity(bool online) async {
     await send(WireOp.syncSetConnectivity, {'online': online});
-  }
-
-  /// Uploads [bytes] to a record attachment via bounded chunks (task 3).
-  ///
-  /// Splits the payload into <=256 KiB chunks so no single custom request
-  /// carries a large byte list, then finishes and returns the created
-  /// `FileRef` fields from the worker-owned store.
-  ///
-  /// [allowVolatileBlobs] is forwarded to the worker's `pocket.files.attach`:
-  /// when the blob store is a volatile in-memory fallback (OPFS unavailable),
-  /// the finish step refuses the attachment unless this is `true`.
-  static const int _fileChunkBytes = 262144;
-
-  @override
-  Future<Map<String, Object?>> filesUpload({
-    required String store,
-    required String recordId,
-    required List<int> bytes,
-    String field = 'imgs',
-    String name = 'blob.bin',
-    int? expectedSize,
-    String? expectedSha256,
-    bool allowVolatileBlobs = false,
-  }) async {
-    if (expectedSize != null && expectedSize != bytes.length) {
-      throw StateError(
-          'Size mismatch: expected $expectedSize but got ${bytes.length}');
-    }
-    final beginRes = (decodeWireValue((await send(WireOp.fileUploadBegin, {
-      'store': store,
-      'recordId': recordId,
-      'field': field,
-      'name': name,
-      'size': bytes.length,
-      if (expectedSha256 != null) 'expectedSha256': expectedSha256,
-      if (allowVolatileBlobs) 'allowVolatileBlobs': true,
-    }))!))! as Map<String, Object?>;
-    final uploadId = beginRes['uploadId']! as int;
-
-    try {
-      for (var offset = 0; offset < bytes.length; offset += _fileChunkBytes) {
-        final end = (offset + _fileChunkBytes < bytes.length)
-            ? offset + _fileChunkBytes
-            : bytes.length;
-        final chunk = Uint8List.fromList(bytes.sublist(offset, end));
-        await send(WireOp.fileUploadChunk, {
-          'uploadId': uploadId,
-          'chunk': encodeWireValue(chunk),
-        });
-      }
-      final res = (await send(WireOp.fileUploadFinish, {
-        'uploadId': uploadId,
-      }))! as Map;
-      return res.map((k, v) => MapEntry(k.toString(), v));
-    } catch (_) {
-      // Best-effort abort prevents the worker's in-memory upload registry from
-      // retaining a partial session after a chunk or finish failure.
-      try {
-        await send(WireOp.fileUploadAbort, {'uploadId': uploadId});
-      } catch (_) {}
-      rethrow;
-    }
-  }
-
-  /// Lists file references attached to a record field (metadata RPC).
-  @override
-  Future<List<Map<String, Object?>>> filesList({
-    required String store,
-    required String recordId,
-    String field = 'imgs',
-  }) async {
-    final res = (decodeWireValue((await send(WireOp.fileList, {
-      'store': store,
-      'recordId': recordId,
-      'field': field,
-    }))!))! as Map<String, Object?>;
-    final refs = res['refs']! as List<Object?>;
-    return refs
-        .map((item) => (item! as Map<Object?, Object?>)
-            .map((k, v) => MapEntry(k.toString(), v)))
-        .toList();
-  }
-
-  /// Opens a file's bytes for a record (metadata RPC; full read-back).
-  @override
-  Future<Uint8List> filesOpen({
-    required String store,
-    required String recordId,
-    String field = 'imgs',
-    int index = 0,
-    String? refId,
-  }) async {
-    final res = (decodeWireValue((await send(WireOp.fileOpen, {
-      'store': store,
-      'recordId': recordId,
-      'field': field,
-      'index': index,
-      if (refId != null) 'refId': refId,
-    }))!))! as Map<String, Object?>;
-    final bytes = decodeWireValue(res['bytes']);
-    if (bytes is! List) throw StateError('Malformed file bytes response');
-    return Uint8List.fromList(bytes.cast<int>());
-  }
-
-  /// Removes a file reference from a record (metadata RPC).
-  @override
-  Future<void> filesRemove({
-    required String store,
-    required String recordId,
-    String field = 'imgs',
-    int index = 0,
-    String? refId,
-  }) async {
-    await send(WireOp.fileRemove, {
-      'store': store,
-      'recordId': recordId,
-      'field': field,
-      'index': index,
-      if (refId != null) 'refId': refId,
-    });
-  }
-
-  /// Garbage-collects blobs in the worker-owned store.
-  @override
-  Future<int> filesGc({
-    Duration blobGrace = const Duration(days: 7),
-    Duration tmpGrace = const Duration(hours: 24),
-  }) async {
-    final res = (await send(WireOp.fileGc, {
-      'blobGraceMs': blobGrace.inMilliseconds,
-      'tmpGraceMs': tmpGrace.inMilliseconds,
-    }))! as Map;
-    return (res['cleaned'] as int?) ?? 0;
-  }
-
-  /// Enforces the storage cap via LRU eviction of synced blobs.
-  @override
-  Future<int> filesEnforceStorageCap({required int maxBytes}) async {
-    final res = (await send(WireOp.fileEnforceStorageCap, {
-      'maxBytes': maxBytes,
-    }))! as Map;
-    return (res['evicted'] as int?) ?? 0;
   }
 
   /// Worker-owned synchronization status snapshots.

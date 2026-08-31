@@ -144,6 +144,38 @@ void main() {
         throwsA(isA<WireException>()),
         reason: 'a patch without an id fails typed',
       );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'fileBeginUpload',
+          'payload': encodeWireValue({'store': 's', 'recordId': 'r'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'an upload begin without a declared size fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'fileChunk',
+          'payload': encodeWireValue({'session': 'u1', 'chunk': 'not-bytes'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'an upload chunk without binary bytes fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'fileCredit',
+          'payload': encodeWireValue({'stream': 'f1', 'bytes': 'many'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a download credit without a byte count fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'fileGc',
+          'payload': encodeWireValue({'blobGraceMs': 0}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a gc request without both grace windows fails typed',
+      );
     });
   });
 
@@ -247,6 +279,18 @@ void main() {
         }),
         throwsA(isA<WireException>()),
         reason: 'a missing record id fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeEvent({
+          'tag': 'fileChunk',
+          'payload': encodeWireValue({
+            'stream': 'f1',
+            'chunk': 'not-bytes',
+            'last': true,
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a file chunk event without binary bytes fails typed',
       );
     });
   });

@@ -28,7 +28,6 @@ const int webProtocolVersion = 3;
 class WireOp {
   static const String open = 'open';
   static const String close = 'close';
-  static const String capabilities = 'capabilities';
 
   // Sync & auth
   static const String syncStart = 'sync_start';
@@ -40,23 +39,6 @@ class WireOp {
   static const String syncResume = 'sync_resume';
   static const String syncUpdateAuth = 'sync_update_auth';
   static const String syncSetConnectivity = 'sync_set_connectivity';
-
-  // File operations (§ files). Bounded chunked upload, then metadata RPC
-  // delegating to the worker-owned pocket.files.
-  static const String fileUploadBegin = 'file_upload_begin';
-  static const String fileUploadChunk = 'file_upload_chunk';
-  static const String fileUploadFinish = 'file_upload_finish';
-  static const String fileUploadAbort = 'file_upload_abort';
-  static const String fileList = 'file_list';
-  static const String fileOpen = 'file_open';
-  static const String fileRemove = 'file_remove';
-  static const String fileGc = 'file_gc';
-  static const String fileEnforceStorageCap = 'file_enforce_storage_cap';
-
-  /// Reports whether the worker-owned blob store is durable (OPFS-backed)
-  /// rather than a volatile in-memory fallback. `db.files.isBlobStorageDurable`
-  /// on the facade.
-  static const String fileStorageStatus = 'file_storage_status';
 
   /// The typed contract envelope: the request travels exactly as the contract
   /// codec encodes it and the kernel answers through the same command handler
@@ -75,7 +57,6 @@ class WireOp {
   static const Set<String> _known = {
     open,
     close,
-    capabilities,
     syncStart,
     syncStop,
     syncNow,
@@ -85,16 +66,6 @@ class WireOp {
     syncResume,
     syncUpdateAuth,
     syncSetConnectivity,
-    fileUploadBegin,
-    fileUploadChunk,
-    fileUploadFinish,
-    fileUploadAbort,
-    fileList,
-    fileOpen,
-    fileRemove,
-    fileGc,
-    fileEnforceStorageCap,
-    fileStorageStatus,
     contractRequest,
     contractEvent,
   };

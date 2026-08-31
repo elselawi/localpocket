@@ -64,7 +64,7 @@ Future<void> main() async {
 
       // Removing an absent reference is intentionally idempotent; this also
       // verifies a valid no-op metadata request crosses the worker boundary.
-      await pocket.filesRemove(
+      await pocket.files.remove(
         store: 'lifecycle_errors',
         recordId: 'record00000000001',
       );

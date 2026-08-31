@@ -22,15 +22,12 @@
 /// cross-area helpers) plus area handler mixins declared in the parts:
 ///
 /// - `worker_engine.dart` (this file) — the [WorkerEngineHost] base: the
-///   engine, worker-owned watcher/upload state, cross-cutting teardown
-///   (`close`, `stopSync`), and the shared helpers that two or more areas
-///   depend on; plus [WorkerEngine], the public entry point with the
-///   envelope parse, dispatch table, and per-op routing.
+///   engine, cross-cutting teardown (`close`, `stopSync`), and the shared
+///   helpers that two or more areas depend on; plus [WorkerEngine], the
+///   public entry point with the envelope parse, dispatch table, and per-op
+///   routing.
 /// - `worker_engine_crud.dart` — store registration (`open`).
-/// - `worker_engine_maintenance.dart` — health/capabilities + maintenance.
 /// - `worker_engine_sync.dart` — sync engine lifecycle + auth.
-/// - `worker_engine_files.dart` — chunked upload + file metadata RPCs.
-/// - `worker_engine_conflicts.dart` — conflict inspection + resolution.
 ///
 /// Reads, writes, and transaction sessions have no dedicated handlers:
 /// they travel as typed contract requests and the kernel command handler
@@ -47,7 +44,6 @@
 library;
 
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:sqlite3/common.dart';
 
@@ -57,20 +53,15 @@ import '../core/errors.dart';
 import '../core/local_pocket.dart';
 import '../core/schema_manifest.dart';
 import '../core/schema.dart';
-import '../files/files_api.dart' show FileRef;
 import '../pocketbase/auth.dart';
 import '../pocketbase/backend.dart';
 import '../sync/engine.dart';
 import '../sync/status.dart';
-import 'conversions.dart';
-import 'lifecycle.dart';
 import 'protocol.dart';
 import 'sync_status_codec.dart';
 import 'wire_args.dart';
 
 part 'worker_engine_crud.dart';
-part 'worker_engine_files.dart';
-part 'worker_engine_maintenance.dart';
 part 'worker_engine_sync.dart';
 
 /// Sink for worker→client events.
@@ -199,9 +190,6 @@ abstract class WorkerEngineHost {
   /// The LocalPocket engine served by this worker.
   final LocalPocket pocket;
 
-  final UploadSessionRegistry _uploadSessions = UploadSessionRegistry();
-  Timer? _uploadExpiryTimer;
-  int _nextUploadId = 1;
   SyncEngine? _syncEngine;
   _WebTokenProvider? _tokenProvider;
   StreamSubscription<SyncStatus>? _syncStatusSubscription;
@@ -220,9 +208,6 @@ abstract class WorkerEngineHost {
   /// shutdown order that `close` and worker teardown can rely on.
   Future<Object?> _handleClose(WorkerEventSink sink, WebRequest req) async {
     await _stopSync();
-    _uploadExpiryTimer?.cancel();
-    _uploadExpiryTimer = null;
-    _uploadSessions.clear();
     // Interactive transaction sessions are kernel-owned: closing the kernel
     // settles them.
     await _contractEventSubscription?.cancel();
@@ -293,11 +278,7 @@ abstract class WorkerEngineHost {
 /// mixin.
 /// {@endtemplate}
 final class WorkerEngine extends WorkerEngineHost
-    with
-        WorkerCrudHandlers,
-        WorkerMaintenanceHandlers,
-        WorkerSyncHandlers,
-        WorkerFilesHandlers {
+    with WorkerCrudHandlers, WorkerSyncHandlers {
   /// Creates a worker request-execution engine.
   ///
   /// {@macro localpocket.worker_engine}
@@ -366,7 +347,6 @@ final class WorkerEngine extends WorkerEngineHost
 
   late final Map<String, Future<Object?> Function(WorkerEventSink, WebRequest)>
       _handlers = {
-    WireOp.capabilities: _handleCapabilities,
     WireOp.open: _handleOpen,
     WireOp.syncStart: _handleSyncStart,
     WireOp.syncStop: _handleSyncStop,
@@ -376,16 +356,6 @@ final class WorkerEngine extends WorkerEngineHost
     WireOp.syncSetConnectivity: _handleSyncSetConnectivity,
     WireOp.syncUpdateAuth: _handleSyncUpdateAuth,
     WireOp.syncStatus: _handleSyncStatus,
-    WireOp.fileUploadBegin: _handleFileUploadBegin,
-    WireOp.fileUploadChunk: _handleFileUploadChunk,
-    WireOp.fileUploadFinish: _handleFileUploadFinish,
-    WireOp.fileUploadAbort: _handleFileUploadAbort,
-    WireOp.fileList: _handleFileList,
-    WireOp.fileOpen: _handleFileOpen,
-    WireOp.fileRemove: _handleFileRemove,
-    WireOp.fileGc: _handleFileGc,
-    WireOp.fileEnforceStorageCap: _handleFileEnforceStorageCap,
-    WireOp.fileStorageStatus: _handleFileStorageStatus,
     WireOp.contractRequest: _handleContract,
     WireOp.close: _handleClose,
   };

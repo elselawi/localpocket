@@ -39,22 +39,22 @@ void main() {
       });
     });
 
-    test('capabilities reports the live engine capability snapshot', () async {
-      final result =
-          (await h.sendOk(h.req(WireOp.capabilities)))! as Map<String, Object?>;
-      expect(result['worker'], isTrue);
-      expect(result['durable'], isTrue);
-      expect(result['persistent'], isTrue);
-      expect(result['journal'], isA<String>());
-      expect(result['sqliteVersion'], isA<String>());
-      expect(result['hasStrict'], isA<bool>());
-      expect(result['walSupported'], isA<bool>());
-      expect(result['hasFts5'], isA<bool>());
+    test('capabilities rides the contract and reports live engine facts',
+        () async {
+      final caps = await h.runtime.send(const contract.CapabilitiesRequest());
+      expect(caps.sqliteVersion, isA<String>());
+      expect(caps.hasStrict, isA<bool>());
+      expect(caps.walSupported, isA<bool>());
+      expect(caps.hasFts5, isA<bool>());
+      // Storage facts are honest: the harness backs the engine with a
+      // volatile MemoryBlobStore.
+      expect(caps.durable, isFalse);
+      expect(caps.journal, isA<String>());
     });
 
     test('success replies echo the request id', () async {
-      final reply = await h.engine
-          .handleRequest(h.sink, h.req(WireOp.capabilities).toJson());
+      final reply =
+          await h.engine.handleRequest(h.sink, h.req(WireOp.open).toJson());
       expect(reply, isA<WorkerSuccess>());
       expect((reply as WorkerSuccess).requestId, 0);
     });
@@ -64,7 +64,7 @@ void main() {
       final bad = WebRequest(
         version: webProtocolVersion + 99,
         requestId: 0,
-        op: WireOp.capabilities,
+        op: WireOp.open,
       );
       final err = await h.sendError(bad, code: WireErrorCode.protocolMismatch);
       expect(err.requestId, 0);
@@ -86,10 +86,10 @@ void main() {
 
     test('malformed envelopes fail with protocolEnvelope', () async {
       final payloads = <Map<String, Object?>>[
-        {'i': 1, 'op': WireOp.capabilities, 'a': <String, Object?>{}}, // no v
-        {'v': 'one', 'i': 1, 'op': WireOp.capabilities, 'a': {}}, // v not int
-        {'v': webProtocolVersion, 'op': WireOp.capabilities, 'a': {}}, // no i
-        {'v': webProtocolVersion, 'i': 1, 'op': WireOp.capabilities}, // no args
+        {'i': 1, 'op': WireOp.open, 'a': <String, Object?>{}}, // no v
+        {'v': 'one', 'i': 1, 'op': WireOp.open, 'a': {}}, // v not int
+        {'v': webProtocolVersion, 'op': WireOp.open, 'a': {}}, // no i
+        {'v': webProtocolVersion, 'i': 1, 'op': WireOp.open}, // no args
       ];
       for (final payload in payloads) {
         final err = await h.sendRaw(payload);
@@ -795,7 +795,7 @@ void main() {
     });
   });
 
-  group('WorkerEngine — chunked file upload', () {
+  group('WorkerEngine — files over the contract', () {
     late WorkerHarness h;
 
     setUp(() async {
@@ -805,139 +805,149 @@ void main() {
       });
     });
 
-    Future<int> beginUpload(String recordId, int size) async {
-      final result = (await h.sendOk(h.req(WireOp.fileUploadBegin, args: {
-        'store': 'widgets',
-        'recordId': recordId,
-        'size': size,
-        // The harness backs the engine with a volatile MemoryBlobStore, so a
-        // real client would have to opt in before attaching.
-        'allowVolatileBlobs': true,
-      })))! as Map<String, Object?>;
-      return result['uploadId']! as int;
-    }
+    Future<String> beginUpload(String recordId, int size) async =>
+        (await h.runtime.send(contract.FileBeginUploadRequest(
+          store: 'widgets',
+          recordId: recordId,
+          size: size,
+          // The harness backs the engine with a volatile MemoryBlobStore, so
+          // a real client would have to opt in before attaching.
+          allowVolatileBlobs: true,
+        )))
+            .session;
 
-    Future<void> chunk(int uploadId, List<int> bytes) async {
-      await h.sendOk(h.req(WireOp.fileUploadChunk, args: {
-        'uploadId': uploadId,
-        'chunk': encodeWireValue(Uint8List.fromList(bytes)),
-      }));
-    }
+    Future<void> chunk(String session, List<int> bytes) =>
+        h.runtime.send(contract.FileChunkRequest(
+            session: session, chunk: Uint8List.fromList(bytes)));
 
-    test('begin/chunk/finish reassembles and attaches (E15)', () async {
+    List<contract.FileChunkEvent> streamChunks(String stream) => [
+          for (final e in h.sink.byOp(WireOp.contractEvent))
+            if (contract.ContractCodec.decodeEvent(
+                    (e['event']! as Map).cast<String, Object?>())
+                case final contract.FileChunkEvent c when c.stream == stream)
+              c,
+        ];
+
+    test('begin/chunk/finish reassembles and attaches', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'with-file'), id: id);
       final payload = utf8.encode('hello worker file');
-      final uploadId = await beginUpload(id, payload.length);
-      await chunk(uploadId, payload.sublist(0, 5));
-      await chunk(uploadId, payload.sublist(5));
+      final session = await beginUpload(id, payload.length);
+      await chunk(session, payload.sublist(0, 5));
+      await chunk(session, payload.sublist(5));
 
-      final result = (await h.sendOk(
-              h.req(WireOp.fileUploadFinish, args: {'uploadId': uploadId})))!
-          as Map<String, Object?>;
-      expect(result['refId'], isA<String>());
-      expect(result['hash'], isA<String>());
-      expect(result['state'], 'pending_upload');
+      final ref =
+          (await h.runtime.send(contract.FileFinishRequest(session: session)))
+              .ref!;
+      expect(ref.refId, isA<String>());
+      expect(ref.hash, isA<String>());
+      expect(ref.state, 'pending_upload');
+      expect(ref.store, 'widgets');
+      expect(ref.recordId, id);
 
       // list sees the ref
-      final list = (await h.sendOk(h.req(WireOp.fileList, args: {
-        'store': 'widgets',
-        'recordId': id,
-      })))! as Map<String, Object?>;
-      final refs = (list['refs']! as List).cast<Map>();
+      final refs = (await h.runtime
+              .send(contract.FilesListRequest(store: 'widgets', recordId: id)))
+          .refs;
       expect(refs, hasLength(1));
-      expect(refs.single['refId'], result['refId']);
+      expect(refs.single.refId, ref.refId);
 
-      // open round-trips the bytes
-      final opened = (await h.sendOk(h.req(WireOp.fileOpen, args: {
-        'store': 'widgets',
-        'recordId': id,
-        'refId': result['refId'],
-      })))! as Map<String, Object?>;
-      final bytes = decodeWireValue(opened['bytes']) as List<int>;
-      expect(utf8.decode(bytes), 'hello worker file');
-      expect(opened['size'], payload.length);
+      // open streams the bytes as credit-windowed chunk events, ending with
+      // a terminal event (the page never receives a whole buffered file in
+      // one reply).
+      final opened = await h.runtime.send(contract.FileOpenRequest(
+          store: 'widgets', recordId: id, refId: ref.refId));
+      await waitUntil(() async {
+        final cs = streamChunks(opened.stream);
+        return cs.isNotEmpty && cs.last.last;
+      });
+      final cs = streamChunks(opened.stream);
+      expect(
+          utf8.decode(cs.expand((c) => c.chunk).toList()), 'hello worker file');
+      expect(cs.last.chunk, isEmpty,
+          reason: 'the terminal event carries no bytes');
     });
 
-    test('expectedSize mismatch → StateError (E3)', () async {
+    test('a declared size mismatch fails the finish typed', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'with-file'), id: id);
-      final uploadId = await beginUpload(id, 100);
-      await chunk(uploadId, utf8.encode('short'));
+      final session = await beginUpload(id, 100);
+      await chunk(session, utf8.encode('short'));
 
-      final err = await h.sendError(
-          h.req(WireOp.fileUploadFinish, args: {'uploadId': uploadId}));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ValidationException');
-      expect(err.message, contains('size mismatch'));
+      await expectLater(
+        h.runtime.send(contract.FileFinishRequest(session: session)),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.message, 'message', contains('size mismatch'))),
+      );
     });
 
-    test('chunk without begin → error', () async {
-      final err = await h.sendError(h.req(WireOp.fileUploadChunk, args: {
-        'uploadId': 1,
-        'chunk': encodeWireValue(Uint8List.fromList([1, 2, 3])),
-      }));
-      expect(err.code, WireErrorCode.localpocket);
+    test('a chunk for an unknown session fails typed', () async {
+      await expectLater(
+        h.runtime.send(contract.FileChunkRequest(
+            session: 'u9999', chunk: Uint8List.fromList([1, 2, 3]))),
+        throwsA(isA<ValidationException>()),
+      );
     });
 
-    test('abort removes the session so finish fails', () async {
+    test('abort releases the session so finish fails', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'with-file'), id: id);
-      final uploadId = await beginUpload(id, 4);
-      await chunk(uploadId, [1, 2, 3, 4]);
-      await h
-          .sendOk(h.req(WireOp.fileUploadAbort, args: {'uploadId': uploadId}));
+      final session = await beginUpload(id, 4);
+      await chunk(session, [1, 2, 3, 4]);
+      await h.runtime.send(contract.FileAbortRequest(session: session));
 
-      final err = await h.sendError(
-          h.req(WireOp.fileUploadFinish, args: {'uploadId': uploadId}));
-      expect(err.code, WireErrorCode.localpocket);
-      expect(err.details?['type'], 'ValidationException');
+      await expectLater(
+        h.runtime.send(contract.FileFinishRequest(session: session)),
+        throwsA(isA<ValidationException>()),
+      );
     });
 
-    test('file_remove/gc/enforce_storage_cap/storage_status RPCs', () async {
+    test('remove/gc/storage-cap/storage-status ride the contract', () async {
       final id = generateRecordId();
       await h.put('widgets', record(name: 'with-file'), id: id);
-      final uploadId = await beginUpload(id, 4);
-      await chunk(uploadId, [1, 2, 3, 4]);
-      await h
-          .sendOk(h.req(WireOp.fileUploadFinish, args: {'uploadId': uploadId}));
+      final session = await beginUpload(id, 4);
+      await chunk(session, [1, 2, 3, 4]);
+      await h.runtime.send(contract.FileFinishRequest(session: session));
 
-      // file_remove by index parks the ref as pending_remove (engine
-      // semantics: the ref row stays until the removal is settled).
-      await h.sendOk(h.req(WireOp.fileRemove, args: {
-        'store': 'widgets',
-        'recordId': id,
-        'index': 0,
-      }));
-      final afterRemove = (await h.sendOk(h.req(WireOp.fileList, args: {
-        'store': 'widgets',
-        'recordId': id,
-      })))! as Map<String, Object?>;
-      final refs = (afterRemove['refs']! as List).cast<Map>();
+      // remove by index parks the ref as pending_remove (engine semantics:
+      // the ref row stays until the removal is settled).
+      await h.runtime.send(contract.FileRemoveRequest(
+        store: 'widgets',
+        recordId: id,
+        index: 0,
+      ));
+      final refs = (await h.runtime
+              .send(contract.FilesListRequest(store: 'widgets', recordId: id)))
+          .refs;
       expect(refs, hasLength(1));
-      expect(refs.single['state'], 'pending_remove',
+      expect(refs.single.state, 'pending_remove',
           reason: 'remove transitions the ref to pending_remove');
 
-      // file_gc with explicit grace windows, and again with the defaults.
-      final gc = (await h.sendOk(h.req(WireOp.fileGc, args: {
-        'blobGraceMs': 0,
-        'tmpGraceMs': 0,
-      })))! as Map<String, Object?>;
-      expect(gc['cleaned'], isA<int>());
-      final gcDefaults =
-          (await h.sendOk(h.req(WireOp.fileGc)))! as Map<String, Object?>;
-      expect(gcDefaults['cleaned'], isA<int>());
+      // gc with explicit grace windows, and again with the defaults.
+      final gc = await h.runtime
+          .send(const contract.FileGcRequest(blobGraceMs: 0, tmpGraceMs: 0));
+      expect(gc.cleaned, isA<int>());
+      final gcDefaults = await h.runtime.send(const contract.FileGcRequest());
+      expect(gcDefaults.cleaned, isA<int>());
 
-      // file_enforce_storage_cap.
-      final cap = (await h.sendOk(
-              h.req(WireOp.fileEnforceStorageCap, args: {'maxBytes': 1024})))!
-          as Map<String, Object?>;
-      expect(cap['evicted'], isA<int>());
+      // storage cap.
+      final cap = await h.runtime
+          .send(const contract.EnforceStorageCapRequest(maxBytes: 1024));
+      expect(cap.evicted, isA<int>());
 
-      // file_storage_status reports the blob store's durability.
-      final status = (await h.sendOk(h.req(WireOp.fileStorageStatus)))!
-          as Map<String, Object?>;
-      expect(status['durable'], isA<bool>());
+      // storage status reports the blob store's durability (honest volatile
+      // reporting for the harness's MemoryBlobStore).
+      final status =
+          await h.runtime.send(const contract.StorageStatusRequest());
+      expect(status.durable, isFalse);
+    });
+
+    test('a credit for an unknown stream fails typed', () async {
+      await expectLater(
+        h.runtime
+            .send(const contract.FileCreditRequest(stream: 'f9999', bytes: 1)),
+        throwsA(isA<StateError>()),
+      );
     });
   });
 

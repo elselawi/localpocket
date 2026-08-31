@@ -65,6 +65,9 @@ class KernelCommandHandler implements CommandHandler {
   late final StreamSubscription<RecordChangeEvent> _changeSub;
   final _sessions = <String, _TxSession>{};
   final _watches = <String, StreamSubscription<dynamic>>{};
+  final _fileUploads = FileUploadSessionRegistry();
+  Timer? _uploadExpiryTimer;
+  final _fileDownloads = <String, _FileDownload>{};
   int _counter = 0;
 
   @override
@@ -214,6 +217,80 @@ class KernelCommandHandler implements CommandHandler {
             .acceptRemote(store, id)
             .then((_) => const OkResult()),
         ConflictsWatchRequest(:final store) => _watchConflicts(store),
+        FileBeginUploadRequest(
+          :final store,
+          :final recordId,
+          :final size,
+          :final field,
+          :final name,
+          :final expectedSha256,
+          :final allowVolatileBlobs,
+        ) =>
+          _fileBeginUpload(
+            store,
+            recordId,
+            size,
+            field,
+            name,
+            expectedSha256,
+            allowVolatileBlobs,
+          ),
+        FileChunkRequest(:final session, :final chunk) => _fileChunk(
+            session,
+            chunk,
+          ),
+        FileFinishRequest(:final session) => _fileFinish(session),
+        FileAbortRequest(:final session) => _fileAbort(session),
+        FilesListRequest(
+          :final store,
+          :final recordId,
+          :final field,
+        ) =>
+          context.database.files
+              .list(store: store, recordId: recordId, field: field)
+              .then((refs) => FileRefsResult(
+                    [for (final ref in refs) _fileRefData(ref)],
+                  )),
+        FileOpenRequest(
+          :final store,
+          :final recordId,
+          :final field,
+          :final index,
+          :final refId,
+        ) =>
+          _fileOpen(store, recordId, field, index, refId),
+        FileCreditRequest(:final stream, :final bytes) => _fileCredit(
+            stream,
+            bytes,
+          ),
+        FileRemoveRequest(
+          :final store,
+          :final recordId,
+          :final field,
+          :final index,
+          :final refId,
+        ) =>
+          context.database.files
+              .remove(
+                store: store,
+                recordId: recordId,
+                field: field,
+                index: index,
+                refId: refId,
+              )
+              .then((_) => const OkResult()),
+        FileGcRequest(:final blobGraceMs, :final tmpGraceMs) =>
+          context.database.files
+              .gc(
+                blobGrace: Duration(milliseconds: blobGraceMs),
+                tmpGrace: Duration(milliseconds: tmpGraceMs),
+              )
+              .then((cleaned) => FileGcResult(cleaned: cleaned)),
+        EnforceStorageCapRequest(:final maxBytes) => context.database.files
+            .enforceStorageCap(maxBytes: maxBytes)
+            .then((evicted) => FileCapResult(evicted: evicted)),
+        StorageStatusRequest() => context.database.files.isBlobStorageDurable
+            .then((durable) => StorageStatusResult(durable: durable)),
       };
 
   // -- lifecycle ------------------------------------------------------------
@@ -243,14 +320,23 @@ class KernelCommandHandler implements CommandHandler {
     return const OkResult();
   }
 
-  CapabilitiesResult _capabilities() {
+  Future<CapabilitiesResult> _capabilities() async {
     final caps = context.capabilities;
+    final journalMode =
+        context.db.selectSync('PRAGMA journal_mode').first.values.first;
+    final durable = await context.files.isBlobStorageDurable;
     return CapabilitiesResult(
       sqliteVersion: caps.sqliteVersion,
       hasStrict: caps.hasStrict,
       walSupported: caps.walSupported,
       hasFts5: caps.hasFts5,
       isWeb: caps.platform == PlatformProfile.web,
+      // The database lives in OPFS on web and in a file natively; attachment
+      // durability is reported honestly from the configured blob store (a
+      // volatile fallback reports false).
+      storage: caps.platform == PlatformProfile.web ? 'opfs' : 'file',
+      durable: durable,
+      journal: journalMode.toString().toLowerCase(),
     );
   }
 
@@ -617,6 +703,164 @@ class KernelCommandHandler implements CommandHandler {
     return const OkResult();
   }
 
+  // -- files -------------------------------------------------------------------
+
+  /// Starts the periodic upload-session expiry sweep on the first upload so
+  /// abandoned sessions are reclaimed even if the caller never sends another
+  /// message. The registry already sweeps lazily; this timer covers the
+  /// fully-wedged caller that sends nothing further at all.
+  void _ensureUploadExpirySweeper() {
+    if (_uploadExpiryTimer != null) return;
+    final ttl = _fileUploads.sessionTtl;
+    if (ttl <= Duration.zero) return;
+    _uploadExpiryTimer = Timer.periodic(
+      Duration(microseconds: ttl.inMicroseconds ~/ 2),
+      (_) => _fileUploads.expireStaleSessions(),
+    );
+  }
+
+  Future<Result> _fileBeginUpload(
+    String store,
+    String recordId,
+    int size,
+    String field,
+    String name,
+    String? expectedSha256,
+    bool allowVolatileBlobs,
+  ) async {
+    _ensureUploadExpirySweeper();
+    _fileUploads.begin(
+      sessionId: 'u${++_counter}',
+      store: store,
+      recordId: recordId,
+      expectedSize: size,
+      field: field,
+      name: name,
+      expectedSha256: expectedSha256,
+      allowVolatileBlobs: allowVolatileBlobs,
+    );
+    return FileUploadSessionResult(
+      session: 'u$_counter',
+      maxChunkBytes: _fileUploads.maxChunkBytes,
+    );
+  }
+
+  Future<Result> _fileChunk(String session, Uint8List chunk) async {
+    _fileUploads.addChunk(sessionId: session, chunk: chunk);
+    return const OkResult();
+  }
+
+  Future<Result> _fileFinish(String session) async {
+    final upload = _fileUploads.takeForFinish(session);
+
+    // Reassemble the byte stream from the bounded chunks. The registry
+    // enforced the aggregate quota and TTL, so the chunks are already
+    // bounded; each chunk is yielded in place (no second full-file copy).
+    Stream<List<int>> stream() async* {
+      for (final chunk in upload.chunks) {
+        yield chunk;
+      }
+    }
+
+    final ref = await context.database.files.attach(
+      store: upload.store,
+      recordId: upload.recordId,
+      bytes: stream(),
+      field: upload.field,
+      name: upload.name,
+      expectedSize: upload.expectedSize,
+      expectedSha256: upload.expectedSha256,
+      allowVolatileBlobs: upload.allowVolatileBlobs,
+    );
+    return FileRefResult(_fileRefData(ref));
+  }
+
+  Future<Result> _fileAbort(String session) async {
+    _fileUploads.abort(session);
+    return const OkResult();
+  }
+
+  /// Opens a download stream under the credit window: chunks flow as events
+  /// until the caller has granted enough credit, and the source subscription
+  /// pauses while the outstanding (un-credited) bytes fill the window. The
+  /// stream ends with a terminal event; a failed stream ends with the error
+  /// carried on it.
+  Future<Result> _fileOpen(
+    String store,
+    String recordId,
+    String field,
+    int index,
+    String? refId,
+  ) async {
+    final stream = await context.database.files.open(
+      store: store,
+      recordId: recordId,
+      field: field,
+      index: index,
+      refId: refId,
+    );
+    final id = 'f${++_counter}';
+    final download = _FileDownload(id);
+    // The subscription is owned by the download registry and cancelled on
+    // handler close.
+    // ignore: cancel_subscriptions
+    late final StreamSubscription<List<int>> sub;
+    sub = stream.listen(
+      (chunk) {
+        final bytes = Uint8List.fromList(chunk);
+        download.outstanding += bytes.length;
+        _events.add(FileChunkEvent(stream: id, chunk: bytes));
+        if (download.outstanding >= defaultFileDownloadWindowBytes) {
+          sub.pause();
+        }
+      },
+      onError: (Object e) {
+        _fileDownloads.remove(id);
+        _events.add(FileChunkEvent(
+          stream: id,
+          chunk: Uint8List(0),
+          last: true,
+          error: e.toString(),
+        ));
+      },
+      onDone: () {
+        _fileDownloads.remove(id);
+        _events.add(
+          FileChunkEvent(stream: id, chunk: Uint8List(0), last: true),
+        );
+      },
+    );
+    download.subscription = sub;
+    _fileDownloads[id] = download;
+    return FileOpenResult(stream: id);
+  }
+
+  Future<Result> _fileCredit(String stream, int bytes) async {
+    final download = _fileDownloads[stream];
+    if (download == null) {
+      throw StateError('Unknown file stream "$stream".');
+    }
+    download.outstanding -= bytes;
+    if (download.outstanding < 0) download.outstanding = 0;
+    if (download.outstanding < defaultFileDownloadWindowBytes) {
+      download.subscription.resume();
+    }
+    return const OkResult();
+  }
+
+  FileRefData _fileRefData(FileRef ref) => FileRefData(
+        refId: ref.refId,
+        store: ref.store,
+        recordId: ref.recordId,
+        field: ref.field,
+        hash: ref.hash,
+        remoteName: ref.remoteName,
+        state: ref.state,
+        nextRetryAt: ref.nextRetryAt,
+        attemptCount: ref.attemptCount,
+        lastError: ref.lastError,
+      );
+
   // -- conflicts ---------------------------------------------------------------
 
   ConflictData _conflictData(ConflictRecord c) => ConflictData(
@@ -692,6 +936,13 @@ class KernelCommandHandler implements CommandHandler {
       await sub.cancel();
     }
     _watches.clear();
+    _uploadExpiryTimer?.cancel();
+    _uploadExpiryTimer = null;
+    _fileUploads.clear();
+    for (final download in _fileDownloads.values) {
+      unawaited(download.subscription.cancel());
+    }
+    _fileDownloads.clear();
     unawaited(_changeSub.cancel());
     await context.database.close();
     await _events.close();

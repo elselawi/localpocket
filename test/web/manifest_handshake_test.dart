@@ -1,4 +1,5 @@
 import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/core/schema_manifest.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/protocol.dart';
@@ -92,10 +93,8 @@ void main() {
       () async {
     final h = await WorkerHarness.open();
     addTearDown(h.close);
-    final result =
-        (await h.sendOk(h.req(WireOp.capabilities)))! as Map<String, Object?>;
-    expect(result['worker'], isTrue);
-    expect(result['sqliteVersion'], isA<String>());
+    final caps = await h.runtime.send(const contract.CapabilitiesRequest());
+    expect(caps.sqliteVersion, isA<String>());
   });
 
   test('encoded wire values survive the fingerprint map round-trip', () {

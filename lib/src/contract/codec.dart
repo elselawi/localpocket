@@ -28,53 +28,71 @@ final class WireEvent {
 abstract final class ContractCodec {
   /// One representative instance per request variant. Used by contract tests
   /// to prove every variant round-trips and every tag is unique.
-  static const List<Request> requestSamples = [
-    OpenRequest(stores: [], manifestFingerprints: {}),
-    CapabilitiesRequest(),
-    HealthRequest(),
-    CloseRequest(),
-    GetRequest(store: 's', id: 'i'),
-    RowsRequest(store: 's', ids: ['i']),
-    MutateRequest(store: 's', mutation: MutationPut({})),
-    QueryRequest(store: 's', spec: QuerySpecData()),
-    CountRequest(store: 's', spec: QuerySpecData()),
-    CountDistinctRequest(store: 's', field: 'f', spec: QuerySpecData()),
-    DistinctRequest(
-      store: 's',
-      field: 'f',
-      spec: QuerySpecData(
-        predicate: LeafSpecData(
-            QueryConditionData('qty', QueryConditionOp.gt, value: 3)),
-        order: [QueryOrderTermData('qty', desc: true)],
-        limit: 7,
+  ///
+  /// The list is final because the binary chunk sample cannot be const; every
+  /// other sample stays const via the spread.
+  static final List<Request> requestSamples = [
+    ...const <Request>[
+      OpenRequest(stores: [], manifestFingerprints: {}),
+      CapabilitiesRequest(),
+      HealthRequest(),
+      CloseRequest(),
+      GetRequest(store: 's', id: 'i'),
+      RowsRequest(store: 's', ids: ['i']),
+      MutateRequest(store: 's', mutation: MutationPut({})),
+      QueryRequest(store: 's', spec: QuerySpecData()),
+      CountRequest(store: 's', spec: QuerySpecData()),
+      CountDistinctRequest(store: 's', field: 'f', spec: QuerySpecData()),
+      DistinctRequest(
+        store: 's',
+        field: 'f',
+        spec: QuerySpecData(
+          predicate: LeafSpecData(
+              QueryConditionData('qty', QueryConditionOp.gt, value: 3)),
+          order: [QueryOrderTermData('qty', desc: true)],
+          limit: 7,
+        ),
       ),
-    ),
-    IdsRequest(store: 's', spec: QuerySpecData()),
-    AggregateRequest(
-        store: 's', fn: AggregateFn.sum, field: 'f', spec: QuerySpecData()),
-    ExplainRequest(store: 's', spec: QuerySpecData()),
-    SearchRequest(store: 's', spec: SearchSpecData(term: 't')),
-    TransactionBeginRequest(readOnly: false),
-    TransactionCommitRequest(session: 'x'),
-    TransactionRollbackRequest(session: 'x'),
-    TransactionSavepointRequest(session: 'x', name: 'n'),
-    TransactionRollbackToRequest(session: 'x', name: 'n'),
-    TransactionReleaseRequest(session: 'x', name: 'n'),
-    WatchOneRequest(store: 's', id: 'i'),
-    WatchRequest(store: 's', spec: QuerySpecData()),
-    WatchCancelRequest(subscription: 'x'),
-    AnalyzeRequest(),
-    WalCheckpointRequest(),
-    VacuumRequest(),
-    PruneOutboxRequest(),
-    CompactRequest(store: 's', olderThanMs: 0),
-    RunMaintenanceRequest(compactOlderThanMs: 0),
-    ConflictsListRequest(),
-    ConflictGetRequest(store: 's', id: 'i'),
-    ResolveConflictRequest(store: 's', id: 'i', merged: {'name': 'm'}),
-    AcceptLocalRequest(store: 's', id: 'i'),
-    AcceptRemoteRequest(store: 's', id: 'i'),
-    ConflictsWatchRequest(),
+      IdsRequest(store: 's', spec: QuerySpecData()),
+      AggregateRequest(
+          store: 's', fn: AggregateFn.sum, field: 'f', spec: QuerySpecData()),
+      ExplainRequest(store: 's', spec: QuerySpecData()),
+      SearchRequest(store: 's', spec: SearchSpecData(term: 't')),
+      TransactionBeginRequest(readOnly: false),
+      TransactionCommitRequest(session: 'x'),
+      TransactionRollbackRequest(session: 'x'),
+      TransactionSavepointRequest(session: 'x', name: 'n'),
+      TransactionRollbackToRequest(session: 'x', name: 'n'),
+      TransactionReleaseRequest(session: 'x', name: 'n'),
+      WatchOneRequest(store: 's', id: 'i'),
+      WatchRequest(store: 's', spec: QuerySpecData()),
+      WatchCancelRequest(subscription: 'x'),
+      AnalyzeRequest(),
+      WalCheckpointRequest(),
+      VacuumRequest(),
+      PruneOutboxRequest(),
+      CompactRequest(store: 's', olderThanMs: 0),
+      RunMaintenanceRequest(compactOlderThanMs: 0),
+      ConflictsListRequest(),
+      ConflictGetRequest(store: 's', id: 'i'),
+      ResolveConflictRequest(store: 's', id: 'i', merged: {'name': 'm'}),
+      AcceptLocalRequest(store: 's', id: 'i'),
+      AcceptRemoteRequest(store: 's', id: 'i'),
+      ConflictsWatchRequest(),
+      FileBeginUploadRequest(store: 's', recordId: 'i', size: 3),
+      FileFinishRequest(session: 'x'),
+      FileAbortRequest(session: 'x'),
+      FilesListRequest(store: 's', recordId: 'i'),
+      FileOpenRequest(store: 's', recordId: 'i'),
+      FileCreditRequest(stream: 'x', bytes: 1),
+      FileRemoveRequest(store: 's', recordId: 'i'),
+      FileGcRequest(),
+      EnforceStorageCapRequest(maxBytes: 1),
+      StorageStatusRequest(),
+    ],
+    // Binary payloads cannot be const; the chunk sample rides outside the
+    // const spread.
+    FileChunkRequest(session: 'x', chunk: Uint8List.fromList([1, 2, 3])),
   ];
 
   /// One representative instance per result variant.
@@ -110,19 +128,41 @@ abstract final class ContractCodec {
     CompactResult(removed: 0),
     ConflictsResult([]),
     ConflictResult(null),
+    FileUploadSessionResult(session: 'x', maxChunkBytes: 1),
+    FileRefResult(
+      FileRefData(
+        refId: 'r',
+        store: 's',
+        recordId: 'i',
+        field: 'imgs',
+        hash: 'h',
+        state: 'pending_upload',
+      ),
+    ),
+    FileRefsResult([]),
+    FileOpenResult(stream: 'x'),
+    FileGcResult(cleaned: 0),
+    FileCapResult(evicted: 0),
+    StorageStatusResult(durable: false),
   ];
 
   /// One representative instance per event variant.
-  static const List<Event> eventSamples = [
-    CommittedChange(
-      store: 's',
-      id: 'i',
-      origin: ChangeOrigin.local,
-      action: ChangeAction.create,
-      newRecord: {'id': 'i'},
-      changedFields: {'name'},
-    ),
-    WatchSnapshot(subscription: 'x', items: []),
+  ///
+  /// The list is final because the binary chunk event cannot be const; every
+  /// other sample stays const via the spread.
+  static final List<Event> eventSamples = [
+    ...const <Event>[
+      CommittedChange(
+        store: 's',
+        id: 'i',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.create,
+        newRecord: {'id': 'i'},
+        changedFields: {'name'},
+      ),
+      WatchSnapshot(subscription: 'x', items: []),
+    ],
+    FileChunkEvent(stream: 'x', chunk: Uint8List.fromList([9])),
   ];
 
   /// request tag → the result tag that answers it.
@@ -180,6 +220,83 @@ abstract final class ContractCodec {
         return const HealthRequest();
       case 'close':
         return const CloseRequest();
+      case 'fileBeginUpload':
+        final size = m['size'];
+        if (size is! int) {
+          throw WireException('Malformed fileBeginUpload payload.');
+        }
+        return FileBeginUploadRequest(
+          store: _store(m),
+          recordId: _required(m, 'recordId'),
+          size: size,
+          field: m['field'] is String ? m['field']! as String : 'imgs',
+          name: m['name'] is String ? m['name']! as String : 'blob.bin',
+          expectedSha256: m['expectedSha256'] is String
+              ? m['expectedSha256']! as String
+              : null,
+          allowVolatileBlobs: m['allowVolatileBlobs'] == true,
+        );
+      case 'fileChunk':
+        final chunk = m['chunk'];
+        if (chunk is! Uint8List) {
+          throw WireException('Malformed fileChunk payload.');
+        }
+        return FileChunkRequest(session: _required(m, 'session'), chunk: chunk);
+      case 'fileFinish':
+        return FileFinishRequest(session: _required(m, 'session'));
+      case 'fileAbort':
+        return FileAbortRequest(session: _required(m, 'session'));
+      case 'filesList':
+        return FilesListRequest(
+          store: _store(m),
+          recordId: _required(m, 'recordId'),
+          field: m['field'] is String ? m['field']! as String : 'imgs',
+        );
+      case 'fileOpen':
+        final index = m['index'];
+        if (index != null && index is! int) {
+          throw WireException('Malformed fileOpen payload.');
+        }
+        return FileOpenRequest(
+          store: _store(m),
+          recordId: _required(m, 'recordId'),
+          field: m['field'] is String ? m['field']! as String : 'imgs',
+          index: index is int ? index : 0,
+          refId: m['refId'] is String ? m['refId']! as String : null,
+        );
+      case 'fileCredit':
+        final bytes = m['bytes'];
+        if (bytes is! int) {
+          throw WireException('Malformed fileCredit payload.');
+        }
+        return FileCreditRequest(stream: _required(m, 'stream'), bytes: bytes);
+      case 'fileRemove':
+        final index = m['index'];
+        if (index != null && index is! int) {
+          throw WireException('Malformed fileRemove payload.');
+        }
+        return FileRemoveRequest(
+          store: _store(m),
+          recordId: _required(m, 'recordId'),
+          field: m['field'] is String ? m['field']! as String : 'imgs',
+          index: index is int ? index : 0,
+          refId: m['refId'] is String ? m['refId']! as String : null,
+        );
+      case 'fileGc':
+        final blobGraceMs = m['blobGraceMs'];
+        final tmpGraceMs = m['tmpGraceMs'];
+        if (blobGraceMs is! int || tmpGraceMs is! int) {
+          throw WireException('Malformed fileGc payload.');
+        }
+        return FileGcRequest(blobGraceMs: blobGraceMs, tmpGraceMs: tmpGraceMs);
+      case 'fileEnforceStorageCap':
+        final maxBytes = m['maxBytes'];
+        if (maxBytes is! int) {
+          throw WireException('Malformed fileEnforceStorageCap payload.');
+        }
+        return EnforceStorageCapRequest(maxBytes: maxBytes);
+      case 'fileStorageStatus':
+        return const StorageStatusRequest();
       case 'get':
         return GetRequest(
           store: _store(m),
@@ -414,6 +531,9 @@ abstract final class ContractCodec {
           walSupported: m['walSupported'] == true,
           hasFts5: m['hasFts5'] == true,
           isWeb: m['isWeb'] == true,
+          storage: m['storage'] as String? ?? 'file',
+          durable: m['durable'] != false,
+          journal: m['journal'] as String? ?? 'unknown',
         );
       case HealthResult.tagValue:
         return HealthResult(
@@ -506,6 +626,46 @@ abstract final class ContractCodec {
         return ConflictResult(conflict == null
             ? null
             : ConflictData.fromJson(_stringMap(conflict, 'conflict')));
+      case FileUploadSessionResult.tagValue:
+        final session = m['session'];
+        final maxChunkBytes = m['maxChunkBytes'];
+        if (session is! String || maxChunkBytes is! int) {
+          throw WireException('Malformed fileUploadSession payload.');
+        }
+        return FileUploadSessionResult(
+            session: session, maxChunkBytes: maxChunkBytes);
+      case FileRefResult.tagValue:
+        final ref = m['ref'];
+        return FileRefResult(
+            ref == null ? null : FileRefData.fromJson(_stringMap(ref, 'ref')));
+      case FileRefsResult.tagValue:
+        final refs = m['refs'];
+        if (refs is! List) {
+          throw WireException('Malformed fileRefs payload.');
+        }
+        return FileRefsResult([
+          for (final r in refs) FileRefData.fromJson(_stringMap(r, 'refs')),
+        ]);
+      case FileOpenResult.tagValue:
+        final stream = m['stream'];
+        if (stream is! String) {
+          throw WireException('Malformed fileOpen payload.');
+        }
+        return FileOpenResult(stream: stream);
+      case FileGcResult.tagValue:
+        final cleaned = m['cleaned'];
+        if (cleaned is! int) {
+          throw WireException('Malformed fileGc payload.');
+        }
+        return FileGcResult(cleaned: cleaned);
+      case FileCapResult.tagValue:
+        final evicted = m['evicted'];
+        if (evicted is! int) {
+          throw WireException('Malformed fileCap payload.');
+        }
+        return FileCapResult(evicted: evicted);
+      case StorageStatusResult.tagValue:
+        return StorageStatusResult(durable: m['durable'] == true);
       default:
         throw WireException('Unknown result tag: $tag');
     }
@@ -572,6 +732,19 @@ abstract final class ContractCodec {
             for (final c in conflicts)
               ConflictData.fromJson(_stringMap(c, 'conflicts'))
           ],
+        );
+      case FileChunkEvent.tagValue:
+        final stream = payload['stream'];
+        final chunk = payload['chunk'];
+        if (stream is! String || chunk is! Uint8List) {
+          throw WireException('Malformed fileChunk payload.');
+        }
+        return FileChunkEvent(
+          stream: stream,
+          chunk: chunk,
+          last: payload['last'] == true,
+          error:
+              payload['error'] is String ? payload['error']! as String : null,
         );
       default:
         throw WireException('Unknown event tag: $tag');

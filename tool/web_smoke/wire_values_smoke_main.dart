@@ -135,10 +135,10 @@ Future<void> main() async {
       // the wire-value round-trip, not the durability gate, so it accepts
       // volatility only when storage isn't durable.
       final allowVolatile = !await pocket.files.isBlobStorageDurable;
-      final uploaded = await pocket.filesUpload(
+      final uploaded = await pocket.files.attach(
         store: 'wire_values',
         recordId: 'wirevalue000001',
-        bytes: bytes,
+        byteArray: bytes,
         field: 'payload',
         name: 'wire-values.bin',
         allowVolatileBlobs: allowVolatile,
@@ -151,7 +151,7 @@ Future<void> main() async {
           throw StateError('Upload mutated source bytes at offset $i.');
         }
       }
-      final readBack = await pocket.filesOpen(
+      final readBack = await pocket.files.open(
         store: 'wire_values',
         recordId: 'wirevalue000001',
         field: 'payload',

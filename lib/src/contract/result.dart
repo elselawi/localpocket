@@ -30,6 +30,9 @@ final class CapabilitiesResult extends Result {
     required this.walSupported,
     required this.hasFts5,
     required this.isWeb,
+    this.storage = 'file',
+    this.durable = true,
+    this.journal = 'unknown',
   });
 
   static const String tagValue = 'capabilities';
@@ -42,6 +45,16 @@ final class CapabilitiesResult extends Result {
   final bool hasFts5;
   final bool isWeb;
 
+  /// Where the runtime keeps the database ('opfs' on web, 'file' native).
+  final String storage;
+
+  /// Whether attachment bytes survive a restart (honest blob-store fact;
+  /// `false` when the store degrades to volatile memory).
+  final bool durable;
+
+  /// The live journal mode reported by the engine.
+  final String journal;
+
   @override
   Map<String, Object?> toJson() => {
         'sqliteVersion': sqliteVersion,
@@ -49,6 +62,9 @@ final class CapabilitiesResult extends Result {
         'walSupported': walSupported,
         'hasFts5': hasFts5,
         'isWeb': isWeb,
+        'storage': storage,
+        'durable': durable,
+        'journal': journal,
       };
 }
 

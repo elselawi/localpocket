@@ -42,6 +42,8 @@ part 'read_service.dart';
 
 part 'transaction_coordinator.dart';
 
+part '../kernel/file_sessions.dart';
+
 part '../kernel/command_handler.dart';
 
 /// Default clock: wall-clock epoch milliseconds.

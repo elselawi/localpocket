@@ -36,7 +36,7 @@ void main() {
       );
       sender.markClosedLocal();
       await expectLater(
-        sender.send(WireOp.capabilities),
+        sender.send(WireOp.syncNow),
         throwsA(isA<DatabaseWorkerClosedException>()),
       );
       expect(transportCalls, 0);
@@ -56,13 +56,13 @@ void main() {
           };
         },
       );
-      await sender.send(WireOp.capabilities);
+      await sender.send(WireOp.syncNow);
       await sender.send(WireOp.syncNow, {'store': 'widgets'});
 
       expect(received, hasLength(2));
       expect(received[0].requestId, 1);
       expect(received[1].requestId, 2);
-      expect(received[0].op, WireOp.capabilities);
+      expect(received[0].op, WireOp.syncNow);
       expect(received[1].op, WireOp.syncNow);
       expect(received[1].args, {'store': 'widgets'});
       expect(received[0].toJson()['v'], webProtocolVersion);
@@ -82,7 +82,7 @@ void main() {
         onWorkerClosed: () => closedCallback++,
       );
       await expectLater(
-        sender.send(WireOp.capabilities),
+        sender.send(WireOp.syncNow),
         throwsA(isA<DatabaseWorkerClosedException>()
             .having((e) => e.message, 'message', contains('worker is closed'))),
       );
@@ -90,7 +90,7 @@ void main() {
       expect(closedCallback, 1);
       // A later send fails immediately (already closed).
       await expectLater(
-        sender.send(WireOp.capabilities),
+        sender.send(WireOp.syncNow),
         throwsA(isA<DatabaseWorkerClosedException>()),
       );
       expect(closedCallback, 1,
@@ -106,7 +106,7 @@ void main() {
         transport: (_) async => throw boom,
         onWorkerClosed: () => closedCallback++,
       );
-      await expectLater(sender.send(WireOp.capabilities), throwsA(same(boom)));
+      await expectLater(sender.send(WireOp.syncNow), throwsA(same(boom)));
       expect(sender.isClosed, isFalse);
       expect(closedCallback, 0);
     });
@@ -132,9 +132,9 @@ void main() {
       );
 
       await expectLater(
-        sender.send(WireOp.capabilities),
+        sender.send(WireOp.syncNow),
         throwsA(isA<DatabaseWorkerTimeoutException>()
-            .having((e) => e.op, 'op', WireOp.capabilities)
+            .having((e) => e.op, 'op', WireOp.syncNow)
             .having((e) => e.requestId, 'requestId', 1)
             .having(
                 (e) => e.timeout, 'timeout', const Duration(milliseconds: 20))),
@@ -160,14 +160,14 @@ void main() {
           };
         },
       );
-      final result = await sender.send(WireOp.capabilities);
+      final result = await sender.send(WireOp.syncNow);
       expect(result, {'ok': true});
     });
 
     test('a null response is rejected as a protocol envelope error', () async {
       final sender = WebSender(transport: (_) async => null);
       await expectLater(
-        sender.send(WireOp.capabilities),
+        sender.send(WireOp.syncNow),
         throwsA(isA<ProtocolEnvelopeException>()
             .having((e) => e.message, 'message', contains('Null response'))),
       );
@@ -178,7 +178,7 @@ void main() {
         'error', () async {
       final sender = WebSender(transport: (_) async => 'not-a-map');
       await expectLater(
-        sender.send(WireOp.capabilities),
+        sender.send(WireOp.syncNow),
         throwsA(isA<ProtocolEnvelopeException>().having(
             (e) => e.message, 'message', contains('Malformed response'))),
       );
@@ -194,7 +194,7 @@ void main() {
         },
       );
       await expectLater(
-        sender.send(WireOp.capabilities),
+        sender.send(WireOp.syncNow),
         throwsA(isA<ProtocolMismatchException>()),
       );
     });
@@ -213,7 +213,7 @@ void main() {
         },
       );
       await expectLater(
-        sender.send(WireOp.capabilities),
+        sender.send(WireOp.syncNow),
         throwsA(isA<RemoteLocalPocketException>()
             .having((e) => e.code, 'code', 'StorageError')),
       );
@@ -232,7 +232,7 @@ void main() {
         },
       );
       await expectLater(
-        sender.send(WireOp.capabilities),
+        sender.send(WireOp.syncNow),
         throwsA(isA<DatabaseWorkerClosedException>()),
       );
     });
