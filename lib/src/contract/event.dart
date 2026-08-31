@@ -62,6 +62,26 @@ final class CommittedChange extends Event {
       };
 }
 
+/// A live conflicts subscription: carries the current list of open conflicts
+/// (initially and on every add, resolve, or modify).
+final class ConflictsSnapshot extends Event {
+  const ConflictsSnapshot(
+      {required this.subscription, required this.conflicts});
+
+  static const String tagValue = 'conflictsSnapshot';
+  @override
+  String get tag => tagValue;
+
+  final String subscription;
+  final List<ConflictData> conflicts;
+
+  @override
+  Map<String, Object?> toJson() => {
+        'subscription': subscription,
+        'conflicts': [for (final c in conflicts) c.toJson()],
+      };
+}
+
 /// A watch snapshot: fully shaped by the kernel (rows plus ordering), emitted
 /// for a live subscription whenever the digest changes.
 final class WatchSnapshot extends Event {

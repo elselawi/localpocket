@@ -62,14 +62,12 @@ import '../pocketbase/auth.dart';
 import '../pocketbase/backend.dart';
 import '../sync/engine.dart';
 import '../sync/status.dart';
-import 'conflicts_bridge.dart';
 import 'conversions.dart';
 import 'lifecycle.dart';
 import 'protocol.dart';
 import 'sync_status_codec.dart';
 import 'wire_args.dart';
 
-part 'worker_engine_conflicts.dart';
 part 'worker_engine_crud.dart';
 part 'worker_engine_files.dart';
 part 'worker_engine_maintenance.dart';
@@ -201,7 +199,6 @@ abstract class WorkerEngineHost {
   /// The LocalPocket engine served by this worker.
   final LocalPocket pocket;
 
-  final Map<int, _ActiveWatcher> _watchers = {};
   final UploadSessionRegistry _uploadSessions = UploadSessionRegistry();
   Timer? _uploadExpiryTimer;
   int _nextUploadId = 1;
@@ -223,10 +220,6 @@ abstract class WorkerEngineHost {
   /// shutdown order that `close` and worker teardown can rely on.
   Future<Object?> _handleClose(WorkerEventSink sink, WebRequest req) async {
     await _stopSync();
-    for (final w in _watchers.values) {
-      await w.cancel();
-    }
-    _watchers.clear();
     _uploadExpiryTimer?.cancel();
     _uploadExpiryTimer = null;
     _uploadSessions.clear();
@@ -286,20 +279,6 @@ abstract class WorkerEngineHost {
     _tokenProvider = null;
     _lastSyncStatus = null;
   }
-
-  /// Emits a worker→client `worker_event` snapshot envelope for [watchId].
-  ///
-  /// Query watches and single-record watches travel the typed contract
-  /// (`WatchSnapshot` events on the contract stream); this envelope remains
-  /// for `conflicts_watch` until that family cuts over.
-  void _emitWorkerEvent(WorkerEventSink sink, int watchId, Object? value) {
-    sink.emit({
-      'v': webProtocolVersion,
-      'op': WireOp.workerEvent,
-      'watchId': watchId,
-      'value': encodeWireValue(value),
-    });
-  }
 }
 
 /// {@template localpocket.worker_engine}
@@ -318,8 +297,7 @@ final class WorkerEngine extends WorkerEngineHost
         WorkerCrudHandlers,
         WorkerMaintenanceHandlers,
         WorkerSyncHandlers,
-        WorkerFilesHandlers,
-        WorkerConflictsHandlers {
+        WorkerFilesHandlers {
   /// Creates a worker request-execution engine.
   ///
   /// {@macro localpocket.worker_engine}
@@ -390,7 +368,6 @@ final class WorkerEngine extends WorkerEngineHost
       _handlers = {
     WireOp.capabilities: _handleCapabilities,
     WireOp.open: _handleOpen,
-    WireOp.watchCancel: _handleWatchCancel,
     WireOp.syncStart: _handleSyncStart,
     WireOp.syncStop: _handleSyncStop,
     WireOp.syncNow: _handleSyncNow,
@@ -409,12 +386,6 @@ final class WorkerEngine extends WorkerEngineHost
     WireOp.fileGc: _handleFileGc,
     WireOp.fileEnforceStorageCap: _handleFileEnforceStorageCap,
     WireOp.fileStorageStatus: _handleFileStorageStatus,
-    WireOp.conflictsList: _handleConflictsList,
-    WireOp.conflictsGet: _handleConflictsGet,
-    WireOp.conflictsResolve: _handleConflictsResolve,
-    WireOp.conflictsAcceptLocal: _handleConflictsAcceptLocal,
-    WireOp.conflictsAcceptRemote: _handleConflictsAcceptRemote,
-    WireOp.conflictsWatch: _handleConflictsWatch,
     WireOp.contractRequest: _handleContract,
     WireOp.close: _handleClose,
   };

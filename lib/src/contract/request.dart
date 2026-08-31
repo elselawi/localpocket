@@ -572,3 +572,103 @@ final class RunMaintenanceRequest extends Request<OkResult> {
   @override
   Map<String, Object?> toJson() => {'compactOlderThanMs': compactOlderThanMs};
 }
+
+// ---------------------------------------------------------------------------
+// conflicts
+// ---------------------------------------------------------------------------
+
+/// Lists open conflicts, optionally filtered by [store], sorted by detection
+/// time (ascending).
+final class ConflictsListRequest extends Request<ConflictsResult> {
+  const ConflictsListRequest({this.store});
+
+  final String? store;
+
+  @override
+  String get tag => 'conflictsList';
+  @override
+  String get resultTag => ConflictsResult.tagValue;
+  @override
+  Map<String, Object?> toJson() => {if (store != null) 'store': store};
+}
+
+/// Reads the conflict for [store]/[id], or none.
+final class ConflictGetRequest extends Request<ConflictResult> {
+  const ConflictGetRequest({required this.store, required this.id});
+
+  final String store;
+  final String id;
+
+  @override
+  String get tag => 'conflictGet';
+  @override
+  String get resultTag => ConflictResult.tagValue;
+  @override
+  Map<String, Object?> toJson() => {'store': store, 'id': id};
+}
+
+/// Resolves the open conflict for [store]/[id] with an application-selected
+/// [merged] document.
+final class ResolveConflictRequest extends Request<OkResult> {
+  const ResolveConflictRequest({
+    required this.store,
+    required this.id,
+    required this.merged,
+  });
+
+  final String store;
+  final String id;
+  final Map<String, Object?> merged;
+
+  @override
+  String get tag => 'conflictsResolve';
+  @override
+  String get resultTag => OkResult.tagValue;
+  @override
+  Map<String, Object?> toJson() => {'store': store, 'id': id, 'merged': merged};
+}
+
+/// Accepts the local version as the resolution for [store]/[id].
+final class AcceptLocalRequest extends Request<OkResult> {
+  const AcceptLocalRequest({required this.store, required this.id});
+
+  final String store;
+  final String id;
+
+  @override
+  String get tag => 'conflictsAcceptLocal';
+  @override
+  String get resultTag => OkResult.tagValue;
+  @override
+  Map<String, Object?> toJson() => {'store': store, 'id': id};
+}
+
+/// Accepts the remote version as the resolution for [store]/[id].
+final class AcceptRemoteRequest extends Request<OkResult> {
+  const AcceptRemoteRequest({required this.store, required this.id});
+
+  final String store;
+  final String id;
+
+  @override
+  String get tag => 'conflictsAcceptRemote';
+  @override
+  String get resultTag => OkResult.tagValue;
+  @override
+  Map<String, Object?> toJson() => {'store': store, 'id': id};
+}
+
+/// Watches open conflicts: a [ConflictsSnapshot] event carries the current
+/// list (initially and on every add/resolve/modify).
+final class ConflictsWatchRequest extends Request<WatchStartedResult> {
+  const ConflictsWatchRequest({this.store});
+
+  final String? store;
+
+  @override
+  String get tag => 'conflictsWatch';
+  @override
+  String get resultTag => WatchStartedResult.tagValue;
+  @override
+  Map<String, Object?> toJson() => {if (store != null) 'store': store};
+}

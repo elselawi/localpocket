@@ -193,6 +193,27 @@ class KernelCommandHandler implements CommandHandler {
             .runMaintenance(
                 compactOlderThan: Duration(milliseconds: compactOlderThanMs))
             .then((_) => const OkResult()),
+        ConflictsListRequest(:final store) => context.database.conflicts
+            .listOpen(store: store)
+            .then((list) =>
+                ConflictsResult([for (final c in list) _conflictData(c)])),
+        ConflictGetRequest(:final store, :final id) => context
+            .database.conflicts
+            .get(store, id)
+            .then((c) => ConflictResult(c == null ? null : _conflictData(c))),
+        ResolveConflictRequest(:final store, :final id, :final merged) =>
+          context.database.conflicts
+              .resolve(store: store, id: id, merged: merged)
+              .then((_) => const OkResult()),
+        AcceptLocalRequest(:final store, :final id) => context
+            .database.conflicts
+            .acceptLocal(store, id)
+            .then((_) => const OkResult()),
+        AcceptRemoteRequest(:final store, :final id) => context
+            .database.conflicts
+            .acceptRemote(store, id)
+            .then((_) => const OkResult()),
+        ConflictsWatchRequest(:final store) => _watchConflicts(store),
       };
 
   // -- lifecycle ------------------------------------------------------------
@@ -594,6 +615,39 @@ class KernelCommandHandler implements CommandHandler {
   Future<Result> _unwatch(String subscription) async {
     unawaited(_watches.remove(subscription)?.cancel());
     return const OkResult();
+  }
+
+  // -- conflicts ---------------------------------------------------------------
+
+  ConflictData _conflictData(ConflictRecord c) => ConflictData(
+        store: c.store,
+        recordId: c.recordId,
+        base: c.base,
+        local: c.local,
+        remote: c.remote,
+        dirtyLocal: c.dirtyLocal,
+        dirtyRemote: c.dirtyRemote,
+        detectedAt: c.detectedAt,
+        resolved: c.resolved,
+      );
+
+  /// Watches open conflicts. The kernel mints the subscription id; a
+  /// [ConflictsSnapshot] carries the full current list (initially and on
+  /// every add, resolve, or modify).
+  Future<Result> _watchConflicts(String? store) {
+    final subscription = 'w${++_counter}';
+    // The subscription is owned by the watch registry and cancelled on
+    // watch_cancel or handler close.
+    // ignore: cancel_subscriptions
+    final sub =
+        context.database.conflicts.watch(store: store).listen((conflicts) {
+      _events.add(ConflictsSnapshot(
+        subscription: subscription,
+        conflicts: [for (final c in conflicts) _conflictData(c)],
+      ));
+    });
+    _watches[subscription] = sub;
+    return Future.value(WatchStartedResult(subscription: subscription));
   }
 
   // -- session helpers ----------------------------------------------------------

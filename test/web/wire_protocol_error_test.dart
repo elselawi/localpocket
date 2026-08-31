@@ -142,23 +142,34 @@ void main() {
       expect(error.details, {'type': 'ValidationException', 'field': 'id'});
     });
 
-    test('stableWireErrorType provides deterministic categories and avoids minification artifacts', () {
-      expect(stableWireErrorType(ValidationException('bad')), 'ValidationException');
+    test(
+        'stableWireErrorType provides deterministic categories and avoids minification artifacts',
+        () {
+      expect(stableWireErrorType(ValidationException('bad')),
+          'ValidationException');
       expect(stableWireErrorType(StorageError('disk full')), 'StorageError');
-      expect(stableWireErrorType(UniqueConstraintException(field: 'name')), 'UniqueConstraintException');
-      expect(stableWireErrorType(NotNullConstraintException(field: 'name')), 'NotNullConstraintException');
-      expect(stableWireErrorType(CheckConstraintException('check')), 'CheckConstraintException');
-      expect(stableWireErrorType(RecordNotFoundException('missing')), 'RecordNotFoundException');
-      expect(stableWireErrorType(DestructiveMigrationRefusedError('refused')), 'DestructiveMigrationRefusedError');
+      expect(stableWireErrorType(UniqueConstraintException(field: 'name')),
+          'UniqueConstraintException');
+      expect(stableWireErrorType(NotNullConstraintException(field: 'name')),
+          'NotNullConstraintException');
+      expect(stableWireErrorType(CheckConstraintException('check')),
+          'CheckConstraintException');
+      expect(stableWireErrorType(RecordNotFoundException('missing')),
+          'RecordNotFoundException');
+      expect(stableWireErrorType(DestructiveMigrationRefusedError('refused')),
+          'DestructiveMigrationRefusedError');
       expect(stableWireErrorType(ReadOnlyTxError('ro')), 'ReadOnlyTxError');
-      expect(stableWireErrorType(TransientNetworkError('net')), 'TransientNetworkError');
+      expect(stableWireErrorType(TransientNetworkError('net')),
+          'TransientNetworkError');
       expect(stableWireErrorType(AuthError('auth')), 'AuthError');
       expect(stableWireErrorType(ProtocolError('proto')), 'ProtocolError');
       expect(stableWireErrorType(StateError('state')), 'StateError');
       expect(stableWireErrorType(ArgumentError('arg')), 'ArgumentError');
-      expect(stableWireErrorType(const FormatException('fmt')), 'FormatException');
+      expect(
+          stableWireErrorType(const FormatException('fmt')), 'FormatException');
       expect(stableWireErrorType(RangeError('range')), 'RangeError');
-      expect(stableWireErrorType(UnsupportedError('unsupported')), 'UnsupportedError');
+      expect(stableWireErrorType(UnsupportedError('unsupported')),
+          'UnsupportedError');
       // Unknown exceptions must return the stable fallback 'unknown', not minified runtimeType
       expect(stableWireErrorType(Exception('custom')), 'unknown');
     });
@@ -175,14 +186,14 @@ void main() {
       const second = WebRequest(
         version: webProtocolVersion,
         requestId: 7,
-        op: WireOp.watchCancel,
+        op: WireOp.fileStorageStatus,
         args: {'watchId': 3},
       );
       expect(first.requestId, second.requestId,
           reason: 'the id is caller-owned; the wire never rewrites it');
       expect(first.op, isNot(second.op));
       expect(WebRequest.fromJson(first.toJson()).op, WireOp.capabilities);
-      expect(WebRequest.fromJson(second.toJson()).op, WireOp.watchCancel);
+      expect(WebRequest.fromJson(second.toJson()).op, WireOp.fileStorageStatus);
       expect(WebRequest.fromJson(second.toJson()).args, {'watchId': 3});
     });
   });

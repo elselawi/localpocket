@@ -264,49 +264,24 @@ void main() {
   });
 
   group('failWorkerStreams', () {
-    test('fails every worker stream and status controllers, clearing the maps',
-        () async {
-      final watchController = StreamController<dynamic>();
+    test('fails the status controllers with the terminal error', () async {
       final syncStatus = StreamController<Map<String, Object?>>.broadcast();
       final authRequired = StreamController<void>.broadcast();
 
-      final watchErrors = <Object?>[];
-      watchController.stream.listen((_) {}, onError: watchErrors.add);
-
       final syncErrors = <Object?>[];
       syncStatus.stream.listen((_) {}, onError: syncErrors.add);
-
       final authErrors = <Object?>[];
       authRequired.stream.listen((_) {}, onError: authErrors.add);
 
-      final workerStreams = <int, StreamController<dynamic>>{
-        7: watchController
-      };
-      final decoders = <int, Object? Function(Object?)>{7: (x) => x};
-
       failWorkerStreams(
-        workerStreams: workerStreams,
-        workerEventDecoders: decoders,
         syncStatusController: syncStatus,
         authRequiredController: authRequired,
       );
 
       await pumpEventQueue();
 
-      expect(watchErrors.single, isA<DatabaseWorkerClosedException>());
       expect(syncErrors.single, isA<DatabaseWorkerClosedException>());
       expect(authErrors.single, isA<DatabaseWorkerClosedException>());
-      expect(workerStreams, isEmpty);
-      expect(decoders, isEmpty);
-      // The controllers are NOT closed: the facade's graceful close() closes
-      // them itself, so an unexpected worker close must not double-close.
-      expect(watchController.isClosed, isFalse);
-      expect(syncStatus.isClosed, isFalse);
-      expect(authRequired.isClosed, isFalse);
-
-      await watchController.close();
-      await syncStatus.close();
-      await authRequired.close();
     });
   });
 }

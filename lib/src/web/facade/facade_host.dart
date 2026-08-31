@@ -32,13 +32,6 @@ abstract interface class WebFacadeHost {
   int get nextRequestId;
   set nextRequestId(int value);
 
-  /// Active per-watch stream controllers (watch_id → controller).
-  Map<int, StreamController<dynamic>> get workerStreams;
-
-  /// Optional per-watch transform applied before a worker event is added to
-  /// its [workerStreams] controller.
-  Map<int, Object? Function(Object?)> get workerEventDecoders;
-
   /// Tracks pending watch registrations/unregistrations across the async
   /// worker boundary.
   WatchSubscriptionTracker get watchTracker;

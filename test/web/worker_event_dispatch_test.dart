@@ -10,101 +10,9 @@ import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
 
 void main() {
+  ChangeBus changeBus() => ChangeBus();
+
   group('handleWorkerEventEnvelope', () {
-    test('worker_event value is wire-decoded and added to the watch stream',
-        () async {
-      final controller = StreamController<dynamic>();
-      final values = <Object?>[];
-      controller.stream.listen(values.add);
-
-      final streams = <int, StreamController<dynamic>>{1: controller};
-      handleWorkerEventEnvelope(
-        {
-          'v': webProtocolVersion,
-          'op': WireOp.workerEvent,
-          'watchId': 1,
-          'value': encodeWireValue({
-            'id': 'abc',
-            'made_on': DateTime.utc(2026, 1, 2, 3, 4, 5),
-          }),
-        },
-        workerStreams: streams,
-        workerEventDecoders: const {},
-        authRequiredController: StreamController<void>.broadcast(),
-        syncStatusController:
-            StreamController<Map<String, Object?>>.broadcast(),
-        changeBus: ChangeBus(),
-      );
-
-      await pumpEventQueue();
-      final value = values.single! as Map;
-      expect(value['id'], 'abc');
-      expect(value['made_on'], DateTime.utc(2026, 1, 2, 3, 4, 5));
-      await controller.close();
-    });
-
-    test('a decoder transform is applied before the value is added', () async {
-      final controller = StreamController<dynamic>();
-      final values = <Object?>[];
-      controller.stream.listen(values.add);
-
-      final streams = <int, StreamController<dynamic>>{2: controller};
-      final decoders = <int, Object? Function(Object?)>{
-        2: (raw) => 'decoded:${(raw! as List).length}',
-      };
-      handleWorkerEventEnvelope(
-        {
-          'v': webProtocolVersion,
-          'op': WireOp.workerEvent,
-          'watchId': 2,
-          'value': encodeWireValue([1, 2, 3]),
-        },
-        workerStreams: streams,
-        workerEventDecoders: decoders,
-        authRequiredController: StreamController<void>.broadcast(),
-        syncStatusController:
-            StreamController<Map<String, Object?>>.broadcast(),
-        changeBus: ChangeBus(),
-      );
-
-      await pumpEventQueue();
-      expect(values.single, 'decoded:3');
-      await controller.close();
-    });
-
-    test(
-        'an error field is delivered as a typed watch error and closes the stream',
-        () async {
-      // The event handler closes this controller after delivering the error.
-      // ignore: close_sinks
-      final controller = StreamController<dynamic>();
-      final errors = <Object?>[];
-      controller.stream.listen((_) {}, onError: errors.add);
-
-      final streams = <int, StreamController<dynamic>>{3: controller};
-      handleWorkerEventEnvelope(
-        {
-          'v': webProtocolVersion,
-          'op': WireOp.workerEvent,
-          'watchId': 3,
-          'error': 'watch failed',
-        },
-        workerStreams: streams,
-        workerEventDecoders: const {},
-        authRequiredController: StreamController<void>.broadcast(),
-        syncStatusController:
-            StreamController<Map<String, Object?>>.broadcast(),
-        changeBus: ChangeBus(),
-      );
-
-      await pumpEventQueue();
-      expect(errors.single, isA<RemoteLocalPocketException>());
-      final err = errors.single as RemoteLocalPocketException;
-      expect(err.code, 'watch');
-      expect(err.message, 'watch failed');
-      expect(controller.isClosed, isTrue);
-    });
-
     test('sync_status is wire-decoded onto the status controller', () async {
       final syncStatus = StreamController<Map<String, Object?>>.broadcast();
       final statuses = <Map<String, Object?>>[];
@@ -118,11 +26,9 @@ void main() {
             'lastSyncAt': encodeWireValue(DateTime.utc(2026, 1, 1)),
           },
         },
-        workerStreams: const {},
-        workerEventDecoders: const {},
         authRequiredController: StreamController<void>.broadcast(),
         syncStatusController: syncStatus,
-        changeBus: ChangeBus(),
+        changeBus: changeBus(),
       );
 
       await pumpEventQueue();
@@ -140,12 +46,10 @@ void main() {
           'v': webProtocolVersion,
           'op': WireOp.authRequired,
         },
-        workerStreams: const {},
-        workerEventDecoders: const {},
         authRequiredController: authRequired,
         syncStatusController:
             StreamController<Map<String, Object?>>.broadcast(),
-        changeBus: ChangeBus(),
+        changeBus: changeBus(),
       );
 
       await pumpEventQueue();
@@ -153,17 +57,50 @@ void main() {
       await authRequired.close();
     });
 
+    test('unknown ops and version mismatches are ignored', () async {
+      final syncStatus = StreamController<Map<String, Object?>>.broadcast();
+      final statuses = <Map<String, Object?>>[];
+      syncStatus.stream.listen(statuses.add);
+
+      void dispatch(Map<String, Object?> event) {
+        handleWorkerEventEnvelope(
+          event,
+          authRequiredController: StreamController<void>.broadcast(),
+          syncStatusController: syncStatus,
+          changeBus: changeBus(),
+        );
+      }
+
+      dispatch({'v': 1, 'op': WireOp.syncStatus, 'status': {}});
+      dispatch({
+        'v': webProtocolVersion,
+        'op': 'mystery_op',
+        'value': encodeWireValue('x'),
+      });
+      dispatch({
+        'v': webProtocolVersion,
+        'op': WireOp.syncStatus,
+        'status': 'not-a-map',
+      });
+
+      await pumpEventQueue();
+      expect(statuses, isEmpty);
+      await syncStatus.close();
+    });
+  });
+
+  group('contract event stream', () {
     test(
         'committed facts ride the contract stream: bindRecordEventStream '
         're-publishes them on the change bus', () async {
-      final changeBus = ChangeBus();
+      final bus = changeBus();
       final events = <RecordChangeEvent>[];
-      changeBus.events.listen(events.add);
+      bus.events.listen(events.add);
 
       // A contract runtime whose transport records nothing and answers
       // nothing; only its event stream matters here.
       final runtime = RemoteRuntimeClient(transport: (_) async => null);
-      bindRecordEventStream(runtime: runtime, changeBus: changeBus);
+      bindRecordEventStream(runtime: runtime, changeBus: bus);
 
       runtime.handleWorkerEvent({
         'v': webProtocolVersion,
@@ -184,111 +121,7 @@ void main() {
       expect(events.single.id, 'abc');
       expect(events.single.action, ChangeAction.create);
       expect(events.single.newRecord, {'id': 'abc', 'name': 'x'});
-      changeBus.close();
-    });
-
-    test('unknown ops, version mismatches, and malformed watch ids are ignored',
-        () async {
-      final controller = StreamController<dynamic>();
-      final values = <Object?>[];
-      controller.stream.listen(values.add);
-      final streams = <int, StreamController<dynamic>>{9: controller};
-
-      void dispatch(Map<String, Object?> event) {
-        handleWorkerEventEnvelope(
-          event,
-          workerStreams: streams,
-          workerEventDecoders: const {},
-          authRequiredController: StreamController<void>.broadcast(),
-          syncStatusController:
-              StreamController<Map<String, Object?>>.broadcast(),
-          changeBus: ChangeBus(),
-        );
-      }
-
-      dispatch({
-        'v': webProtocolVersion,
-        'op': 'mystery_op',
-        'watchId': 9,
-        'value': encodeWireValue('x'),
-      });
-      dispatch({
-        'v': 1,
-        'op': WireOp.workerEvent,
-        'watchId': 9,
-        'value': encodeWireValue('x'),
-      });
-      dispatch({
-        'v': webProtocolVersion,
-        'op': WireOp.workerEvent,
-        'watchId': 'nine',
-        'value': encodeWireValue('x'),
-      });
-      // Unknown watch id: no stream registered.
-      dispatch({
-        'v': webProtocolVersion,
-        'op': WireOp.workerEvent,
-        'watchId': 999,
-        'value': encodeWireValue('x'),
-      });
-
-      await pumpEventQueue();
-      expect(values, isEmpty);
-      await controller.close();
-    });
-
-    test('an unknown op after the record-event retirement is ignored',
-        () async {
-      final changeBus = ChangeBus();
-      final events = <RecordChangeEvent>[];
-      changeBus.events.listen(events.add);
-
-      expect(
-        () => handleWorkerEventEnvelope(
-          {
-            'v': webProtocolVersion,
-            'op': 'record_event',
-            'event': encodeWireValue({'id': 'abc'}),
-          },
-          workerStreams: const {},
-          workerEventDecoders: const {},
-          authRequiredController: StreamController<void>.broadcast(),
-          syncStatusController:
-              StreamController<Map<String, Object?>>.broadcast(),
-          changeBus: changeBus,
-        ),
-        returnsNormally,
-        reason: 'the retired record_event envelope is plain unknown-op noise '
-            'now: committed facts ride the contract stream',
-      );
-
-      await pumpEventQueue();
-      expect(events, isEmpty);
-      changeBus.close();
-    });
-
-    test('events targeting a closed stream are dropped', () async {
-      final controller = StreamController<dynamic>();
-      controller.stream.listen((_) {});
-      await controller.close();
-
-      final streams = <int, StreamController<dynamic>>{5: controller};
-      handleWorkerEventEnvelope(
-        {
-          'v': webProtocolVersion,
-          'op': WireOp.workerEvent,
-          'watchId': 5,
-          'value': encodeWireValue('x'),
-        },
-        workerStreams: streams,
-        workerEventDecoders: const {},
-        authRequiredController: StreamController<void>.broadcast(),
-        syncStatusController:
-            StreamController<Map<String, Object?>>.broadcast(),
-        changeBus: ChangeBus(),
-      );
-      // Should not throw despite the closed controller.
-      await pumpEventQueue();
+      bus.close();
     });
   });
 }

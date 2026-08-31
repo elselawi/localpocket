@@ -1,10 +1,8 @@
 import 'dart:async';
 
 import 'package:localpocket/localpocket.dart' show ConflictRecord;
-import 'package:localpocket/src/web/conflicts_bridge.dart';
-import 'package:localpocket/src/web/conversions.dart';
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/web/facade/facade_host.dart';
-import 'package:localpocket/src/web/protocol.dart';
 
 /// {@template localpocket.web_conflicts}
 /// Main-thread conflicts API over the worker-owned engine.
@@ -25,29 +23,22 @@ class WebConflicts {
   /// Lists all currently open / unresolved conflicts, optionally filtered by
   /// [store]. Sorted by detection time (ascending), matching native.
   Future<List<ConflictRecord>> listOpen({String? store}) async {
-    final response = await _pocket.send(WireOp.conflictsList, {
-      if (store != null) 'store': store,
-    });
-    if (response is! Map) {
-      return const <ConflictRecord>[];
-    }
-    return ((response['conflicts'] as List?) ?? const [])
-        .map((raw) => decodeConflictRecord(
-            (raw as Map).map((k, v) => MapEntry(k.toString(), v))))
-        .toList();
+    final res = await _pocket.contractRuntime
+        .send(contract.ConflictsListRequest(store: store));
+    return [for (final c in res.conflicts) _record(c)];
   }
 
   /// Returns the conflict for [store]/[id], or null when none is open.
   Future<ConflictRecord?> get(String store, String id) async {
-    final res =
-        await _pocket.send(WireOp.conflictsGet, {'store': store, 'id': id});
-    if (res == null) return null;
-    return decodeConflictRecord(
-        (res as Map).map((k, v) => MapEntry(k.toString(), v)));
+    final res = await _pocket.contractRuntime
+        .send(contract.ConflictGetRequest(store: store, id: id));
+    return res.conflict == null ? null : _record(res.conflict!);
   }
 
   /// Watches open conflicts, emitting a new [List<ConflictRecord>] whenever
-  /// conflicts are added, resolved, or modified. Broadcast, like native.
+  /// conflicts are added, resolved, or modified. The kernel mints the
+  /// subscription id and emits [ConflictsSnapshot] events on the shared
+  /// runtime stream; the initial list arrives with the first snapshot.
   Stream<List<ConflictRecord>> watch({String? store}) {
     late final StreamController<List<ConflictRecord>> controller;
     final watchId = _pocket.nextRequestId++;
@@ -56,25 +47,20 @@ class WebConflicts {
       onListen: () => _pocket.watchTracker.runRegistration(
         watchId: watchId,
         register: () async {
-          _pocket.workerStreams[watchId] = controller;
-          // Transform raw wire lists into typed ConflictRecords. The worker's
-          // native conflicts watch emits the initial list immediately on
-          // listen, so no initial snapshot is returned in the request response.
-          _pocket.workerEventDecoders[watchId] = (raw) {
-            if (raw is! List) {
-              return const <ConflictRecord>[];
-            }
-            final list = raw.cast<Map<dynamic, dynamic>>();
-            return [
-              for (final m in list)
-                decodeConflictRecord(m.map((k, v) => MapEntry(k.toString(), v)))
-            ];
-          };
           try {
-            await _pocket.send(WireOp.conflictsWatch, {
-              'watchId': watchId,
-              if (store != null) 'store': store,
-            });
+            final started = await _pocket.contractRuntime
+                .send(contract.ConflictsWatchRequest(store: store));
+            _subscriptions[watchId] = (
+              subscription: started.subscription,
+              // ignore: cancel_subscriptions
+              listener: _pocket.contractRuntime.events.listen((e) {
+                if (e is contract.ConflictsSnapshot &&
+                    e.subscription == started.subscription &&
+                    !controller.isClosed) {
+                  controller.add([for (final c in e.conflicts) _record(c)]);
+                }
+              }),
+            );
           } catch (e) {
             if (!controller.isClosed) controller.addError(e);
           }
@@ -97,12 +83,32 @@ class WebConflicts {
   }
 
   Future<void> _cancelWatch(int watchId) async {
-    _pocket.workerStreams.remove(watchId);
-    _pocket.workerEventDecoders.remove(watchId);
+    final registration = _subscriptions.remove(watchId);
+    if (registration == null) return;
+    await registration.listener.cancel();
     try {
-      await _pocket.send(WireOp.watchCancel, {'watchId': watchId});
+      await _pocket.contractRuntime.send(
+          contract.WatchCancelRequest(subscription: registration.subscription));
     } catch (_) {}
   }
+
+  /// Contract subscription registration per facade watch id (id + listener).
+  final Map<int,
+          ({String subscription, StreamSubscription<contract.Event> listener})>
+      _subscriptions = {};
+
+  ConflictRecord _record(contract.ConflictData c) => ConflictRecord(
+        store: c.store,
+        recordId: c.recordId,
+        base: Map<String, Object?>.of(c.base),
+        local: Map<String, Object?>.of(c.local),
+        remote: Map<String, Object?>.of(c.remote),
+        dirtyLocal: Set<String>.of(c.dirtyLocal),
+        dirtyRemote: Set<String>.of(c.dirtyRemote),
+        detectedAt: c.detectedAt,
+        resolved:
+            c.resolved == null ? null : Map<String, Object?>.of(c.resolved!),
+      );
 
   /// Resolves the open conflict for [store]/[id] with [merged].
   Future<void> resolve({
@@ -110,21 +116,19 @@ class WebConflicts {
     required String id,
     required Map<String, Object?> merged,
   }) async {
-    await _pocket.send(WireOp.conflictsResolve, {
-      'store': store,
-      'id': id,
-      'merged': encodeWireValue(merged),
-    });
+    await _pocket.contractRuntime.send(
+        contract.ResolveConflictRequest(store: store, id: id, merged: merged));
   }
 
   /// Accepts the local version to resolve the conflict.
   Future<void> acceptLocal(String store, String id) async {
-    await _pocket.send(WireOp.conflictsAcceptLocal, {'store': store, 'id': id});
+    await _pocket.contractRuntime
+        .send(contract.AcceptLocalRequest(store: store, id: id));
   }
 
   /// Accepts the remote version to resolve the conflict.
   Future<void> acceptRemote(String store, String id) async {
-    await _pocket
-        .send(WireOp.conflictsAcceptRemote, {'store': store, 'id': id});
+    await _pocket.contractRuntime
+        .send(contract.AcceptRemoteRequest(store: store, id: id));
   }
 }

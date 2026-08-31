@@ -755,3 +755,62 @@ Codec round-trip coverage rides the request-sample matrix; malformed
 - `web_sender_test.dart`/`wire_protocol_error_test.dart`/`controller_test.dart`:
   filler ops switched to still-live ops; the case-160 vocabulary pin drops
   the seven deleted ops.
+---
+
+# Conflicts cutover over the contract (2026-08-31)
+
+The conflicts surface rides the typed contract, and the old `worker_event`
+envelope is gone entirely: all six conflicts wire ops
+(`conflicts_list/get/resolve/accept_local/accept_remote/watch`) plus
+`worker_event` and the int-id `watch_cancel` are deleted from the registry.
+Gates: analyze 0, suite `+2704 ~83`, local web gate 7/7 (asset regenerated),
+API snapshot PASS, browser matrix PASS.
+
+## Contract additions
+- `ConflictData` (contract/conflict.dart): the immutable wire-safe conflict
+  snapshot - store, recordId, base/local/remote documents, dirtyLocal/
+  dirtyRemote sets, detectedAt, optional resolved document. It carries the
+  exact field facts the kernel's `lp_conflicts` row model carries; nested
+  documents cross as wire values, so DateTime/BigInt survive.
+- Requests: `ConflictsListRequest(store?)` -> `ConflictsResult`,
+  `ConflictGetRequest(store, id)` -> `ConflictResult(ConflictData?)`,
+  `ResolveConflictRequest(store, id, merged)` -> `OkResult`,
+  `AcceptLocalRequest`/`AcceptRemoteRequest(store, id)` -> `OkResult`,
+  `ConflictsWatchRequest(store?)` -> `WatchStartedResult`.
+- Event: `ConflictsSnapshot(subscription, conflicts)` - the kernel emits the
+  initial list on registration and the full current list on every add,
+  resolve, or modify (the core conflicts watch semantics, unchanged).
+
+## The re-route
+- `WebConflicts` mirrors the query-watch pattern: kernel-minted string
+  subscription, `ConflictsSnapshot` events on the shared runtime stream
+  filtered by subscription id, typed `WatchCancelRequest` on cancel, and a
+  ConflictData -> ConflictRecord mapping at the facade boundary. The
+  workerEventDecoders transform is gone - the contract decodes conflicts
+  directly.
+- Kernel: conflict cases dispatch to the SAME core `Conflicts` service the
+  old handlers called (`listOpen/get/resolve/acceptLocal/acceptRemote/
+  watch`); `_watchConflicts` registers in the kernel watch registry so
+  `watch_cancel` and handler `close()` settle it.
+- Worker deletions: `worker_engine_conflicts.dart` (all six handlers +
+  `_ActiveWatcher`), `_emitWorkerEvent` (its last caller), the
+  `record_event`-era conflict bridge `conflicts_bridge.dart`, and the
+  `watch_cancel` int-id op. The worker now emits ONLY `contract_event`.
+- Page deletions: `workerStreams`/`workerEventDecoders` removed from
+  `WebFacadeHost`, the production facade, and `FakeFacadeHost`;
+  `handleWorkerEventEnvelope` keeps only `sync_status`/`auth_required`
+  (their families retire those too); `failWorkerStreams`/
+  `terminateWorkerStreams` shrink accordingly.
+
+## Tests moved in the same commit
+- `web_conflicts_facade_test.dart` rewritten against decoded contract
+  requests (list/get/resolve/accept sequence, snapshot delivery with
+  subscription filtering, typed cancel, stream errors).
+- `worker_engine_test.dart`: both old conflicts groups replaced by one
+  contract-driven group (typed list/get snapshots, resolve writes the
+  merged doc, accept_local/accept_remote/remote-deletion purge, watch
+  snapshot + cancel).
+- `worker_event_dispatch_test.dart` rewritten: only the status dispatch and
+  the contract committed-fact binding remain; `worker_closed_stream_test.dart`
+  and `conflicts_protocol_test.dart` deleted with their machinery; case-160
+  pin drops the eight deleted ops.

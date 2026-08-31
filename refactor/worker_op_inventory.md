@@ -65,7 +65,7 @@ All six CUT OVER (2026-08-31); the old ops are deleted:
 |---|---|---|
 | `watch_query` | `WatchRequest(ir)` → subscription id; snapshot events are kernel-shaped pages | ordered query ⇒ order-sensitive digest (§10.5) |
 | `watch_one` | `WatchOneRequest(store, id)` | ✔ CUT OVER (2026-08-31) — snapshots are single-row `WatchSnapshot` events on the contract stream (an empty item list means "absent"); the kernel validates the record decodes before registering |
-| `watch_cancel` | `CancelWatchRequest(subscriptionId)` | query + single-record watches cancel over the contract `WatchCancelRequest`; the int-id op remains only for conflicts watches |
+| `watch_cancel` | `CancelWatchRequest(subscriptionId)` | ✔ CUT OVER (2026-08-31) — the int-id op is deleted; every watch cancels over the contract |
 
 Watches inside transactions are rejected with the same typed error on both
 runtimes (§6.7).
@@ -101,14 +101,16 @@ runtimes (§6.7).
 
 ## 8. Conflict family (6 ops)
 
-| Op | Destination command | Notes |
+All six CUT OVER (2026-08-31); the old ops are deleted.
+
+| Op | Destination command → result | Notes |
 |---|---|---|
-| `conflicts_list` | `ConflictsListRequest(store)` → typed conflict snapshots | |
-| `conflicts_get` | `ConflictGetRequest(store, id)` | |
-| `conflicts_resolve` | `ResolveConflictRequest(conflictId, merged: [Write…])` | explicit typed command, never a closure (§6.10) |
-| `conflicts_accept_local` | `AcceptLocalRequest(conflictId)` | uses common mutation/event path |
-| `conflicts_accept_remote` | `AcceptRemoteRequest(conflictId)` | |
-| `conflicts_watch` | `ConflictsWatchRequest(store)` | |
+| `conflicts_list` | `ConflictsListRequest(store)` → `ConflictsResult` | ✔ typed `ConflictData` snapshots |
+| `conflicts_get` | `ConflictGetRequest(store, id)` → `ConflictResult` | ✔ |
+| `conflicts_resolve` | `ResolveConflictRequest(store, id, merged)` → `OkResult` | ✔ explicit typed command, never a closure (§6.10) |
+| `conflicts_accept_local` | `AcceptLocalRequest(store, id)` → `OkResult` | ✔ uses common mutation/event path |
+| `conflicts_accept_remote` | `AcceptRemoteRequest(store, id)` → `OkResult` | ✔ |
+| `conflicts_watch` | `ConflictsWatchRequest(store)` → `WatchStartedResult` + `ConflictsSnapshot` events | ✔ |
 
 ## 9. Known wire-surface gaps to close during cutovers
 
@@ -128,10 +130,9 @@ runtimes (§6.7).
 ## Phase 7 cutover order (fixed)
 
 CRUD/batch ✔ (2026-08-31) → query/search/cursors ✔ (2026-08-30) → watches/events ✔
-(2026-08-31; `worker_event`/int-id `watch_cancel` survive for conflicts only) →
-transactions ✔ (2026-08-31; `QueryPlan` stays kernel-internal) →
+(2026-08-31) → transactions ✔ (2026-08-31; `QueryPlan` stays kernel-internal) →
 maintenance/capabilities ✔ (2026-08-31; `capabilities` keeps the rich live
 report until storage facts join the contract; `close` keeps full teardown until
-family 8) → conflicts → files/streams → sync/auth/status/realtime →
-close/lifecycle. Old and new envelopes may coexist per family; both must call
-the same kernel services.
+family 8) → conflicts ✔ (2026-08-31; `worker_event` is fully retired) →
+files/streams → sync/auth/status/realtime → close/lifecycle. Old and new
+envelopes may coexist per family; both must call the same kernel services.

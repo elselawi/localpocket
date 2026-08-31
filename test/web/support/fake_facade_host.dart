@@ -55,10 +55,6 @@ class FakeFacadeHost implements WebFacadeHost {
   Future<Object?> Function(String op, Map<String, Object?> args)? onSend;
 
   @override
-  final Map<int, StreamController<dynamic>> workerStreams = {};
-  @override
-  final Map<int, Object? Function(Object?)> workerEventDecoders = {};
-  @override
   final WatchSubscriptionTracker watchTracker = WatchSubscriptionTracker();
   @override
   final TypedStoreRegistry typedRegistry = TypedStoreRegistry();
@@ -75,10 +71,7 @@ class FakeFacadeHost implements WebFacadeHost {
     await Future.wait([
       syncStatusController.close(),
       authRequiredController.close(),
-      ...workerStreams.values.map((stream) => stream.close()),
     ]);
-    workerStreams.clear();
-    workerEventDecoders.clear();
   }
 
   @override
@@ -149,27 +142,6 @@ class FakeFacadeHost implements WebFacadeHost {
       throw StateError('No store "$store" registered in this LocalPocket.');
     }
     return s;
-  }
-
-  /// Delivers a raw worker-event value to [watchId] through the same
-  /// `handleWorkerEventEnvelope` path the production facade runs.
-  void deliverWorkerEvent(int watchId, Object? rawValue, {Object? error}) {
-    handleWorkerEventEnvelope(
-      {
-        'v': webProtocolVersion,
-        'op': WireOp.workerEvent,
-        'watchId': watchId,
-        if (error != null)
-          'error': error
-        else
-          'value': encodeWireValue(rawValue),
-      },
-      workerStreams: workerStreams,
-      workerEventDecoders: workerEventDecoders,
-      authRequiredController: authRequiredController,
-      syncStatusController: syncStatusController,
-      changeBus: changeBus,
-    );
   }
 
   // ---- file RPCs (recorded) ----

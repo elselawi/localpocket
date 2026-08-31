@@ -28,6 +28,7 @@ export '../core/errors.dart';
 
 part 'wire_values.dart';
 part 'mutation.dart';
+part 'conflict.dart';
 part 'query_spec.dart';
 part 'request.dart';
 part 'result.dart';

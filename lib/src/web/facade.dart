@@ -27,7 +27,6 @@ import '../core/schema.dart';
 import '../core/schema_manifest.dart';
 import '../core/store.dart';
 import '../contract/contract.dart' as contract;
-import '../sync/conflicts.dart';
 import '../sync/status.dart';
 import '../typed/query_surface.dart';
 import '../typed/typed.dart';
@@ -114,16 +113,8 @@ class LocalPocket
   /// Performance counters for this facade.
   final PerfCounters perf = PerfCounters();
   @override
-  final Map<int, StreamController<dynamic>> workerStreams = {};
-  @override
   final WatchSubscriptionTracker watchTracker = WatchSubscriptionTracker();
 
-  /// Optional per-watch transform applied to a worker event value before it is
-  /// added to the matching [workerStreams] controller. Used by watch types
-  /// whose wire payload needs structural decoding (e.g. conflicts -> typed
-  /// [ConflictRecord] lists).
-  @override
-  final Map<int, Object? Function(Object?)> workerEventDecoders = {};
   final StreamController<Map<String, Object?>> _syncStatusController =
       StreamController<Map<String, Object?>>.broadcast();
   final StreamController<void> _authRequiredController =
@@ -348,8 +339,6 @@ class LocalPocket
 
   void _failWorkerStreams() {
     failWorkerStreams(
-      workerStreams: workerStreams,
-      workerEventDecoders: workerEventDecoders,
       syncStatusController: _syncStatusController,
       authRequiredController: _authRequiredController,
     );
@@ -363,17 +352,15 @@ class LocalPocket
       _contractRuntime?.handleWorkerEvent(event);
       handleWorkerEventEnvelope(
         event,
-        workerStreams: workerStreams,
-        workerEventDecoders: workerEventDecoders,
         authRequiredController: _authRequiredController,
         syncStatusController: _syncStatusController,
         changeBus: changeBus,
       );
-    } catch (e, stack) {
+    } catch (_) {
       // A malformed unsolicited event must not tear down unrelated requests.
-      for (final stream in workerStreams.values) {
-        if (!stream.isClosed) stream.addError(e, stack);
-      }
+      // Watch streams ride the contract runtime, which guards its own decode
+      // path; the status controllers fail through `_failWorkerStreams` when
+      // the worker itself goes away.
     }
   }
 

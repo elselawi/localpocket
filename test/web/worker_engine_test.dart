@@ -53,9 +53,8 @@ void main() {
     });
 
     test('success replies echo the request id', () async {
-      final reply =
-          await h.engine.handleRequest(
-              h.sink, h.req(WireOp.capabilities).toJson());
+      final reply = await h.engine
+          .handleRequest(h.sink, h.req(WireOp.capabilities).toJson());
       expect(reply, isA<WorkerSuccess>());
       expect((reply as WorkerSuccess).requestId, 0);
     });
@@ -942,43 +941,7 @@ void main() {
     });
   });
 
-  group('WorkerEngine — conflicts', () {
-    late WorkerHarness h;
-
-    setUp(() async {
-      h = await WorkerHarness.open();
-      addTearDown(() async {
-        await h.close();
-      });
-    });
-
-    test('conflicts_list on a clean store is empty', () async {
-      final result = (await h
-              .sendOk(h.req(WireOp.conflictsList, args: {'store': 'widgets'})))!
-          as Map<String, Object?>;
-      expect(result['conflicts'], isEmpty);
-    });
-
-    test('conflicts_get for an unknown record returns null result', () async {
-      final reply = await h.send(h.req(WireOp.conflictsGet, args: {
-        'store': 'widgets',
-        'id': generateRecordId(),
-      }));
-      expect(reply, isA<WorkerSuccess>());
-      expect((reply as WorkerSuccess).result, isNull);
-    });
-
-    test('conflicts_resolve for an unknown record → StateError', () async {
-      final err = await h.sendError(h.req(WireOp.conflictsResolve, args: {
-        'store': 'widgets',
-        'id': generateRecordId(),
-        'merged': encodeWireValue({'name': 'x'}),
-      }));
-      expect(err.details?['type'], 'StateError');
-    });
-  });
-
-  group('WorkerEngine — conflicts with open rows', () {
+  group('WorkerEngine — conflicts over the contract', () {
     late WorkerHarness h;
 
     setUp(() async {
@@ -1015,100 +978,89 @@ void main() {
       return id;
     }
 
-    test('conflicts_list and conflicts_get surface the open row', () async {
-      final id = await seedConflict();
-      final list = (await h
-              .sendOk(h.req(WireOp.conflictsList, args: {'store': 'widgets'})))!
-          as Map<String, Object?>;
-      final conflicts = (list['conflicts']! as List).cast<Map>();
-      expect(conflicts, hasLength(1));
-      expect(conflicts.single['record_id'], id);
-
-      final got = (await h.sendOk(h.req(WireOp.conflictsGet, args: {
-        'store': 'widgets',
-        'id': id,
-      })))! as Map<String, Object?>;
-      expect(got['record_id'], id);
-      expect(got['local'], isNotNull);
-      expect(got['remote'], isNotNull);
-      expect(got['detected_at'], 1000);
-    });
-
-    test('conflicts_resolve clears the row and writes the merged doc',
+    test('conflicts list/get surface the open row as a typed snapshot',
         () async {
       final id = await seedConflict();
-      await h.sendOk(h.req(WireOp.conflictsResolve, args: {
-        'store': 'widgets',
-        'id': id,
-        'merged': encodeWireValue({'name': 'merged'}),
-      }));
-      final list = (await h
-              .sendOk(h.req(WireOp.conflictsList, args: {'store': 'widgets'})))!
-          as Map<String, Object?>;
-      expect((list['conflicts']! as List).cast<Map>(), isEmpty);
+      final list =
+          await h.runtime.send(contract.ConflictsListRequest(store: 'widgets'));
+      expect(list.conflicts, hasLength(1));
+      expect(list.conflicts.single.recordId, id);
+      expect(list.conflicts.single.detectedAt, 1000);
+
+      final got = await h.runtime
+          .send(contract.ConflictGetRequest(store: 'widgets', id: id));
+      expect(got.conflict, isNotNull);
+      expect(got.conflict!.local, {'name': 'local'});
+      expect(got.conflict!.remote, {'name': 'remote'});
+    });
+
+    test('resolve clears the row and writes the merged doc', () async {
+      final id = await seedConflict();
+      await h.runtime.send(contract.ResolveConflictRequest(
+        store: 'widgets',
+        id: id,
+        merged: {'name': 'merged'},
+      ));
+      final list =
+          await h.runtime.send(contract.ConflictsListRequest(store: 'widgets'));
+      expect(list.conflicts, isEmpty);
       final rec = await h.get('widgets', id);
       expect(rec!['name'], 'merged');
     });
 
-    test('conflicts_accept_local resolves with the local version', () async {
-      final id = await seedConflict();
-      await h.sendOk(h.req(WireOp.conflictsAcceptLocal, args: {
-        'store': 'widgets',
-        'id': id,
-      }));
-      final rec = await h.get('widgets', id);
-      expect(rec!['name'], 'local');
+    test('accept_local/accept_remote resolve with their version', () async {
+      final a = await seedConflict();
+      await h.runtime
+          .send(contract.AcceptLocalRequest(store: 'widgets', id: a));
+      expect((await h.get('widgets', a))!['name'], 'local');
+
+      final b = await seedConflict();
+      await h.runtime
+          .send(contract.AcceptRemoteRequest(store: 'widgets', id: b));
+      expect((await h.get('widgets', b))!['name'], 'remote');
     });
 
-    test('conflicts_accept_remote resolves with the remote version', () async {
-      final id = await seedConflict();
-      await h.sendOk(h.req(WireOp.conflictsAcceptRemote, args: {
-        'store': 'widgets',
-        'id': id,
-      }));
-      final rec = await h.get('widgets', id);
-      expect(rec!['name'], 'remote');
-    });
-
-    test('conflicts_accept_remote with a remote deletion purges the record',
-        () async {
+    test('accept_remote with a remote deletion purges the record', () async {
       final id = await seedConflict(remote: {'__lp_deleted__': true});
-      await h.sendOk(h.req(WireOp.conflictsAcceptRemote, args: {
-        'store': 'widgets',
-        'id': id,
-      }));
+      await h.runtime
+          .send(contract.AcceptRemoteRequest(store: 'widgets', id: id));
       expect(await h.get('widgets', id), isNull,
           reason: 'accepting a remote deletion mirrors the remote');
     });
 
-    test('conflicts_watch registers a watcher and forwards emissions',
-        () async {
+    test('conflicts watch emits snapshots and cancel stops them', () async {
       final id = await seedConflict();
-      const watchId = 55;
-      final result = (await h.sendOk(
-              h.req(WireOp.conflictsWatch, args: {'watchId': watchId})))!
-          as Map<String, Object?>;
-      expect(result['watchId'], watchId);
+      final started = await h.runtime
+          .send(const contract.ConflictsWatchRequest(store: 'widgets'));
 
-      // The initial list is emitted as a worker event.
-      await waitUntil(() async => h.sink.byOp(WireOp.workerEvent).isNotEmpty);
-      final events = h.sink.byOp(WireOp.workerEvent);
-      expect(events.last['watchId'], watchId);
-      expect(events.last['value'], isA<List>());
+      // The initial list is emitted as a contract event.
+      List<contract.ConflictsSnapshot> snapshots() => [
+            for (final e in h.sink.byOp(WireOp.contractEvent))
+              if (contract.ContractCodec.decodeEvent(
+                      (e['event']! as Map).cast<String, Object?>())
+                  case contract.ConflictsSnapshot s
+                  when s.subscription == started.subscription)
+                s,
+          ];
+      await waitUntil(() async => snapshots().isNotEmpty);
+      expect(snapshots().single.conflicts.single.recordId, id);
+
+      await h.runtime
+          .send(contract.AcceptLocalRequest(store: 'widgets', id: id));
+      await waitUntil(() async => snapshots().last.conflicts.isEmpty);
 
       // Cancelling the watch stops further emissions.
-      await h.sendOk(h.req(WireOp.watchCancel, args: {'watchId': watchId}));
-      final emitted = h.sink.byOp(WireOp.workerEvent).length;
-      await h.sendOk(h.req(WireOp.conflictsAcceptLocal, args: {
-        'store': 'widgets',
-        'id': id,
-      }));
+      await h.runtime.send(
+          contract.WatchCancelRequest(subscription: started.subscription));
+      final emitted = snapshots().length;
+      final other = await seedConflict();
+      await h.runtime
+          .send(contract.AcceptLocalRequest(store: 'widgets', id: other));
       await Future<void>.delayed(const Duration(milliseconds: 120));
-      expect(h.sink.byOp(WireOp.workerEvent).length, emitted,
-          reason: 'no emissions after watch_cancel');
+      expect(snapshots().length, emitted,
+          reason: 'no emissions after watch cancel');
     });
   });
-
   group('WorkerEngine — maintenance & close', () {
     test('maintenance requests execute against the engine', () async {
       final h = await WorkerHarness.open();
@@ -1120,8 +1072,7 @@ void main() {
       await h.runtime.send(contract.AnalyzeRequest(store: 'widgets'));
       await h.runtime.send(const contract.WalCheckpointRequest());
       await h.runtime.send(const contract.VacuumRequest());
-      final pruned =
-          await h.runtime.send(const contract.PruneOutboxRequest());
+      final pruned = await h.runtime.send(const contract.PruneOutboxRequest());
       expect(pruned.removed, isA<int>());
       final compacted = await h.runtime
           .send(contract.CompactRequest(store: 'widgets', olderThanMs: 0));

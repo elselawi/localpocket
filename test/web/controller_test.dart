@@ -85,16 +85,13 @@ void main() {
     expect(syncNowDecoded.op, WireOp.syncNow);
     expect(syncNowDecoded.args['store'], 'notes');
 
-    // 4. Verify an old-wire watch cancel envelope round-trips (the int-id
-    // channel that remains for conflicts watches)
-    final watchCancelReq = WebRequest(
+    // 4. Verify a file envelope round-trips
+    final storageReq = WebRequest(
       version: webProtocolVersion,
       requestId: 4,
-      op: WireOp.watchCancel,
-      args: {'watchId': 7},
+      op: WireOp.fileStorageStatus,
     );
-    expect(watchCancelReq.op, WireOp.watchCancel);
-    expect(watchCancelReq.args['watchId'], 7);
+    expect(storageReq.op, WireOp.fileStorageStatus);
   });
 
   test('file upload protocol envelopes round-trip through WebRequest', () {

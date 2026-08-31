@@ -28,15 +28,8 @@ const int webProtocolVersion = 3;
 class WireOp {
   static const String open = 'open';
   static const String close = 'close';
-  static const String workerEvent = 'worker_event';
   static const String capabilities = 'capabilities';
 
-  // Reactive Watchers
-
-  /// Cancels an old-wire watch registration. The query and single-record
-  /// watches cancel over the contract (`WatchCancelRequest`); conflicts
-  /// watches still use this int-id channel until the conflicts cutover.
-  static const String watchCancel = 'watch_cancel';
   // Sync & auth
   static const String syncStart = 'sync_start';
   static const String syncStop = 'sync_stop';
@@ -65,14 +58,6 @@ class WireOp {
   /// on the facade.
   static const String fileStorageStatus = 'file_storage_status';
 
-  // Conflicts API (§ conflicts). Delegates to the engine's `pocket.conflicts`.
-  static const String conflictsList = 'conflicts_list';
-  static const String conflictsGet = 'conflicts_get';
-  static const String conflictsResolve = 'conflicts_resolve';
-  static const String conflictsAcceptLocal = 'conflicts_accept_local';
-  static const String conflictsAcceptRemote = 'conflicts_accept_remote';
-  static const String conflictsWatch = 'conflicts_watch';
-
   /// The typed contract envelope: the request travels exactly as the contract
   /// codec encodes it and the kernel answers through the same command handler
   /// the direct runtime uses. Coexists with the string-op registry until every
@@ -90,9 +75,7 @@ class WireOp {
   static const Set<String> _known = {
     open,
     close,
-    workerEvent,
     capabilities,
-    watchCancel,
     syncStart,
     syncStop,
     syncNow,
@@ -112,12 +95,6 @@ class WireOp {
     fileGc,
     fileEnforceStorageCap,
     fileStorageStatus,
-    conflictsList,
-    conflictsGet,
-    conflictsResolve,
-    conflictsAcceptLocal,
-    conflictsAcceptRemote,
-    conflictsWatch,
     contractRequest,
     contractEvent,
   };

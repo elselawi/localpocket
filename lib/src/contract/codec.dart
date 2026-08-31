@@ -69,6 +69,12 @@ abstract final class ContractCodec {
     PruneOutboxRequest(),
     CompactRequest(store: 's', olderThanMs: 0),
     RunMaintenanceRequest(compactOlderThanMs: 0),
+    ConflictsListRequest(),
+    ConflictGetRequest(store: 's', id: 'i'),
+    ResolveConflictRequest(store: 's', id: 'i', merged: {'name': 'm'}),
+    AcceptLocalRequest(store: 's', id: 'i'),
+    AcceptRemoteRequest(store: 's', id: 'i'),
+    ConflictsWatchRequest(),
   ];
 
   /// One representative instance per result variant.
@@ -102,6 +108,8 @@ abstract final class ContractCodec {
     WatchStartedResult(subscription: 'x'),
     PruneOutboxResult(removed: 0),
     CompactResult(removed: 0),
+    ConflictsResult([]),
+    ConflictResult(null),
   ];
 
   /// One representative instance per event variant.
@@ -319,6 +327,28 @@ abstract final class ContractCodec {
           throw WireException('Malformed runMaintenance payload.');
         }
         return RunMaintenanceRequest(compactOlderThanMs: compactOlderThanMs);
+      case 'conflictsList':
+        final store = m['store'];
+        return ConflictsListRequest(store: store is String ? store : null);
+      case 'conflictGet':
+        return ConflictGetRequest(store: _store(m), id: _required(m, 'id'));
+      case 'conflictsResolve':
+        final merged = m['merged'];
+        if (merged is! Map) {
+          throw WireException('Malformed conflictsResolve payload.');
+        }
+        return ResolveConflictRequest(
+          store: _store(m),
+          id: _required(m, 'id'),
+          merged: _stringMap(merged, 'merged'),
+        );
+      case 'conflictsAcceptLocal':
+        return AcceptLocalRequest(store: _store(m), id: _required(m, 'id'));
+      case 'conflictsAcceptRemote':
+        return AcceptRemoteRequest(store: _store(m), id: _required(m, 'id'));
+      case 'conflictsWatch':
+        final store = m['store'];
+        return ConflictsWatchRequest(store: store is String ? store : null);
       default:
         return null;
     }
@@ -462,6 +492,20 @@ abstract final class ContractCodec {
         return tag == PruneOutboxResult.tagValue
             ? PruneOutboxResult(removed: removed)
             : CompactResult(removed: removed);
+      case ConflictsResult.tagValue:
+        final conflicts = m['conflicts'];
+        if (conflicts is! List) {
+          throw WireException('Malformed conflicts payload.');
+        }
+        return ConflictsResult([
+          for (final c in conflicts)
+            ConflictData.fromJson(_stringMap(c, 'conflicts')),
+        ]);
+      case ConflictResult.tagValue:
+        final conflict = m['conflict'];
+        return ConflictResult(conflict == null
+            ? null
+            : ConflictData.fromJson(_stringMap(conflict, 'conflict')));
       default:
         throw WireException('Unknown result tag: $tag');
     }
@@ -515,6 +559,19 @@ abstract final class ContractCodec {
         return WatchSnapshot(
           subscription: subscription,
           items: [for (final i in items) _stringMap(i, 'items')],
+        );
+      case ConflictsSnapshot.tagValue:
+        final subscription = payload['subscription'];
+        final conflicts = payload['conflicts'];
+        if (subscription is! String || conflicts is! List) {
+          throw WireException('Malformed conflictsSnapshot payload.');
+        }
+        return ConflictsSnapshot(
+          subscription: subscription,
+          conflicts: [
+            for (final c in conflicts)
+              ConflictData.fromJson(_stringMap(c, 'conflicts'))
+          ],
         );
       default:
         throw WireException('Unknown event tag: $tag');

@@ -232,6 +232,36 @@ final class SearchHitData {
   }
 }
 
+/// The list of open conflicts, sorted by detection time (ascending).
+final class ConflictsResult extends Result {
+  const ConflictsResult(this.conflicts);
+  static const String tagValue = 'conflicts';
+  @override
+  String get tag => tagValue;
+
+  final List<ConflictData> conflicts;
+
+  @override
+  Map<String, Object?> toJson() => {
+        'conflicts': [for (final c in conflicts) c.toJson()],
+      };
+}
+
+/// The conflict for one record, or none.
+final class ConflictResult extends Result {
+  const ConflictResult(this.conflict);
+  static const String tagValue = 'conflict';
+  @override
+  String get tag => tagValue;
+
+  final ConflictData? conflict;
+
+  @override
+  Map<String, Object?> toJson() => {
+        'conflict': conflict?.toJson(),
+      };
+}
+
 /// Handshake for an interactive transaction: the session id must ride every
 /// subsequent command that participates in the transaction.
 final class TransactionBeginResult extends Result {

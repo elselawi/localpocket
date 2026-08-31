@@ -1,133 +1,163 @@
-import 'package:localpocket/localpocket.dart' show ConflictRecord;
-import 'package:localpocket/src/web/conflicts_bridge.dart';
-import 'package:localpocket/src/web/conversions.dart';
+import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/web/facade/web_conflicts.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
 
+import '../support/helpers.dart';
 import 'support/fake_facade_host.dart';
+
+ConflictRecord conflict(String id) => ConflictRecord(
+      store: 'widgets',
+      recordId: id,
+      base: {'id': id, 'name': 'base'},
+      local: {'id': id, 'name': 'local'},
+      remote: {'id': id, 'name': 'remote'},
+      dirtyLocal: {'name'},
+      dirtyRemote: {'name'},
+      detectedAt: 1700000000000,
+    );
+
+/// Decodes the contract request carried by [fake]'s i-th sent envelope.
+contract.Request sentRequest(FakeFacadeHost fake, int i) =>
+    contract.ContractCodec.decodeRequest(
+        (fake.sent[i].$2['request']! as Map).cast<String, Object?>());
 
 void main() {
   late FakeFacadeHost fake;
   late WebConflicts conflicts;
 
   setUp(() {
-    fake = FakeFacadeHost({});
+    fake = FakeFacadeHost({'widgets': widgetsSchema()});
     conflicts = WebConflicts.ins(fake);
+    // Default reply for resolution commands; individual tests override it.
+    fake.responses[WireOp.contractRequest] =
+        FakeFacadeHost.contractReply(const contract.OkResult());
   });
 
-  ConflictRecord conflict(String id) => ConflictRecord(
-        store: 'widgets',
-        recordId: id,
-        base: {'name': 'base', 'made_on': DateTime.utc(2026, 1, 1)},
-        local: {'name': 'local'},
-        remote: {'name': 'remote'},
-        dirtyLocal: {'name'},
-        dirtyRemote: {'name'},
-        detectedAt: 123,
-      );
+  group('WebConflicts envelopes', () {
+    test('listOpen sends a typed list request and decodes the snapshots',
+        () async {
+      final c = conflict('x');
+      fake.onSend = (op, args) async {
+        final req = contract.ContractCodec.decodeRequest(
+            (args['request']! as Map).cast<String, Object?>());
+        expect(req, isA<contract.ConflictsListRequest>());
+        return FakeFacadeHost.contractReply(
+            contract.ConflictsResult([_data(c)]));
+      };
 
-  test('listOpen decodes wire rows through decodeConflictRecord', () async {
-    final c1 = conflict('a');
-    final c2 = conflict('b');
-    fake.responses[WireOp.conflictsList] = {
-      'conflicts': [encodeConflictRecord(c1), encodeConflictRecord(c2)],
-    };
+      final list = await conflicts.listOpen(store: 'widgets');
+      expect(list, hasLength(1));
+      expect(list.single.store, 'widgets');
+      expect(list.single.recordId, 'x');
+      expect(list.single.local, {'id': 'x', 'name': 'local'});
+      expect(list.single.dirtyRemote, {'name'});
+    });
 
-    final list = await conflicts.listOpen();
-    expect(list, hasLength(2));
-    expect(list[0].recordId, 'a');
-    expect(list[0].store, 'widgets');
-    expect(list[0].base, {'name': 'base', 'made_on': DateTime.utc(2026, 1, 1)},
-        reason: 'nested wire types must survive the round-trip');
-    expect(list[0].dirtyLocal, {'name'});
-    expect(list[1].recordId, 'b');
-    expect(fake.sent.single.$2, isNot(contains('store')),
-        reason: 'an omitted store filter must not be sent');
+    test('get decodes a snapshot; an empty reply decodes to null', () async {
+      fake.onSend = (op, args) async {
+        final req = contract.ContractCodec.decodeRequest(
+            (args['request']! as Map).cast<String, Object?>());
+        return FakeFacadeHost.contractReply(
+            contract.ConflictResult(_data(conflict('y'))));
+      };
+      final got = await conflicts.get('widgets', 'y');
+      expect(got, isNotNull);
+      expect(got!.recordId, 'y');
+
+      fake.onSend = (op, args) async =>
+          FakeFacadeHost.contractReply(const contract.ConflictResult(null));
+      expect(await conflicts.get('widgets', 'none'), isNull);
+    });
+
+    test('resolve/acceptLocal/acceptRemote ride the typed commands', () async {
+      await conflicts.resolve(
+          store: 'widgets', id: 'x', merged: {'id': 'x', 'name': 'merged'});
+      await conflicts.acceptLocal('widgets', 'x');
+      await conflicts.acceptRemote('widgets', 'x');
+
+      expect(fake.sent, hasLength(3));
+      final resolve = sentRequest(fake, 0) as contract.ResolveConflictRequest;
+      expect(resolve.store, 'widgets');
+      expect(resolve.id, 'x');
+      expect(resolve.merged, {'id': 'x', 'name': 'merged'});
+      expect(sentRequest(fake, 1) as contract.AcceptLocalRequest,
+          isA<contract.AcceptLocalRequest>());
+      expect(sentRequest(fake, 2) as contract.AcceptRemoteRequest,
+          isA<contract.AcceptRemoteRequest>());
+    });
   });
 
-  test(
-      'listOpen sends the store filter when provided and tolerates an '
-      'empty/missing list', () async {
-    fake.responses[WireOp.conflictsList] = {'conflicts': <Object?>[]};
-    expect(await conflicts.listOpen(store: 'widgets'), isEmpty);
-    expect(fake.sent.single.$2, {'store': 'widgets'});
+  group('WebConflicts.watch', () {
+    test(
+        'sends a typed watch request and decodes conflicts snapshots; '
+        'cancel sends the typed cancel', () async {
+      fake.onSend = (op, args) async {
+        final req = contract.ContractCodec.decodeRequest(
+            (args['request']! as Map).cast<String, Object?>());
+        return switch (req) {
+          contract.ConflictsWatchRequest() => FakeFacadeHost.contractReply(
+              const contract.WatchStartedResult(subscription: 'c1')),
+          contract.WatchCancelRequest() =>
+            FakeFacadeHost.contractReply(const contract.OkResult()),
+          _ => const contract.OkResult(),
+        };
+      };
 
-    fake.responses[WireOp.conflictsList] = {};
-    expect(await conflicts.listOpen(), isEmpty);
-  });
+      final received = <List<ConflictRecord>>[];
+      final sub = conflicts.watch(store: 'widgets').listen(received.add);
+      await pumpEventQueue();
 
-  test('get decodes the record and returns null for a null result', () async {
-    fake.responses[WireOp.conflictsGet] = encodeConflictRecord(conflict('x'));
-    final record = await conflicts.get('widgets', 'x');
-    expect(record, isNotNull);
-    expect(record!.recordId, 'x');
-    expect(fake.sent.single.$2, {'store': 'widgets', 'id': 'x'});
+      final watch = sentRequest(fake, 0) as contract.ConflictsWatchRequest;
+      expect(watch.store, 'widgets');
 
-    fake.responses[WireOp.conflictsGet] = null;
-    expect(await conflicts.get('widgets', 'gone'), isNull);
-  });
+      fake.deliverContractEvent(contract.ConflictsSnapshot(
+        subscription: 'c1',
+        conflicts: [_data(conflict('x'))],
+      ));
+      await pumpEventQueue();
+      expect(received, hasLength(1));
+      expect(received.single.single.recordId, 'x');
 
-  test('resolve sends the merged document wire-encoded', () async {
-    await conflicts.resolve(
-      store: 'widgets',
-      id: 'a',
-      merged: {'name': 'merged', 'made_on': DateTime.utc(2026, 2, 2)},
-    );
-    final (op, args) = fake.sent.single;
-    expect(op, WireOp.conflictsResolve);
-    expect(args['store'], 'widgets');
-    expect(args['id'], 'a');
-    expect(
-        args['merged'],
-        encodeWireValue(
-            {'name': 'merged', 'made_on': DateTime.utc(2026, 2, 2)}));
-  });
+      // Snapshots of other subscriptions are ignored.
+      fake.deliverContractEvent(const contract.ConflictsSnapshot(
+        subscription: 'c2',
+        conflicts: [],
+      ));
+      await pumpEventQueue();
+      expect(received, hasLength(1));
 
-  test('acceptLocal and acceptRemote send the right ops', () async {
-    await conflicts.acceptLocal('widgets', 'a');
-    expect(fake.sent.single.$1, WireOp.conflictsAcceptLocal);
-    expect(fake.sent.single.$2, {'store': 'widgets', 'id': 'a'});
+      await sub.cancel();
+      await pumpEventQueue();
+      final cancel = sentRequest(fake, fake.sent.length - 1)
+          as contract.WatchCancelRequest;
+      expect(cancel.subscription, 'c1');
+    });
 
-    fake.sent.clear();
-    await conflicts.acceptRemote('widgets', 'b');
-    expect(fake.sent.single.$1, WireOp.conflictsAcceptRemote);
-    expect(fake.sent.single.$2, {'store': 'widgets', 'id': 'b'});
-  });
-
-  test(
-      'watch registers a workerEventDecoder, sends conflicts_watch, delivers '
-      'typed lists, and the cancel path removes the decoder and sends '
-      'watch_cancel', () async {
-    final watchId = fake.nextRequestId;
-    final c1 = conflict('a');
-
-    final emissions = <List<ConflictRecord>>[];
-    final sub = conflicts.watch().listen(emissions.add);
-    await pumpEventQueue();
-
-    // Registration sent conflicts_watch and registered a decoder.
-    final watch = fake.sent.where((s) => s.$1 == WireOp.conflictsWatch).single;
-    expect(watch.$2, {'watchId': watchId});
-    expect(fake.workerEventDecoders.containsKey(watchId), isTrue);
-    expect(fake.workerStreams.containsKey(watchId), isTrue);
-    final controller = fake.workerStreams[watchId]!;
-    expect(controller.isClosed, isFalse);
-
-    // A raw wire list is decoded into typed ConflictRecords.
-    fake.deliverWorkerEvent(watchId, [encodeConflictRecord(c1)]);
-    await pumpEventQueue();
-    expect(emissions, hasLength(1));
-    expect(emissions.single.single.recordId, 'a');
-
-    // Cancelling removes the decoder and sends watch_cancel.
-    await sub.cancel();
-    await pumpEventQueue();
-    await controller.close();
-    expect(controller.isClosed, isTrue);
-    expect(fake.workerEventDecoders.containsKey(watchId), isFalse);
-    expect(fake.workerStreams.containsKey(watchId), isFalse);
-    final cancel = fake.sent.where((s) => s.$1 == WireOp.watchCancel).single;
-    expect(cancel.$2, {'watchId': watchId});
+    test('a failing watch request surfaces as a stream error', () async {
+      final boom = StateError('worker down');
+      fake.onSend = (op, args) async {
+        if (op == WireOp.contractRequest) throw boom;
+        return fake.responses[op];
+      };
+      final errors = <Object?>[];
+      final sub = conflicts.watch().listen((_) {}, onError: errors.add);
+      await pumpEventQueue();
+      expect(errors, [boom]);
+      await sub.cancel();
+    });
   });
 }
+
+contract.ConflictData _data(ConflictRecord c) => contract.ConflictData(
+      store: c.store,
+      recordId: c.recordId,
+      base: c.base,
+      local: c.local,
+      remote: c.remote,
+      dirtyLocal: c.dirtyLocal,
+      dirtyRemote: c.dirtyRemote,
+      detectedAt: c.detectedAt,
+      resolved: c.resolved,
+    );

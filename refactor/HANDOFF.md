@@ -103,11 +103,20 @@ Cutover slices DONE (2026-08-30):
    teardown (the worker still owns sync/conflicts/upload state) — both
    retire with the files/family-8 cutovers.
 
-Remaining (this stage):
-conflicts (retires `worker_event`/`watch_cancel`/`conflicts_*`) → files →
-sync/auth/status/realtime → close/lifecycle. The barrel switch is the NEXT
-agent's stage (plan Phase 9).
+7. **Conflicts family cutover**: the six conflicts ops ride typed contract
+   requests with immutable `ConflictData` snapshots; `ConflictsWatchRequest`
+   + `ConflictsSnapshot` events replace the `worker_event` int-id channel,
+   and `worker_event`/`watch_cancel`/`conflicts_*` are all deleted (the
+   worker now emits ONLY `contract_event`). `workerStreams`/
+   `workerEventDecoders` plumbing removed from the host, facade, and
+   lifecycle helpers. `conflicts_bridge.dart` and
+   `worker_engine_conflicts.dart` deleted.
 
+Remaining (this stage):
+files (bounded contract upload/download sessions, `FileRef`, storage
+capabilities for the capabilities op) → sync/auth/status/realtime →
+close/lifecycle (consolidates `close`; the worker becomes a small envelope
+loop). The barrel switch is the NEXT agent's stage (plan Phase 9).
 The full destination plan (12 stages, gates, checklists) is in
 `final_refactoring_plan.md`. Stages 0–6 are DONE. You are starting stage 7:
 the family cutovers and web collapse. Stage-by-stage history lives in
@@ -498,11 +507,15 @@ Fixed order:
    added (recorded). DEVIATIONS: `capabilities` keeps the rich live report
    until storage facts join the contract; `close` keeps full teardown until
    family 8 (the worker still owns sync/conflicts/upload state).
-5. **Conflicts** — 6 ops → new contract variants (list/get/watch/resolve/
-   accept-local/accept-remote) with typed immutable conflict snapshots.
-   Delete `conflicts_bridge.dart`, `worker_engine_conflicts.dart`, the
-   `WebConflicts` mirror. Update `web_conflicts_facade_test.dart` /
-   `conflicts_protocol_test.dart`.
+5. **Conflicts** — DONE (2026-08-31, see the ledger's "Conflicts cutover"
+   section). `ConflictData` + `ConflictsListRequest`/`ConflictGetRequest`/
+   `ResolveConflictRequest`/`AcceptLocalRequest`/`AcceptRemoteRequest`/
+   `ConflictsWatchRequest` and the `ConflictsSnapshot` event added; the
+   kernel dispatches to the same core `Conflicts` service. Deleted:
+   `conflicts_bridge.dart`, `worker_engine_conflicts.dart`,
+   `_emitWorkerEvent`, the `worker_event` envelope, the int-id
+   `watch_cancel`, `workerStreams`/`workerEventDecoders` plumbing, and the
+   `conflicts_protocol_test.dart`/`worker_closed_stream_test.dart` pins.
 6. **Files** — bounded upload/download sessions per plan §11.4
    (`FileBeginUpload`/`FileChunk`/`FileFinish`/`FileAbort`; `FilesList`/
    `FileOpen`/`FileChunkEvent`/`FileCredit`; remove/gc/cap/status). One
