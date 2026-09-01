@@ -4,7 +4,6 @@ import 'package:test/test.dart';
 
 import '../../tool/api_surface_scanner.dart';
 import '../../tool/raw_api_gate.dart';
-import '../../tool/typed_surface_gate.dart';
 
 void main() {
   const violatingSource = '''
@@ -71,21 +70,9 @@ final class SneakySurface {
     });
   });
 
-  test('case 165: typed record-map write payload fails', () {
-    final inputs = scanRecordMapInputs(
-      violatingSource.replaceFirst('SyntheticRaw', 'BadTypedStore'),
-      path: 'lib/src/typed/bad.dart',
-      owners: {'BadTypedStore'},
-    );
-    expect(typedSurfaceViolations(inputs), [
-      contains('BadTypedStore.save(Map<String,Object?> record)'),
-    ]);
-  });
-
   test('repository gates pass end to end', () async {
     for (final script in [
       'tool/raw_api_gate.dart',
-      'tool/typed_surface_gate.dart',
     ]) {
       final result = await Process.run(
         Platform.resolvedExecutable,

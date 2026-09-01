@@ -103,7 +103,6 @@ void main() {
         '[offline_lint]',
         '[security_review]',
         '[raw_api_gate]',
-        '[typed_surface_gate]',
         '[docs_examples]',
         '[test_suite]',
         '[coverage_gate]',

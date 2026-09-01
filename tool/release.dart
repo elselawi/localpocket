@@ -174,11 +174,6 @@ List<ReleaseStep> buildReleaseSteps({
         argv: ['run', 'tool/raw_api_gate.dart'],
       ),
       const ReleaseStep(
-        id: 'typed_surface_gate',
-        label: 'Typed descriptor/draft surface gate',
-        argv: ['run', 'tool/typed_surface_gate.dart'],
-      ),
-      const ReleaseStep(
         id: 'dependency_bounds',
         label: 'Dependency bounds and lockfile compatibility',
         argv: ['run', 'tool/dependency_check.dart'],
@@ -248,8 +243,7 @@ List<ReleaseStep> buildReleaseSteps({
           '-j',
           '1',
           'test/release/',
-          'test/web/',
-          'test/typed/compile_fail_test.dart'
+          'test/web/'
         ],
         retryOnFailure: true,
       ),

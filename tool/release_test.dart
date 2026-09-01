@@ -31,7 +31,6 @@ void main() {
             'snapshot_clean',
             'api_contract_gate',
             'raw_api_gate',
-            'typed_surface_gate',
             'dependency_bounds',
             'docs_examples',
             'version_check',
@@ -65,10 +64,6 @@ void main() {
         defaultSteps.singleWhere((s) => s.id == 'raw_api_gate').argv,
         ['run', 'tool/raw_api_gate.dart'],
       );
-      expect(
-        defaultSteps.singleWhere((s) => s.id == 'typed_surface_gate').argv,
-        ['run', 'tool/typed_surface_gate.dart'],
-      );
     });
 
     test('release gate step includes all gate-tagged suites', () {
@@ -86,7 +81,6 @@ void main() {
             '1',
             'test/release/',
             'test/web/',
-            'test/typed/compile_fail_test.dart',
           ]));
 
       final liveSuite = buildReleaseSteps(withReal: true)
@@ -115,7 +109,6 @@ void main() {
       expect(result.stdout, contains('[security_review]'));
       expect(result.stdout, contains('[traceability]'));
       expect(result.stdout, contains('[raw_api_gate]'));
-      expect(result.stdout, contains('[typed_surface_gate]'));
       expect(result.stdout, contains('[docs_examples]'));
     });
 

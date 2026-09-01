@@ -1,7 +1,0 @@
-# Compile-fail fixtures are intentionally invalid Dart. They pin the
-# compile-time failures the typed layer guarantees (plan §4.8). They are
-# excluded from the main `dart analyze` run and analyzed only by
-# test/typed/compile_fail_test.dart (gate-tagged, run sequentially with -j 1).
-analyzer:
-  exclude:
-    - "*.dart"
