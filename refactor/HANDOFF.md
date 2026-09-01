@@ -168,7 +168,20 @@ lives in `refactor/*.md`.
 
 ---
 
-## 2. Current state (verified 2026-09-01, after Phase 8 + Phase 9)
+## 2. Current state (verified 2026-09-01, Phase 10 move-only passes in progress)
+
+Phase 10 has landed the move-only re-homes (all green, committed): `src/sync`→
+`src/kernel/sync`, `src/pocketbase`→`src/adapters/pocketbase`, `src/core`→
+`src/kernel` (flat), the schema split (`src/typed/{cond,field_def,
+store_def,schema_helpers}`→`src/schema/`, `write`→`src/api/writes.dart`,
+`limits`→`src/api/limits.dart`), and the files common re-home
+(`blob_store`/`file_sync_lane`→`kernel/files/`, `files_api`→
+`kernel/file_service.dart`). There is NO `lib/src/core/` or `lib/src/sync/`
+any more; the barrel exports the same public names from the new homes.
+Remaining Phase 10 work: the web collapse, the old typed app-surface
+deletion, the `raw_surface.dart` retirement, the files platform split, the
+benchmark/example migration, and the barrel re-check — see the ledger's
+Phase 10 section and the ownership map ticks.
 
 ALL EIGHT families of the Phase 7 cutover are DONE (2026-08-31), Phase 8
 (2026-09-01) added the destination surfaces for files/conflicts/sync, and
@@ -207,14 +220,14 @@ windows. `lib/localpocket.dart` is now the ONE supported application barrel
 
 | Piece | Where | Notes |
 |---|---|---|
-| Kernel database | `lib/src/core/local_pocket.dart` — `class KernelDatabase` | The concrete engine. The destination `LocalPocket` (facade, `lib/src/api/`) owns the public name; the raw `KernelDatabase` is kernel-internal (the `LocalPocket = KernelDatabase` transitional typedef is no longer exported). |
-| Kernel context | `lib/src/core/kernel_context.dart` (part) | `KernelContext`: db, tables, clock, capabilities, changeBus, outbox, opQueue, conflicts, files, typedRegistry, transactions, mutations, reads, commands, traceExecute/traceQuery. Constructed inside `KernelDatabase.open`, exposed as `db.kernel`. |
-| Services | `lib/src/core/{mutation_service,read_service,transaction_coordinator}.dart` (parts) | `db.mutations` (put/upsert/putAll/upsertAll/patch/patchAll/archive/restore/purge — need a `Collection` bound to a tx when used in-session), `db.reads` (compiled-plan execution), `db._transactions` (write queue, durability pragma state, group commit, read transactions). |
+| Kernel database | `lib/src/kernel/local_pocket.dart` — `class KernelDatabase` | The concrete engine. The destination `LocalPocket` (facade, `lib/src/api/`) owns the public name; the raw `KernelDatabase` is kernel-internal (the `LocalPocket = KernelDatabase` transitional typedef is no longer exported). |
+| Kernel context | `lib/src/kernel/kernel_context.dart` (part) | `KernelContext`: db, tables, clock, capabilities, changeBus, outbox, opQueue, conflicts, files, typedRegistry, transactions, mutations, reads, commands, traceExecute/traceQuery. Constructed inside `KernelDatabase.open`, exposed as `db.kernel`. |
+| Services | `lib/src/kernel/{mutation_service,read_service,transaction_coordinator}.dart` (parts) | `db.mutations` (put/upsert/putAll/upsertAll/patch/patchAll/archive/restore/purge — need a `Collection` bound to a tx when used in-session), `db.reads` (compiled-plan execution), `db._transactions` (write queue, durability pragma state, group commit, read transactions). |
 | Command dispatcher | `lib/src/kernel/command_handler.dart` (part) | `KernelCommandHandler implements CommandHandler` — exhaustive switch over ALL 28 request variants. Constructed as `db.commands`. |
-| Runtime contract | `lib/src/contract/` (one library, parts) | `Request`(28 sealed variants)/`Result`(17)/`Event`(2), `ContractCodec` (encode/decode + `requestSamples`/`resultSamples`/`eventSamples` + `requestResultTags` correlation map), error codec, wire value codec, `abstract interface class CommandHandler`. **Exports `../core/errors.dart`.** |
+| Runtime contract | `lib/src/contract/` (one library, parts) | `Request`(28 sealed variants)/`Result`(17)/`Event`(2), `ContractCodec` (encode/decode + `requestSamples`/`resultSamples`/`eventSamples` + `requestResultTags` correlation map), error codec, wire value codec, `abstract interface class CommandHandler`. **Exports `../kernel/errors.dart`.** |
 | Runtimes | `lib/src/runtime/runtime_client.dart` | `RuntimeClient` interface; `LocalRuntimeClient` (direct, with correlation check); `LoopbackRuntimeClient` (full wire encode→decode→handle→encode→decode); `RemoteRuntimeClient` (contract envelope over the page transport — `lib/src/runtime/remote_runtime_client.dart`). |
-| Schema manifests | `lib/src/core/schema_manifest.dart` | `SchemaManifest.compile(schema)`, fingerprint over complete behavior JSON, `unsupportedFeatures` flags, persisted in `lp_meta` key `schema_manifest:<store>`, same-version change rejection, duplicate-store rejection, web rejection of unrepresentable callbacks. `StoreTable.manifest`. |
-| Execution context | `lib/src/core/execution_context.dart` | `ExecutionContext.root()` / `.transaction(executor:, readOnly:)`. `Tx.context`. Query/search builders accept an executor — tx-built builders carry the tx executor (structural fix, pinned by `debugExecutor`). |
+| Schema manifests | `lib/src/kernel/schema_manifest.dart` | `SchemaManifest.compile(schema)`, fingerprint over complete behavior JSON, `unsupportedFeatures` flags, persisted in `lp_meta` key `schema_manifest:<store>`, same-version change rejection, duplicate-store rejection, web rejection of unrepresentable callbacks. `StoreTable.manifest`. |
+| Execution context | `lib/src/kernel/execution_context.dart` | `ExecutionContext.root()` / `.transaction(executor:, readOnly:)`. `Tx.context`. Query/search builders accept an executor — tx-built builders carry the tx executor (structural fix, pinned by `debugExecutor`). |
 | Re-route seam | `WebFacadeHost.contractRuntime` | ONE shared `RemoteRuntimeClient` per facade (lazy in production, built over `send` in `FakeFacadeHost`). `FakeFacadeHost.contractReply`/`contractErrorReply`/`deliverContractEvent` are the test helpers; `WorkerHarness.customRequest` mirrors the JS boundary. |
 
 ### Contract request inventory (already implemented end-to-end)
