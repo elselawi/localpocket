@@ -1092,3 +1092,136 @@ retires.
   `lifecycle_error_smoke`'s `expectRemoteError` had to learn that contract
   errors decode as TYPED kernel errors (`StateError` stays `StateError`, the
   old `RemoteLocalPocketException[StateError]` wrapper is dead).
+
+---
+
+# Stage A — destination surfaces for files, conflicts, and sync (2026-09-01)
+
+The wire and kernel work for these families was DONE (the Phase 7 cutovers);
+this pass put the missing typed public surfaces on the destination facade
+(`lib/src/api/`) and proved them through the parameterized conformance suite
+(direct + loopback + remote). No new wire vocabulary was added — every
+surface rides the existing contract requests. Gates: analyze 0, suite
+`+2767 ~83`, local web gate 7/7 (asset unchanged — no web-layer change),
+API snapshot PASS.
+
+## A1. Files on the store facade (`lib/src/api/files.dart`)
+
+- `FileRef` — one immutable file reference used on both platforms; maps
+  `FileRefData` ↔ `FileRef` at the boundary (mirror of `ConflictData` ↔
+  `ConflictRecord`). Fields: refId/store/recordId/field/hash/remoteName/state/
+  nextRetryAt/attemptCount/lastError.
+- `FileSource` — the bounded attachment source: `FileSource.stream(chunks,
+  {length, name})` (declare the length when known) and `FileSource.bytes(
+  bytes, {name})` (always knows its length). The kernel chunker bounds the
+  wire: `attach` begins a session at the accepted `maxChunkBytes` and streams
+  chunks, so no single request carries a large payload.
+- `Files<S>` — `store.files` is the store-scoped file service: `attach(
+  recordId, {field, source, allowVolatileBlobs})`, `list(recordId,
+  {field})`, `open(ref)` → `Stream<List<int>>` (assembled from the
+  credit-windowed `FileChunkEvent` flow — the browser-proven consume/credit
+  loop from `web_files.dart`, with buffering for events that overtake the
+  open reply), `remove(ref)`, plus the store-less verbs the kernel exposes:
+  `gc`, `enforceStorageCap`, and the honest `isBlobStorageDurable`.
+- The api facade's `_send` seam carries the typed errors; unknown sessions
+  and streams surface typed (`ValidationException`/`StateError`).
+- Behavior oracle: `lib/src/files/files_api.dart` — the destination tests
+  pin the volatile guard, dedup, and pending_upload/pending_remove states
+  without rewriting behavior.
+
+## A2. Conflicts on the store facade (`lib/src/api/conflicts.dart`)
+
+- `StoreConflicts<S>` — `store.conflicts` is the store-scoped surface:
+  `listOpen()`, `get(id)`, `watch()` (kernel-minted subscription,
+  `ConflictsSnapshot` events on the shared runtime stream, typed
+  `WatchCancelRequest` on cancel — the `Store.watch` pattern, not the web
+  facade's `WatchSubscriptionTracker`, which is web-layer), `resolve(id,
+  merged: [Write<S>...])`, `acceptLocal(id)`, `acceptRemote(id)`.
+- `Conflict<S>` — the typed immutable snapshot: base/local/remote as `Row<S>`
+  (enriched with `id: recordId` so `row.id` and the resolve base work),
+  dirtyLocal/dirtyRemote as `Set<String>`, detectedAt as `DateTime`, and
+  `remoteDeleted` (delete-conflict tombstone check against
+  `remoteDeletedKey`).
+- DECISION (resolve semantics): the final API lowers TYPED WRITES into the
+  merged document — `resolve(id, merged: [Write<S>...])` fetches the
+  conflict, starts from its LOCAL document, applies the lowered writes on top
+  (via the store's own `_buildRecord` lowering, passed as a tear-off — no
+  behavior was moved), and sends the full document as `ResolveConflictRequest`.
+  The kernel's resolve writes the domain row to the given merged document, so
+  a partial map would null out unmentioned fields; starting from local
+  preserves them. Unmentioned fields keep their local value.
+- The contract `ResolveConflictRequest` was NOT changed; `Writes.id` and
+  `archived` writes are rejected by the existing lowering.
+
+## A3. PocketBase sync attachment on the destination facade (`lib/src/api/sync.dart`)
+
+- DECISION: adopted `PocketBaseSyncOptions` (baseUrl/tokenProvider/identity)
+  — the plan §6.9 shape — rather than the typed layer's named-parameter
+  `attachPocketBaseSync`. `db.attachPocketBaseSync(PocketBaseSyncOptions(...))`
+  returns a concrete `PocketBaseSync` host.
+- The destination `PocketBaseSync` drives the SHARED CONTRACT RUNTIME on both
+  platforms (native direct and web remote): `start()` sends `SyncStartRequest`
+  (sync start owns realtime — NO `startRealtime()` on this surface, per §6.9),
+  `syncNow`/`pause`/`resume`/`setConnectivity`/`updateAuth` send the matching
+  requests, `status`/`authRequired` derive from `SyncStatusEvent`/
+  `AuthRequiredEvent`. The sync logic always lives in the kernel engine.
+- Token rules unchanged: the provider stays caller-owned; its current value
+  crosses only via the start command's optional token and `updateAuth`.
+  Auth is an explicit bridge — `authRequired` fires and the caller pushes a
+  fresh token (the plan §6.9 sketch; no automatic refresh inside the host).
+- `LocalPocketOptions` gained `syncBackendFactory` (the `SyncBackendFactory`
+  seam) so a native/direct kernel can accept sync start; the worker boot
+  configures its own factory, so web callers never pass it. Also gained
+  `blobStore` so native files work through the destination options.
+- DEVIATION (layering note): `lib/src/api/sync.dart` imports the adapter's
+  `TokenProvider`/`Token` and the api barrel re-exports them (`show Token,
+  TokenProvider`) so `PocketBaseSyncOptions` is usable from one import — the
+  same pairing the typed layer already exposes. R1/R3 (core/sync → pocketbase)
+  are untouched; the layering test does not scan `lib/src/api/`.
+
+## A4. Backoff primitive + adapter mapping (VERIFIED — no code change)
+
+- The ONE shared backoff primitive ALREADY exists: `lib/src/sync/backoff.dart`
+  (`exponentialBackoffDelay`) is the single overflow-safe exponential-backoff
+  implementation. Both callers delegate to it: `SyncConfig.delayFor` (sync
+  retry delays, used by puller/pusher/file lane) and the SSE reconnect loop
+  (`lib/src/pocketbase/sse.dart`). Plan Phase 8 sync item 8 is satisfied —
+  recorded, not rebuilt.
+- PocketBase attachment field mapping ALREADY lives in the adapter:
+  `lib/src/pocketbase/pb_client.dart` (`imgs+`/`imgs-` field wiring,
+  `updateRecordFiles`, `downloadFile`), surfaced by `backend.dart`
+  (`updateRecordFiles`/`updateRecordFilesStream`/`downloadFile`) and mapped
+  by `sse.dart` (`imgs` lists). Per the ownership map, nothing moved.
+
+## A5. Conformance (the gate)
+
+- `test/conformance/surface_conformance_test.dart` (new): files + conflicts +
+  sync groups over direct + loopback + remote runtimes. Files ride the
+  destination `Files<S>` (bounded upload, streamed credit-windowed download,
+  honest volatile storage, remove/gc/cap); conflicts are seeded into
+  `lp_conflicts` directly and listed/watched/resolved/accept-ed through the
+  typed surface (list/get/resolve merging from local, acceptLocal/acceptRemote,
+  watch initial + re-emit); sync drives the destination `PocketBaseSync`
+  against an in-process PocketBase wire server (`MockPbServer`) — start owns
+  realtime, lifecycle verbs round-trip, report is complete. 15 cases × 3
+  runtimes green.
+- `test/api/files_test.dart`, `test/api/conflicts_test.dart`,
+  `test/api/sync_test.dart` (new): focused destination-surface tests over the
+  direct runtime (volatile guard, declared-length mismatch, no-blob-store
+  failure, resolve-from-local semantics, remote-deletion accept, auth-required
+  event, no-sync-backend typed failure).
+- `test/compile_fixtures/final_api_vm.dart`: extended with the files/
+  conflicts/sync vocabulary (analyzer is the gate) — the executable definition
+  of the destination API now covers every contract family.
+
+## Gotchas learned this pass
+- `Store.conflicts.resolve` reuses the store's private `_buildRecord` lowering
+  by passing it as a constructor tear-off — no behavior was moved out of
+  `Store`, so the write-lowering pins stay put.
+- The destination conflict `Row`s are enriched with `id: recordId`; the
+  `remoteDeleted` tombstone check must ignore that injected id (the kernel's
+  own check is `remote.length == 1 && remote[remoteDeletedKey] == true`).
+- `addTearDown(() => db.close())` — a bare `addTearDown(db.close)` tear-off
+  evaluates the `late` field at registration and throws `LateError`.
+- The fixture's `TokenProvider` stub comes from the api barrel's re-export —
+  the sync attachment vocabulary compiles from one import.

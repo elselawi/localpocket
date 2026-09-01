@@ -9,6 +9,8 @@ library;
 import 'dart:typed_data';
 
 import '../core/cipher.dart';
+import '../files/blob_store.dart' show BlobStore;
+import '../sync/sync_backend.dart' show SyncBackendFactory;
 import '../typed/store_def.dart';
 
 /// Re-exported so callers configuring durability can name it from the same
@@ -27,6 +29,8 @@ final class LocalPocketOptions {
     this.bootstrap = const BootstrapOptions(),
     this.maxDocumentBytes = 1900000,
     this.now,
+    this.syncBackendFactory,
+    this.blobStore,
   });
 
   /// Database file path (`:memory:` opens an in-memory database).
@@ -49,6 +53,24 @@ final class LocalPocketOptions {
 
   /// Injectable wall clock (tests). `null` uses the system clock.
   final DateTime Function()? now;
+
+  /// Builds the sync backend the kernel uses for sync start commands, or
+  /// `null` when sync is not used on this database.
+  ///
+  /// The PocketBase adapter supplies [SyncBackendFactory]'s implementation;
+  /// on web the worker boot configures it itself, so this is primarily the
+  /// native (direct runtime) wiring. A runtime without a factory fails sync
+  /// start with a typed error.
+  final SyncBackendFactory? syncBackendFactory;
+
+  /// The blob store holding attachment bytes for this database, or `null`
+  /// when files are not used.
+  ///
+  /// On web the worker resolves its own platform blob store (OPFS with a
+  /// volatile in-memory fallback); on native targets this is the storage
+  /// adapter for attachment bytes. A database without a blob store fails
+  /// file operations with a typed error.
+  final BlobStore? blobStore;
 }
 
 /// {@template localpocket.encryption_config}

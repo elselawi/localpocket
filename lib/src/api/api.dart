@@ -7,10 +7,18 @@
 /// directly for now.
 library;
 
+export 'conflicts.dart';
 export 'events.dart';
+export 'files.dart';
 export 'local_pocket.dart';
 export 'options.dart';
 export 'query.dart';
 export 'row.dart';
 export 'store.dart';
+export 'sync.dart';
 export 'transaction.dart';
+
+// The token bridge types back `PocketBaseSyncOptions`; re-exported here so
+// the sync attachment is usable from this one import (the same pairing the
+// typed layer already exposes).
+export '../pocketbase/auth.dart' show Token, TokenProvider;

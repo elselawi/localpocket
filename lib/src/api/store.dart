@@ -18,7 +18,9 @@ import '../typed/cond.dart';
 import '../typed/field_def.dart';
 import '../typed/store_def.dart';
 import '../typed/write.dart';
+import 'conflicts.dart';
 import 'events.dart';
+import 'files.dart';
 import 'query.dart';
 import 'row.dart';
 
@@ -274,6 +276,25 @@ final class Store<S extends StoreDef<S>> {
         SearchHit<S>.internal(hit.id, hit.score, () => get(hit.id)),
     ];
   }
+
+  // -- files ----------------------------------------------------------------
+
+  /// File attachments and blob lifecycle for this store.
+  Files<S> get files => Files<S>.internal(
+        runtime: _runtime,
+        def: def,
+        ensureOpen: _ensureOpen,
+      );
+
+  // -- conflicts ------------------------------------------------------------
+
+  /// Conflict listing, watching, and resolution for this store.
+  StoreConflicts<S> get conflicts => StoreConflicts<S>.internal(
+        runtime: _runtime,
+        def: def,
+        ensureOpen: _ensureOpen,
+        lowerWrites: _buildRecord,
+      );
 
   // -- reactivity -----------------------------------------------------------
 

@@ -147,3 +147,19 @@ and download flow control are kernel-owned) → sync/auth/status/realtime ✔
 `contract_request`/`contract_event` only — the worker is a small envelope
 loop). Old and new envelopes may coexist per family; both must call the same
 kernel services.
+
+## 10. Stage A destination surfaces (2026-09-01)
+
+All three families' wire ops were already CUT OVER (2026-08-31); this pass
+added the destination PUBLIC surfaces that ride them:
+
+- `Files<S>` (store-scoped attach/list/open/remove + store-less gc/
+  enforceStorageCap/isBlobStorageDurable) — rides the file contract.
+- `StoreConflicts<S>` (listOpen/get/watch/resolve/acceptLocal/acceptRemote)
+  — rides the conflicts contract + `WatchCancelRequest` on watch cancel.
+- `PocketBaseSync` + `PocketBaseSyncOptions` (`db.attachPocketBaseSync`) —
+  rides the sync contract; start owns realtime; no `startRealtime()` in the
+  final surface.
+
+No new wire vocabulary was added; the destination facade's `_send`/runtime
+seam handles the typed errors.

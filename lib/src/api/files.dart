@@ -1,0 +1,345 @@
+/// Store-scoped file attachments and blob lifecycle over the runtime
+/// contract.
+///
+/// `Store.files` is the record-facing file service: attach bytes (as a
+/// bounded [FileSource]), list what is attached, stream a download back, and
+/// remove references. Uploads ride the kernel's bounded chunk sessions and
+/// downloads ride the credit-windowed [FileChunkEvent] flow, so no single
+/// request or reply ever carries a whole file across the runtime boundary.
+library;
+
+import 'dart:async';
+import 'dart:typed_data';
+
+import '../contract/contract.dart';
+import '../runtime/runtime_client.dart';
+import '../typed/store_def.dart';
+
+/// One immutable file reference: the same shape both platforms expose.
+///
+/// This is the typed view of the contract's [FileRefData] — the wire-safe
+/// snapshot of one `lp_file_refs` row. It carries no behavior; bytes live in
+/// the runtime's blob store and metadata lives in the kernel.
+final class FileRef {
+  /// Creates a file reference.
+  const FileRef({
+    required this.refId,
+    required this.store,
+    required this.recordId,
+    required this.field,
+    required this.hash,
+    required this.state,
+    this.remoteName,
+    this.nextRetryAt = 0,
+    this.attemptCount = 0,
+    this.lastError,
+  });
+
+  /// Maps the contract's wire snapshot onto the typed view.
+  factory FileRef.fromData(FileRefData data) => FileRef(
+        refId: data.refId,
+        store: data.store,
+        recordId: data.recordId,
+        field: data.field,
+        hash: data.hash,
+        state: data.state,
+        remoteName: data.remoteName,
+        nextRetryAt: data.nextRetryAt,
+        attemptCount: data.attemptCount,
+        lastError: data.lastError,
+      );
+
+  /// Stable local file-reference id.
+  final String refId;
+
+  /// Store containing the owning record.
+  final String store;
+
+  /// Record containing the attachment.
+  final String recordId;
+
+  /// Attachment field name.
+  final String field;
+
+  /// Content hash used to locate the blob.
+  final String hash;
+
+  /// Remote filename, when known.
+  final String? remoteName;
+
+  /// Lifecycle state: pending upload, synced, pending remove, remote-only,
+  /// or orphaned.
+  final String state;
+
+  /// Persisted retry deadline (epoch milliseconds).
+  final int nextRetryAt;
+
+  /// Number of attempted file operations.
+  final int attemptCount;
+
+  /// Most recent file-operation error.
+  final String? lastError;
+
+  @override
+  bool operator ==(Object other) =>
+      other is FileRef && other.refId == refId && other.state == state;
+
+  @override
+  int get hashCode => Object.hash(refId, state);
+
+  @override
+  String toString() => 'FileRef($refId, $store/$recordId/$field, $state)';
+}
+
+/// A bounded attachment source: the bytes to attach plus the optional
+/// declared length and display name.
+///
+/// The [stream] variant is for callers that already hold the bytes as a
+/// stream — declare [length] when you know it (the kernel rejects a finish
+/// whose actual size disagrees with the declared one). The [bytes] variant
+/// wraps an in-memory byte list and always knows its length.
+final class FileSource {
+  const FileSource._(this._chunks, {this.length, this.name});
+
+  /// A stream-backed source. [length] is the declared byte count, used to
+  /// begin the upload session; when omitted the bytes are collected first so
+  /// the session can be opened with the true size.
+  factory FileSource.stream(
+    Stream<List<int>> chunks, {
+    int? length,
+    String? name,
+  }) =>
+      FileSource._(chunks, length: length, name: name);
+
+  /// A byte-list source.
+  factory FileSource.bytes(List<int> bytes, {String? name}) =>
+      FileSource._(Stream.value(List<int>.of(bytes)),
+          length: bytes.length, name: name);
+
+  final Stream<List<int>> _chunks;
+
+  /// The source bytes, in order.
+  Stream<List<int>> get chunks => _chunks;
+
+  /// Declared byte count, when known.
+  final int? length;
+
+  /// The display name reported to the storage backend.
+  final String? name;
+}
+
+/// {@template localpocket.files}
+/// File attachments and blob lifecycle for one store.
+///
+/// Obtain one from `store.files`. Every method sends one typed command (or,
+/// for [attach], a bounded chunk session) through the runtime; the same
+/// surface behaves identically on native and web.
+///
+/// The record must exist before an attachment is made — the kernel keeps the
+/// record-first dependency so an owning record synchronizes before its
+/// attachment.
+/// {@endtemplate}
+final class Files<S extends StoreDef<S>> {
+  Files.internal({
+    required RuntimeClient runtime,
+    required this.def,
+    required void Function() ensureOpen,
+  })  : _runtime = runtime,
+        _ensureOpen = ensureOpen;
+
+  /// The canonical store definition this view is bound to.
+  final S def;
+
+  final RuntimeClient _runtime;
+  final void Function() _ensureOpen;
+
+  /// The store's name.
+  String get name => def.name;
+
+  /// Whether the runtime-owned blob store is durable. `false` means the
+  /// bytes vanish on a process/worker restart (volatile in-memory fallback);
+  /// metadata would survive but the attachments would be effectively
+  /// ephemeral.
+  Future<bool> get isBlobStorageDurable async =>
+      (await _send(const StorageStatusRequest())).durable;
+
+  /// Attaches [source] to [recordId] in [field] and returns the new file
+  /// reference (or the existing one when the kernel deduplicates an
+  /// identical attachment).
+  ///
+  /// Bytes are streamed in bounded chunks at the kernel's accepted limit, so
+  /// no single request crosses the runtime boundary with a large payload.
+  /// When the blob store is volatile (see [isBlobStorageDurable]) the
+  /// attachment fails with a typed error unless [allowVolatileBlobs] is
+  /// `true` — the loss of bytes on restart becomes an explicit choice.
+  Future<FileRef> attach({
+    required String recordId,
+    required FileSource source,
+    String field = 'imgs',
+    bool allowVolatileBlobs = false,
+  }) async {
+    _ensureOpen();
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in source.chunks) {
+      builder.add(chunk);
+    }
+    final payload = builder.takeBytes();
+    final declared = source.length;
+    if (declared != null && declared != payload.length) {
+      throw StateError(
+          'Size mismatch: declared $declared but got ${payload.length}');
+    }
+    final session = await _send(FileBeginUploadRequest(
+      store: name,
+      recordId: recordId,
+      size: payload.length,
+      field: field,
+      name: source.name ?? 'blob.bin',
+      allowVolatileBlobs: allowVolatileBlobs,
+    ));
+    try {
+      final chunkBytes = session.maxChunkBytes;
+      for (var offset = 0; offset < payload.length; offset += chunkBytes) {
+        final end = offset + chunkBytes < payload.length
+            ? offset + chunkBytes
+            : payload.length;
+        await _send(FileChunkRequest(
+          session: session.session,
+          chunk: Uint8List.sublistView(payload, offset, end),
+        ));
+      }
+      final ref = await _send(FileFinishRequest(session: session.session));
+      return FileRef.fromData(ref.ref!);
+    } catch (_) {
+      // Best-effort abort keeps the kernel's upload registry from retaining
+      // a partial session after a chunk or finish failure.
+      try {
+        await _send(FileAbortRequest(session: session.session));
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  /// The file references attached to [recordId] in [field], in kernel order.
+  Future<List<FileRef>> list({
+    required String recordId,
+    String field = 'imgs',
+  }) async {
+    _ensureOpen();
+    final result = await _send(FilesListRequest(
+      store: name,
+      recordId: recordId,
+      field: field,
+    ));
+    return [for (final ref in result.refs) FileRef.fromData(ref)];
+  }
+
+  /// Streams the bytes of [ref] back as a bounded, credit-windowed stream.
+  ///
+  /// The kernel pushes chunks only as fast as the caller consumes them (a
+  /// credit window bounds the outstanding bytes), so the runtime never
+  /// buffers and delivers a whole file in one reply. The stream ends after
+  /// the terminal chunk event; a failed stream surfaces the kernel's error.
+  Future<Stream<List<int>>> open(FileRef ref) async {
+    _ensureOpen();
+    // ignore: close_sinks
+    final controller = StreamController<List<int>>();
+    // Chunk events can overtake the open reply (they travel a different
+    // channel), so events for a not-yet-known stream are buffered briefly.
+    final buffered = <FileChunkEvent>[];
+    var streamId = '';
+    var closed = false;
+
+    void consume(FileChunkEvent event) {
+      if (event.error != null) {
+        controller.addError(StateError(event.error!));
+        if (!controller.isClosed) unawaited(controller.close());
+        closed = true;
+        return;
+      }
+      if (event.chunk.isNotEmpty) controller.add(event.chunk);
+      if (event.last) {
+        closed = true;
+        if (!controller.isClosed) unawaited(controller.close());
+      } else {
+        // Credit the consumed bytes back so the kernel keeps streaming.
+        unawaited(_credit(event.stream, event.chunk.length));
+      }
+    }
+
+    late final StreamSubscription<Event> sub;
+    sub = _runtime.events.listen((event) {
+      if (event is! FileChunkEvent) return;
+      if (closed) return;
+      if (streamId.isEmpty) {
+        buffered.add(event);
+      } else if (event.stream == streamId) {
+        consume(event);
+      }
+    });
+    controller.onCancel = () => sub.cancel();
+    try {
+      final opened = await _send(FileOpenRequest(
+        store: name,
+        recordId: ref.recordId,
+        field: ref.field,
+        refId: ref.refId,
+      ));
+      streamId = opened.stream;
+      for (final event in buffered) {
+        if (event.stream == streamId) consume(event);
+      }
+      buffered.clear();
+    } catch (error) {
+      await sub.cancel();
+      if (!controller.isClosed) await controller.close();
+      rethrow;
+    }
+    return controller.stream;
+  }
+
+  /// Removes [ref] from its record. The reference is parked as
+  /// `pending_remove`; the kernel sweeps the blob when the removal settles.
+  Future<void> remove(FileRef ref) => _send(FileRemoveRequest(
+        store: name,
+        recordId: ref.recordId,
+        field: ref.field,
+        refId: ref.refId,
+      ));
+
+  /// Garbage-collects unreferenced blobs and stale temporary uploads, and
+  /// returns how many were cleaned.
+  Future<int> gc({
+    Duration blobGrace = const Duration(days: 7),
+    Duration tmpGrace = const Duration(hours: 24),
+  }) async {
+    _ensureOpen();
+    final result = await _send(FileGcRequest(
+      blobGraceMs: blobGrace.inMilliseconds,
+      tmpGraceMs: tmpGrace.inMilliseconds,
+    ));
+    return result.cleaned;
+  }
+
+  /// Evicts synced blobs (LRU) until stored attachment bytes are at most
+  /// [maxBytes], and returns how many were evicted.
+  Future<int> enforceStorageCap({required int maxBytes}) async {
+    _ensureOpen();
+    final result = await _send(EnforceStorageCapRequest(maxBytes: maxBytes));
+    return result.evicted;
+  }
+
+  Future<void> _credit(String stream, int bytes) async {
+    try {
+      await _send(FileCreditRequest(stream: stream, bytes: bytes));
+    } catch (_) {
+      // Best effort: the runtime may already be closed, and the kernel
+      // settles download state on close either way.
+    }
+  }
+
+  Future<R> _send<R extends Result>(Request<R> request) {
+    _ensureOpen();
+    return _runtime.send(request);
+  }
+}

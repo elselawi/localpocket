@@ -15,6 +15,7 @@ import 'events.dart';
 import 'open_platform.dart';
 import 'options.dart';
 import 'store.dart';
+import 'sync.dart';
 import 'transaction.dart';
 
 export '../core/schema.dart' show CollectionSchema;
@@ -58,6 +59,8 @@ final class LocalPocket {
           : () => options.now!().millisecondsSinceEpoch,
       wasmAssetPath: options.bootstrap.wasmAssetPath,
       workerAssetPath: options.bootstrap.workerAssetPath,
+      syncBackendFactory: options.syncBackendFactory,
+      blobStore: options.blobStore,
     );
     try {
       return LocalPocket.internal(createRuntime(db.commands));
@@ -129,6 +132,19 @@ final class LocalPocket {
             storeName: event.store,
             ids: [event.id],
           ));
+
+  /// Attaches a PocketBase sync host to this database.
+  ///
+  /// The host drives the shared contract runtime: [PocketBaseSync.start]
+  /// starts the kernel-owned sync engine and its realtime connection. The
+  /// [PocketBaseSyncOptions.tokenProvider] stays caller-owned and its token
+  /// crosses only through the sync start and auth-update commands. The same
+  /// host behaves identically on native and web — sync start owns realtime,
+  /// so there is no separate realtime command on this surface.
+  PocketBaseSync attachPocketBaseSync(PocketBaseSyncOptions options) {
+    _ensureOpen();
+    return PocketBaseSync.internal(_runtime, options);
+  }
 
   /// Runs the database's query planner across its indexes.
   Future<void> analyze([StoreDef<Object?>? store]) =>

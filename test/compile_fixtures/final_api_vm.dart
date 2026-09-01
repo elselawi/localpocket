@@ -1,22 +1,32 @@
 // Destination public API compile fixture — VM vocabulary.
 //
-// This file is the executable definition of the destination public API for
-// everything the runtime contract already carries: opening, typed stores,
-// immutable rows, declarative queries with kernel-owned pages, aggregates,
-// search, interactive transactions, watches, committed-fact events, and
-// maintenance. The analyzer is the gate: this file must stay at zero issues.
+// This file is the executable definition of the destination public API:
+// opening, typed stores, immutable rows, declarative queries with
+// kernel-owned pages, aggregates, search, interactive transactions, watches,
+// committed-fact events, maintenance, files, conflicts, and the PocketBase
+// sync attachment. The analyzer is the gate: this file must stay at zero
+// issues.
 //
 // It imports the facade library directly because the barrel switch has not
 // landed yet; when it does, this import flips to
 // `package:localpocket/localpocket.dart` unchanged in body.
-//
-// Deliberately out of scope until the corresponding command families enter
-// the contract: sync attachment, files, and conflicts (see the handoff's
-// out-of-scope list). They activate with the web remote cutover fixture.
 import 'dart:typed_data';
 
 import 'package:localpocket/src/api/api.dart';
 import 'package:localpocket/src/typed/typed.dart';
+
+/// Compile-only token provider: proves the sync attachment vocabulary
+/// compiles without wiring real auth.
+final class FixtureTokens implements TokenProvider {
+  @override
+  Future<Token> currentToken() async => Token('fixture-token');
+
+  @override
+  Future<Token> refreshToken(Token current) async => Token('fixture-token');
+
+  @override
+  String get identity => 'fixture-user';
+}
 
 final class Tasks extends StoreDef<Tasks> {
   Tasks._() : super(name: 'tasks', version: 1);
@@ -177,6 +187,78 @@ Future<void> exerciseAll() async {
   await db.pruneOutbox();
   await db.walCheckpoint();
   await db.vacuum();
+
+  // -- Files ------------------------------------------------------------------
+  final files = tasks.files;
+  final ref = await files.attach(
+    recordId: id,
+    field: 'attachment',
+    source: FileSource.stream(
+      Stream.value([1, 2, 3]),
+      length: 3,
+      name: 'report.bin',
+    ),
+    allowVolatileBlobs: true,
+  );
+  ref.refId;
+  ref.hash;
+  ref.state;
+  ref.remoteName;
+  final List<FileRef> refs = await files.list(recordId: id, field: 'attachment');
+  // ignore: unnecessary_statements
+  refs.length;
+  final Stream<List<int>> bytes = await files.open(ref);
+  // ignore: unawaited_futures
+  bytes.drain<void>();
+  await files.remove(ref);
+  await files.gc();
+  await files.enforceStorageCap(maxBytes: 1024);
+  final bool durable = await files.isBlobStorageDurable;
+  // ignore: unnecessary_statements
+  durable;
+
+  // -- Conflicts --------------------------------------------------------------
+  final conflicts = tasks.conflicts;
+  final List<Conflict<Tasks>> openConflicts = await conflicts.listOpen();
+  // ignore: unnecessary_statements
+  openConflicts.length;
+  final Conflict<Tasks>? one = await conflicts.get(id);
+  one?.recordId;
+  one?.local(Tasks.title);
+  one?.remoteDeleted;
+  final sub2 = conflicts.watch().listen((list) => list.length);
+  await sub2.cancel();
+  await conflicts.resolve(id, merged: [
+    Tasks.title.set('Chosen by the user'),
+    Tasks.done.set(true),
+  ]);
+  await conflicts.acceptLocal(id);
+  await conflicts.acceptRemote(id);
+
+  // -- PocketBase sync attachment ---------------------------------------------
+  final sync = db.attachPocketBaseSync(
+    PocketBaseSyncOptions(
+      baseUrl: Uri.parse('https://pb.example.com'),
+      tokenProvider: FixtureTokens(),
+      identity: 'account-42',
+    ),
+  );
+  await sync.start();
+  final report = await sync.syncNow();
+  report.pushed;
+  report.hadError;
+  await sync.pause();
+  await sync.resume();
+  await sync.setConnectivity(true);
+  await sync.updateAuth('refreshed');
+  final syncSub = sync.status.listen((status) {
+    status.state;
+    status.pending;
+  });
+  await syncSub.cancel();
+  final authSub = sync.authRequired.listen((_) {});
+  await authSub.cancel();
+  await sync.stop();
 
   await db.close();
 }

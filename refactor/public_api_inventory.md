@@ -171,3 +171,19 @@ Dispositions:
 Every row gains a ✔ + phase number when its disposition is implemented and
 conformance-tested. Rows marked DELETE must also record the gate/test that
 proves absence (§14.1 public API gate).
+## 6. Stage A destination surfaces landed (2026-09-01)
+
+The destination facade now exposes the files, conflicts, and sync families
+over the runtime contract. Pairings that landed (each ✔ against the contract
+requests the Phase 7 cutovers already shipped):
+
+| Destination type | Maps / rides | Contract |
+|---|---|---|
+| `Files<S>` (`store.files`) | `FileRefData` ↔ `FileRef` | `FileBeginUploadRequest`/`FileChunk`/`FileFinish`/`FileAbort`, `FilesListRequest`, `FileOpenRequest` + `FileChunkEvent` + `FileCreditRequest`, `FileRemoveRequest`, `FileGcRequest`, `EnforceStorageCapRequest`, `StorageStatusRequest` ✔ |
+| `FileRef`, `FileSource` | immutable; `FileSource.stream`/`bytes` | — |
+| `StoreConflicts<S>` (`store.conflicts`) | `ConflictData` → `Conflict<S>` | `ConflictsListRequest`/`ConflictGetRequest`/`ConflictsWatchRequest` + `ConflictsSnapshot`, `ResolveConflictRequest` (writes lowered from `Write<S>`), `AcceptLocalRequest`/`AcceptRemoteRequest` ✔ |
+| `PocketBaseSync`, `PocketBaseSyncOptions` (`db.attachPocketBaseSync`) | — | `SyncStartRequest`/`Stop`/`Now`/`Pause`/`Resume`/`SetConnectivity`/`UpdateAuth`, `SyncStatusEvent`, `AuthRequiredEvent` ✔ |
+| `LocalPocketOptions.syncBackendFactory` / `.blobStore` | native direct-runtime wiring | `KernelDatabase.open` ✔ |
+
+`TokenProvider`/`Token` are re-exported from the api barrel so the sync
+attachment is usable from one import (recorded layering note in the ledger).
