@@ -1,4 +1,4 @@
-// lib/src/typed/limits.dart
+// lib/src/api/limits.dart
 /// Page-size sentinels for typed reads.
 abstract final class Limits {
   /// Pass as `limit:` to run the read without a page size. Expanded to the

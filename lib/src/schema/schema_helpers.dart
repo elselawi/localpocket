@@ -7,7 +7,7 @@
 library;
 
 import 'package:localpocket/src/kernel/schema.dart';
-import 'package:localpocket/src/typed/field_def.dart';
+import 'field_def.dart';
 
 /// Builds an index declaration from store-owned field descriptors.
 ///

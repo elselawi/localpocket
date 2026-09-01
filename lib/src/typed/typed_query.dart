@@ -11,7 +11,7 @@
 /// cursor with the same loud shape validation.
 library;
 
-import 'store_def.dart';
+import '../schema/store_def.dart';
 import 'typed_row.dart';
 
 /// Continuation seam: re-runs a captured query shape from [cursor]. Created

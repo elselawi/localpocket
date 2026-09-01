@@ -10,13 +10,13 @@ import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
 import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart';
 import 'package:localpocket/src/kernel/store.dart';
-import 'package:localpocket/src/typed/cond.dart';
-import 'package:localpocket/src/typed/field_def.dart';
-import 'package:localpocket/src/typed/limits.dart';
-import 'package:localpocket/src/typed/store_def.dart';
+import 'package:localpocket/src/schema/cond.dart';
+import 'package:localpocket/src/schema/field_def.dart';
+import 'package:localpocket/src/api/limits.dart';
+import 'package:localpocket/src/schema/store_def.dart';
 import 'package:localpocket/src/typed/typed_query.dart';
 import 'package:localpocket/src/typed/typed_row.dart';
-import 'package:localpocket/src/typed/write.dart';
+import 'package:localpocket/src/api/writes.dart';
 import 'package:localpocket/src/typed/typed_search.dart';
 import 'package:localpocket/src/typed/query_surface.dart';
 

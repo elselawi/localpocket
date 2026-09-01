@@ -27,7 +27,7 @@
 /// ```
 library;
 
-import 'package:localpocket/src/typed/store_def.dart';
+import 'package:localpocket/src/schema/store_def.dart';
 import 'package:localpocket/src/typed/typed_collection.dart';
 import 'typed_pocket_platform.dart';
 

@@ -14,8 +14,8 @@ import 'dart:async';
 import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';
 import '../kernel/sync/conflicts.dart' show remoteDeletedKey;
-import '../typed/store_def.dart';
-import '../typed/write.dart';
+import '../schema/store_def.dart';
+import '../api/writes.dart';
 import 'row.dart';
 
 /// {@template localpocket.conflict}

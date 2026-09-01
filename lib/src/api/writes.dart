@@ -10,8 +10,8 @@
 /// to clear.
 library;
 
-import 'field_def.dart';
-import 'store_def.dart';
+import '../schema/field_def.dart';
+import '../schema/store_def.dart';
 
 /// {@template localpocket.write}
 /// One typed write: a declared-field assignment, an explicit record id, or

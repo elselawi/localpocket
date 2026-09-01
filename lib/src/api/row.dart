@@ -7,8 +7,8 @@
 library;
 
 import '../kernel/errors.dart';
-import '../typed/field_def.dart';
-import '../typed/store_def.dart';
+import '../schema/field_def.dart';
+import '../schema/store_def.dart';
 
 /// {@template localpocket.row}
 /// One immutable typed record snapshot.

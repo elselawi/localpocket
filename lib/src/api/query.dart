@@ -8,10 +8,10 @@
 library;
 
 import '../contract/contract.dart';
-import '../typed/cond.dart';
-import '../typed/field_def.dart';
-import '../typed/limits.dart';
-import '../typed/store_def.dart';
+import '../schema/cond.dart';
+import '../schema/field_def.dart';
+import '../api/limits.dart';
+import '../schema/store_def.dart';
 import 'row.dart';
 
 /// {@template localpocket.query_spec}

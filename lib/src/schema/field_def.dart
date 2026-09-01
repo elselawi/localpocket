@@ -10,7 +10,7 @@ library;
 
 import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/schema.dart';
-import 'package:localpocket/src/typed/cond.dart';
+import 'cond.dart';
 
 /// Decodes a raw stored value into a value of type `T`.
 typedef FieldDecodeFn<T> = T Function(Object? raw);

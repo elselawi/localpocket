@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:localpocket/src/api/api.dart';
 import 'package:localpocket/src/files/blob_store.dart' show MemoryBlobStore;
-import 'package:localpocket/src/typed/write.dart';
+import 'package:localpocket/src/api/writes.dart';
 import 'package:test/test.dart';
 
 import 'tasks_store.dart';

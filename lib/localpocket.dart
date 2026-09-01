@@ -22,12 +22,12 @@ library;
 // The destination public API: the facade barrel plus the schema declaration
 // layer (typed descriptors ARE the destination schema source).
 export 'src/api/api.dart';
-export 'src/typed/cond.dart';
-export 'src/typed/field_def.dart';
-export 'src/typed/limits.dart';
-export 'src/typed/schema_helpers.dart';
-export 'src/typed/store_def.dart';
-export 'src/typed/write.dart';
+export 'src/schema/cond.dart';
+export 'src/schema/field_def.dart';
+export 'src/api/limits.dart';
+export 'src/schema/schema_helpers.dart';
+export 'src/schema/store_def.dart';
+export 'src/api/writes.dart';
 
 // The schema helper types store declarations name. The raw schema types
 // (CollectionSchema, Field, ...) are kernel-internal and not exported.

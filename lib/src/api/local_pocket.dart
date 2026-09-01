@@ -10,7 +10,7 @@ import '../kernel/local_pocket.dart' as kernel
     show DurabilityClass, KernelDatabase;
 import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';
-import '../typed/store_def.dart';
+import '../schema/store_def.dart';
 import 'events.dart';
 import 'open_platform.dart';
 import 'options.dart';

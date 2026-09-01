@@ -7,8 +7,8 @@
 library;
 
 import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart';
-import 'package:localpocket/src/typed/limits.dart';
-import 'package:localpocket/src/typed/store_def.dart';
+import 'package:localpocket/src/api/limits.dart';
+import 'package:localpocket/src/schema/store_def.dart';
 import 'package:localpocket/src/typed/typed_row.dart';
 
 /// Delegating search surface implemented by native and web facade adapters.

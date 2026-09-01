@@ -9,7 +9,7 @@ library;
 
 import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';
-import '../typed/store_def.dart';
+import '../schema/store_def.dart';
 import 'store.dart';
 
 /// {@template localpocket.transaction}

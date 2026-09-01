@@ -13,7 +13,7 @@ import 'dart:typed_data';
 
 import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';
-import '../typed/store_def.dart';
+import '../schema/store_def.dart';
 
 /// One immutable file reference: the same shape both platforms expose.
 ///

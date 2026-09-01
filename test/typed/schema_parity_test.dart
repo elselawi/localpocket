@@ -25,7 +25,7 @@ import 'package:test/test.dart';
 
 final String _schemaSrc = File('lib/src/kernel/schema.dart').readAsStringSync();
 final String _storeDefSrc =
-    File('lib/src/typed/store_def.dart').readAsStringSync();
+    File('lib/src/schema/store_def.dart').readAsStringSync();
 
 /// Captures text between [start] and the first occurrence of [end].
 String _between(String src, String start, String end) {

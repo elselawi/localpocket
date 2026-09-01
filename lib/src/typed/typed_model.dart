@@ -1,4 +1,4 @@
-import 'store_def.dart';
+import '../schema/store_def.dart';
 import 'typed_row.dart';
 
 /// {@template localpocket.typed_model}

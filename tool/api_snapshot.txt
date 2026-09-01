@@ -3,11 +3,11 @@
 
 === lib/localpocket.dart ===
 export 'src/api/api.dart';
-export 'src/core/schema.dart'
-export 'src/typed/cond.dart';
-export 'src/typed/field_def.dart';
-export 'src/typed/limits.dart';
-export 'src/typed/schema_helpers.dart';
-export 'src/typed/store_def.dart';
-export 'src/typed/write.dart';
+export 'src/api/limits.dart';
+export 'src/api/writes.dart';
+export 'src/kernel/schema.dart'
+export 'src/schema/cond.dart';
+export 'src/schema/field_def.dart';
+export 'src/schema/schema_helpers.dart';
+export 'src/schema/store_def.dart';
 

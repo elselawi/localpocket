@@ -2,8 +2,8 @@
 library;
 
 import 'package:localpocket/src/kernel/errors.dart';
-import 'package:localpocket/src/typed/field_def.dart';
-import 'package:localpocket/src/typed/store_def.dart';
+import 'package:localpocket/src/schema/field_def.dart';
+import 'package:localpocket/src/schema/store_def.dart';
 
 /// {@template localpocket.typed_row}
 /// A typed view over one decoded record.

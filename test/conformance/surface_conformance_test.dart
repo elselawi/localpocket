@@ -9,7 +9,7 @@ import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
 import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/runtime/runtime_client.dart';
-import 'package:localpocket/src/typed/write.dart';
+import 'package:localpocket/src/api/writes.dart';
 import 'package:test/test.dart';
 
 import '../api/tasks_store.dart';
