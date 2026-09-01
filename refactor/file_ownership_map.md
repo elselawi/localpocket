@@ -11,7 +11,10 @@ Every current production file in `lib/` → destination file (Phase 10 tree,
 | `lib/localpocket.dart` | REWRITE (Phase 9) — curated exports of `src/api` + `schema` |
 | `lib/typed.dart`, `lib/sync.dart`, `lib/pocketbase.dart` | DELETE (Phase 9 step 9) |
 
-## `lib/src/core/`
+## `lib/src/core/` — ALL MOVED to `lib/src/kernel/` (P10.3, commit 02fb5cc) ✔
+
+> Move-only re-home into `lib/src/kernel/` (flat, original names). The splits below
+> (storage/query subdirs, renames, api/ ownership) are Phase-10-follow-up passes.
 
 | Current | Action |
 |---|---|
@@ -43,14 +46,14 @@ Every current production file in `lib/` → destination file (Phase 10 tree,
 | `watch.dart` | `kernel/watcher_service.dart` (one digest policy, §10.5) |
 | `web_compat.dart` | DELETE when the last consumer is re-homed (audit before Phase 10) |
 
-## `lib/src/typed/`
+## `lib/src/typed/` — declaration files SPLIT to `schema/` + `api/` (P10.4, commit e8a1aeb) ✔
 
 | Current | Action |
 |---|---|
-| `store_def.dart`, `field_def.dart`, `cond.dart`, `write.dart` | `schema/` + `api/writes.dart` — keep descriptor type system, remove map-surface deps |
-| `schema_helpers.dart` | `schema/schema_helpers.dart` |
+| `store_def.dart`, `field_def.dart`, `cond.dart`, `write.dart` | ✔ → `src/schema/{store_def,field_def,cond}.dart` + `src/api/writes.dart` (P10.4); remove map-surface deps |
+| `schema_helpers.dart` | ✔ → `src/schema/schema_helpers.dart` (P10.4) |
 | `registry.dart` | DELETE (Phase 3) — `kernel/store_registry.dart` + manifest handshake replace `verifyRegisteredSchema` |
-| `limits.dart` | `api/query.dart` (`Limits`) |
+| `limits.dart` | ✔ → `src/api/limits.dart` (P10.4; kept as own file, may fold into `api/query.dart`) |
 | `typed_row.dart` | `api/row.dart` (`Row<S>`) |
 | `typed_model.dart` | DELETE (§16 — no model base class); migrate any used helpers |
 | `typed_pocket.dart`, `typed_pocket_platform.dart` | `api/local_pocket.dart` (fold lifecycle into one facade) |
@@ -59,49 +62,55 @@ Every current production file in `lib/` → destination file (Phase 10 tree,
 | `query_surface.dart` | DELETE — lowering happens once in common code |
 | `typed_sync.dart`, `typed_sync_host.dart`, `sync_engine_native.dart`, `sync_engine_platform.dart` | `api/sync.dart` (`PocketBaseSync`) — one host, `start()` owns realtime |
 
-## `lib/src/sync/` — re-home, do not rewrite
+## `lib/src/sync/` — ALL MOVED to `lib/src/kernel/sync/` (P10.1, commit de0ee66) ✔
+
+> Move-only re-home; files keep their original names (the `backend.dart`/
+> `config.dart`/`status.dart`/`repositories.dart` renames below are follow-ups).
 
 | Current | Action |
 |---|---|
-| `engine.dart` | `kernel/sync/engine.dart` (kernel-owned; web worker hosts it) |
-| `sync_backend.dart` | `kernel/sync/backend.dart` (port incl. `baseUpdated` OCC + file members) |
-| `sync_config.dart` | `kernel/sync/config.dart` (public options live in `api/sync.dart`) |
-| `status.dart` | `kernel/sync/status.dart` (public models re-exported by `api/sync.dart`, complete codec) |
-| `sync_tables.dart` | `kernel/sync/repositories.dart` neighborhood (internal row models) |
-| `sync_store.dart` | `kernel/sync/repositories.dart` (cursor/sweep state ports) |
-| `outbox.dart` | `kernel/sync/outbox.dart` |
-| `op_queue.dart` | `kernel/sync/op_queue.dart` |
-| `mapping.dart` | `kernel/sync/mapping.dart` (internal) |
-| `merge.dart` | `kernel/sync/merge.dart` — move-only; `CustomResolver` path rejected at compile-time of schema (Rule 4) |
-| `conflicts.dart` | `kernel/conflict_service.dart` + `api/conflicts.dart` snapshots |
-| `puller.dart` | `kernel/sync/puller.dart` (cursor max-tuple, quarantine, hidden-unhide behavior preserved) |
-| `pusher.dart` | `kernel/sync/pusher.dart` (OCC/`baseUpdated`, MissingRemotePolicy, recreate loop guard preserved) |
-| `sweeper.dart` | `kernel/sync/sweeper.dart` |
-| `apply_lane.dart` | `kernel/sync/apply_lane.dart` — move-only |
+| `engine.dart` | ✔ `kernel/sync/engine.dart` (kernel-owned; web worker hosts it) |
+| `sync_backend.dart` | ✔ `kernel/sync/sync_backend.dart` (port incl. `baseUpdated` OCC + file members) |
+| `sync_config.dart` | ✔ `kernel/sync/sync_config.dart` (public options live in `api/sync.dart`) |
+| `status.dart` | ✔ `kernel/sync/status.dart` (public models re-exported by `api/sync.dart`, complete codec) |
+| `sync_tables.dart` | ✔ `kernel/sync/sync_tables.dart` (internal row models) |
+| `sync_store.dart` | ✔ `kernel/sync/sync_store.dart` (cursor/sweep state ports) |
+| `outbox.dart` | ✔ `kernel/sync/outbox.dart` |
+| `op_queue.dart` | ✔ `kernel/sync/op_queue.dart` |
+| `mapping.dart` | ✔ `kernel/sync/mapping.dart` (internal) |
+| `merge.dart` | ✔ `kernel/sync/merge.dart` — move-only; `CustomResolver` path rejected at compile-time of schema (Rule 4) |
+| `conflicts.dart` | ✔ `kernel/sync/conflicts.dart` (conflict service; `api/conflicts.dart` snapshots exist) |
+| `puller.dart` | ✔ `kernel/sync/puller.dart` (cursor max-tuple, quarantine, hidden-unhide behavior preserved) |
+| `pusher.dart` | ✔ `kernel/sync/pusher.dart` (OCC/`baseUpdated`, MissingRemotePolicy, recreate loop guard preserved) |
+| `sweeper.dart` | ✔ `kernel/sync/sweeper.dart` |
+| `apply_lane.dart` | ✔ `kernel/sync/apply_lane.dart` — move-only |
 
-## `lib/src/files/`
-
-| Current | Action |
-|---|---|
-| `blob_store.dart` | `kernel/files/blob_store.dart` (port + memory impl) |
-| `native_blob_store.dart` | `platform/native/blob_store.dart` (dart:io stays here) |
-| `native_blob_store_platform.dart` / `_web.dart` | conditional export collapses into `platform/*/blob_store.dart` entries |
-| `web_blob_store.dart` | `platform/web/worker/blob_store.dart` (OPFS / volatile fallback) |
-| `web_blob_object_url.dart` | `platform/web/page/object_urls.dart` |
-| `native_backup_file.dart` | `platform/native/backup_store.dart` |
-| `files_api.dart` | `kernel/file_service.dart` + `api/files.dart` (`Files<S>`, `FileRef`) |
-| `file_sync_lane.dart` | `kernel/files/file_sync.dart` |
-
-## `lib/src/pocketbase/` — adapter isolation (§8.6)
+## `lib/src/files/` — common code RE-HOMED (P10.5, commit 37913f7) ✔
 
 | Current | Action |
 |---|---|
-| `backend.dart` | `adapters/pocketbase/backend.dart` (implements sync ports only) |
-| `pb_client.dart` | `adapters/pocketbase/client.dart` (REST + batch ordering + `imgs` attachment mapping lives with the adapter) |
-| `auth.dart` | `adapters/pocketbase/auth.dart` (`TokenProvider` re-exported by `api/sync.dart`) |
-| `transport.dart` | `adapters/pocketbase/transport.dart` |
-| `realtime`/SSE (`sse.dart`) | `adapters/pocketbase/realtime.dart` (SSE handshake/reconnect/gap hints) |
-| `filter_builder.dart` | `adapters/pocketbase/filter_builder.dart` (space-separated timestamp literals; quote-escape rule) |
+| `blob_store.dart` | ✔ `kernel/files/blob_store.dart` (port + memory impl) |
+| `native_blob_store.dart` | `platform/native/blob_store.dart` (dart:io stays here) — pending |
+| `native_blob_store_platform.dart` / `_web.dart` | conditional export collapses into `platform/*/blob_store.dart` entries — pending |
+| `web_blob_store.dart` | `platform/web/worker/blob_store.dart` (OPFS / volatile fallback) — pending |
+| `web_blob_object_url.dart` | `platform/web/page/object_urls.dart` — pending |
+| `native_backup_file.dart` | `platform/native/backup_store.dart` — pending |
+| `files_api.dart` | ✔ `kernel/file_service.dart` (`api/files.dart` is the destination facade) |
+| `file_sync_lane.dart` | ✔ `kernel/files/file_sync.dart` |
+
+## `lib/src/pocketbase/` — ALL MOVED to `lib/src/adapters/pocketbase/` (P10.2, commit 4ab577b) ✔
+
+> Move-only re-home; files keep their original names (`client.dart`/`realtime.dart`
+> renames are follow-ups).
+
+| Current | Action |
+|---|---|
+| `backend.dart` | ✔ `adapters/pocketbase/backend.dart` (implements sync ports only) |
+| `pb_client.dart` | ✔ `adapters/pocketbase/pb_client.dart` (REST + batch ordering + `imgs` attachment mapping lives with the adapter) |
+| `auth.dart` | ✔ `adapters/pocketbase/auth.dart` (`TokenProvider` re-exported by `api/sync.dart`) |
+| `transport.dart` | ✔ `adapters/pocketbase/transport.dart` |
+| `realtime`/SSE (`sse.dart`) | ✔ `adapters/pocketbase/sse.dart` (SSE handshake/reconnect/gap hints) |
+| `filter_builder.dart` | ✔ `adapters/pocketbase/filter_builder.dart` (space-separated timestamp literals; quote-escape rule) |
 
 ## `lib/src/web/` — the big collapse (Phase 7)
 

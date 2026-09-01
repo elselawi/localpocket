@@ -1362,3 +1362,29 @@ part of the Phase 10 gate command list.
   kernel (R2 holds).
 - Note: `lib/src/kernel/` is currently FLAT (old core names); the plan §15.1
   storage/query organization is a later split, kept green per move.
+
+## P10.4 schema split (commit e8a1aeb)
+
+- `lib/src/typed/{cond,field_def,schema_helpers,store_def}.dart` →
+  `lib/src/schema/`; `write.dart` → `lib/src/api/writes.dart`; `limits.dart`
+  → `lib/src/api/limits.dart` (DEVIATION: kept as its own file rather than
+  folded into `api/query.dart` — move-only, no code merge; can fold later).
+  Barrel `lib/localpocket.dart` now exports the SAME names from
+  `src/schema/*` + `src/api/{writes,limits}.dart`; `typed.dart` re-exports the
+  new locations for the interim typed layer. Sibling + package-form importers
+  across lib/test/tool re-pointed (incl. `test/typed/schema_parity_test.dart`
+  file-path pin). API snapshot regenerated in this commit (export-source lines
+  changed, public names unchanged).
+
+## P10.5 files common re-home (commit 37913f7)
+
+- `lib/src/files/blob_store.dart` → `kernel/files/blob_store.dart`;
+  `file_sync_lane.dart` → `kernel/files/file_sync.dart`; `files_api.dart` →
+  `kernel/file_service.dart` (move-only; `api/files.dart` stays the
+  destination facade). Hub imports became kernel-sibling
+  (`files/blob_store.dart`, `file_service.dart`); sync engine/puller import
+  `../files/file_sync.dart`; the remaining platform files in `lib/src/files/`
+  (`native_blob_store*`, `web_blob_store`, `web_blob_object_url`,
+  `native_backup_file`) now import `../kernel/files/blob_store.dart` and stay
+  until the `platform/*` split. Layering hub pin updated (hub wires
+  `sync/*` + `files/*`/`file_service.dart`).
