@@ -1317,3 +1317,48 @@ exported; the destination `LocalPocket` owns the name. Gates: analyze 0, suite
   (internal).
 - Final gates: analyze 0, `dart test` `+2767 ~83`, local web gate 7/7, API
   snapshot PASS, browser matrix PASS.
+
+---
+
+# Phase 10 — file-tree moves and old-architecture deletion (2026-09-01)
+
+Move-only passes first (behavior is moved, never rewritten — Rule 10). Each
+pass: `dart analyze lib test tool` 0, full suite `+2767 ~83`, worker asset
+recompiled + checksum refreshed (moving source files changes the compiled
+asset), local web gate 7/7. NOTE: the offline_lint typed-layer violations
+(`lib/src/typed/*` importing the adapter's `TokenProvider`) are PRE-EXISTING
+and resolve when the typed app surface is deleted below; offline_lint is not
+part of the Phase 10 gate command list.
+
+## P10.1 sync -> kernel/sync (commit de0ee66)
+
+- `git mv lib/src/sync lib/src/kernel/sync`; `../core/`→`../../core/` and
+  `../files/`→`../../files/` inside the moved files; external importers
+  (`../sync/`→`../kernel/sync/`, `package:localpocket/src/sync/`→
+  `.../src/kernel/sync/`) across lib, test, tool. `raw_surface.dart` exports
+  re-pointed. Layering test + `offline_lint` + `idempotency_contract_test`
+  file-path pins updated. Test-local `test/sync/engine/*` + `test/sync/*`
+  helpers untouched (they import `raw_surface.dart`).
+
+## P10.2 pocketbase -> adapters/pocketbase (commit 4ab577b)
+
+- `git mv lib/src/pocketbase lib/src/adapters/pocketbase`; internal
+  `../core/`→`../../core/` and `../kernel/sync/`→`../../kernel/sync/`;
+  external importers re-pointed (api barrel `show Token, TokenProvider`,
+  `raw_surface.dart`, typed layer, web controller, tests). Layering test R1/R3
+  paths + `offline_lint` + `doc_contract_test` file-path pins updated.
+
+## P10.3 core -> kernel (commit 02fb5cc)
+
+- `git mv` of every `lib/src/core/**` item (including `query/` subdir) into
+  `lib/src/kernel/` (flat move-only; the storage/query/ sub-splits land in
+  later passes). `local_pocket.dart` part directives re-pointed
+  (`part '../kernel/command_handler.dart'`→`part 'command_handler.dart'`,
+  same for `file_sessions.dart`; the two kernel parts now
+  `part of 'local_pocket.dart'`); the hub's `../kernel/sync/*` imports became
+  sibling `sync/*`. Every `../core/`, `../../core/`, `src/core/` reference
+  across lib/test/benchmark/example/tool rewritten to `kernel`. Layering test
+  hub pin + R1/R2 scope (core == kernel now) updated. No `dart:io` under
+  kernel (R2 holds).
+- Note: `lib/src/kernel/` is currently FLAT (old core names); the plan §15.1
+  storage/query organization is a later split, kept green per move.
