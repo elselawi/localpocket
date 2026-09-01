@@ -6,7 +6,6 @@ import 'package:localpocket/src/kernel/capabilities.dart';
 import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
-import 'package:localpocket/src/kernel/sync/engine.dart';
 import 'package:test/test.dart';
 
 import '../pocketbase/fake_transport.dart';
@@ -21,11 +20,23 @@ import '../support/helpers.dart';
 /// implementation so the two cannot drift unnoticed.
 void main() {
   group('documentation contract', () {
-    test('README documents the startRealtime ownership promise', () async {
+    test('README documents that sync start owns realtime', () async {
       final readme = await File('README.md').readAsString();
-      expect(readme, contains('startRealtime()'),
-          reason: 'the README must tell apps to start realtime explicitly');
-      // The implementation keeps engine.start() from opening SSE.
+      expect(readme, contains('owns realtime'),
+          reason: 'the README must tell apps that start() owns realtime');
+      expect(readme, contains('no separate realtime command'),
+          reason: 'the README must say realtime is not a separate command');
+      expect(readme, isNot(contains('startRealtime()')),
+          reason: 'the README must not teach a deleted startRealtime command');
+      // Sync start OWNS realtime: the backend factory opens the SSE
+      // connection when it builds the engine's backend. Pin that wiring in
+      // source and pin the seam's behavior directly.
+      final backendSrc =
+          await File('lib/src/adapters/pocketbase/backend.dart').readAsString();
+      expect(backendSrc, contains('Sync start owns realtime'),
+          reason: 'the factory comment must state who owns realtime');
+      expect(backendSrc, contains('await backend.startRealtime()'),
+          reason: 'the factory must open realtime when it builds the backend');
       final fake = FakeTransport();
       fake.streamStatus(200);
       fake.sendStatus(204); // subscribe POST
@@ -36,20 +47,10 @@ void main() {
         transport: fake,
       );
       addTearDown(backend.close);
-      final engine = SyncEngine(
-        pocket: await openPocket(stores: [widgetsSchema()]),
-        backend: backend,
-      );
-      addTearDown(() => engine.pocket.close());
-      await engine.start();
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      expect(fake.streams, isEmpty,
-          reason: 'engine.start() must not open the SSE connection');
-      await engine.stop();
       await backend.startRealtime();
       await Future<void>.delayed(const Duration(milliseconds: 40));
       expect(fake.streams, hasLength(1),
-          reason: 'startRealtime() is the explicit owner of the connection');
+          reason: 'the realtime seam opens the SSE connection');
     });
 
     test('files.open on a remote_only ref throws the documented error',
@@ -163,7 +164,8 @@ void main() {
           reason: 'the warning must call out the PocketBase backend');
       // The wire-level gap is documented where the write happens.
       final clientSource =
-          await File('lib/src/adapters/pocketbase/pb_client.dart').readAsString();
+          await File('lib/src/adapters/pocketbase/pb_client.dart')
+              .readAsString();
       expect(
         clientSource,
         contains('LAST-WRITE-WINS'),

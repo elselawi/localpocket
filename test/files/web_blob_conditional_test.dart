@@ -24,8 +24,8 @@ void main() {
     });
 
     test('the web worker store is pure Dart (no dart:io)', () {
-      final webImpl =
-          File('lib/src/platform/web/worker/blob_store.dart').readAsStringSync();
+      final webImpl = File('lib/src/platform/web/worker/blob_store.dart')
+          .readAsStringSync();
       expect(webImpl.contains("import 'dart:io'"), isFalse,
           reason: 'no dart:io symbol may load on web');
       expect(webImpl.contains('class WebBlobStore'), isTrue);
@@ -36,7 +36,8 @@ void main() {
           isFalse);
       expect(File('lib/src/files/native_blob_store_web.dart').existsSync(),
           isFalse);
-      expect(File('lib/src/files/native_blob_store.dart').existsSync(), isFalse);
+      expect(
+          File('lib/src/files/native_blob_store.dart').existsSync(), isFalse);
     });
   });
 }

@@ -1495,7 +1495,7 @@ part of the Phase 10 gate command list.
 - Gates: `dart analyze lib test tool benchmark example` 0; full suite
   `+2357 ~82`; targeted gate suites green; `api_snapshot` PASS (regenerated).
 
-## P10.9 kernel hub rework + typed app surface deleted (commits …)
+## P10.9 kernel hub rework + typed app surface deleted (commit 0325188)
 
 - Kernel hub rework: `lib/src/kernel/local_pocket.dart` no longer owns a
   `TypedStoreRegistry` nor a `TypedCollection<S> store<S>(S def)` method (the
@@ -1529,7 +1529,7 @@ part of the Phase 10 gate command list.
   `+2350 ~82` (down from `+2357` — the deleted typed sync remote pin);
   `api_snapshot` PASS (barrel unchanged this step).
 
-## P10.10 raw_surface retired; internal tests import specific src files (commits …)
+## P10.10 raw_surface retired; internal tests import specific src files (commit 8d63130)
 
 - The keystone is DOWN: `lib/src/internal/raw_surface.dart` DELETED (and the
   now-empty `lib/src/internal/` directory with it). No `test`, `benchmark`,
@@ -1554,7 +1554,7 @@ part of the Phase 10 gate command list.
   export line wrapped by `dart format` — cosmetic). Local web gate 7/7
   (worker asset unchanged; `raw_surface` was unreachable from the worker).
 
-## P10.11 files platform split (commit …)
+## P10.11 files platform split (commit 86a632e)
 
 - `lib/src/files/` is EMPTY. Platform files moved (git mv): `native_blob_store.dart`
   → `platform/native/blob_store.dart`, `native_backup_file.dart` →
@@ -1583,3 +1583,45 @@ part of the Phase 10 gate command list.
   `dart analyze lib test tool benchmark example` 0; offline_lint 0 violations
   (the three pre-existing typed-layer violations vanished with `typed/`).
 
+
+
+## P10.12 docs + traceability finalization; planning artifacts retired (commits …)
+
+- README.md fully modernized to the ONE destination import. Step 2 (Models &
+  Operations): `TypedRow<Tasks>` → `Row<Tasks>`, `TypedCollection<Tasks>` →
+  `Store<Tasks>`, and every `query(where:/orderBy:/limit:/select:)`,
+  `search(term, limit:)`, `count(where:)`, `ids(where:)`, `watch(where:)` call
+  now takes a `QuerySpec`/`SearchSpec` (keyset pagination via
+  `QuerySpec(orderBy:, limit:)`). Step 3 (Opening): `TypedPocket`/`StoreDefs`/
+  `handle(Tasks.store)`/`openTyped` → `LocalPocket.open(LocalPocketOptions(...))`
+  + `db.store(Tasks.store)`; the `TypedStoreMismatchError` note reworded to
+  describe the behavior (the type is kernel-internal, not in the barrel).
+  Later sections: watch gotchas teach `Store.changes`/`ChangeNotification`
+  instead of `watchOne`; raw-SQL `notifyExternalChange` advice removed; sync
+  section rewritten around `db.attachPocketBaseSync(PocketBaseSyncOptions(...))`
+  → `PocketBaseSync` (start owns realtime; raw `SyncEngine`/`PocketBaseBackend`/
+  `SyncConfig` construction dropped — kernel-internal); conflicts →
+  `store.conflicts` (`StoreConflicts<S>`); change hooks → `LocalPocket.changes`/
+  `Store.changes` (committed facts); migration → `StoreDef.migrations` +
+  `StoreMigration`; encryption → `LocalPocketOptions(encryption:
+  EncryptionConfig.aesGcm256(key:))` + per-field `encrypted:` on the store
+  declaration. Every stale name (`TypedPocket`, `TypedCollection`, `TypedRow`,
+  `openTyped`, `watchOne`, `CollectionSchema`, `Field.text`, `AesGcmFieldCipher`,
+  `PocketBaseBackend`, `startRealtime`, …) is gone from the README (§14.6).
+- `tool/traceability_check.dart` expanded from 21 to 29 registered public
+  symbols now that the README teaches them (`QuerySpec`, `SearchSpec`, `Limits`,
+  `LocalPocketOptions`, `EncryptionConfig`, `PocketBaseSyncOptions`,
+  `ChangeNotification`, `StoreConflicts` added; `Cond` left out — used
+  implicitly in `where:` lists, never named in tests). PASS: 29 symbols
+  verified across tests and docs. Symbols still not README-taught (`FieldDef`,
+  `SyncStatus`, `FileRef`, `OrderTerm`, `FtsNormalization`, `IndexScope`) stay
+  unregistered (Phase 11 doc gate).
+- `dart run tool/docs_examples_test.dart` PASS — the four compile-marked README
+  blocks still compile against the destination barrel (the added
+  `Fields`/`IndexSpec`/`FtsSpec` prose is in Dart comments only).
+- Full gate re-verified: `dart analyze lib test tool benchmark example` 0; full
+  suite `+2350 ~82`; local web gate 7/7; api_snapshot PASS (no lib/ change
+  since P10.11 — README/tool only, so no worker asset ritual needed).
+- DECISION: Phase 10 is complete. The planning artifacts under `refactor/` and
+  `final_refactoring_plan.md` are temporary by design (HANDOFF §1) and are
+  retired in the follow-up commit; this entry is the final ledger record.

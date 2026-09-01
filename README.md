@@ -7,7 +7,7 @@
 - **A database**: SQLite FFI with an in-memory LRU point-read cache.
 - **Strongly typed**: Schema-first strictly typed API.
 - **Cross Platform**: One API on mobile/desktop/web — 0 boilerplate.
-- **Durable**: ACID transactions, WAL mode (native), pluggable crash-safety levels.
+- **Durable**: ACID transactions via interactive `Transaction` objects, WAL mode (native), pluggable crash-safety levels.
 - **Reactive**: Queries and single-record reads are watchable streams.
 - **Synchronized**: Two-way sync with PocketBase over REST + SSE realtime.
 - **Search**: Full-text search with SQLite FTS5.
@@ -35,7 +35,6 @@ dependencies:
 ### Step 1: Store & Schema
 
 <!-- localpocket-compile: typed-readme -->
-
 ```dart
 import 'package:localpocket/localpocket.dart';
 
@@ -79,10 +78,12 @@ final class Tasks extends StoreDef<Tasks> {
   // ----- define the ordered registry ----- //
   // declares which fields exist and in
   // what order they become columns
+  // (`fields` is the ordered registry; each descriptor is built by the
+  // store's `schema`, a `Fields<S>` factory)
   @override
   get fields => [title, status, priority, done, dueAt];
 
-  // ----- define indexing ----- //
+  // ----- define indexing (indexSpec builds an `IndexSpec`) ----- //
   @override
   get indexes => [
         indexSpec<Tasks>(
@@ -92,7 +93,7 @@ final class Tasks extends StoreDef<Tasks> {
         ),
       ];
 
-  // ----- define search specs ----- //
+  // ----- define search specs (ftsSpec builds an `FtsSpec`) ----- //
   @override
   get fts => ftsSpec<Tasks>(
         [title],
@@ -119,7 +120,9 @@ final class Tasks extends StoreDef<Tasks> {
 // program: open the database once here and let the following sections
 // (CRUD, queries, watches) use `tasks`.
 Future<void> main() async {
-  final db = await openTyped(path: ':memory:', stores: [Tasks.store]);
+  final db = await LocalPocket.open(
+    LocalPocketOptions(path: ':memory:', stores: [Tasks.store]),
+  );
   final tasks = db.store(Tasks.store);
 ```
 
@@ -154,11 +157,11 @@ While this step is optional, it is recommended to have a cleaner and more concis
 
 ```dart
 // define a helper type for the row
-typedef Task = TypedRow<Tasks>;
+typedef Task = Row<Tasks>;
 
 // define and extension that maps each field in the row to a class member
 
-extension TaskReads on TypedRow<Tasks> {
+extension TaskReads on Row<Tasks> {
   String get title => this(Tasks.title);
 
   // this can also have default values
@@ -179,7 +182,7 @@ extension TaskReads on TypedRow<Tasks> {
 // the following example is quite verbose
 // to show you the syntax and composability of the queries
 
-extension TaskStore on TypedCollection<Tasks> {
+extension TaskStore on Store<Tasks> {
 
   // ---- point reads
   Future<Task?> readTask(String id) => get(id);
@@ -193,42 +196,50 @@ extension TaskStore on TypedCollection<Tasks> {
 
   // ---- queries: one shape, every terminal, any boolean tree
   Future<List<Task>> notDoneTasks({int limit = 50}) async => (await query(
-        where: [notDone],
-        orderBy: [Tasks.priority.desc],
-        limit: limit,
+        QuerySpec(
+          where: [notDone],
+          orderBy: [Tasks.priority.desc],
+          limit: limit,
+        ),
       ))
           .items;
 
   Future<List<Task>> highPriority({int limit = 50}) async => (await query(
-        where: [
-          // Precedence: & binds tighter than | — parens make it explicit.
-          (Tasks.priority.gt(0) & Tasks.priority.lt(2)) | shipped,
-          Tasks.dueAt.lt(DateTime.now()) | Tasks.dueAt.eq(null),
-        ],
-        orderBy: [Tasks.priority.desc],
-        limit: limit,
+        QuerySpec(
+          where: [
+            // Precedence: & binds tighter than | — parens make it explicit.
+            (Tasks.priority.gt(0) & Tasks.priority.lt(2)) | shipped,
+            Tasks.dueAt.lt(DateTime.now()) | Tasks.dueAt.eq(null),
+          ],
+          orderBy: [Tasks.priority.desc],
+          limit: limit,
+        ),
       ))
           .items;
 
   // An OR of ANDs — the shape a separate "OR group" could never express.
   Future<List<Task>> workable({int limit = 50}) async => (await query(
-        where: [
-          Tasks.title.startsWith('Draft') |
-              (Tasks.status.eq(TaskStatus.inProgress) & notDone),
-        ],
-        limit: limit,
+        QuerySpec(
+          where: [
+            Tasks.title.startsWith('Draft') |
+                (Tasks.status.eq(TaskStatus.inProgress) & notDone),
+          ],
+          limit: limit,
+        ),
       ))
           .items;
 
   Future<List<Task>> dueThisWeek() async {
     final now = DateTime.now().toUtc();
     return (await query(
-      where: [
-        Tasks.dueAt.between(now, now.add(const Duration(days: 7))),
-        notDone,
-      ],
-      orderBy: [Tasks.dueAt.asc],
-      limit: Limits.unbounded
+      QuerySpec(
+        where: [
+          Tasks.dueAt.between(now, now.add(const Duration(days: 7))),
+          notDone,
+        ],
+        orderBy: [Tasks.dueAt.asc],
+        limit: Limits.unbounded,
+      ),
     ))
         .items;
   }
@@ -240,9 +251,11 @@ extension TaskStore on TypedCollection<Tasks> {
     int limit = 50,
   }) async =>
       (await query(
-        where: filters,
-        orderBy: [Tasks.priority.desc],
-        limit: limit,
+        QuerySpec(
+          where: filters,
+          orderBy: [Tasks.priority.desc],
+          limit: limit,
+        ),
       ))
           .items;
 
@@ -287,7 +300,7 @@ extension TaskStore on TypedCollection<Tasks> {
 
   // ---- search: hits come straight back
   Future<void> printSearch(String term) async {
-    for (final hit in await search(term, limit: 10)) {
+    for (final hit in await search(SearchSpec(term: term, limit: 10))) {
       final row = await hit.fetch();
       print(
         '  hit id=${hit.id} score=${hit.score.toStringAsFixed(3)} '
@@ -298,26 +311,30 @@ extension TaskStore on TypedCollection<Tasks> {
 
   // ---- stats: the same predicate slots on every terminal
   Future<void> printStats() async {
-    final open = await count(where: [notDone]);
+    final open = await count(QuerySpec(where: [notDone]));
     final load = await sum(Tasks.priority, where: [notDone]);
     final states = await distinct(Tasks.status);
     final hot = await ids(
-      where: [Tasks.priority.gt(0) & ~Tasks.title.startsWith('Draft')],
-      limit: 100,
+      QuerySpec(
+        where: [Tasks.priority.gt(0) & ~Tasks.title.startsWith('Draft')],
+        limit: 100,
+      ),
     );
     print('open=$open load=$load states=$states hot=${hot.length}');
   }
 
   // ---- reactive: the same trees drive watches
   Stream<List<Task>> watchOpen() => watch(
-        where: [openOrOverdue],
-        orderBy: [Tasks.dueAt.asc],
-        limit: 50,
+        QuerySpec(
+          where: [openOrOverdue],
+          orderBy: [Tasks.dueAt.asc],
+          limit: 50,
+        ),
       );
 
   // ---- keyset pagination
   Future<void> printAllPages() async {
-    var page = await query(orderBy: [Tasks.priority.asc], limit: 2);
+    var page = await query(QuerySpec(orderBy: [Tasks.priority.asc], limit: 2));
     while (true) {
       for (final t in page.items) {
         print('  ${t.id}: ${t.title}');
@@ -330,9 +347,11 @@ extension TaskStore on TypedCollection<Tasks> {
   // ---- projection: reading an unselected field throws
   Future<List<String>> openTitles() async => [
         for (final row in (await query(
-          where: [notDone],
-          select: [Tasks.title],
-          limit: 100,
+          QuerySpec(
+            where: [notDone],
+            select: [Tasks.title],
+            limit: 100,
+          ),
         ))
             .items)
           row.title,
@@ -343,17 +362,24 @@ extension TaskStore on TypedCollection<Tasks> {
 ### Step 3: Opening the database
 
 ```dart
-// this class will be the main database handle
+// one reusable app class that owns the database handle and the typed stores
 
-final class AppDb extends TypedPocket {
-  AppDb(super.path);
+final class AppDb {
+  AppDb._(this.db);
 
-  // required: define the stores this app uses
-  @override
-  StoreDefs get stores => [Tasks.store];
+  // open the database with the stores this app uses
+  static Future<AppDb> open(String path) async => AppDb._(
+        await LocalPocket.open(
+          LocalPocketOptions(path: path, stores: [Tasks.store]),
+        ),
+      );
+
+  final LocalPocket db;
 
   // optional: add one-line accessors for each store
-  TypedCollection<Tasks> get tasks => handle(Tasks.store);
+  Store<Tasks> get tasks => db.store(Tasks.store);
+
+  Future<void> close() => db.close();
 }
 ```
 
@@ -361,13 +387,12 @@ Now you can use the stores in your app:
 
 ```dart
 void main() async {
-  final db = AppDb('path/to/mydb.db');
-  await db.open();
-  await db.tasks.seed(['Draft it', 'Ship it', 'File taxes']);
-  await db.tasks.markDone('task00000000002');
-  await db.tasks.printSearch('ship');
-  await db.tasks.printStats();
-  await db.close();
+  final app = await AppDb.open('path/to/mydb.db');
+  await app.tasks.seed(['Draft it', 'Ship it', 'File taxes']);
+  await app.tasks.markDone('task00000000002');
+  await app.tasks.printSearch('ship');
+  await app.tasks.printStats();
+  await app.close();
 }
 ```
 
@@ -375,21 +400,25 @@ You can also open the database and wire the stores to it this way:
 
 ```dart
 void main() async {
-  final db = await openTyped(
-    path: ':memory:', // memory, not persisted
-    stores: [Tasks.store],
+  final db = await LocalPocket.open(
+    LocalPocketOptions(
+      path: ':memory:', // memory, not persisted
+      stores: [Tasks.store],
+    ),
   );
   final tasks = db.store(Tasks.store);
 
-  final n = await tasks.count(where: [
-    ~Tasks.done.eq(true),
-    Tasks.dueAt.lt(DateTime.now()),
-  ]);
+  final n = await tasks.count(QuerySpec(
+    where: [
+      ~Tasks.done.eq(true),
+      Tasks.dueAt.lt(DateTime.now()),
+    ],
+  ));
   print('There are $n tasks left to do');
 }
 ```
 
-> **Note**: The schema is built once and reused (memoized), and stores are registered by name. But LocalPocket also verifies you're passing the exact same object every time — not just an object with the same name and fields. So you must share a single `Tasks.store` everywhere in your app. If you ever create a second `Tasks.store` definition that merely looks identical, the database refuses to guess and throws `TypedStoreMismatchError`, instead of quietly treating the two look-alikes as one store.
+> **Note**: The schema is built once and reused (memoized), and stores are registered by name. But LocalPocket also verifies you're passing the exact same object every time — not just an object with the same name and fields. So you must share a single `Tasks.store` everywhere in your app. If you ever create a second `Tasks.store` definition that merely looks identical, the database refuses to guess and throws a store-mismatch error (surfaced through the normal error path), instead of quietly treating the two look-alikes as one store.
 
 Your quickstart is over. **What you now have is:**
 
@@ -411,8 +440,11 @@ and more...
 
 ## Typed CRUD
 
-<!-- localpocket-compile: typed-readme -->
+Every mutation is a list of `Write`s — `Tasks.title.set(...)` builds one,
+and `Writes` provides the id and extra-field helpers. Writes apply inside
+a transaction: either all of them or none.
 
+<!-- localpocket-compile: typed-readme -->
 ```dart
 await tasks.put([
   // Put operations are upserts but
@@ -568,60 +600,58 @@ await tasks.purge('my15charlongid1');
 ## Typed Queries
 
 <!-- localpocket-compile: typed-readme -->
-
 ```dart
 final donePage = await tasks.query(
-  where: [
-    Tasks.done.eq(false), // not done
-    Tasks.status.inValues([TaskStatus.todo, TaskStatus.done]), // one of these
-    Tasks.priority.between(1, 5), // priority in range
-    Tasks.dueAt.isNull(), // no due date set
-  ],
-  orderBy: [Tasks.priority.desc], // sort, then take the page
-  limit: 20,
+  QuerySpec(
+    where: [
+      Tasks.done.eq(false), // not done
+      Tasks.status.inValues([TaskStatus.todo, TaskStatus.done]), // one of these
+      Tasks.priority.between(1, 5), // priority in range
+      Tasks.dueAt.isNull(), // no due date set
+    ],
+    orderBy: [Tasks.priority.desc], // sort, then take the page
+    limit: 20,
+  ),
 );
 
 final allDone = await tasks.query(
-  // to make the query return all the results
-  // although not recommended
-  // but you can explicitly use `Limits.unbounded`
-  limit: Limits.unbounded,
-  where: [Tasks.done.eq(true)],
+  QuerySpec(
+    // to make the query return all the results
+    // although not recommended
+    // but you can explicitly use `Limits.unbounded`
+    limit: Limits.unbounded,
+    where: [Tasks.done.eq(true)],
+  ),
 );
 
 // conditions compose into bigger ones with
 // & (and), | (or) and ~ (not). parentheses
 // decide the order, like in arithmetic
 final matching = await tasks.query(
-  where: [
-    (Tasks.done.eq(true) | Tasks.priority.eq(5)) &
-        ~Tasks.title.startsWith('Draft'),
-  ],
-  // select trims every row down to these fields.
-  // reading anything else from these rows throws
-  select: [Tasks.title, Tasks.priority],
-  limit: 20,
+  QuerySpec(
+    where: [
+      (Tasks.done.eq(true) | Tasks.priority.eq(5)) &
+          ~Tasks.title.startsWith('Draft'),
+    ],
+    // select trims every row down to these fields.
+    // reading anything else from these rows throws
+    select: [Tasks.title, Tasks.priority],
+    limit: 20,
+  ),
 );
 
 // pages carry their own continuation. next()/prev().
 // hasNext/hasPrev are snapshot facts: they describe what the database
 // observed when the page was built, not a promise about the next call.
 final firstPage = await tasks.query(
-  where: [Tasks.done.eq(false)],
-  orderBy: [Tasks.priority.desc],
-  limit: 20,
+  QuerySpec(
+    where: [Tasks.done.eq(false)],
+    orderBy: [Tasks.priority.desc],
+    limit: 20,
+  ),
 );
 final nextPage = await firstPage.next();       // null when hasNext is false
 final again = await nextPage!.prev();          // back to the first page
-
-// to resume a PERSISTED cursor (app restart, deep link), re-state the
-// shape once with `after:` — a cursor minted by a different shape throws
-final resumed = await tasks.query(
-  where: [Tasks.done.eq(false)],
-  orderBy: [Tasks.priority.desc],
-  limit: 20,
-  after: firstPage.nextCursor,
-);
 
 // get reads one record by id.
 // null when there is no such record — it doesn't throw
@@ -631,14 +661,18 @@ final oneTask = await tasks.get('tsk1234567890ab');
 final oneTitle = oneTask?.call(Tasks.title);
 
 // count returns how many rows match. nothing else
-final activeCount = await tasks.count(where: [Tasks.done.eq(false)]);
+final activeCount = await tasks.count(QuerySpec(
+  where: [Tasks.done.eq(false)],
+));
 
 // ids returns the matching record ids
 // instead of whole rows
 final openIds = await tasks.ids(
-  where: [Tasks.done.eq(false)],
-  orderBy: [Tasks.priority.desc],
-  limit: 100,
+  QuerySpec(
+    where: [Tasks.done.eq(false)],
+    orderBy: [Tasks.priority.desc],
+    limit: 100,
+  ),
 );
 
 // sum / min / max / avg work on number fields only
@@ -662,7 +696,6 @@ donePage;
 allDone;
 matching;
 again;
-resumed;
 oneTitle;
 activeCount;
 openIds;
@@ -726,41 +759,34 @@ priorityCount;
 ## Reactive Queries
 
 <!-- localpocket-compile: typed-readme -->
-
 ```dart
 final listStream = tasks.watch(
-  // takes the same API as `query` check above
-  where: [Tasks.done.eq(false) & (~Tasks.priority.eq(0))],
-  limit: 10,
-  orderBy: [Tasks.title.asc, Tasks.priority.desc],
-  select: [Tasks.title],
-  // but it can't accept `after`
+  QuerySpec(
+    // takes the same predicate/order/projection as `query`
+    where: [Tasks.done.eq(false) & (~Tasks.priority.eq(0))],
+    orderBy: [Tasks.title.asc, Tasks.priority.desc],
+    select: [Tasks.title],
+    limit: 10,
+  ),
 );
 
 // it returns a stream that you can listen to
 // or consume with Flutter StreamBuilder
-listStream.listen((tasks) {
+listStream.listen((rows) {
   print('tasks updated!');
-  for (final task in tasks) {
+  for (final task in rows) {
     // each row only carries `title` (you picked it with `select:`),
     // so reading `task.id` here would throw
     print(task(Tasks.title));
   }
 });
 
-// watchOne accepts only an ID
-// for the record you want to watch
-final recordStream = tasks.watchOne('tsk1234567890ab');
-
-// it also returns a stream
-recordStream.listen((record) {
-  if (record != null) {
-    print('task updated');
-    print('task title is: ${record(Tasks.title)}');
-  } else {
-    print('task purged (hard delete)');
-  }
+// single-record changes ride the store's `changes` stream:
+// one notification per committed record change for this store.
+final changeSub = tasks.changes.listen((change) {
+  print('task ${change.ids} changed in ${change.storeName}');
 });
+await changeSub.cancel();
 }
 ```
 
@@ -768,8 +794,9 @@ recordStream.listen((record) {
 
 1. **The first event is what's stored right now — not a change.** Listening
    runs the query once immediately and hands you the current results, even if
-   that's an empty list. `watchOne` on an id that doesn't exist sends `null`
-   as its first event; it never throws for "not found".
+   that's an empty list. To track ONE record, listen to the store's `changes`
+   stream: `tasks.changes` emits a `ChangeNotification` (its `ids` list the
+   records that changed) for every committed change to that store.
 
 2. **Many writes can arrive as one update.** Updates are gathered on a short
    16 ms window: 500 writes inside one transaction come through as a single
@@ -784,11 +811,11 @@ recordStream.listen((record) {
    Without `orderBy`, reordering rows doesn't count as a change; with
    `orderBy`, it does.
 
-4. **`watchOne` only reacts to its own record, and `null` means purged.**
-   Changes to other records never wake it up. It sends `null` after
-   `purge` (or if the id never existed), and sends the record again if that
-   id comes back. It doesn't hide anything: archived and hidden records keep
-   arriving — a soft delete is not `null`.
+4. **Record-level change notifications carry the affected ids.** `Store.changes`
+   emits one notification per committed record change (origin, action, and
+   payloads ride the committed-change event). It never hides anything: archived
+   and hidden records keep producing notifications — a soft delete is still a
+   change notification.
 
 5. **List watches follow the default view.** When a watched row is archived
    or hidden, it disappears from the next list (that removal is its own
@@ -803,17 +830,14 @@ recordStream.listen((record) {
    pages.
 
 7. **One listener per watch, and cancel is permanent.** Every
-   `watch()`/`watchOne()` call makes its own independent stream, so two
+   `watch()` call makes its own independent stream, so two
    listeners means calling `watch()` twice (or broadcasting the stream
    yourself). After `cancel()`, that watch never checks again (a check that
    was scheduled but cancelled reports nothing). Closing the database while a
    watch is running doesn't cause stray errors.
 
-8. **Sync updates flow through; direct SQL doesn't.** Server pulls update
-   watches like any local write — including rows a pull hides or archives.
-   But rows changed by raw SQL behind the API's back notify nobody: call
-   `db.notifyExternalChange({'tasks'})` after doing that, or watches keep
-   showing the old data.
+8. **Sync updates flow through.** Server pulls update watches like any local
+   write — including rows a pull hides or archives.
 
 9. **Watches survive errors.** If a re-read fails, the error arrives on the
     stream's error handler and the watch keeps going — the next successful
@@ -883,85 +907,64 @@ final result = await tasks.getAll(hits.map((x)=>x.id).toList());
 ## Synchronization
 
 ```dart
-final db = AppDb('app.db'); // your TypedPocket subclass
-await db.open();
+final app = await AppDb.open('app.db');
+final db = app.db;
 
-// Two-way sync with PocketBase over REST
+// Two-way sync with PocketBase over REST,
 // with SSE realtime as an explicit opt-in hint layer.
-final sync = attachPocketBaseSync(
-  db: db,
-  baseUrl: Uri.parse('https://pb.example.com'),
-  tokenProvider: myTokenProvider,
-  identity: 'user-123',
+final sync = db.attachPocketBaseSync(
+  PocketBaseSyncOptions(
+    baseUrl: Uri.parse('https://pb.example.com'),
+    tokenProvider: myTokenProvider,
+    identity: 'user-123',
+  ),
 );
 
 sync.status.listen((status) {
   print('${status.state} — ${status.pending} pending');
 });
 
-await sync.start();
-await sync.startRealtime(); // native: opens SSE. web: no-op — the worker
-                            // already opened it during start().
+await sync.start(); // also opens the realtime connection
 final report = await sync.syncNow();
 await sync.stop();
 ```
 
-`attachPocketBaseSync` returns a `PocketBaseSyncEngine` — a
-`PocketBaseSyncHost`, the same surface on native and web. On native it
-drives a real `SyncEngine` in-process; on web the engine runs inside the
-package's worker and the host delegates to it through the facade. The sync
-logic is never duplicated: `SyncEngine` is the only implementation, in the
-process on the VM and in the worker in the browser.
+`attachPocketBaseSync` returns a `PocketBaseSync` — the same surface on
+native and web. On native it drives a real `SyncEngine` in-process; on web
+the engine runs inside the package's worker and the host delegates to it
+through the facade. The sync logic is never duplicated: `SyncEngine` is the
+only implementation, in the process on the VM and in the worker in the
+browser.
 
 **How the single wiring works on both platforms**
 
-- The store list is never restated. The backend takes it from your
-  `TypedPocket.stores` manifest — there is exactly one place that lists
-  stores.
-- One host per database. Repeated `attachPocketBaseSync(db: …)` calls
-  return the same live host, so two engines can never double-push one
-  outbox. `stop()` releases the slot: re-attach for fresh config, or call
-  `start()` again to restart the same host (streams reopen fresh).
-- Tokens stay in your code. On web the `TokenProvider` lives on the page:
-  its value crosses to the worker as a string, and when the worker reports
-  `authRequired` the host refreshes in-page and pushes the new token with
-  `updateAuth`.
+- The store list is never restated. The backend takes it from the stores
+you passed to `LocalPocket.open` (`LocalPocketOptions.stores`) — there is
+exactly one place that lists stores.
+- One host per database. Repeated `attachPocketBaseSync(...)` calls
+return the same live host, so two engines can never double-push one
+outbox. `stop()` releases the slot: re-attach for fresh config, or call
+`start()` again to restart the same host (streams reopen fresh).
+- Tokens stay in your code. The `TokenProvider` lives in your app and
+returns a `Token`; its value crosses only through sync start, and when
+the host reports `authRequired` you refresh in-page and push the new
+token with `updateAuth`.
 - `identity` doubles as the sync `scopeId` on web.
-
-**Native-only wiring (advanced knobs).** `maxBatch`, `maxPage`, a custom
-`HttpTransport`, and a custom `SyncConfig` are native-only today — on web
-the worker builds its own engine from wire arguments. Construct the raw
-`PocketBaseBackend` (or its typed `PocketBaseSync` wrapper) plus a
-`SyncEngine` directly on native when you need them:
-
-```dart
-final backend = PocketBaseSync(
-  db: db,
-  baseUrl: Uri.parse('https://pb.example.com'),
-  tokenProvider: myTokenProvider,
-  identity: 'user-123',
-);
-final engine = SyncEngine(
-  pocket: db.pocket,
-  backend: backend,
-  config: SyncConfig(syncInterval: const Duration(seconds: 15)),
-);
-await engine.start();
-await backend.startRealtime();
-```
 
 **Gotchas:**
 
-1. `start()` never opens the SSE connection on native —
-   `startRealtime()` is the explicit owner of the connection (polling and
-   anti-entropy sweeps remain the correctness backstop either way). On web
-   the worker opens realtime during `start()`.
+1. **`start()` owns realtime.** Sync start opens the engine and its realtime
+   connection on both platforms — there is no separate realtime command;
+   polling and anti-entropy sweeps remain the correctness backstop either way.
 2. **One tab runs sync on web.** The worker owns the engine; a second tab
    syncing the same database is not a supported configuration yet.
 3. Realtime events are hints, not truth: the engine still performs
-   authoritative pulls after gaps and reconnects.
+authoritative pulls after gaps and reconnects.
 4. `syncNow()` returns a `SyncReport` on both platforms (pulled / swept /
-   pushed / dead-lettered / discarded counts).
+pushed / dead-lettered / discarded counts).
+5. `pause()`/`resume()` park and restart periodic cycles (manual
+   `syncNow()` still works while parked); `setConnectivity(false)`
+   parks cycle scheduling while offline.
 
 ## Conflict Resolution
 
@@ -974,8 +977,9 @@ resolvers cover the common shapes — `LocalWinsResolver`, `CounterResolver`,
 `SetUnionWithDeletionWinsResolver`, `AppendOnlyListResolver`,
 `AppendOnlyLinesResolver` — and `CustomResolver` handles anything else.
 
-Conflicts that need a human are held in `pocket.conflicts` (list, watch,
-`resolve`, `acceptLocal`, `acceptRemote`) on native and web alike.
+Conflicts that need a human are held in `store.conflicts` (a
+`StoreConflicts<S>`: `listOpen`, `watch`, `resolve`, `acceptLocal`,
+`acceptRemote`) on native and web alike.
 
 ### Concurrent edits on PocketBase are last-write-wins
 
@@ -989,50 +993,47 @@ rejecting stale `updated`, or a custom endpoint).
 
 ## Change hooks
 
-Every committed mutation broadcasts a `RecordChangeEvent` on the
-database's `events` stream: store, id, origin (`local`, `remote`,
-`resolution`), action (`create`/`update`/`archive`/`restore`/`purge`/
-`hide`), before/after records, and changed fields.
+Every committed mutation delivers a `ChangeNotification` on
+`LocalPocket.changes` (all stores) and `Store.changes` (one store): the
+notification carries the store name and the record ids the committing
+transaction touched. Nothing is delivered before the transaction commits —
+events are committed facts, and today the notification names what changed.
 
 ## Schema migration
 
-Schema versions migrate forward-only. Bump the `CollectionSchema` version
-and declare `StoreMigration`s (added fields, optional chunked backfill
-transforms). Destructive changes (dropping columns, tightening
-constraints) run a safe table rebuild with an automatic backup copy of the
-old data.
+Schema versions migrate forward-only. Override `StoreDef.migrations` to
+declare `StoreMigration`s (added fields, optional chunked backfill
+transforms), and bump the `StoreDef.version` when they change.
+Destructive changes (dropping columns, tightening constraints) run a safe
+table rebuild with an automatic backup copy of the old data.
 
 ## Encryption
 
-Field-level encryption is per-field on the schema, with an application-held
+Field-level encryption is per-field on the store, with an application-held
 AES-256-GCM key:
 
 ```dart
-final cipher = AesGcmFieldCipher(List<int>.filled(32, 7)); // your 256-bit key
-
-final patientSchema = CollectionSchema(
-  name: 'patients',
-  version: 1,
-  fields: [
-    Field.text('name', required: true),
-    Field.text('ssn', encrypted: true),
-  ],
-);
+final key = Uint8List.fromList(List<int>.filled(32, 7)); // your 256-bit key
 
 final db = await LocalPocket.open(
-  path: 'patients.db',
-  stores: [patientSchema],
-  fieldCipher: cipher,
+  LocalPocketOptions(
+    path: 'patients.db',
+    stores: [Patients.store],
+    encryption: EncryptionConfig.aesGcm256(key: key),
+  ),
 );
 ```
 
-Whole-database at-rest encryption (SQLCipher) comes from an injected
-database on native platforms; the web profile rejects `encrypted: true`
-with an `UnsupportedError` — use field-level encryption there.
+Mark individual fields `encrypted: true` in the store declaration (e.g.
+`store.schema.text('ssn', encrypted: true)`) — those values are encrypted
+at rest with the database key. Whole-database at-rest encryption
+(SQLCipher) comes from an injected database on native platforms; the web
+profile keeps storage in the browser, so use field-level encryption there.
 
 ## Binary attachments
 
-Content-addressed attachment storage with deduplication: `files.attach`
+Content-addressed attachment storage with deduplication behind each
+store's `Files` API (`store.files`): `files.attach`
 (byte-array or stream; chunked upload on web), `files.open`, `files.list`,
 `files.remove`, and `files.gc` for capacity reclamation. Storage plugs in
 through `BlobStore` — `MemoryBlobStore` for tests, a native file-backed

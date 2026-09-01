@@ -757,9 +757,9 @@ void main() {
             'updated_$id');
       }
 
-        final beginBefore = beginCount;
-        await h.engine.puller.fetchBatch('widgets', ids, batchSize: 5);
-        expect(beginCount - beginBefore, equals(3),
+      final beginBefore = beginCount;
+      await h.engine.puller.fetchBatch('widgets', ids, batchSize: 5);
+      expect(beginCount - beginBefore, equals(3),
           reason:
               '15 items in chunks of 5 should execute exactly 3 write transactions');
     });
