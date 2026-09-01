@@ -22,7 +22,14 @@ export '../core/perf_counters.dart';
 export '../core/schema.dart';
 export '../core/ddl_compiler.dart';
 export '../core/database_adapter.dart';
-export '../core/local_pocket.dart';
+// ONE `LocalPocket` name: the raw kernel on the VM, the web facade under
+// `dart.library.js_interop` — the same conditional the old barrel used, so
+// web smoke pages (which open through the facade) and VM tests (which open
+// the raw kernel) both keep working.
+export '../core/local_pocket.dart'
+    show DurabilityClass, TestHooks, KernelDatabase, PointReadCache;
+export '../core/local_pocket.dart'
+    if (dart.library.js_interop) '../web/facade.dart' show LocalPocket;
 export '../core/transaction.dart';
 export '../core/store.dart';
 export '../core/query_plan.dart';
@@ -58,7 +65,6 @@ export '../sync/engine.dart';
 export '../files/file_sync_lane.dart';
 export '../files/blob_store.dart';
 export '../files/native_blob_store_platform.dart';
-export '../files/native_backup_file.dart';
 export '../files/files_api.dart';
 
 // -- PocketBase adapter --------------------------------------------------------

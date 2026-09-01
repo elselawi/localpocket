@@ -1,4 +1,4 @@
-# HANDOFF — Phase 7 COMPLETE; next: the barrel switch
+# HANDOFF — Phase 8 + Phase 9 COMPLETE; next: Phase 10 (file-tree moves)
 
 Read this file top to bottom before touching anything. It is written so an
 agent with no prior session memory can continue the work safely.
@@ -30,14 +30,18 @@ the facade exists in `lib/src/api/`, runs over both runtimes, and is proven
 by `test/conformance/facade_conformance_test.dart`. See the facade section
 at the end of `refactor/contract-runtime.md` for everything that landed.
 
-**Your stage now: Phase 9 — the barrel switch.** The Phase 7 wire-family
-cutover is COMPLETE (2026-08-31): the wire registry is ONLY `open` +
-`contract_request`/`contract_event`, the worker is a small envelope loop
-whose only feature handler is the `open` handshake, and every remaining
-surface (events, sync, files, conflicts, close) travels as typed contract
-commands answered by the kernel's own command handler. The 2026-08-31
-family commits (CRUD/batch, watches, transactions, maintenance, conflicts,
-files `e9c1554`, sync `f47344e`, close/lifecycle) are the record.
+**Your stage now: Phase 10 — move files and delete the old architecture.**
+
+Phase 8 (destination surfaces for files/conflicts/sync) and Phase 9 (the
+barrel switch) are COMPLETE (2026-09-01). The wire registry is ONLY `open` +
+`contract_request`/`contract_event` (Phase 7, 2026-08-31), the destination
+facade in `lib/src/api/` exposes every family over the contract, and
+`lib/localpocket.dart` is now the ONE supported application barrel (see the
+ledger's "Phase 9 — barrel switch" section). What remains is Phase 10:
+file-tree moves and deleting the old architecture per `final_refactoring_plan.md`.
+
+Phase 7 history (kept for reference): the family cutovers above are the
+record of the wire → contract collapse.
 
 Cutover slices DONE (2026-08-30):
 
@@ -117,12 +121,15 @@ Cutover slices DONE (2026-08-30):
    `worker_engine_conflicts.dart` deleted.
 
 Remaining: NOTHING in Phase 7 — all eight families are cut over (2026-08-31).
-The next stage is the barrel switch (plan Phase 9): export the destination
-facade from the package barrel, retire the `LocalPocket = KernelDatabase`
-transitional typedef and the old web facade's claim on the name, and delete
-the planning artifacts. The full destination plan (12 stages, gates,
-checklists) is in `final_refactoring_plan.md`. Stages 0–7 are DONE.
-Stage-by-stage history lives in `refactor/*.md`.
+Phase 8 (2026-09-01) added the destination surfaces (files/conflicts/sync)
+and Phase 9 (2026-09-01) switched the barrel: `lib/localpocket.dart` exports
+only the destination facade + schema declaration layer, the aux barrels
+(`typed.dart`/`sync.dart`/`pocketbase.dart`) are deleted, and internal tests
+use `src/internal/raw_surface.dart`. The next stage is Phase 10: move files
+into `api`/`kernel`/`platform` ownership and delete the old architecture.
+The full destination plan (12 stages, gates, checklists) is in
+`final_refactoring_plan.md`. Stages 0–9 are DONE. Stage-by-stage history
+lives in `refactor/*.md`.
 
 ---
 
@@ -161,36 +168,33 @@ Stage-by-stage history lives in `refactor/*.md`.
 
 ---
 
-## 2. Current state (verified 2026-08-31, after the conflicts cutover)
+## 2. Current state (verified 2026-09-01, after Phase 8 + Phase 9)
 
-ALL EIGHT families of the Phase 7 cutover are DONE (2026-08-31: CRUD/batch,
-watches/committed events, transactions, maintenance/capabilities, conflicts,
-files, sync/auth/status, close/lifecycle). The wire registry is ONLY `open` +
-`contract_request`/`contract_event`; the worker emits ONLY `contract_event`
-and is a small envelope loop whose only feature handler is the `open`
-handshake. The kernel owns every feature surface — including the sync engine
-(behind the `SyncBackendFactory` seam in `sync/sync_backend.dart`, so R1/R3
-hold), the bounded file upload sessions, and the download credit windows.
+ALL EIGHT families of the Phase 7 cutover are DONE (2026-08-31), Phase 8
+(2026-09-01) added the destination surfaces for files/conflicts/sync, and
+Phase 9 (2026-09-01) switched the public barrel. The wire registry is ONLY
+`open` + `contract_request`/`contract_event`; the worker emits ONLY
+`contract_event` and is a small envelope loop whose only feature handler is
+the `open` handshake. The kernel owns every feature surface — including the
+sync engine (behind the `SyncBackendFactory` seam in `sync/sync_backend.dart`,
+so R1/R3 hold), the bounded file upload sessions, and the download credit
+windows. `lib/localpocket.dart` is now the ONE supported application barrel
+(destination facade + schema declaration layer); the aux barrels are deleted.
 
-- Branch `refactor/final-architecture`; see `git log` for the family commits
-  (one commit per family, all gates green).
+- Branch `refactor/final-architecture`; see `git log` for the family commits.
 - `dart analyze lib test tool` -> 0 issues.
-- `dart test` -> `+2735 ~83` all passed (83 skips = live/gate/platform tags).
+- `dart test` -> `+2767 ~83` all passed (83 skips = live/gate/platform tags).
 - `dart run tool/local_web_gate.dart` -> PASS (7 checks, incl. the
-  byte-compare "shipped worker asset is current" gate; asset regenerated
-  after every web-layer change).
-- `dart run tool/api_snapshot.dart` -> PASS (snapshot unchanged; the new
-  facade is still not exported from the barrel).
-- `dart run tool/browser_web_gate.dart` -> 17 pages x 3 browsers PASS
-  (re-run after every family; the transaction smoke caught the concurrent-
-  session hang, see the ledger).
-- The contract additionally carries the whole file family
-  (`FileRefData`, bounded upload sessions, credit-windowed downloads),
-  `SyncStatusData`/`SyncReportData` + the seven sync requests and the
-  `SyncStatusEvent`/`AuthRequiredEvent` events, and storage facts on
-  `CapabilitiesResult`. The web facade's `syncStatus` is a typed
-  `Stream<SyncStatus>` fed by contract events; `close()` sends the contract
-  `CloseRequest` — one close behavior for every runtime.
+  byte-compare "shipped worker asset is current" gate).
+- `dart run tool/api_snapshot.dart` -> PASS (snapshot regenerated at the
+  barrel switch; `lib/localpocket.dart` is the only entrypoint).
+- `dart run tool/browser_web_gate.dart` -> 17 pages x 3 browsers PASS.
+- The destination facade (`lib/src/api/`) exposes Store/Row/QuerySpec/
+  Transaction/events/watches/maintenance/files/conflicts/sync over the
+  contract; `db.attachPocketBaseSync(PocketBaseSyncOptions(...))` is the sync
+  attachment; `store.files` / `store.conflicts` are the record-facing surfaces.
+- Internal unit tests, the benchmarks, and the example import
+  `src/internal/raw_surface.dart` (internal, never exported by the barrel).
 - Gotcha: `dart analyze` with several folder arguments can serve stale
   results right after large edits — verify compile state with `dart test`
   on the affected folders before trusting a clean analysis.
@@ -203,7 +207,7 @@ hold), the bounded file upload sessions, and the download credit windows.
 
 | Piece | Where | Notes |
 |---|---|---|
-| Kernel database | `lib/src/core/local_pocket.dart` — `class KernelDatabase` | The concrete engine. Public name `LocalPocket` is a **transitional typedef** to it (plus a separate web facade class at `lib/src/web/facade.dart` — both compile today). |
+| Kernel database | `lib/src/core/local_pocket.dart` — `class KernelDatabase` | The concrete engine. The destination `LocalPocket` (facade, `lib/src/api/`) owns the public name; the raw `KernelDatabase` is kernel-internal (the `LocalPocket = KernelDatabase` transitional typedef is no longer exported). |
 | Kernel context | `lib/src/core/kernel_context.dart` (part) | `KernelContext`: db, tables, clock, capabilities, changeBus, outbox, opQueue, conflicts, files, typedRegistry, transactions, mutations, reads, commands, traceExecute/traceQuery. Constructed inside `KernelDatabase.open`, exposed as `db.kernel`. |
 | Services | `lib/src/core/{mutation_service,read_service,transaction_coordinator}.dart` (parts) | `db.mutations` (put/upsert/putAll/upsertAll/patch/patchAll/archive/restore/purge — need a `Collection` bound to a tx when used in-session), `db.reads` (compiled-plan execution), `db._transactions` (write queue, durability pragma state, group commit, read transactions). |
 | Command dispatcher | `lib/src/kernel/command_handler.dart` (part) | `KernelCommandHandler implements CommandHandler` — exhaustive switch over ALL 28 request variants. Constructed as `db.commands`. |
@@ -573,9 +577,20 @@ Expected friction (all learned the hard way):
   `refactor/worker_op_inventory.md`, and refresh this file's §2/§6 for the
   next agent.
 
-Out of scope for this stage: the barrel switch (plan Phase 9 — keep the
-`LocalPocket = KernelDatabase` typedef and the web facade's claim on the
-name), the deferred contract fields (`MutateRequest.durability`,
-`VacuumRequest.pages`, `PruneOutboxRequest.maxEntries`, `CompactRequest.nowMs`)
-unless a family genuinely forces them, `db.flush()`/`db.backup()`, `getAll`
-beyond `rows`, and revision numbers on `CommittedChange`.
+Phase 8 + Phase 9 are DONE (2026-09-01). The next stage is Phase 10 (move
+files + delete the old architecture, per `final_refactoring_plan.md` §12):
+move typed code into `api`/`schema` ownership, semantic core into `kernel`,
+browser code into `platform/web`, native code into `platform/native`, keep
+the PocketBase adapter separate, and delete — where no longer referenced —
+the raw public `Collection`/`Page`/`Tx`/query/search builders, typed map
+surfaces and adapters, the conditional public `LocalPocket` implementations,
+the web facade and semantic proxy directories, compiled-plan transport, the
+string op registries, platform sync host duplicates, public raw file/conflict
+forms, and the second schema-registration path. Move-only commits where
+possible after behavior has settled. The internal test surface
+(`src/internal/raw_surface.dart`) and the `test/typed`/`test/e2e` suites
+retire together with the old architecture they pin.
+
+Still out of scope: the deferred contract fields (`MutateRequest.durability`,
+`VacuumRequest.pages`, `PruneOutboxRequest.maxEntries`, `CompactRequest.nowMs`),
+`db.flush()`/`db.backup()`, and revision numbers on `CommittedChange`.
