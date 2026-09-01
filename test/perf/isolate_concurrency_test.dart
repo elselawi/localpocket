@@ -1,7 +1,13 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/cipher.dart';
+import 'package:localpocket/src/kernel/codec.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/kernel/sync/mapping.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

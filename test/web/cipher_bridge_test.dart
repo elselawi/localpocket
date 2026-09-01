@@ -1,6 +1,7 @@
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/cipher.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/platform/web/crypto.dart';
 import 'package:test/test.dart';
 

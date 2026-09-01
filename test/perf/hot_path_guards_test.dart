@@ -1,4 +1,5 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/database_adapter.dart';
+import 'package:localpocket/src/kernel/ids.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

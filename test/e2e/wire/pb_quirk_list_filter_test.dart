@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/adapters/pocketbase/filter_builder.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/sync/status.dart';
+import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
 import '../../secret.dart';

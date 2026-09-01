@@ -11,7 +11,17 @@ library;
 
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/adapters/pocketbase/auth.dart';
+import 'package:localpocket/src/adapters/pocketbase/backend.dart';
+import 'package:localpocket/src/adapters/pocketbase/transport.dart';
+import 'package:localpocket/src/kernel/cipher.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/kernel/sync/engine.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart';
+import 'package:localpocket/src/kernel/sync/sync_config.dart';
 import 'package:test/test.dart';
 
 import '../../secret.dart';

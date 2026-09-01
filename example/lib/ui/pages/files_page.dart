@@ -46,9 +46,7 @@ class _FilesPageState extends State<FilesPage> {
     if (mounted) {
       setState(() {
         _tasks = [for (final t in page.items) t.toJson()];
-        _selectedTaskId ??= page.items.isNotEmpty
-            ? page.items.first.id
-            : null;
+        _selectedTaskId ??= page.items.isNotEmpty ? page.items.first.id : null;
         _error = null;
       });
       if (_selectedTaskId != null) _loadRefs(_selectedTaskId!);

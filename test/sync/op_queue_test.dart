@@ -1,4 +1,5 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 

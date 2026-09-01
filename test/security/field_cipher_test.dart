@@ -4,7 +4,10 @@ import 'dart:math';
 
 import 'package:cryptography/cryptography.dart' as crypto;
 import 'package:cryptography/dart.dart' as cryptodart;
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/cipher.dart';
+import 'package:localpocket/src/kernel/ddl_compiler.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

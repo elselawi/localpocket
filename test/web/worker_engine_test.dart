@@ -2,7 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/change_bus.dart';
+import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/kernel/sync/status.dart';
 import 'package:localpocket/src/contract/contract.dart' as contract;
 
 import 'package:localpocket/src/platform/web/page/protocol.dart';

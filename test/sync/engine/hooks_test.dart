@@ -1,6 +1,9 @@
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/change_bus.dart';
+import 'package:localpocket/src/kernel/codec.dart';
+import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/kernel/sync/merge.dart';
 import 'package:test/test.dart';
 
 import 'engine_helpers.dart';

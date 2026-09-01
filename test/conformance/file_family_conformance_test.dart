@@ -2,7 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/capabilities.dart';
+import 'package:localpocket/src/kernel/database_adapter.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:localpocket/src/contract/contract.dart';
 import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/runtime/runtime_client.dart';

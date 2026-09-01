@@ -1,6 +1,12 @@
 import 'dart:async';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/adapters/pocketbase/backend.dart';
+import 'package:localpocket/src/kernel/capabilities.dart';
+import 'package:localpocket/src/kernel/cipher.dart';
+import 'package:localpocket/src/kernel/database_adapter.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;

@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/canonical_json.dart';
 import 'package:test/test.dart';
 
 /// Canonical JSON serialization boundary tests.

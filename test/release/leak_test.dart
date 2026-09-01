@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/adapters/pocketbase/backend.dart';
+import 'package:localpocket/src/adapters/pocketbase/transport.dart';
+import 'package:localpocket/src/kernel/database_adapter.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 

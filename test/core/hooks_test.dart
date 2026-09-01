@@ -1,4 +1,6 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/change_bus.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:test/test.dart';
 
 void main() {

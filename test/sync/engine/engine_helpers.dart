@@ -2,7 +2,13 @@
 /// never fire on their own (tests drive cycles explicitly).
 library;
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/cipher.dart';
+import 'package:localpocket/src/kernel/database_adapter.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/kernel/sync/engine.dart';
+import 'package:localpocket/src/kernel/sync/sync_config.dart';
 
 import '../../support/helpers.dart';
 import 'mock_backend.dart';

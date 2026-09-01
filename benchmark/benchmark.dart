@@ -50,8 +50,7 @@ Map<String, Object?> recMap(String id, int i) => {
 Future<void> seed100k(Store<BenchmarkWidgets> store) async {
   for (var start = 0; start < 100000; start += 10000) {
     final chunk = [
-      for (var i = start; i < start + 10000; i++)
-        rec(generateRecordId(), i),
+      for (var i = start; i < start + 10000; i++) rec(generateRecordId(), i),
     ];
     await store.putAll(chunk);
   }
@@ -103,7 +102,8 @@ Future<void> main() async {
     final records = [
       for (var i = 0; i < 10000; i++) rec(generateRecordId(), i),
     ];
-    await db.transaction((tx) => tx.store(BenchmarkWidgets.store).putAll(records));
+    await db
+        .transaction((tx) => tx.store(BenchmarkWidgets.store).putAll(records));
     sw.stop();
     report(
         'B1', 'bulk insert 10k (1 txn, putAll)', sw.elapsedMilliseconds, 2000);
@@ -426,9 +426,8 @@ Future<void> main() async {
         LocalPocketOptions(path: dbPath, stores: [BenchmarkWidgets.store]));
     final store10 = db10.store(BenchmarkWidgets.store);
     var emits = 0;
-    final sub = store10
-        .watch(QuerySpec<BenchmarkWidgets>(limit: 10))
-        .listen((_) {
+    final sub =
+        store10.watch(QuerySpec<BenchmarkWidgets>(limit: 10)).listen((_) {
       emits++;
     });
     await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -546,8 +545,7 @@ Future<void> main() async {
       failures.add(
           'B13 (row overhead ${overheadUsPerRow.toStringAsFixed(3)}us/row)');
     }
-    stdout.writeln(
-        'B13 row boundary: raw=${rawUs}us, row=${typedUs}us, '
+    stdout.writeln('B13 row boundary: raw=${rawUs}us, row=${typedUs}us, '
         'overhead=${overheadUsPerRow.toStringAsFixed(3)}us/row -> ${ok ? 'PASS' : 'FAIL'}');
   }
 

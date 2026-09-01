@@ -1,4 +1,4 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:test/test.dart';
 
 import 'engine_helpers.dart';

@@ -1,6 +1,12 @@
 import 'dart:io';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/files/native_blob_store_platform.dart';
+import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/kernel/sync/engine.dart';
+import 'package:localpocket/src/kernel/sync/merge.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart';
+import 'package:localpocket/src/kernel/sync/sync_config.dart';
+import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

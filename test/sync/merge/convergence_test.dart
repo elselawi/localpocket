@@ -1,4 +1,4 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/sync/sync_config.dart';
 import 'package:test/test.dart';
 import 'dart:math';
 

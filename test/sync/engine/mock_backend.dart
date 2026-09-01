@@ -6,7 +6,8 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 
 class MockRecord {
   MockRecord({

@@ -1,4 +1,6 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/kernel/sync/merge.dart';
+import 'package:localpocket/src/kernel/sync/sync_config.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';

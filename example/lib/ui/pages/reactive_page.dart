@@ -72,11 +72,10 @@ class _ReactivePageState extends State<ReactivePage> {
     final db = _db;
     if (db == null) return;
     // Find an existing in_progress task or a done one to flip.
-    final page = await db.store(PlaygroundTasks.store).query(
-          lp.QuerySpec(
-            orderBy: [PlaygroundTasks.priority.asc],
-            limit: 10,
-          ),
+    final page = await db
+        .store(PlaygroundTasks.store)
+        .query(
+          lp.QuerySpec(orderBy: [PlaygroundTasks.priority.asc], limit: 10),
         );
     if (page.items.isEmpty) {
       if (mounted) {
@@ -95,9 +94,9 @@ class _ReactivePageState extends State<ReactivePage> {
       PlaygroundTasks.completed.set(next == TaskStatus.done),
     ]);
     // Also count open tasks.
-    final count = await db.store(PlaygroundTasks.store).count(
-          lp.QuerySpec(where: [PlaygroundTasks.completed.eq(false)]),
-        );
+    final count = await db
+        .store(PlaygroundTasks.store)
+        .count(lp.QuerySpec(where: [PlaygroundTasks.completed.eq(false)]));
     if (mounted) setState(() => _todoCounter = count);
   }
 

@@ -1,4 +1,6 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/query_plan.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:test/test.dart';
 
 void main() {

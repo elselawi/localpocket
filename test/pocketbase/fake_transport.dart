@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/adapters/pocketbase/transport.dart';
 
 /// A scriptable fake [HttpTransport] for adapter tests.
 ///

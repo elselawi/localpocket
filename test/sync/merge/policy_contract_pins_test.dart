@@ -1,4 +1,4 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/sync/merge.dart';
 import 'package:test/test.dart';
 
 /// Contract pins for the merge policy semantics that the audit called out.

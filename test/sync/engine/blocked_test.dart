@@ -1,4 +1,8 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/sync/status.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart';
+import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';

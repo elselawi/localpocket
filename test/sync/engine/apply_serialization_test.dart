@@ -1,6 +1,9 @@
 import 'dart:async';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/sync/puller.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart';
+import 'package:localpocket/src/kernel/sync/sync_store.dart';
 import 'package:localpocket/src/kernel/sync/apply_lane.dart';
 import 'package:test/test.dart';
 

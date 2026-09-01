@@ -15,11 +15,10 @@ class Helpers {
     LocalPocket db, {
     int limit = 30,
   }) async {
-    final tasks = await db.store(PlaygroundTasks.store).query(
-          QuerySpec(
-            orderBy: [PlaygroundTasks.priority.asc],
-            limit: limit,
-          ),
+    final tasks = await db
+        .store(PlaygroundTasks.store)
+        .query(
+          QuerySpec(orderBy: [PlaygroundTasks.priority.asc], limit: limit),
         );
     final users = <String, Row<PlaygroundUsers>>{};
     final userIds = <String>{};
@@ -36,8 +35,10 @@ class Helpers {
         {
           ...t.toJson(),
           'assignee':
-              users[t(PlaygroundTasks.assignedTo)]?.get(PlaygroundUsers.fullName) ??
-                  '(unassigned)',
+              users[t(PlaygroundTasks.assignedTo)]?.get(
+                PlaygroundUsers.fullName,
+              ) ??
+              '(unassigned)',
         },
     ];
   }

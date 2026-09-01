@@ -1,6 +1,10 @@
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/canonical_json.dart';
+import 'package:localpocket/src/kernel/hashing.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/kernel/compiled_query_runner.dart';
 
 /// Compares watch-refresh cost at growing result sizes.

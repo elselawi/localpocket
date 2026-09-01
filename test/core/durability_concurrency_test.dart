@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:localpocket/src/kernel/write_queue.dart';
 import 'package:test/test.dart';
 

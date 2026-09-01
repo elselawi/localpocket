@@ -1,4 +1,6 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/capabilities.dart';
+import 'package:localpocket/src/kernel/database_adapter.dart';
+import 'package:localpocket/src/kernel/ids.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:test/test.dart';
 

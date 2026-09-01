@@ -1,7 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/adapters/pocketbase/backend.dart';
+import 'package:localpocket/src/kernel/capabilities.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/sync/engine.dart';
 import 'package:test/test.dart';
 
 import '../pocketbase/fake_transport.dart';

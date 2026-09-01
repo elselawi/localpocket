@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/sync/merge.dart';
 import 'package:test/test.dart';
 
 /// Merge matrix tests.

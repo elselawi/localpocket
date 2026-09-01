@@ -1,6 +1,12 @@
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/adapters/pocketbase/auth.dart';
+import 'package:localpocket/src/adapters/pocketbase/backend.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/sync/engine.dart';
+import 'package:localpocket/src/kernel/sync/status.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart';
+import 'package:localpocket/src/kernel/sync/sync_store.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

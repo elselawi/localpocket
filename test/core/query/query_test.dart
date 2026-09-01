@@ -1,6 +1,10 @@
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/store.dart';
 import 'package:localpocket/src/kernel/compiled_query_runner.dart';
 import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
 import 'package:test/test.dart';

@@ -32,7 +32,8 @@ export 'src/api/writes.dart';
 // The sync attachment surfaces the engine's status/report models through the
 // same import (`PocketBaseSync.status` emits SyncStatus, `syncNow` returns a
 // SyncReport), so the public sync surface is usable from the one barrel.
-export 'src/kernel/sync/status.dart' show SyncEngineState, SyncReport, SyncStatus;
+export 'src/kernel/sync/status.dart'
+    show SyncEngineState, SyncReport, SyncStatus;
 
 // The blob-store types the facade's file configuration names
 // (`LocalPocketOptions.blobStore`): the interface plus the in-memory store

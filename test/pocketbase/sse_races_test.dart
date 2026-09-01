@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/adapters/pocketbase/auth.dart';
+import 'package:localpocket/src/adapters/pocketbase/pb_client.dart';
+import 'package:localpocket/src/adapters/pocketbase/sse.dart';
+import 'package:localpocket/src/adapters/pocketbase/transport.dart';
 import 'package:test/test.dart';
 
 import 'fake_transport.dart';

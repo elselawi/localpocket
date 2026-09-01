@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/hashing.dart';
+import 'package:localpocket/src/kernel/ids.dart';
 import 'package:test/test.dart';
 
 /// Tests for the public hashing and record-ID helpers.

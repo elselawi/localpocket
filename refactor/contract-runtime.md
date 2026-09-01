@@ -1529,3 +1529,28 @@ part of the Phase 10 gate command list.
   `+2350 ~82` (down from `+2357` — the deleted typed sync remote pin);
   `api_snapshot` PASS (barrel unchanged this step).
 
+## P10.10 raw_surface retired; internal tests import specific src files (commits …)
+
+- The keystone is DOWN: `lib/src/internal/raw_surface.dart` DELETED (and the
+  now-empty `lib/src/internal/` directory with it). No `test`, `benchmark`,
+  `example`, `tool`, or `lib` file references it; no config/release script
+  references `src/internal`.
+- All 158 surviving internal test files + 2 tool benchmarks
+  (`compiled_plan_benchmark.dart`, `watch_refresh_benchmark.dart`) now import
+  the SPECIFIC `src/` libraries they use (plan §13.1) instead of the raw
+  barrel. The port was done with a one-shot analyzer-based tool
+  (`tool/_port_raw_surface.dart`, since deleted): it resolved each
+  raw_surface export's public top-level names via the analyzer's
+  `exportNamespace.definedNames` (the multiline `show` export of
+  `local_pocket.dart` needed a `\s+show\s+` regex), stripped comments/strings
+  from each importing file, and kept only the exports whose names actually
+  appear. Residuals (missing `generateRecordId` in two sync engine tests, a
+  duplicate `sync_config` import, two unnecessary imports where the contract
+  already provides the name) fixed by hand.
+- Kernel tests were NOT weakened — imports moved, bodies untouched. Full
+  suite `+2350 ~82` green (same count as before the port: the port is
+  import-only).
+- `api_snapshot.txt` regenerated (the only change is the barrel's sync-status
+  export line wrapped by `dart format` — cosmetic). Local web gate 7/7
+  (worker asset unchanged; `raw_surface` was unreachable from the worker).
+

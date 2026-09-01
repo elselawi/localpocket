@@ -1,6 +1,9 @@
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/query_plan.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/kernel/compiled_query_runner.dart';
 import 'package:localpocket/src/contract/contract.dart' show encodeWireValue;
 

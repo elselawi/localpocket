@@ -3,7 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/files/native_blob_store_platform.dart';
+import 'package:localpocket/src/kernel/cipher.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 // `processAndValidateBlobStream` is internal (not on the public export list).
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';

@@ -21,12 +21,12 @@ class PlaygroundSchemas {
   static final PlaygroundSecrets secrets = PlaygroundSecrets.store;
 
   static List<StoreDef<Object?>> get all => [
-        users,
-        tasks,
-        posts,
-        metrics,
-        secrets,
-      ];
+    users,
+    tasks,
+    posts,
+    metrics,
+    secrets,
+  ];
 }
 
 /// Users referenced by the tasks' `assigned_to` field.
@@ -42,11 +42,17 @@ final class PlaygroundUsers extends StoreDef<PlaygroundUsers> {
   static final active = store.schema.boolean('active');
 
   @override
-  List<FieldDef<PlaygroundUsers, Object?>> get fields =>
-      [fullName, email, role, active];
+  List<FieldDef<PlaygroundUsers, Object?>> get fields => [
+    fullName,
+    email,
+    role,
+    active,
+  ];
 
   @override
-  List<IndexSpec> get indexes => [store.indexSpec([role])];
+  List<IndexSpec> get indexes => [
+    store.indexSpec([role]),
+  ];
 }
 
 /// Posts with numeric counters + jsonList tags.
@@ -61,8 +67,12 @@ final class PlaygroundPosts extends StoreDef<PlaygroundPosts> {
   static final tags = store.schema.jsonList<String>('tags');
 
   @override
-  List<FieldDef<PlaygroundPosts, Object?>> get fields =>
-      [title, views, likes, tags];
+  List<FieldDef<PlaygroundPosts, Object?>> get fields => [
+    title,
+    views,
+    likes,
+    tags,
+  ];
 }
 
 /// A dense numeric store for aggregate + performance demos.
@@ -76,11 +86,16 @@ final class PlaygroundMetrics extends StoreDef<PlaygroundMetrics> {
   static final recorded = store.schema.date('recorded');
 
   @override
-  List<FieldDef<PlaygroundMetrics, Object?>> get fields =>
-      [label, value, recorded];
+  List<FieldDef<PlaygroundMetrics, Object?>> get fields => [
+    label,
+    value,
+    recorded,
+  ];
 
   @override
-  List<IndexSpec> get indexes => [store.indexSpec([label])];
+  List<IndexSpec> get indexes => [
+    store.indexSpec([label]),
+  ];
 }
 
 /// A store with an encrypted field to demonstrate field-level encryption.
@@ -94,6 +109,9 @@ final class PlaygroundSecrets extends StoreDef<PlaygroundSecrets> {
   static final category = store.schema.text('category');
 
   @override
-  List<FieldDef<PlaygroundSecrets, Object?>> get fields =>
-      [label, secret, category];
+  List<FieldDef<PlaygroundSecrets, Object?>> get fields => [
+    label,
+    secret,
+    category,
+  ];
 }

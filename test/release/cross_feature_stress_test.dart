@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:test/test.dart';
 
 import '../sync/engine/engine_helpers.dart';

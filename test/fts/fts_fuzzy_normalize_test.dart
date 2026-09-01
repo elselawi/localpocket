@@ -1,6 +1,7 @@
 import 'dart:convert';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:test/test.dart';
 
 import 'package:localpocket/src/kernel/fts_normalizer.dart'
