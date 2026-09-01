@@ -9,7 +9,7 @@ import 'dart:js_interop';
 import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 
-import 'blob_store.dart';
+import '../kernel/files/blob_store.dart';
 
 /// Creates a page-usable `blob:` URL for [hash] by reading the bytes back from
 /// [store] on the main thread.

@@ -1,14 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import '../kernel/database_adapter.dart';
+import '../database_adapter.dart';
 
-import '../kernel/change_bus.dart';
-import '../kernel/ids.dart';
-import '../kernel/local_pocket.dart';
+import '../change_bus.dart';
+import '../ids.dart';
+import '../local_pocket.dart';
 import 'blob_store.dart';
-import '../kernel/sync/sync_backend.dart';
-import '../kernel/sync/sync_config.dart';
-import '../kernel/sync/sync_tables.dart';
+import '../sync/sync_backend.dart';
+import '../sync/sync_config.dart';
+import '../sync/sync_tables.dart';
 
 /// {@template localpocket.file_sync_report}
 /// A summary of the work performed by a file synchronization pass.

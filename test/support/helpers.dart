@@ -7,7 +7,7 @@ import 'package:localpocket/src/kernel/database_adapter.dart' show Database;
 import 'package:localpocket/src/kernel/local_pocket.dart'
     show LocalPocket, TestHooks;
 import 'package:localpocket/src/kernel/schema.dart';
-import 'package:localpocket/src/files/blob_store.dart' show BlobStore;
+import 'package:localpocket/src/kernel/files/blob_store.dart' show BlobStore;
 import 'package:path/path.dart' as p;
 
 const String inMemoryDatabasePath = ':memory:';

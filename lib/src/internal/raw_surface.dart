@@ -62,10 +62,10 @@ export '../kernel/sync/pusher.dart';
 export '../kernel/sync/engine.dart';
 
 // -- files --------------------------------------------------------------------
-export '../files/file_sync_lane.dart';
-export '../files/blob_store.dart';
+export '../kernel/files/file_sync.dart';
+export '../kernel/files/blob_store.dart';
 export '../files/native_blob_store_platform.dart';
-export '../files/files_api.dart';
+export '../kernel/file_service.dart';
 
 // -- PocketBase adapter --------------------------------------------------------
 export '../adapters/pocketbase/backend.dart';

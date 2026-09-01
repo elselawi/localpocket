@@ -9,7 +9,7 @@ import '../../kernel/ids.dart';
 import '../../kernel/local_pocket.dart';
 import '../../kernel/schema.dart';
 import '../../kernel/transaction.dart';
-import '../../files/file_sync_lane.dart';
+import '../files/file_sync.dart';
 import 'apply_lane.dart';
 import 'mapping.dart';
 import 'merge.dart';

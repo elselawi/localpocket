@@ -1,14 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import '../kernel/database_adapter.dart';
+import 'database_adapter.dart';
 
-import '../kernel/change_bus.dart';
-import '../kernel/ids.dart';
-import '../kernel/local_pocket.dart';
-import '../kernel/row_models.dart';
-import '../kernel/sql_utils.dart';
-import 'blob_store.dart';
-import '../kernel/sync/sync_tables.dart';
+import 'change_bus.dart';
+import 'ids.dart';
+import 'local_pocket.dart';
+import 'row_models.dart';
+import 'sql_utils.dart';
+import 'files/blob_store.dart';
+import 'sync/sync_tables.dart';
 
 /// {@template localpocket.file_ref}
 /// Representation of a file ref in `lp_file_refs`.

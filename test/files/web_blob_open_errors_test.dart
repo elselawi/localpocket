@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:localpocket/src/files/blob_store.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:test/test.dart';
 
 /// Unit tests for the not-found-vs-storage-failure classification that

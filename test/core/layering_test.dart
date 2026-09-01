@@ -113,7 +113,8 @@ void main() {
     final hub = File('lib/src/kernel/local_pocket.dart').readAsStringSync();
     expect(hub.contains("import 'sync/"), isTrue,
         reason: 'LocalPocket (the hub) intentionally wires sync');
-    expect(hub.contains("import '../files/"), isTrue,
+    expect(hub.contains("import 'files/") || hub.contains("import 'file_service.dart'"),
+        isTrue,
         reason: 'LocalPocket (the hub) intentionally wires files');
   });
 

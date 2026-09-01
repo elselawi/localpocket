@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:path/path.dart' as p;
 
-import 'blob_store.dart';
+import '../kernel/files/blob_store.dart';
 
 /// Native filesystem implementation of [BlobStore].
 ///

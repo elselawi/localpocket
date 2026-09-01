@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
-import 'package:localpocket/src/files/blob_store.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:test/test.dart';
 
 void main() {

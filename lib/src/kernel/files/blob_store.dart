@@ -3,7 +3,7 @@ import 'dart:convert' show ChunkedConversionSink;
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
-import '../kernel/cipher.dart';
+import '../cipher.dart';
 
 /// {@template localpocket.blob_store}
 /// BlobStore interface.

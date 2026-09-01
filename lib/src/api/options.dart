@@ -9,7 +9,7 @@ library;
 import 'dart:typed_data';
 
 import '../kernel/cipher.dart';
-import '../files/blob_store.dart' show BlobStore;
+import '../kernel/files/blob_store.dart' show BlobStore;
 import '../kernel/sync/sync_backend.dart' show SyncBackendFactory;
 import '../schema/store_def.dart';
 

@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/files/blob_store.dart' show MemoryBlobStore;
+import 'package:localpocket/src/kernel/files/blob_store.dart' show MemoryBlobStore;
 import 'package:localpocket/src/api/writes.dart';
 import 'package:test/test.dart';
 
@@ -9,7 +9,7 @@ import 'tasks_store.dart';
 
 /// Files on the store facade over the direct runtime: attach, list, streamed
 /// open, remove, and the store-less blob lifecycle verbs. The behavior is
-/// pinned by the kernel file service (`lib/src/files/files_api.dart`) — this
+/// pinned by the kernel file service (`lib/src/kernel/file_service.dart`) — this
 /// suite proves the destination surface rides it unchanged.
 void main() {
   group('Files on the store facade', () {

@@ -12,7 +12,7 @@ import 'sweeper.dart';
 import 'sync_backend.dart';
 import 'sync_config.dart';
 import 'sync_store.dart';
-import '../../files/file_sync_lane.dart';
+import '../files/file_sync.dart';
 
 /// {@template localpocket.sync_engine}
 /// Coordinates pull, visibility sweep, push, realtime hints, and file sync.

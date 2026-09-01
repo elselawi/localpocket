@@ -6,7 +6,7 @@ import 'package:sqlite3/src/wasm/js_interop/new_file_system_access.dart';
 import 'package:meta/meta.dart';
 import 'package:web/web.dart' show DOMException, FileSystemDirectoryHandle;
 
-import 'blob_store.dart';
+import '../kernel/files/blob_store.dart';
 
 /// {@template localpocket.web_blob_store}
 /// Web implementation of [BlobStore] backed by async OPFS, with an in-memory

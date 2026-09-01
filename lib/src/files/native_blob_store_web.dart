@@ -1,4 +1,4 @@
-import 'blob_store.dart';
+import '../kernel/files/blob_store.dart';
 
 /// Web-safe placeholder for the native filesystem store. Web applications
 /// should inject a browser BlobStore (for example an OPFS-backed one); this

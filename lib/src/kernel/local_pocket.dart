@@ -33,8 +33,8 @@ import 'sync/outbox.dart';
 import 'sync/conflicts.dart';
 import 'sync/sync_tables.dart';
 import 'sync/sync_backend.dart' show SyncBackendFactory, SyncTokenSource;
-import '../files/blob_store.dart';
-import '../files/files_api.dart';
+import 'files/blob_store.dart';
+import 'file_service.dart';
 import '../typed/typed.dart';
 import '../contract/contract.dart';
 
