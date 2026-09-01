@@ -165,8 +165,52 @@ Dispositions:
 | `startRealtime()` web no-op | DELETE — `start()` owns realtime everywhere (§4.10) |
 | guessed page-side capability snapshot | DELETE — worker open handshake is authoritative (§4.11) |
 
+## 6. Application-surface pairing (the barrel switch, 2026-09-01)
+
+Phase 9's pair-and-keep rule: every application-level test that exercised a
+raw/typed surface with a destination-API equivalent keeps the STRONGER
+assertion set; its intent is ported ONCE into a destination-API test. The
+destination API is proven by `test/conformance/facade_conformance_test.dart`
+(one body over direct + loopback + remote runtimes), the `test/api/` facade
+tests, and the active VM compile fixture (`test/compile_fixtures/final_api_vm.dart`).
+Storage/migration/codec/merge/PocketBase-quirk/blob unit tests STAY internal
+(plan §13.1) and move onto `src/` imports; they are never weakened.
+
+| Old application surface | Destination API | Ported-into (intent kept once) |
+|---|---|---|
+| `openTyped(path:, stores:)` / `TypedPocket` (native + web conditional pair) | `LocalPocket.open(LocalPocketOptions(path:, stores:))` | `facade_conformance_test.dart` open() per runtime; `test/api/facade_test.dart` |
+| `db.store(StoreDef)` / `TypedCollection` CRUD + batch | `Store<S>` put/upsert/putAll/upsertAll/patch/patchAll/archive/restore/purge/get/getAll | conformance "CRUD and batch writes round-trip" + `test/api/facade_test.dart` |
+| `TypedRow<S>` (immutable typed snapshot) | `Row<S>` (row(field) call syntax, `FieldNotSelectedError`, defensive `toJson`) | conformance "projection yields immutable rows and typed errors" + `test/api/query_test.dart` |
+| `TypedQuery` / `TypedSearch` surface | `QuerySpec<S>` / `SearchSpec<S>` (immutable specs, kernel-owned pages) | conformance query/cursor/search tests + `test/api/query_test.dart` |
+| Raw `Page` reconstruction / `QueryBuilder.fetch()` | `Page<S>` with `hasNext`/`hasPrev`/`next()`/`prev()` + `Cursor<S>` | conformance cursor-corpus tests (incl. stale + persist-across-reopen) |
+| `db.transaction((tx)...)` / raw `Tx` | `Transaction` + context-bound `tx.store(S)` + savepoints | conformance "transactions and savepoints behave identically" + `test/api/transaction_test.dart` |
+| `db.watch(...)` / `watchOne` / `RecordChangeEvent` streams | `Store<S>.watch(QuerySpec)` + `Store.changes` / `db.changes` typed events | conformance "ordered watches re-emit on pure reorder" + "committed-change events flow through the facade" |
+| `attachPocketBaseSync` / typed sync host | `PocketBaseSync` + `start()` owns realtime (through `RemoteSyncSurface` on web; sync request family in the contract) | `test/conformance/file_family_conformance_test.dart` + `test/runtime/` contract tests; web smoke under `tool/web_smoke/` |
+| Raw `Conflicts` / file forms | `StoreConflicts<S>` / `Files<S>` (contract families) | contract + runtime + `test/web/` suites |
+| Old web facade class `LocalPocket` (`lib/src/web/facade.dart`) | the one common `api/local_pocket.dart` `LocalPocket` over `RemoteRuntimeClient` | `tool/web_smoke/api_smoke_main.dart` + browser matrix |
+| `TestHooks` from the barrel | `TestHooks` imported from `src/` by tests only (not exported) | kernel tests |
+| `lib/typed.dart`, `lib/sync.dart`, `lib/pocketbase.dart` | deleted; internal tests import `src/typed/`, `src/sync/`, `src/pocketbase/` directly | internal suites listed in §1–§4 |
+
 ## Completion tracking
 
 Every row gains a ✔ + phase number when its disposition is implemented and
 conformance-tested. Rows marked DELETE must also record the gate/test that
 proves absence (§14.1 public API gate).
+
+- ✔ §1 `src/core/errors.dart` KEEP → `api/errors.dart` (the facade error
+  hierarchy rides the contract codec; `FieldNotSelectedError` added) — Phase 5–7.
+- ✔ §1 `DurabilityClass` KEEP → `api/` (re-exported via `options.dart`) — Phase 5.
+- ✔ §1 `Collection`/`Page`/`Tx`/`QueryBuilder`/`SearchBuilder`/`QueryPlan`
+  REPLACE → `Store<S>`/`Page<S>`/`Transaction`/`QuerySpec<S>`/`SearchSpec<S>` —
+  the destination facade + conformance suite — Phase 5–7. Barrel export dies
+  Phase 9 (this stage).
+- ✔ §1 `LocalPocket` (native + web conditional pair) REPLACE/DELETE → the one
+  concrete `api/local_pocket.dart` class; the `LocalPocket = KernelDatabase`
+  transitional typedef stays src-internal; the web facade's barrel claim
+  retires — Phase 9 (this stage, gate: `tool/api_snapshot.dart`).
+- ✔ §2 typed descriptors KEEP (`StoreDef`, `FieldDef`, `Write`, `Writes`,
+  `Limits`, `Cond`, `OrderTerm`, `schema_helpers`) — re-exported by the final
+  barrel — Phase 9 (this stage).
+- ✔ §5 web facade classes DELETE — replaced by `RemoteRuntimeClient` over the
+  worker; the facade FILE survives to Phase 10 but its export claim retires
+  this stage.
