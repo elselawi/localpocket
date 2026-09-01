@@ -73,8 +73,7 @@ Future<void> main() async {
     // DATABASE path is unique per run so a stale OPFS file from an older
     // schema cannot poison the reopen (WebKit keeps OPFS across launches).
     final keyBytes = List<int>.generate(32, (i) => (i * 7 + 13) % 256);
-    final dbPath =
-        'cipher_smoke_${DateTime.now().microsecondsSinceEpoch}';
+    final dbPath = 'cipher_smoke_${DateTime.now().microsecondsSinceEpoch}';
     const secretValue = 'Top secret clinical note — unicode ✓ 1234567890!@#';
     const recordId = 'vault0000000000';
 
