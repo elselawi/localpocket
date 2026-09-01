@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+// Flutter also exports a `Row` widget; hide the typed snapshot type.
+import 'package:localpocket/localpocket.dart' hide Row;
 
 import '../../core/app_state.dart';
+import '../../core/schemas.dart';
 import '../widgets/demo_panel.dart';
 
 class AggregatesPage extends StatefulWidget {
@@ -32,14 +34,15 @@ class _AggregatesPageState extends State<AggregatesPage> {
     setState(() => _loading = true);
     final sw = Stopwatch()..start();
     try {
-      final q = db.collection('metrics').query();
-      final count = await q.count();
-      final sum = await q.sum('value');
-      final min = await q.min('value');
-      final max = await q.max('value');
-      final avg = await q.avg('value');
-      final distinctLabel = await q.countDistinct('label');
-      final distincts = await q.distinct('label');
+      final store = db.store(PlaygroundMetrics.store);
+      final count = await store.count(QuerySpec());
+      final sum = await store.sum(PlaygroundMetrics.value);
+      final min = await store.min(PlaygroundMetrics.value);
+      final max = await store.max(PlaygroundMetrics.value);
+      final avg = await store.avg(PlaygroundMetrics.value);
+      final distinctLabel =
+          await store.countDistinct(PlaygroundMetrics.label);
+      final distincts = await store.distinct(PlaygroundMetrics.label);
       sw.stop();
       setState(() {
         _agg = {
@@ -140,42 +143,37 @@ class _AggregatesPageState extends State<AggregatesPage> {
   Widget _aggPill(String label, String value) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(context)
+                .textTheme
+                .labelSmall
+                ?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 2),
-          Text(
-            value,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
+          Text(value, style: Theme.of(context).textTheme.titleMedium),
         ],
       ),
     );
   }
 
   static const _aggCode = '''
-final q = db.collection('metrics').query();
-final count = await q.count();          // COUNT(*)
-final sum   = await q.sum('value');     // SUM(value)
-final min   = await q.min('value');
-final max   = await q.max('value');
-final avg   = await q.avg('value');
-final distinctLabels = await q.countDistinct('label');
-final labels = await q.distinct('label');
+final store = db.store(PlaygroundMetrics.store);
+final count = await store.count(QuerySpec());          // COUNT(*)
+final sum   = await store.sum(PlaygroundMetrics.value);     // SUM(value)
+final min   = await store.min(PlaygroundMetrics.value);
+final max   = await store.max(PlaygroundMetrics.value);
+final avg   = await store.avg(PlaygroundMetrics.value);
+final distinctLabels = await store.countDistinct(PlaygroundMetrics.label);
+final labels = await store.distinct(PlaygroundMetrics.label);
 ''';
 
   static const _explain = '''

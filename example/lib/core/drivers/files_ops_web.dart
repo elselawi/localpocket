@@ -1,68 +1,56 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'dart:typed_data';
+
+import 'package:localpocket/localpocket.dart';
 
 import '../file_ref.dart';
 
-/// Web: `files.list` returns raw maps keyed like [FileRef]. The facade's
-/// `LocalPocket.files` carries `attach(byteArray:)` and `open()` returning
-/// bytes directly. We use a `dynamic` receive so this file compiles on native
-/// targets too and resolves to the web facade at runtime.
-Future<List<PlaygroundFileRef>> listFilesImpl(
-  dynamic db, {
-  required String store,
+/// Web files driver. The destination [Files] surface is platform-neutral: it
+/// rides the shared contract runtime over the worker, so this is identical to
+/// the native driver.
+Future<List<PlaygroundFileRef>> listFilesImpl<S extends StoreDef<S>>(
+  Files<S> files, {
   required String recordId,
   String field = 'notes',
 }) async {
-  final dynamic refs = await db.files.list(
-    store: store,
-    recordId: recordId,
-    field: field,
-  );
+  final refs = await files.list(recordId: recordId, field: field);
   return [
     for (final r in refs)
       PlaygroundFileRef(
-        refId: (r['refId'] as String?) ?? '',
-        remoteName: r['remoteName'] as String?,
-        state: (r['state'] as String?) ?? 'unknown',
-        lastError: r['lastError'] as String?,
+        refId: r.refId,
+        remoteName: r.remoteName,
+        state: r.state,
+        lastError: r.lastError,
       ),
   ];
 }
 
-/// Web attach: provides bytes as a byteArray.
-Future<String> attachBytesImpl(
-  dynamic db, {
-  required String store,
+Future<String> attachBytesImpl<S extends StoreDef<S>>(
+  Files<S> files, {
   required String recordId,
   required List<int> bytes,
   String field = 'notes',
   String name = 'note.txt',
   String? expectedSha256,
 }) async {
-  final dynamic ref = await db.files.attach(
-    store: store,
+  final ref = await files.attach(
     recordId: recordId,
-    byteArray: bytes,
+    source: FileSource.bytes(bytes, name: name),
     field: field,
-    name: name,
-    expectedSize: bytes.length,
-    expectedSha256: expectedSha256,
   );
-  return (ref['refId'] as String?) ?? '';
+  return ref.refId;
 }
 
-/// Web open: returns bytes directly.
-Future<List<int>> openBytesImpl(
-  dynamic db, {
-  required String store,
+Future<List<int>> openBytesImpl<S extends StoreDef<S>>(
+  Files<S> files, {
   required String recordId,
   String field = 'notes',
   int index = 0,
 }) async {
-  final dynamic bytes = await db.files.open(
-    store: store,
-    recordId: recordId,
-    field: field,
-    index: index,
-  );
-  return bytes.toList();
+  final refs = await files.list(recordId: recordId, field: field);
+  final stream = await files.open(refs[index]);
+  final builder = BytesBuilder();
+  await for (final chunk in stream) {
+    builder.add(chunk);
+  }
+  return builder.takeBytes().toList();
 }

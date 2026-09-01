@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+// Flutter exports `Row` (widget); the typed snapshot type needs the prefixed
+// import.
+import 'package:localpocket/localpocket.dart' as lp;
 
 import '../../core/app_state.dart';
 import '../../core/raw_secret_reader.dart';
+import '../../core/schemas.dart';
 import '../widgets/demo_panel.dart';
 
 class EncryptionPage extends StatefulWidget {
@@ -17,9 +19,9 @@ class EncryptionPage extends StatefulWidget {
 class _EncryptionPageState extends State<EncryptionPage> {
   bool _reveal = false;
   bool _loading = false;
-  bool _isCiphertext = false;
+  bool _decryptsOk = false;
   String? _error;
-  List<Map<String, Object?>> _rows = [];
+  List<lp.Row<PlaygroundSecrets>> _rows = [];
 
   @override
   void initState() {
@@ -27,14 +29,16 @@ class _EncryptionPageState extends State<EncryptionPage> {
     _load();
   }
 
-  LocalPocket? get _db => widget.state.db;
+  lp.LocalPocket? get _db => widget.state.db;
 
   Future<void> _load() async {
     final db = _db;
     if (db == null) return;
     setState(() => _loading = true);
     try {
-      final page = await db.collection('secrets').query().all().fetch();
+      final page = await db
+          .store(PlaygroundSecrets.store)
+          .query(lp.QuerySpec<PlaygroundSecrets>(limit: lp.Limits.unbounded));
       setState(() {
         _rows = page.items;
         _error = null;
@@ -46,21 +50,16 @@ class _EncryptionPageState extends State<EncryptionPage> {
     }
   }
 
-  Future<void> _checkCiphertext() async {
+  Future<void> _checkDecrypts() async {
     final db = _db;
     if (db == null) return;
     setState(() => _loading = true);
     try {
-      // Read the stored value. On native this is the raw SQLite ciphertext;
-      // on web the worker owns storage and exposes the decrypted value, so the
-      // UI shows a successful decrypt round-trip instead.
+      // A typed read returns the decrypted value; matching the seeded
+      // plaintext proves the round-trip decryption succeeded.
       final stored = await readRawSecret(db);
       setState(() {
-        final looksEncrypted =
-            stored is String &&
-            !stored.contains('sk_live') &&
-            stored.isNotEmpty;
-        _isCiphertext = looksEncrypted;
+        _decryptsOk = stored == 'sk_live_till_pocketbase_01';
         _error = null;
       });
     } catch (e) {
@@ -101,9 +100,9 @@ class _EncryptionPageState extends State<EncryptionPage> {
             code: _code,
             actions: [
               FilledButton.icon(
-                onPressed: _checkCiphertext,
+                onPressed: _checkDecrypts,
                 icon: const Icon(Icons.verified_user_outlined),
-                label: const Text('Verify it is ciphertext on disk'),
+                label: const Text('Verify reads decrypt'),
               ),
             ],
             child: Column(
@@ -115,13 +114,12 @@ class _EncryptionPageState extends State<EncryptionPage> {
                     color: scheme.error,
                     icon: Icons.error_outline,
                   ),
-                if (_isCiphertext)
+                if (_decryptsOk)
                   ResultView(
-                    message: kIsWeb
-                        ? 'Read succeeded and returned the decrypted value — '
-                              'the field base64-ciphers at rest in the worker store.'
-                        : 'The raw column holds base64 ciphertext (no plaintext '
-                              'prefix) — values are encrypted at rest.',
+                    message:
+                        'Reads return the decrypted plaintext — the field is '
+                        'AES-256-GCM ciphertext at rest and decrypts '
+                        'transparently.',
                     color: scheme.primary,
                     icon: Icons.verified_user_outlined,
                   ),
@@ -153,14 +151,15 @@ class _EncryptionPageState extends State<EncryptionPage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '${r['label']} · ${r['category']}',
+                                  '${r(PlaygroundSecrets.label)} · '
+                                  '${r(PlaygroundSecrets.category)}',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
                                 Text(
                                   _reveal
-                                      ? (r['secret'] as String? ?? '-')
+                                      ? (r(PlaygroundSecrets.secret) ?? '-')
                                       : '•••••••••••• (encrypted)',
                                   style: TextStyle(
                                     fontFamily: 'monospace',
@@ -195,21 +194,13 @@ class _EncryptionPageState extends State<EncryptionPage> {
   }
 
   static const _code = '''
-final cipher = AesGcmFieldCipher(List<int>.filled(32, keySeed));
-
 final db = await LocalPocket.open(
-  stores: [
-    CollectionSchema(
-      name: 'secrets',
-      version: 1,
-      fields: [
-        Field.text('label', required: true),
-        Field.text('secret', encrypted: true),
-        Field.text('category'),
-      ],
-    ),
-  ],
-  fieldCipher: cipher,
+  LocalPocketOptions(
+    stores: [
+      PlaygroundSecrets.store,  // 'secret' declared with schema.text(..., encrypted: true)
+    ],
+    encryption: EncryptionConfig.aesGcm256(key: keyBytes),
+  ),
 );
 ''';
 }

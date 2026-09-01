@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+// Flutter exports `Row` (widget); the typed snapshot type needs the prefixed
+// import.
+import 'package:localpocket/localpocket.dart' as lp;
 
 import '../../core/app_state.dart';
+import '../../core/tasks.dart';
 import '../widgets/demo_panel.dart';
 
 class ReactivePage extends StatefulWidget {
@@ -15,7 +18,7 @@ class ReactivePage extends StatefulWidget {
 }
 
 class _ReactivePageState extends State<ReactivePage> {
-  StreamSubscription<List<Map<String, Object?>>>? _sub;
+  StreamSubscription<List<lp.Row<PlaygroundTasks>>>? _sub;
   List<Map<String, Object?>> _items = [];
   int _emissions = 0;
   int _todoCounter = 0;
@@ -34,7 +37,7 @@ class _ReactivePageState extends State<ReactivePage> {
     super.dispose();
   }
 
-  LocalPocket? get _db => widget.state.db;
+  lp.LocalPocket? get _db => widget.state.db;
 
   void _startWatch() {
     _sub?.cancel();
@@ -42,16 +45,18 @@ class _ReactivePageState extends State<ReactivePage> {
     if (db == null) return;
     setState(() => _status = 'listening…');
     _sub = db
-        .collection('tasks')
-        .query()
-        .where('status', eq: 'in_progress')
-        .limit(50)
-        .watch()
+        .store(PlaygroundTasks.store)
+        .watch(
+          lp.QuerySpec(
+            where: [PlaygroundTasks.status.eq(TaskStatus.inProgress)],
+            limit: 50,
+          ),
+        )
         .listen(
-          (items) {
+          (rows) {
             if (mounted) {
               setState(() {
-                _items = items;
+                _items = [for (final r in rows) r.toJson()];
                 _emissions++;
                 _status = 'emitted';
               });
@@ -67,12 +72,12 @@ class _ReactivePageState extends State<ReactivePage> {
     final db = _db;
     if (db == null) return;
     // Find an existing in_progress task or a done one to flip.
-    final page = await db
-        .collection('tasks')
-        .query()
-        .orderBy('priority')
-        .limit(10)
-        .fetch();
+    final page = await db.store(PlaygroundTasks.store).query(
+          lp.QuerySpec(
+            orderBy: [PlaygroundTasks.priority.asc],
+            limit: 10,
+          ),
+        );
     if (page.items.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -82,17 +87,17 @@ class _ReactivePageState extends State<ReactivePage> {
       return;
     }
     final target = page.items.first;
-    final next = (target['status'] == 'done') ? 'in_progress' : 'done';
-    await db.collection('tasks').patch(target['id'] as String, {
-      'status': next,
-      'completed': next == 'done',
-    });
+    final next = target(PlaygroundTasks.status) == TaskStatus.done
+        ? TaskStatus.inProgress
+        : TaskStatus.done;
+    await db.store(PlaygroundTasks.store).patch(target.id, [
+      PlaygroundTasks.status.set(next),
+      PlaygroundTasks.completed.set(next == TaskStatus.done),
+    ]);
     // Also count open tasks.
-    final count = await db
-        .collection('tasks')
-        .query()
-        .where('completed', eq: false)
-        .count();
+    final count = await db.store(PlaygroundTasks.store).count(
+          lp.QuerySpec(where: [PlaygroundTasks.completed.eq(false)]),
+        );
     if (mounted) setState(() => _todoCounter = count);
   }
 
@@ -216,16 +221,14 @@ class _ReactivePageState extends State<ReactivePage> {
   }
 
   static const _watchCode = '''
-final sub = db.collection('tasks')
-    .query()
-    .where('status', eq: 'in_progress')
-    .limit(50)
-    .watch()
-    .listen((items) => setState(() => rows = items));
-
-// single record watch
-final one = db.collection('tasks').watchOne(id)
-    .listen((doc) => print(doc));
+final sub = db.store(PlaygroundTasks.store)
+    .watch(
+      QuerySpec(
+        where: [PlaygroundTasks.status.eq(TaskStatus.inProgress)],
+        limit: 50,
+      ),
+    )
+    .listen((rows) => setState(() => items = rows));
 
 await sub.cancel();   // always cancel
 ''';

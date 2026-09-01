@@ -29,6 +29,17 @@ export 'src/schema/schema_helpers.dart';
 export 'src/schema/store_def.dart';
 export 'src/api/writes.dart';
 
+// The sync attachment surfaces the engine's status/report models through the
+// same import (`PocketBaseSync.status` emits SyncStatus, `syncNow` returns a
+// SyncReport), so the public sync surface is usable from the one barrel.
+export 'src/kernel/sync/status.dart' show SyncEngineState, SyncReport, SyncStatus;
+
+// The blob-store types the facade's file configuration names
+// (`LocalPocketOptions.blobStore`): the interface plus the in-memory store
+// that backs native demos and tests. Real applications inject their own
+// platform store here.
+export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
+
 // The schema helper types store declarations name. The raw schema types
 // (CollectionSchema, Field, ...) are kernel-internal and not exported.
 export 'src/kernel/schema.dart'

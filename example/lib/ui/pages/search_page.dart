@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+// Flutter also exports a `Row` widget; hide the typed snapshot type.
+import 'package:localpocket/localpocket.dart' hide Row;
 
 import '../../core/app_state.dart';
+import '../../core/tasks.dart';
 import '../widgets/demo_panel.dart';
 
 class SearchPage extends StatefulWidget {
@@ -40,16 +42,15 @@ class _SearchPageState extends State<SearchPage> {
     setState(() => _loading = true);
     final sw = Stopwatch()..start();
     try {
-      final ranked = await db
-          .collection('tasks')
-          .search(term)
-          .limit(10)
-          .fetch();
+      final store = db.store(PlaygroundTasks.store);
+      final ranked = await store.search(
+        SearchSpec(term: term, limit: 10),
+      );
       final rows = <Map<String, Object?>>[];
       for (final hit in ranked) {
-        final rec = await db.collection('tasks').get(hit.id);
+        final rec = await store.get(hit.id);
         if (rec != null) {
-          rows.add({...rec, '__score': hit.score});
+          rows.add({...rec.toJson(), '__score': hit.score});
         }
       }
       sw.stop();
@@ -190,10 +191,8 @@ class _SearchPageState extends State<SearchPage> {
 
   static const _searchCode = '''
 final results = await db
-    .collection('tasks')
-    .search('sync')      // FTS5 BM25 ranked
-    .limit(10)
-    .fetch();
+    .store(PlaygroundTasks.store)
+    .search(SearchSpec(term: 'sync', limit: 10));  // FTS5 BM25 ranked
 
 for (final hit in results) {
   print('\${hit.id}: \${hit.score}');

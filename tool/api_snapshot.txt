@@ -5,7 +5,9 @@
 export 'src/api/api.dart';
 export 'src/api/limits.dart';
 export 'src/api/writes.dart';
+export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
 export 'src/kernel/schema.dart'
+export 'src/kernel/sync/status.dart' show SyncEngineState, SyncReport, SyncStatus;
 export 'src/schema/cond.dart';
 export 'src/schema/field_def.dart';
 export 'src/schema/schema_helpers.dart';

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:localpocket/src/internal/raw_surface.dart' as lp;
+// Flutter exports `Row` (widget) and `Page<T>` (navigator); the typed
+// snapshot and page types need the prefixed import.
+import 'package:localpocket/localpocket.dart' as lp;
 
 import '../../core/app_state.dart';
+import '../../core/tasks.dart';
 import '../widgets/demo_panel.dart';
 
 class QueriesPage extends StatefulWidget {
@@ -21,6 +24,7 @@ class _QueriesPageState extends State<QueriesPage> {
   int _count = 0;
   List<Map<String, Object?>> _items = [];
   String? _nextCursor;
+  lp.Page<PlaygroundTasks>? _lastPage;
   String? _error;
 
   @override
@@ -31,41 +35,69 @@ class _QueriesPageState extends State<QueriesPage> {
 
   lp.LocalPocket? get _db => widget.state.db;
 
+  /// Maps the dropdown's wire status strings onto the typed enum.
+  static TaskStatus? _taskStatus(String s) => switch (s) {
+        'todo' => TaskStatus.todo,
+        'in_progress' => TaskStatus.inProgress,
+        'done' => TaskStatus.done,
+        _ => null,
+      };
+
   Future<void> _run({bool next = false}) async {
     final db = _db;
     if (db == null) return;
     setState(() => _loading = true);
     try {
-      var q = db.collection('tasks').query();
-      if (_query != null && _query!.trim().isNotEmpty) {
-        q = q.where('title', contains: _query!.trim());
+      final store = db.store(PlaygroundTasks.store);
+      final conditions = <lp.Cond<PlaygroundTasks>>[];
+      final q = _query?.trim();
+      if (q != null && q.isNotEmpty) {
+        conditions.add(PlaygroundTasks.title.contains(q));
       }
-      if (_status != 'all') {
-        q = q.where('status', eq: _status);
+      final status = _taskStatus(_status);
+      if (status != null) {
+        conditions.add(PlaygroundTasks.status.eq(status));
       }
-      q = q.orderBy('priority', desc: false).orderBy('title', desc: _desc);
-      final lp.Page page;
-      if (next && _nextCursor != null) {
-        page = await q.limit(5).keysetAfter(_nextCursor!);
+      final spec = lp.QuerySpec<PlaygroundTasks>(
+        where: conditions,
+        orderBy: [
+          PlaygroundTasks.priority.asc,
+          if (_desc) PlaygroundTasks.title.desc else PlaygroundTasks.title.asc,
+        ],
+        limit: 5,
+      );
+      final lp.Page<PlaygroundTasks> page;
+      if (next && _lastPage != null) {
+        final p = await _lastPage!.next();
+        if (p == null) {
+          if (mounted) setState(() => _loading = false);
+          return;
+        }
+        page = p;
       } else {
-        page = await q.limit(5).fetch();
+        page = await store.query(spec);
       }
-      final cnt = await db
-          .collection('tasks')
-          .query()
-          .where('completed', eq: false)
-          .count();
-      setState(() {
-        _count = cnt;
-        _items = _sort == 'priority' ? page.items : [...page.items]
-          ..sort(
-            (a, b) => (a['title'] as String? ?? '').compareTo(
-              b['title'] as String? ?? '',
-            ),
-          );
-        _nextCursor = page.nextCursor;
-        _error = null;
-      });
+      _lastPage = page;
+      final cnt = await store.count(
+        lp.QuerySpec(where: [PlaygroundTasks.completed.eq(false)]),
+      );
+      if (mounted) {
+        setState(() {
+          _count = cnt;
+          _items = [
+            for (final r in page.items) r.toJson(),
+          ];
+          if (_sort == 'title') {
+            _items.sort(
+              (a, b) => (a['title'] as String? ?? '').compareTo(
+                b['title'] as String? ?? '',
+              ),
+            );
+          }
+          _nextCursor = page.nextCursor?.token;
+          _error = null;
+        });
+      }
     } catch (e) {
       setState(() => _error = '$e');
     } finally {
@@ -89,7 +121,7 @@ class _QueriesPageState extends State<QueriesPage> {
           const SizedBox(height: 8),
           Text(
             'Build parameterized filters, sorting, and keyset pagination with '
-            'the fluent query builder. Every value is bound — never interpolated.',
+            'declarative specs. Every value is bound — never interpolated.',
             style: Theme.of(context).textTheme.bodyLarge,
           ),
           const SizedBox(height: 20),
@@ -269,22 +301,15 @@ class _QueriesPageState extends State<QueriesPage> {
   }
 
   static const _queryCode = '''
-final page = await tasks
-    .query()
-    .where('completed', eq: false)
-    .where('title', contains: 'search')
-    .orderBy('priority')
-    .orderBy('title')
-    .limit(5)
-    .fetch();
+final page = await tasks.query(
+  QuerySpec(
+    where: [PlaygroundTasks.completed.eq(false)],
+    orderBy: [PlaygroundTasks.priority.asc],
+    limit: 5,
+  ),
+);
 
 // keyset pagination
-final next = await tasks.query()
-    .where('completed', eq: false)
-    .orderBy('priority')
-    .orderBy('title')
-    .limit(5)
-    .keysetAfter(page.nextCursor!)
-    .fetch();
+final next = await page.next();
 ''';
 }

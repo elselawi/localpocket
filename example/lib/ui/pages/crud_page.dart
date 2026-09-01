@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+// Flutter also exports a `Row` widget; hide the typed snapshot type.
+import 'package:localpocket/localpocket.dart' hide Row;
 
 import '../../core/app_state.dart';
 import '../../core/tasks.dart';
@@ -126,7 +127,7 @@ class _CrudPageState extends State<CrudPage> {
     final db = _db;
     if (db == null) return;
     try {
-      await db.collection('tasks').archive(id);
+      await db.store(PlaygroundTasks.store).archive(id);
       setState(
         () => _result = 'Archived "$title" (soft delete, hidden from queries).',
       );
@@ -160,7 +161,7 @@ class _CrudPageState extends State<CrudPage> {
     );
     if (confirm != true) return;
     try {
-      await db.collection('tasks').purge(id);
+      await db.store(PlaygroundTasks.store).purge(id);
       setState(() => _result = 'Purged "$title" (hard local delete).');
       await _refresh();
     } catch (e) {

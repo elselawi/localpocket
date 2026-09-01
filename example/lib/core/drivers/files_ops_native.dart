@@ -1,21 +1,16 @@
 import 'dart:typed_data';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/localpocket.dart';
 
 import '../file_ref.dart';
 
-/// Native: `files.list` returns typed [FileRef] objects.
-Future<List<PlaygroundFileRef>> listFilesImpl(
-  LocalPocket db, {
-  required String store,
+/// `store.files` returns typed [FileRef] objects on every platform.
+Future<List<PlaygroundFileRef>> listFilesImpl<S extends StoreDef<S>>(
+  Files<S> files, {
   required String recordId,
   String field = 'notes',
 }) async {
-  final refs = await db.files.list(
-    store: store,
-    recordId: recordId,
-    field: field,
-  );
+  final refs = await files.list(recordId: recordId, field: field);
   return [
     for (final r in refs)
       PlaygroundFileRef(
@@ -27,42 +22,36 @@ Future<List<PlaygroundFileRef>> listFilesImpl(
   ];
 }
 
-/// Native attach: streams [bytes].
-Future<String> attachBytesImpl(
-  LocalPocket db, {
-  required String store,
+/// Attaches [bytes] to a record, returning the created reference name/hash.
+///
+/// The playground's native demo uses a volatile in-memory blob store, so the
+/// attachment explicitly opts into volatile blobs.
+Future<String> attachBytesImpl<S extends StoreDef<S>>(
+  Files<S> files, {
   required String recordId,
   required List<int> bytes,
   String field = 'notes',
   String name = 'note.txt',
   String? expectedSha256,
 }) async {
-  final ref = await db.files.attach(
-    store: store,
+  final ref = await files.attach(
     recordId: recordId,
-    bytes: Stream.value(Uint8List.fromList(bytes)),
+    source: FileSource.bytes(bytes, name: name),
     field: field,
-    name: name,
-    expectedSize: bytes.length,
-    expectedSha256: expectedSha256,
+    allowVolatileBlobs: true,
   );
   return ref.refId;
 }
 
-/// Native open: returns a byte stream.
-Future<List<int>> openBytesImpl(
-  LocalPocket db, {
-  required String store,
+/// Opens the bytes of the file at [index] for a record.
+Future<List<int>> openBytesImpl<S extends StoreDef<S>>(
+  Files<S> files, {
   required String recordId,
   String field = 'notes',
   int index = 0,
 }) async {
-  final stream = await db.files.open(
-    store: store,
-    recordId: recordId,
-    field: field,
-    index: index,
-  );
+  final refs = await files.list(recordId: recordId, field: field);
+  final stream = await files.open(refs[index]);
   final builder = BytesBuilder();
   await for (final chunk in stream) {
     builder.add(chunk);

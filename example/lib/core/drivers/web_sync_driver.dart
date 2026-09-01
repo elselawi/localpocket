@@ -1,18 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/localpocket.dart';
 
 import '../sync_status.dart';
 import 'sync_driver.dart';
 
-/// Web sync driver. The engine runs inside the worker; this drives it through
-/// the facade's `startSync` / `syncStatus` surface.
-///
-/// The facade `LocalPocket` (on web) carries worker-side sync methods. We use
-/// a `dynamic` receive so this file compiles cleanly on native targets too
-/// (where those methods don't exist) while resolving to the web facade at
-/// runtime.
+/// Web sync driver. The engine runs inside the worker, but the destination
+/// [PocketBaseSync] attachment is platform-neutral: `attachPocketBaseSync`
+/// drives the kernel-owned engine over the shared contract runtime on every
+/// target, so this driver is identical to the native one.
 class WebSyncDriver implements SyncDriver {
   WebSyncDriver(this._db);
 
@@ -21,10 +18,8 @@ class WebSyncDriver implements SyncDriver {
     PlaygroundSyncStatus.none(),
   );
 
-  StreamSubscription<dynamic>? _sub;
+  PocketBaseSync? _sync;
   bool _connected = false;
-
-  dynamic get _facade => _db; // on web this is the facade LocalPocket
 
   @override
   ValueListenable<PlaygroundSyncStatus> get status => _status;
@@ -34,58 +29,61 @@ class WebSyncDriver implements SyncDriver {
 
   @override
   Future<void> connect({required Uri baseUrl, String? token}) async {
-    // Engine lives in the worker; pass scope url + token.
-    await _facade.startSync(
-      baseUrl: baseUrl.toString(),
-      scopeId: baseUrl.toString(),
-      token: token ?? '',
-    );
-    _connected = true;
+    final tokens = StaticTokenProvider(token ?? '');
+    final sync = _db.attachPocketBaseSync(PocketBaseSyncOptions(
+      baseUrl: baseUrl,
+      tokenProvider: tokens,
+    ));
+    _sync = sync;
+    sync.status.listen(_onStatus);
     _status.value = PlaygroundSyncStatus(
       state: 'opening',
       pending: 0,
       conflicts: 0,
       hidden: 0,
     );
-    await _sub?.cancel();
-    _sub = _facade.syncStatus.listen(
-      (dynamic m) {
-        if (m is Map) {
-          _connected = true;
-          _status.value = PlaygroundSyncStatus(
-            state: (m['state'] as String?) ?? 'idle',
-            pending: (m['pending'] as int?) ?? 0,
-            conflicts: (m['conflicts'] as int?) ?? 0,
-            hidden: (m['hidden'] as int?) ?? 0,
-            lastError: m['lastError'] as String?,
-            lastSyncAt: m['lastSyncAt'] as DateTime?,
-          );
-        }
-      },
-      onError: (Object e) {
-        _status.value = PlaygroundSyncStatus(
-          state: 'off',
-          pending: 0,
-          conflicts: 0,
-          hidden: 0,
-          lastError: '$e',
-        );
-      },
+    try {
+      await sync.start();
+      _connected = true;
+      await sync.syncNow();
+    } catch (e) {
+      _status.value = PlaygroundSyncStatus(
+        state: 'off',
+        pending: 0,
+        conflicts: 0,
+        hidden: 0,
+        lastError: '$e',
+      );
+      rethrow;
+    }
+  }
+
+  void _onStatus(SyncStatus s) {
+    _connected = s.state != SyncEngineState.closed;
+    _status.value = PlaygroundSyncStatus(
+      state: s.state.name,
+      pending: s.pending,
+      conflicts: s.conflicts,
+      hidden: s.hidden,
+      lastError: s.lastError,
+      lastSyncAt: s.lastSyncAt,
     );
   }
 
   @override
   Future<void> syncNow() async {
-    await _facade.syncNow();
+    await _sync?.syncNow();
   }
 
   @override
   Future<void> disconnect() async {
-    await _sub?.cancel();
-    _sub = null;
-    try {
-      await _facade.stopSync();
-    } catch (_) {}
+    final s = _sync;
+    if (s != null) {
+      try {
+        await s.stop();
+      } catch (_) {}
+    }
+    _sync = null;
     _connected = false;
     _status.value = PlaygroundSyncStatus.none();
   }

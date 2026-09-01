@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+// Flutter also exports a `Row` widget; hide the typed snapshot type.
+import 'package:localpocket/localpocket.dart' hide Row;
 
 import '../../core/app_state.dart';
+import '../../core/tasks.dart';
 import '../widgets/demo_panel.dart';
 
 class MaintenancePage extends StatefulWidget {
@@ -25,13 +27,13 @@ class _MaintenancePageState extends State<MaintenancePage> {
     if (db == null) return;
     setState(() => _loading = true);
     try {
-      final plan = await db
-          .collection('tasks')
-          .query()
-          .where('completed', eq: false)
-          .orderBy('priority')
-          .limit(20)
-          .explain();
+      final plan = await db.store(PlaygroundTasks.store).explain(
+            QuerySpec(
+              where: [PlaygroundTasks.completed.eq(false)],
+              orderBy: [PlaygroundTasks.priority.asc],
+              limit: 20,
+            ),
+          );
       setState(() {
         _explain = plan;
         _error = null;
@@ -50,10 +52,11 @@ class _MaintenancePageState extends State<MaintenancePage> {
     try {
       switch (kind) {
         case 'maintenance':
-          await db.runMaintenance();
+          await db.walCheckpoint();
+          final pruned = await db.pruneOutbox();
           _planned =
-              'runMaintenance() completed: WAL checkpointed, settled '
-              'outbox pruned, archived data compacted.';
+              'walCheckpoint() + pruneOutbox() completed: WAL checkpointed, '
+              '$pruned settled outbox rows removed.';
         case 'analyze':
           await db.analyze();
           _planned = 'ANALYZE refreshed the query planner statistics.';
@@ -136,7 +139,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
             code: _maintainCode,
             actions: [
               for (final (label, kind) in [
-                ('Run maintenance', 'maintenance'),
+                ('Checkpoint + prune', 'maintenance'),
                 ('ANALYZE', 'analyze'),
                 ('VACUUM', 'vacuum'),
                 ('Prune outbox', 'prune'),
@@ -175,38 +178,34 @@ class _MaintenancePageState extends State<MaintenancePage> {
   }
 
   static const _explainCode = '''
-final plan = await tasks
-    .query()
-    .where('completed', eq: false)
-    .orderBy('priority')
-    .limit(20)
-    .explain();
+final plan = await db.store(PlaygroundTasks.store).explain(
+  QuerySpec(
+    where: [PlaygroundTasks.completed.eq(false)],
+    orderBy: [PlaygroundTasks.priority.asc],
+    limit: 20,
+  ),
+);
 print(plan);   // e.g. "USING INDEX tasks_status_priority"
 ''';
 
   static const _maintainCode = '''
-await db.runMaintenance();   // checkpoint WAL, prune outbox, compact
-await db.analyze();          // refresh planner stats
-await db.vacuum();           // reclaim space
-await db.pruneOutbox();      // drop settled outbox rows
+await db.walCheckpoint();   // checkpoint the WAL
+await db.analyze();         // refresh planner stats
+await db.vacuum();          // reclaim space
+await db.pruneOutbox();     // drop settled outbox rows
 ''';
 
   static const _policyCode = '''
-final postSchema = CollectionSchema(
-  name: 'posts',
-  version: 2,
-  fields: [
-    Field.text('title'),
-    Field.int('views'),
-    Field.jsonList('tags'),
-  ],
-  conflictPolicy: ConflictPolicy(
+final class Posts extends StoreDef<Posts> {
+  // ...
+  @override
+  ConflictPolicy? get conflictPolicy => ConflictPolicy(
     fieldOverrides: {
       'views': const CounterResolver(),   // base + localΔ + remoteΔ
       'tags':  const SetUnionWithDeletionWinsResolver(),  // merge tag sets
     },
     editsUnarchive: true,
-  ),
-);
+  );
+}
 ''';
 }

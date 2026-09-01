@@ -15,11 +15,10 @@ void main() {
     ); // app bar or navigation
   });
 
-  test('typed and raw playground schemas coexist', () {
-    final tasks = PlaygroundSchemas.tasks;
-    expect(identical(tasks, PlaygroundTasks.store.collectionSchema), isTrue);
-    expect(tasks.name, 'tasks');
-    expect(tasks.fts, isNotNull);
+  test('playground store definitions are the canonical typed definitions', () {
+    expect(identical(PlaygroundSchemas.tasks, PlaygroundTasks.store), isTrue);
+    expect(PlaygroundSchemas.tasks.name, 'tasks');
+    expect(PlaygroundSchemas.tasks.fts, isNotNull);
     expect(PlaygroundSchemas.users.name, 'users');
   });
 }

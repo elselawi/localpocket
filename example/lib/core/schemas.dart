@@ -1,79 +1,99 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/localpocket.dart';
 
 import 'tasks.dart';
 
-/// All collection schemas used by the playground.
+/// Roles for the playground's `users` store.
+enum UserRole { admin, member, viewer }
+
+/// All store definitions used by the playground.
 ///
-/// `tasks` is defined with the typed API; the other stores deliberately retain
-/// raw schemas to demonstrate that both access styles coexist.
+/// Every store is declared as a typed [StoreDef]; the destination facade
+/// compiles them into the engine's schemas at open time. The tasks store is
+/// defined in `tasks.dart`; the others live here.
 class PlaygroundSchemas {
   PlaygroundSchemas._();
 
-  /// A reference to `users`. Used by the relationships showcase.
-  static final users = CollectionSchema(
-    name: 'users',
-    version: 1,
-    fields: [
-      Field.text('name', required: true),
-      Field.text('email', uniqueWhenActive: true),
-      Field.enumValue('role', const ['admin', 'member', 'viewer']),
-      Field.bool('active'),
-    ],
-    indexes: const [
-      IndexSpec(['role']),
-    ],
-  );
+  /// The canonical store definitions, one per playground store.
+  static final PlaygroundUsers users = PlaygroundUsers.store;
+  static final PlaygroundTasks tasks = PlaygroundTasks.store;
+  static final PlaygroundPosts posts = PlaygroundPosts.store;
+  static final PlaygroundMetrics metrics = PlaygroundMetrics.store;
+  static final PlaygroundSecrets secrets = PlaygroundSecrets.store;
 
-  /// Tasks: the canonical typed definition compiles to the same engine schema.
-  static CollectionSchema<Object?> get tasks =>
-      PlaygroundTasks.store.collectionSchema;
+  static List<StoreDef<Object?>> get all => [
+        users,
+        tasks,
+        posts,
+        metrics,
+        secrets,
+      ];
+}
 
-  /// Posts col with numeric counters + jsonList tags + conflict resolvers.
-  static final posts = CollectionSchema(
-    name: 'posts',
-    version: 1,
-    fields: [
-      Field.text('title', required: true),
-      Field.int('views'),
-      Field.int('likes'),
-      Field.jsonList('tags'),
-    ],
-    conflictPolicy: ConflictPolicy(
-      fieldOverrides: {
-        'views': const CounterResolver(),
-        'likes': const CounterResolver(),
-        'tags': const SetUnionWithDeletionWinsResolver(),
-      },
-      editsUnarchive: true,
-    ),
-  );
+/// Users referenced by the tasks' `assigned_to` field.
+final class PlaygroundUsers extends StoreDef<PlaygroundUsers> {
+  PlaygroundUsers._() : super(name: 'users', version: 1);
 
-  /// A dense numeric store for aggregate + performance demos.
-  static final metrics = CollectionSchema(
-    name: 'metrics',
-    version: 1,
-    fields: [Field.text('label'), Field.real('value'), Field.date('recorded')],
-    indexes: const [
-      IndexSpec(['label']),
-    ],
-  );
+  static final PlaygroundUsers store = PlaygroundUsers._();
 
-  /// A store with an encrypted field to demonstrate field-level encryption.
-  static final secrets = CollectionSchema(
-    name: 'secrets',
-    version: 1,
-    fields: [
-      Field.text('label', required: true),
-      Field.text('secret', encrypted: true),
-      Field.text('category'),
-    ],
-  );
+  // The column is literally `name`; the accessor avoids `StoreDef.name`.
+  static final fullName = store.schema.text('name').req();
+  static final email = store.schema.text('email', uniqueWhenActive: true);
+  static final role = store.schema.enumOf('role', UserRole.values);
+  static final active = store.schema.boolean('active');
 
-  static List<CollectionSchema> get all => [
-    users,
-    tasks,
-    posts,
-    metrics,
-    secrets,
-  ];
+  @override
+  List<FieldDef<PlaygroundUsers, Object?>> get fields =>
+      [fullName, email, role, active];
+
+  @override
+  List<IndexSpec> get indexes => [store.indexSpec([role])];
+}
+
+/// Posts with numeric counters + jsonList tags.
+final class PlaygroundPosts extends StoreDef<PlaygroundPosts> {
+  PlaygroundPosts._() : super(name: 'posts', version: 1);
+
+  static final PlaygroundPosts store = PlaygroundPosts._();
+
+  static final title = store.schema.text('title').req();
+  static final views = store.schema.integer('views');
+  static final likes = store.schema.integer('likes');
+  static final tags = store.schema.jsonList<String>('tags');
+
+  @override
+  List<FieldDef<PlaygroundPosts, Object?>> get fields =>
+      [title, views, likes, tags];
+}
+
+/// A dense numeric store for aggregate + performance demos.
+final class PlaygroundMetrics extends StoreDef<PlaygroundMetrics> {
+  PlaygroundMetrics._() : super(name: 'metrics', version: 1);
+
+  static final PlaygroundMetrics store = PlaygroundMetrics._();
+
+  static final label = store.schema.text('label');
+  static final value = store.schema.real('value');
+  static final recorded = store.schema.date('recorded');
+
+  @override
+  List<FieldDef<PlaygroundMetrics, Object?>> get fields =>
+      [label, value, recorded];
+
+  @override
+  List<IndexSpec> get indexes => [store.indexSpec([label])];
+}
+
+/// A store with an encrypted field to demonstrate field-level encryption.
+final class PlaygroundSecrets extends StoreDef<PlaygroundSecrets> {
+  PlaygroundSecrets._() : super(name: 'secrets', version: 1);
+
+  static final PlaygroundSecrets store = PlaygroundSecrets._();
+
+  static final label = store.schema.text('label').req();
+  static final secret = store.schema.text('secret', encrypted: true);
+  static final category = store.schema.text('category');
+
+  @override
+  List<FieldDef<PlaygroundSecrets, Object?>> get fields =>
+      [label, secret, category];
 }

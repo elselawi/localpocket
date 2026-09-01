@@ -1,11 +1,14 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+// Flutter also exports a `Row` widget; hide the typed snapshot type and
+// project rows to display maps below.
+import 'package:localpocket/localpocket.dart' hide Row;
 
 import '../../core/app_state.dart';
 import '../../core/file_ref.dart';
 import '../../core/files_helper.dart';
+import '../../core/tasks.dart';
 import '../helpers.dart';
 import '../widgets/demo_panel.dart';
 
@@ -37,12 +40,14 @@ class _FilesPageState extends State<FilesPage> {
   Future<void> _loadTasks() async {
     final db = _db;
     if (db == null) return;
-    final page = await db.collection('tasks').query().limit(8).fetch();
+    final page = await db
+        .store(PlaygroundTasks.store)
+        .query(QuerySpec(limit: 8));
     if (mounted) {
       setState(() {
-        _tasks = page.items;
+        _tasks = [for (final t in page.items) t.toJson()];
         _selectedTaskId ??= page.items.isNotEmpty
-            ? page.items.first['id'] as String
+            ? page.items.first.id
             : null;
         _error = null;
       });
@@ -55,8 +60,7 @@ class _FilesPageState extends State<FilesPage> {
     if (db == null) return;
     try {
       final refs = await listFiles(
-        db,
-        store: 'tasks',
+        db.store(PlaygroundTasks.store).files,
         recordId: taskId,
         field: 'notes',
       );
@@ -83,8 +87,7 @@ class _FilesPageState extends State<FilesPage> {
       final bytes = utf8.encode(content);
       final name = 'note_${DateTime.now().millisecondsSinceEpoch}.txt';
       await attachBytes(
-        db,
-        store: 'tasks',
+        db.store(PlaygroundTasks.store).files,
         recordId: taskId,
         bytes: bytes,
         field: 'notes',
@@ -106,8 +109,7 @@ class _FilesPageState extends State<FilesPage> {
     setState(() => _loading = true);
     try {
       final bytes = await openBytes(
-        db,
-        store: 'tasks',
+        db.store(PlaygroundTasks.store).files,
         recordId: taskId,
         field: 'notes',
         index: 0,
@@ -281,19 +283,15 @@ class _FilesPageState extends State<FilesPage> {
   }
 
   static const _attachCode = '''
-final ref = await db.files.attach(
-  store: 'tasks',
+final files = db.store(PlaygroundTasks.store).files;
+
+final ref = await files.attach(
   recordId: taskId,
-  bytes: fileStream,    // native: Stream<List<int>>
-  byteArray: bytes,     // web: List<int>
+  source: FileSource.bytes(bytes, name: 'note.txt'),
   field: 'notes',
-  name: 'note.txt',
 );
 
-final stream = await db.files.open(
-  store: 'tasks', recordId: taskId, field: 'notes', index: 0);
-
-await db.files.gc();          // garbage-collect unreferenced blobs
-await db.files.enforceStorageCap(maxBytes: 64 * 1024 * 1024);
+final refs = await files.list(recordId: taskId, field: 'notes');
+final stream = await files.open(refs.first);
 ''';
 }

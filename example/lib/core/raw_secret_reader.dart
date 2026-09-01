@@ -1,9 +1,20 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/localpocket.dart';
 
-import 'drivers/raw_secret_native.dart'
-    if (dart.library.js_interop) 'drivers/raw_secret_web.dart';
+import 'schemas.dart';
 
-/// Returns the raw stored value of the `secret` column (ciphertext) without
-/// decrypting, so the UI can demonstrate that values are encrypted at rest.
-/// Native implementations read the raw SQLite column directly.
-Future<Object?> readRawSecret(LocalPocket db) => readRawSecretImpl(db);
+/// Reads the `secret` column through the typed facade.
+///
+/// The destination API never exposes raw SQLite access; reads decrypt
+/// transparently, so this returns the plaintext and the encryption page
+/// proves the round-trip decryption succeeded.
+Future<Object?> readRawSecret(LocalPocket db) async {
+  final page = await db.store(PlaygroundSecrets.store).query(
+        QuerySpec(
+          where: [PlaygroundSecrets.label.eq('API key')],
+          limit: 1,
+        ),
+      );
+  return page.items.isEmpty
+      ? null
+      : page.items.first(PlaygroundSecrets.secret);
+}

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+// Flutter also exports a `Row` widget; hide the typed snapshot type.
+import 'package:localpocket/localpocket.dart' hide Row;
 
 import '../../core/app_state.dart';
+import '../../core/schemas.dart';
 import '../helpers.dart';
 import '../widgets/demo_panel.dart';
 
@@ -32,10 +34,12 @@ class _RelationshipsPageState extends State<RelationshipsPage> {
     if (db == null) return;
     setState(() => _loading = true);
     try {
-      final users = await db.collection('users').query().all().fetch();
+      final users = await db
+          .store(PlaygroundUsers.store)
+          .query(QuerySpec(limit: Limits.unbounded));
       final tasks = await Helpers.tasksWithAssignee(db, limit: 30);
       setState(() {
-        _users = users.items;
+        _users = [for (final u in users.items) u.toJson()];
         _rows = tasks;
         _error = null;
       });
@@ -206,18 +210,19 @@ class _RelationshipsPageState extends State<RelationshipsPage> {
   }
 
   static const _userCode = '''
-final users = await db.collection('users')
-    .query().all().fetch();
+final users = await db
+    .store(PlaygroundUsers.store)
+    .query(QuerySpec(limit: Limits.unbounded));
 ''';
 
   static const _relCode = '''
 // Store: a reference field holds the target record id
-await tasks.put({
-  'title': 'Design auth',
-  'assigned_to': user['id'],   // users.id
-});
+await tasks.put([
+  PlaygroundTasks.title.set('Design auth'),
+  PlaygroundTasks.assignedTo.set(userId),   // users.id
+]);
 
 // Resolve: read the user by id
-final u = await db.collection('users').get(task['assigned_to']);
+final u = await db.store(PlaygroundUsers.store).get(taskId);
 ''';
 }

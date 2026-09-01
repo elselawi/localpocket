@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+// Flutter also exports a `Row` widget; hide the typed snapshot type.
+import 'package:localpocket/localpocket.dart' hide Row;
 
 import '../../core/app_state.dart';
+import '../../core/schemas.dart';
 import '../widgets/demo_panel.dart';
 
 class PerformancePage extends StatefulWidget {
@@ -25,12 +27,13 @@ class _PerformancePageState extends State<PerformancePage> {
     setState(() => _loading = true);
     try {
       // 1000 point reads
-      final ids = await db.collection('metrics').query().ids();
+      final metrics = db.store(PlaygroundMetrics.store);
+      final ids = await metrics.ids(QuerySpec(limit: Limits.unbounded));
       final reads = ids.take(min(1000, ids.length)).toList();
       final sw = Stopwatch()..start();
       var hit = 0;
       for (final id in reads) {
-        final r = await db.collection('metrics').get(id);
+        final r = await metrics.get(id);
         if (r != null) hit++;
       }
       sw.stop();
@@ -39,19 +42,18 @@ class _PerformancePageState extends State<PerformancePage> {
       final sw2 = Stopwatch()..start();
       await db.transaction((tx) async {
         for (var i = 0; i < 200; i++) {
-          await tx.collection('posts').putAll([
-            {
-              'title': 'Perf $i',
-              'views': i,
-              'likes': i % 7,
-              'tags': const ['perf'],
-            },
+          await tx.store(PlaygroundPosts.store).putAll([
+            [
+              PlaygroundPosts.title.set('Perf $i'),
+              PlaygroundPosts.views.set(i),
+              PlaygroundPosts.likes.set(i % 7),
+              PlaygroundPosts.tags.set(const ['perf']),
+            ],
           ]);
         }
       });
       sw2.stop();
 
-      final perf = db.perf;
       setState(() {
         _result = {
           'point reads':
@@ -61,9 +63,6 @@ class _PerformancePageState extends State<PerformancePage> {
           'bulk writes':
               '200 txns · ${sw2.elapsedMilliseconds} ms · '
               '${(sw2.elapsedMicroseconds / 200).toStringAsFixed(0)} µs/txn',
-          'live perf counters':
-              'writes=${perf.writeTransactions} · '
-              'queries=${perf.queries} · rows=${perf.rowsWritten}',
         };
         _error = null;
       });
@@ -181,18 +180,16 @@ class _PerformancePageState extends State<PerformancePage> {
 
   static const _benchCode = '''
 // 1. Cached point reads
+final metrics = db.store(PlaygroundMetrics.store);
 for (final id in ids) {
-  final r = await db.collection('metrics').get(id);  // µs
+  final r = await metrics.get(id);  // µs
 }
 
 // 2. Transactional bulk writes
 await db.transaction((tx) async {
   for (var i = 0; i < 200; i++) {
-    await tx.collection('posts').putAll([...]);
+    await tx.store(PlaygroundPosts.store).putAll([[...]]);
   }
 });
-
-// 3. Live counters
-db.perf.writeTransactions / perf.queries / perf.rowsWritten
 ''';
 }

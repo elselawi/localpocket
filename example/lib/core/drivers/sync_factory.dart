@@ -1,4 +1,4 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/localpocket.dart';
 
 import 'sync_driver.dart';
 import 'sync_factory_native.dart'

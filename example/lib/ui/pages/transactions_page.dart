@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:localpocket/src/internal/raw_surface.dart';
+// Flutter also exports a `Row` widget; hide the typed snapshot type.
+import 'package:localpocket/localpocket.dart' hide Row;
 
 import '../../core/app_state.dart';
+import '../../core/tasks.dart';
 import '../widgets/demo_panel.dart';
 
 class TransactionsPage extends StatefulWidget {
@@ -30,7 +32,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
   Future<void> _loadCount() async {
     final db = _db;
     if (db == null) return;
-    final c = await db.collection('tasks').query().count();
+    final c = await db.store(PlaygroundTasks.store).count(QuerySpec());
     if (mounted) setState(() => _taskCount = c);
   }
 
@@ -46,20 +48,20 @@ class _TransactionsPageState extends State<TransactionsPage> {
     try {
       // Batch of atomic writes.
       await db.transaction((tx) async {
-        final tasks = tx.collection('tasks');
+        final tasks = tx.store(PlaygroundTasks.store);
         await tasks.putAll([
-          {
-            'title': 'Tx task A',
-            'status': 'in_progress',
-            'priority': 2,
-            'completed': false,
-          },
-          {
-            'title': 'Tx task B',
-            'status': 'todo',
-            'priority': 4,
-            'completed': false,
-          },
+          [
+            PlaygroundTasks.title.set('Tx task A'),
+            PlaygroundTasks.status.set(TaskStatus.inProgress),
+            PlaygroundTasks.priority.set(2),
+            PlaygroundTasks.completed.set(false),
+          ],
+          [
+            PlaygroundTasks.title.set('Tx task B'),
+            PlaygroundTasks.status.set(TaskStatus.todo),
+            PlaygroundTasks.priority.set(4),
+            PlaygroundTasks.completed.set(false),
+          ],
         ]);
       });
       sw.stop();
@@ -87,12 +89,12 @@ class _TransactionsPageState extends State<TransactionsPage> {
     try {
       try {
         await db.transaction((tx) async {
-          final tasks = tx.collection('tasks');
-          await tasks.put({
-            'title': 'This should roll back',
-            'status': 'todo',
-            'priority': 9,
-          });
+          final tasks = tx.store(PlaygroundTasks.store);
+          await tasks.put([
+            PlaygroundTasks.title.set('This should roll back'),
+            PlaygroundTasks.status.set(TaskStatus.todo),
+            PlaygroundTasks.priority.set(9),
+          ]);
           // Force a failure mid-transaction.
           throw StateError(
             'Simulated failure — any writes in this tx are rolled back.',
@@ -102,7 +104,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
         // expected
       }
       sw.stop();
-      final count = await db.collection('tasks').query().count();
+      final count = await db.store(PlaygroundTasks.store).count(QuerySpec());
       setState(() {
         _ok =
             'Transaction rolled back. Task count unchanged: $count (was $_taskCount). '
@@ -188,10 +190,16 @@ class _TransactionsPageState extends State<TransactionsPage> {
 
   static const _txCode = '''
 await db.transaction((tx) async {
-  final tasks = tx.collection('tasks');
+  final tasks = tx.store(PlaygroundTasks.store);
   await tasks.putAll([
-    {'title': 'A', 'priority': 2},
-    {'title': 'B', 'priority': 4},
+    [
+      PlaygroundTasks.title.set('A'),
+      PlaygroundTasks.priority.set(2),
+    ],
+    [
+      PlaygroundTasks.title.set('B'),
+      PlaygroundTasks.priority.set(4),
+    ],
   ]);
 });
 // Commits atomically: rows + outbox + sync state all-or-nothing.
@@ -200,7 +208,8 @@ await db.transaction((tx) async {
   static const _rollbackCode = '''
 try {
   await db.transaction((tx) async {
-    await tx.collection('tasks').put({'title': 'doomed'});
+    await tx.store(PlaygroundTasks.store)
+        .put([PlaygroundTasks.title.set('doomed')]);
     throw StateError('boom');   // any exception rolls back
   });
 } catch (_) {

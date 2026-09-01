@@ -1451,3 +1451,47 @@ part of the Phase 10 gate command list.
   `TypedRow`), which is the next sub-step. `raw_surface.dart` still re-exports
   `../typed/typed.dart` for those consumers.
 
+## P10.8 benchmark + example migrated to the destination API (commits 312ea4b, …)
+
+- `benchmark/` (14 files) now imports the ONE public barrel
+  (`package:localpocket/localpocket.dart`) for the destination API
+  (`LocalPocket.open(LocalPocketOptions(...))`, `Store<S>`, `QuerySpec`/
+  `SearchSpec`, `Writes`, `db.transaction`) and the specific `src/kernel/*`
+  files for the kernel-internal probes (B5 rawQuery/traceQuery, B7 outbox,
+  B8 merge3Way, B9 NativeBlobStore). `typed_benchmark_models.dart` imports
+  the barrel and gained an `fts` override so the shared 100k db supports the
+  FTS search benchmark. B11 now rides the loopback runtime (the old
+  `PlatformProfile.web` smoke is gone); B13 measures the destination `Row<S>`
+  boundary (Row copies its backing map, so the "no-copy alias" assertion
+  retired and the target moved to 5us/row); B14 compares destination typed
+  `putAll` against a raw `KernelDatabase` map `putAll`. `dart run
+  benchmark/benchmark.dart` → ALL BENCHMARK TARGETS MET. The competitor
+  harness (`comparative_peers.dart`) and profile scripts swap `raw_surface`
+  for the kernel `src/` files they use.
+- `example/` (a Flutter playground, 43 lib files) now uses ONLY the public
+  barrel: `schemas.dart` is fully typed `StoreDef`s (users/posts/metrics/
+  secrets as `PlaygroundUsers`/`PlaygroundPosts`/`PlaygroundMetrics`/
+  `PlaygroundSecrets`; posts drops the raw `ConflictPolicy` — conflict policy
+  declarations are not yet part of the barrel surface, and the demo resolves
+  conflicts through the destination `store.conflicts`); `database_service.dart`
+  opens with `LocalPocketOptions` + `EncryptionConfig.aesGcm256` and seeds via
+  typed writes; the sync drivers use `db.attachPocketBaseSync(
+  PocketBaseSyncOptions(...))`; the files drivers use `store.files`
+  (`Files<S>.attach(FileSource...)`/`list`/`open`); the raw-secret native
+  driver (raw SQLite read of the ciphertext column) retired — the destination
+  API never exposes raw SQL, so the encryption page now proves reads decrypt
+  (round-trip), a recorded deviation. `dart analyze example` → 0 issues.
+- BARREL CHANGE (public surface): `lib/localpocket.dart` now also exports the
+  sync status/report models (`SyncStatus`, `SyncReport`, `SyncEngineState`
+  from `src/kernel/sync/status.dart` — the `PocketBaseSync` surface returns
+  them) and the blob-store types its own `LocalPocketOptions.blobStore` names
+  (`BlobStore`, `MemoryBlobStore` from `src/kernel/files/blob_store.dart`).
+  Without these, the one-barrel rule is unworkable for sync/files users.
+  `api_snapshot.txt` regenerated in the same commit.
+- Gotcha (learned here): the destination `Row<S>` and `Page<S>` names collide
+  with Flutter's `Row` widget and `Page<T>` navigator class; Flutter pages
+  import the barrel as `lp` (prefixed) when they name those types, or
+  `hide Row` and project rows to display maps (`row.toJson()`) otherwise.
+- Gates: `dart analyze lib test tool benchmark example` 0; full suite
+  `+2357 ~82`; targeted gate suites green; `api_snapshot` PASS (regenerated).
+
