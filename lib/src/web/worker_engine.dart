@@ -35,11 +35,11 @@ import 'dart:async';
 import 'package:sqlite3/common.dart';
 
 import '../contract/contract.dart' as contract;
-import '../core/database_adapter.dart';
-import '../core/errors.dart';
-import '../core/local_pocket.dart';
-import '../core/schema_manifest.dart';
-import '../core/schema.dart';
+import '../kernel/database_adapter.dart';
+import '../kernel/errors.dart';
+import '../kernel/local_pocket.dart';
+import '../kernel/schema_manifest.dart';
+import '../kernel/schema.dart';
 import 'protocol.dart';
 import 'wire_args.dart';
 

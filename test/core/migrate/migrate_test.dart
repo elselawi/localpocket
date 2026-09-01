@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:localpocket/src/internal/raw_surface.dart';
-import 'package:localpocket/src/core/migrator.dart';
+import 'package:localpocket/src/kernel/migrator.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';

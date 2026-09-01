@@ -8,8 +8,8 @@
 /// entirely at this consumer-facing boundary.
 library;
 
-import 'package:localpocket/src/core/errors.dart';
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/typed/cond.dart';
 
 /// Decodes a raw stored value into a value of type `T`.

@@ -4,9 +4,9 @@ library;
 
 import 'dart:collection';
 
-import 'package:localpocket/src/core/canonical_json.dart';
-import 'package:localpocket/src/core/errors.dart';
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/canonical_json.dart';
+import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/typed/field_def.dart';
 
 import 'schema_helpers.dart' as schema_helpers;

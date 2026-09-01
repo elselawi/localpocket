@@ -1,7 +1,7 @@
 /// Sync-layer tables and their row models.
 library;
 
-import '../../core/row_models.dart';
+import '../../kernel/row_models.dart';
 
 enum SyncState { clean, dirty, inFlight, conflict, error, quarantine, blocked }
 

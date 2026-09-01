@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:localpocket/src/internal/raw_surface.dart';
-import 'package:localpocket/src/core/compiled_query_runner.dart';
+import 'package:localpocket/src/kernel/compiled_query_runner.dart';
 
 /// Compares watch-refresh cost at growing result sizes.
 ///

@@ -1,4 +1,4 @@
-import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
+import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
 
 /// Common interface for fluent query construction across native and web query builders.
 abstract interface class QueryFilterDsl<Self extends Object> {

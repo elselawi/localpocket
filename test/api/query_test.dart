@@ -1,9 +1,9 @@
 import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/core/errors.dart';
-import 'package:localpocket/src/core/local_pocket.dart' as kernel
+import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart' as kernel
     show KernelDatabase;
-import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
-import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/typed/typed.dart';
 import 'package:test/test.dart';
 

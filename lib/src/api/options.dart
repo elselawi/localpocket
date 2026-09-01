@@ -8,14 +8,14 @@ library;
 
 import 'dart:typed_data';
 
-import '../core/cipher.dart';
+import '../kernel/cipher.dart';
 import '../files/blob_store.dart' show BlobStore;
 import '../kernel/sync/sync_backend.dart' show SyncBackendFactory;
 import '../typed/store_def.dart';
 
 /// Re-exported so callers configuring durability can name it from the same
 /// import as the rest of the facade vocabulary.
-export '../core/local_pocket.dart' show DurabilityClass;
+export '../kernel/local_pocket.dart' show DurabilityClass;
 
 /// {@template localpocket.local_pocket_options}
 /// Everything [LocalPocket.open] needs to bring up a database.

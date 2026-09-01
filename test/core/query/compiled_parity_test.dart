@@ -1,5 +1,5 @@
 import 'package:localpocket/src/internal/raw_surface.dart';
-import 'package:localpocket/src/core/compiled_query_runner.dart';
+import 'package:localpocket/src/kernel/compiled_query_runner.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';

@@ -1,12 +1,12 @@
 import 'dart:io';
 
-import 'package:localpocket/src/core/capabilities.dart' show PlatformProfile;
-import 'package:localpocket/src/core/cipher.dart'
+import 'package:localpocket/src/kernel/capabilities.dart' show PlatformProfile;
+import 'package:localpocket/src/kernel/cipher.dart'
     show CryptoProvider, FieldCipher;
-import 'package:localpocket/src/core/database_adapter.dart' show Database;
-import 'package:localpocket/src/core/local_pocket.dart'
+import 'package:localpocket/src/kernel/database_adapter.dart' show Database;
+import 'package:localpocket/src/kernel/local_pocket.dart'
     show LocalPocket, TestHooks;
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/files/blob_store.dart' show BlobStore;
 import 'package:path/path.dart' as p;
 

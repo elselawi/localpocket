@@ -10,11 +10,11 @@ import 'package:sqlite3/src/wasm/sqlite3.dart';
 import 'package:sqlite3_web/sqlite3_web.dart';
 import 'package:web/web.dart' show FileSystemDirectoryHandle;
 
-import '../core/capabilities.dart';
-import '../core/database_adapter.dart';
-import '../core/errors.dart';
-import '../core/local_pocket.dart';
-import '../core/schema.dart';
+import '../kernel/capabilities.dart';
+import '../kernel/database_adapter.dart';
+import '../kernel/errors.dart';
+import '../kernel/local_pocket.dart';
+import '../kernel/schema.dart';
 import '../files/web_blob_store.dart';
 import '../adapters/pocketbase/backend.dart' show PocketBaseSyncBackendFactory;
 import 'cipher_bridge.dart';

@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';

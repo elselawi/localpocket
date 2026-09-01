@@ -6,7 +6,7 @@
 /// logical form.
 library;
 
-import '../core/errors.dart';
+import '../kernel/errors.dart';
 import '../typed/field_def.dart';
 import '../typed/store_def.dart';
 

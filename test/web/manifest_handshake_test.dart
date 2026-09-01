@@ -1,6 +1,6 @@
 import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/core/schema_manifest.dart';
+import 'package:localpocket/src/kernel/schema_manifest.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';

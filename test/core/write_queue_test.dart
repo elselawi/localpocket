@@ -1,4 +1,4 @@
-import 'package:localpocket/src/core/write_queue.dart';
+import 'package:localpocket/src/kernel/write_queue.dart';
 import 'package:test/test.dart';
 
 /// Regression coverage: a failed action must never poison the

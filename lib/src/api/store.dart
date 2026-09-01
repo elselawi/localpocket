@@ -10,8 +10,8 @@ library;
 
 import 'dart:async';
 
-import '../core/ddl_compiler.dart' show DdlCompiler;
-import '../core/ids.dart' show generateRecordId;
+import '../kernel/ddl_compiler.dart' show DdlCompiler;
+import '../kernel/ids.dart' show generateRecordId;
 import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';
 import '../typed/cond.dart';

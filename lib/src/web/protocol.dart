@@ -12,7 +12,7 @@ library;
 // comments above; documenting every individual constant would add noise.
 // ignore_for_file: public_member_api_docs
 
-import '../core/errors.dart';
+import '../kernel/errors.dart';
 import '../kernel/sync/sync_backend.dart';
 
 /// Protocol version for every envelope. Bump on any incompatible change.

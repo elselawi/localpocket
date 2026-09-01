@@ -1,5 +1,5 @@
 import 'package:localpocket/src/internal/raw_surface.dart';
-import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
+import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';

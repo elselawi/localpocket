@@ -1,8 +1,8 @@
 import 'package:localpocket/src/contract/contract.dart';
-import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
-import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
-import 'package:localpocket/src/core/query/query_builder/query_forwarder.dart';
-import 'package:localpocket/src/core/store.dart';
+import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_forwarder.dart';
+import 'package:localpocket/src/kernel/store.dart';
 import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 

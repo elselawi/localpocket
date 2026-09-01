@@ -2,8 +2,8 @@ import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 
-import 'package:localpocket/src/core/canonical_json.dart';
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/canonical_json.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/web/conversions.dart';
 import 'package:localpocket/src/web/facade.dart';
 

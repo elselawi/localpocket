@@ -8,7 +8,7 @@
 /// envelope, whose malformed value must fail loudly).
 library;
 
-import '../core/schema.dart';
+import '../kernel/schema.dart';
 import 'worker_engine.dart' show deepStringMap, parseSchema;
 
 /// Parses the dartified `additionalData` map into typed open options.

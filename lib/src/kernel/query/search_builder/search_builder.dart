@@ -1,14 +1,14 @@
 import 'dart:convert';
 
-import 'package:localpocket/src/core/canonical_json.dart';
-import 'package:localpocket/src/core/database_adapter.dart';
-import 'package:localpocket/src/core/ddl_compiler.dart';
-import 'package:localpocket/src/core/errors.dart';
-import 'package:localpocket/src/core/hashing.dart';
-import 'package:localpocket/src/core/local_pocket.dart';
-import 'package:localpocket/src/core/query_plan.dart';
-import 'package:localpocket/src/core/query/search_builder/search_dsl.dart';
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/canonical_json.dart';
+import 'package:localpocket/src/kernel/database_adapter.dart';
+import 'package:localpocket/src/kernel/ddl_compiler.dart';
+import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/hashing.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/query_plan.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_dsl.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:meta/meta.dart';
 import 'package:sqlite3/common.dart';
 

@@ -1,5 +1,5 @@
 import 'package:localpocket/src/internal/raw_surface.dart';
-import 'package:localpocket/src/core/schema_manifest.dart';
+import 'package:localpocket/src/kernel/schema_manifest.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';

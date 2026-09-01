@@ -1,7 +1,7 @@
 /// Typed row reads: a view over the database's decoded logical map.
 library;
 
-import 'package:localpocket/src/core/errors.dart';
+import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/typed/field_def.dart';
 import 'package:localpocket/src/typed/store_def.dart';
 

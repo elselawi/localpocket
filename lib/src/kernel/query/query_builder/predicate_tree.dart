@@ -11,7 +11,7 @@
 /// travel as bound arguments, and LIKE patterns are escaped here.
 library;
 
-import 'package:localpocket/src/core/ddl_compiler.dart';
+import 'package:localpocket/src/kernel/ddl_compiler.dart';
 
 /// {@template localpocket.predicate_node}
 /// One node of a predicate tree. Leaves are single-field predicates;

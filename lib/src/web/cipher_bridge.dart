@@ -15,8 +15,8 @@ library;
 
 import 'dart:typed_data';
 
-import '../core/cipher.dart';
-import '../core/schema.dart';
+import '../kernel/cipher.dart';
+import '../kernel/schema.dart';
 
 /// Tag identifying the AES-256-GCM cipher envelope.
 const String cipherEnvelopeTypeAesGcm = 'aes-gcm';

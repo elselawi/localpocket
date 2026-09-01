@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
 
 import 'canonical_json.dart';
 import 'change_bus.dart';

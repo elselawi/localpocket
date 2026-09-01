@@ -1,13 +1,13 @@
 import 'dart:convert';
 
-import '../../core/database_adapter.dart';
+import '../../kernel/database_adapter.dart';
 
-import '../../core/canonical_json.dart';
-import '../../core/change_bus.dart';
-import '../../core/codec.dart';
-import '../../core/hashing.dart';
-import '../../core/local_pocket.dart';
-import '../../core/schema.dart';
+import '../../kernel/canonical_json.dart';
+import '../../kernel/change_bus.dart';
+import '../../kernel/codec.dart';
+import '../../kernel/hashing.dart';
+import '../../kernel/local_pocket.dart';
+import '../../kernel/schema.dart';
 import 'conflicts.dart';
 import 'mapping.dart';
 import 'merge.dart';

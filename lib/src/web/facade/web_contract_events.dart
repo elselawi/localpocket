@@ -1,5 +1,5 @@
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/core/change_bus.dart';
+import 'package:localpocket/src/kernel/change_bus.dart';
 import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 
 /// Maps one contract committed-change event onto the record-change event the

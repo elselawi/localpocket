@@ -11,36 +11,36 @@
 library;
 
 // -- kernel / storage ---------------------------------------------------------
-export '../core/canonical_json.dart';
-export '../core/codec.dart';
-export '../core/ids.dart';
-export '../core/hashing.dart';
-export '../core/cipher.dart';
-export '../core/errors.dart';
-export '../core/capabilities.dart';
-export '../core/perf_counters.dart';
-export '../core/schema.dart';
-export '../core/ddl_compiler.dart';
-export '../core/database_adapter.dart';
+export '../kernel/canonical_json.dart';
+export '../kernel/codec.dart';
+export '../kernel/ids.dart';
+export '../kernel/hashing.dart';
+export '../kernel/cipher.dart';
+export '../kernel/errors.dart';
+export '../kernel/capabilities.dart';
+export '../kernel/perf_counters.dart';
+export '../kernel/schema.dart';
+export '../kernel/ddl_compiler.dart';
+export '../kernel/database_adapter.dart';
 // ONE `LocalPocket` name: the raw kernel on the VM, the web facade under
 // `dart.library.js_interop` — the same conditional the old barrel used, so
 // web smoke pages (which open through the facade) and VM tests (which open
 // the raw kernel) both keep working.
-export '../core/local_pocket.dart'
+export '../kernel/local_pocket.dart'
     show DurabilityClass, TestHooks, KernelDatabase, PointReadCache;
-export '../core/local_pocket.dart'
+export '../kernel/local_pocket.dart'
     if (dart.library.js_interop) '../web/facade.dart' show LocalPocket;
-export '../core/transaction.dart';
-export '../core/store.dart';
-export '../core/query_plan.dart';
-export '../core/change_bus.dart';
-export '../core/watch.dart';
-export '../core/query/query_builder/query_builder.dart';
-export '../core/query/query_builder/query_dsl.dart';
-export '../core/query/query_builder/query_forwarder.dart';
-export '../core/query/search_builder/search_builder.dart';
-export '../core/query/search_builder/search_dsl.dart';
-export '../core/query/search_builder/search_forwarder.dart';
+export '../kernel/transaction.dart';
+export '../kernel/store.dart';
+export '../kernel/query_plan.dart';
+export '../kernel/change_bus.dart';
+export '../kernel/watch.dart';
+export '../kernel/query/query_builder/query_builder.dart';
+export '../kernel/query/query_builder/query_dsl.dart';
+export '../kernel/query/query_builder/query_forwarder.dart';
+export '../kernel/query/search_builder/search_builder.dart';
+export '../kernel/query/search_builder/search_dsl.dart';
+export '../kernel/query/search_builder/search_forwarder.dart';
 
 // -- typed (interim app surface) ---------------------------------------------
 export '../typed/typed.dart';

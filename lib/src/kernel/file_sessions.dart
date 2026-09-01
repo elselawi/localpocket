@@ -11,7 +11,7 @@
 /// Download state tracks the outstanding (un-credited) bytes of each open
 /// file stream so the kernel can pause the source stream when the caller's
 /// credit window fills — a consumer never receives a whole buffered file.
-part of '../core/local_pocket.dart';
+part of 'local_pocket.dart';
 
 /// Maximum chunk size for bounded file uploads (256 KiB).
 const int defaultMaxUploadChunkBytes = 262144;

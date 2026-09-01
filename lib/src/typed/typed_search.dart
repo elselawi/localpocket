@@ -6,7 +6,7 @@
 /// limit: ..., ...)` — there is no search builder in the typed layer.
 library;
 
-import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart';
 import 'package:localpocket/src/typed/limits.dart';
 import 'package:localpocket/src/typed/store_def.dart';
 import 'package:localpocket/src/typed/typed_row.dart';

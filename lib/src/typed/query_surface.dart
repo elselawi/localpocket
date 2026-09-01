@@ -3,8 +3,8 @@
 /// implements.
 library;
 
-import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
-import 'package:localpocket/src/core/store.dart';
+import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
+import 'package:localpocket/src/kernel/store.dart';
 
 /// The delegating query surface `TypedCollection`'s terminals forward to.
 /// Each concrete adapter wraps one builder and mutates it in place; the

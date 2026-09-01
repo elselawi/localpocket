@@ -6,10 +6,10 @@ library;
 
 import 'dart:convert';
 
-import '../../core/canonical_json.dart';
-import '../../core/codec.dart';
-import '../../core/hashing.dart';
-import '../../core/schema.dart';
+import '../../kernel/canonical_json.dart';
+import '../../kernel/codec.dart';
+import '../../kernel/hashing.dart';
+import '../../kernel/schema.dart';
 import 'sync_backend.dart';
 
 /// {@template localpocket.map_failure}

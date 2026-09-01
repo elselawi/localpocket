@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
-import '../../core/canonical_json.dart';
-import '../../core/change_bus.dart';
-import '../../core/codec.dart';
-import '../../core/local_pocket.dart';
-import '../../core/row_models.dart';
+import '../../kernel/canonical_json.dart';
+import '../../kernel/change_bus.dart';
+import '../../kernel/codec.dart';
+import '../../kernel/local_pocket.dart';
+import '../../kernel/row_models.dart';
 import 'merge.dart';
 import 'sync_tables.dart';
 

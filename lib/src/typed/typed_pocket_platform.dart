@@ -9,5 +9,5 @@
 /// layer decides "which LocalPocket".
 library;
 
-export '../core/local_pocket.dart'
+export '../kernel/local_pocket.dart'
     if (dart.library.js_interop) '../web/facade.dart' show LocalPocket;

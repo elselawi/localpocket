@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/core/change_bus.dart';
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/change_bus.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 import 'package:localpocket/src/web/facade/query/web_query_builder.dart';
 import 'package:localpocket/src/web/facade/search/web_search_builder.dart';

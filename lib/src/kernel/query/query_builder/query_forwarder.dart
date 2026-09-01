@@ -1,6 +1,6 @@
-import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
-import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
-import 'package:localpocket/src/core/query/query_builder/query_dsl.dart';
+import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_dsl.dart';
 
 /// Mixin for delegating fluent query filter methods to an underlying [QueryBuilder].
 mixin QueryForwarder<T extends Object> implements QueryFilterDsl<T> {

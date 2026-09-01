@@ -1,11 +1,11 @@
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
-import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
-import 'package:localpocket/src/core/query/query_builder/query_forwarder.dart';
-import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
-import 'package:localpocket/src/core/query/search_builder/search_forwarder.dart';
-import 'package:localpocket/src/core/schema.dart';
-import 'package:localpocket/src/core/store.dart';
+import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_forwarder.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_forwarder.dart';
+import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/kernel/store.dart';
 import 'package:localpocket/src/typed/query_surface.dart';
 import 'package:localpocket/src/typed/typed.dart';
 import 'package:localpocket/src/typed/typed_collection.dart'

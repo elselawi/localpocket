@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/web/facade.dart';
 
 /// Task-2/5 browser spike: proves the worker-owned `WebBlobStore` backs the

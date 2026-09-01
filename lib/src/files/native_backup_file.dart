@@ -2,7 +2,7 @@
 ///
 /// Lives in the `files` layer — the designated platform-I/O home (see
 /// `test/core/layering_test.dart` and `test/core/tx/tx_test.dart`) — so the
-/// core (`lib/src/core/`) stays web-clean. The native database factory wires
+/// core (`lib/src/kernel/`) stays web-clean. The native database factory wires
 /// these onto [DirectSqliteDatabase.backupFileExists]/[backupFileDeleter];
 /// the web worker wires its own OPFS implementation instead.
 library;

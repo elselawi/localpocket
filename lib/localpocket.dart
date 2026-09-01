@@ -31,5 +31,5 @@ export 'src/typed/write.dart';
 
 // The schema helper types store declarations name. The raw schema types
 // (CollectionSchema, Field, ...) are kernel-internal and not exported.
-export 'src/core/schema.dart'
+export 'src/kernel/schema.dart'
     show IndexSpec, IndexScope, FtsSpec, FtsNormalization, StoreMigration;

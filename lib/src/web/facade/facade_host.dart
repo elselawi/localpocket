@@ -11,8 +11,8 @@ library;
 
 import 'dart:async';
 
-import '../../core/change_bus.dart';
-import '../../core/schema.dart';
+import '../../kernel/change_bus.dart';
+import '../../kernel/schema.dart';
 import '../../runtime/remote_runtime_client.dart';
 import '../../typed/registry.dart';
 import '../lifecycle.dart';

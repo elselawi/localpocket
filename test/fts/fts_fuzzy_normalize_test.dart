@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:test/test.dart';
 
-import 'package:localpocket/src/core/fts_normalizer.dart'
+import 'package:localpocket/src/kernel/fts_normalizer.dart'
   show ftsNormalizerName;
 
 void main() {

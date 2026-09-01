@@ -1,5 +1,5 @@
-import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
-import 'package:localpocket/src/core/query/search_builder/search_dsl.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_dsl.dart';
 
 /// Mixin for delegating fluent search filter methods to [SearchBuilder].
 mixin SearchForwarder<T extends Object> implements SearchFilterDsl<T> {

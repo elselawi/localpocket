@@ -59,7 +59,7 @@ void main() {
     test('no network inside tx enforced', () async {
       // The core and sync layers never import dart:io or an HTTP client, and
       // the Tx surface exposes no network members.
-      for (final dir in ['lib/src/core', 'lib/src/kernel/sync']) {
+      for (final dir in ['lib/src/kernel', 'lib/src/kernel/sync']) {
         final files = Directory(dir)
             .listSync(recursive: true)
             .whereType<File>()
@@ -72,7 +72,7 @@ void main() {
               reason: '${f.path} must not import http');
         }
       }
-      final txApi = await File('lib/src/core/transaction.dart').readAsString();
+      final txApi = await File('lib/src/kernel/transaction.dart').readAsString();
       expect(txApi, isNot(contains('http')));
       expect(txApi, isNot(contains('Client')));
     });

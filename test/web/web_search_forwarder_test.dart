@@ -1,6 +1,6 @@
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/web/facade/search/web_search_builder.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';

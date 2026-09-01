@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
-import 'package:localpocket/src/core/cipher.dart';
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/cipher.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/web/cipher_bridge.dart';
 import 'package:localpocket/src/web/facade.dart';
 

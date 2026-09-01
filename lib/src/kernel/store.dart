@@ -1,8 +1,8 @@
 import 'dart:convert';
 
 import 'package:collection/collection.dart';
-import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
-import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart';
 import 'package:sqlite3/common.dart' show SqliteException;
 import 'database_adapter.dart';
 

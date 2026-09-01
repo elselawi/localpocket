@@ -79,11 +79,11 @@ void main(List<String> args) {
     if (!ddlContent.contains('Encrypted field') ||
         !ddlContent.contains('cannot be indexed')) {
       violations.add(
-          'lib/src/core/ddl_compiler.dart: Must reject encrypted fields from indexes.');
+          'lib/src/kernel/ddl_compiler.dart: Must reject encrypted fields from indexes.');
     }
     if (!ddlContent.contains('cannot be included in FTS')) {
       violations.add(
-          'lib/src/core/ddl_compiler.dart: Must reject encrypted fields from FTS.');
+          'lib/src/kernel/ddl_compiler.dart: Must reject encrypted fields from FTS.');
     }
   }
 
@@ -94,7 +94,7 @@ void main(List<String> args) {
     if (!queryContent.contains('_escapeLike') ||
         !queryContent.contains('ESCAPE')) {
       violations.add(
-          'lib/src/core/query.dart: LIKE queries must escape patterns and define ESCAPE clause.');
+          'lib/src/kernel/query.dart: LIKE queries must escape patterns and define ESCAPE clause.');
     }
   }
 
@@ -104,7 +104,7 @@ void main(List<String> args) {
     final storeContent = storeFile.readAsStringSync();
     if (!storeContent.contains('isValidRecordId')) {
       violations.add(
-          'lib/src/core/store.dart: Writes must enforce isValidRecordId check.');
+          'lib/src/kernel/store.dart: Writes must enforce isValidRecordId check.');
     }
   }
 

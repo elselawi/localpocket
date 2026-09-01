@@ -17,16 +17,16 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
-import 'package:localpocket/src/core/change_bus.dart'
+import 'package:localpocket/src/kernel/change_bus.dart'
     show ChangeAction, ChangeOrigin;
-import 'package:localpocket/src/core/errors.dart';
+import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/sync/status.dart';
 
 // The typed error hierarchy crosses the runtime boundary via the error
 // codec, so it is part of the contract's public surface. The sync status
 // models back the sync status/report payloads.
-export '../core/change_bus.dart' show ChangeAction, ChangeOrigin;
-export '../core/errors.dart';
+export '../kernel/change_bus.dart' show ChangeAction, ChangeOrigin;
+export '../kernel/errors.dart';
 export '../kernel/sync/status.dart';
 
 part 'wire_values.dart';

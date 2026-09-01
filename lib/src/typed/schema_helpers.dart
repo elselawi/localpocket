@@ -6,7 +6,7 @@
 /// while the raw constructors remain available for database-level schemas.
 library;
 
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/typed/field_def.dart';
 
 /// Builds an index declaration from store-owned field descriptors.

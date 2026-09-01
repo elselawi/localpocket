@@ -1,6 +1,6 @@
 import 'package:localpocket/src/api/api.dart';
 import 'package:localpocket/src/contract/contract.dart' show CommandHandler;
-import 'package:localpocket/src/core/errors.dart';
+import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/runtime/runtime_client.dart';
 import 'package:localpocket/src/typed/typed.dart';
 import 'package:test/test.dart';

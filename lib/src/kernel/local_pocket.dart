@@ -27,12 +27,12 @@ import 'write_queue.dart';
 import 'query/query_builder/query_builder.dart';
 import 'query/query_builder/predicate_tree.dart';
 import 'query/search_builder/search_builder.dart';
-import '../kernel/sync/engine.dart';
-import '../kernel/sync/op_queue.dart';
-import '../kernel/sync/outbox.dart';
-import '../kernel/sync/conflicts.dart';
-import '../kernel/sync/sync_tables.dart';
-import '../kernel/sync/sync_backend.dart' show SyncBackendFactory, SyncTokenSource;
+import 'sync/engine.dart';
+import 'sync/op_queue.dart';
+import 'sync/outbox.dart';
+import 'sync/conflicts.dart';
+import 'sync/sync_tables.dart';
+import 'sync/sync_backend.dart' show SyncBackendFactory, SyncTokenSource;
 import '../files/blob_store.dart';
 import '../files/files_api.dart';
 import '../typed/typed.dart';
@@ -44,9 +44,9 @@ part 'read_service.dart';
 
 part 'transaction_coordinator.dart';
 
-part '../kernel/file_sessions.dart';
+part 'file_sessions.dart';
 
-part '../kernel/command_handler.dart';
+part 'command_handler.dart';
 
 /// Default clock: wall-clock epoch milliseconds.
 int _defaultNow() => DateTime.now().millisecondsSinceEpoch;

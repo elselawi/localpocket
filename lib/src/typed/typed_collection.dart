@@ -4,12 +4,12 @@ library;
 
 // Imported directly: the raw record-map seam types are hidden from the
 // public barrel by design (see typed.dart).
-import 'package:localpocket/src/core/ddl_compiler.dart';
-import 'package:localpocket/src/core/errors.dart';
-import 'package:localpocket/src/core/query/query_builder/predicate_tree.dart';
-import 'package:localpocket/src/core/query/query_builder/query_builder.dart';
-import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
-import 'package:localpocket/src/core/store.dart';
+import 'package:localpocket/src/kernel/ddl_compiler.dart';
+import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
+import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/kernel/store.dart';
 import 'package:localpocket/src/typed/cond.dart';
 import 'package:localpocket/src/typed/field_def.dart';
 import 'package:localpocket/src/typed/limits.dart';

@@ -1,5 +1,5 @@
-import 'package:localpocket/src/core/cipher.dart';
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/cipher.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/web/open_options.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:localpocket/src/web/worker_engine.dart';

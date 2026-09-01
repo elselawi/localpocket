@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import '../core/database_adapter.dart';
+import '../kernel/database_adapter.dart';
 
-import '../core/change_bus.dart';
-import '../core/ids.dart';
-import '../core/local_pocket.dart';
+import '../kernel/change_bus.dart';
+import '../kernel/ids.dart';
+import '../kernel/local_pocket.dart';
 import 'blob_store.dart';
 import '../kernel/sync/sync_backend.dart';
 import '../kernel/sync/sync_config.dart';

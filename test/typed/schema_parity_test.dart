@@ -23,7 +23,7 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
-final String _schemaSrc = File('lib/src/core/schema.dart').readAsStringSync();
+final String _schemaSrc = File('lib/src/kernel/schema.dart').readAsStringSync();
 final String _storeDefSrc =
     File('lib/src/typed/store_def.dart').readAsStringSync();
 

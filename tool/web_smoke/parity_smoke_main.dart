@@ -1,8 +1,8 @@
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
-import 'package:localpocket/src/core/ids.dart';
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/web/facade.dart';
 
 Future<void> main() async {

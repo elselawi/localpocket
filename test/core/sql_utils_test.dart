@@ -1,4 +1,4 @@
-import 'package:localpocket/src/core/sql_utils.dart';
+import 'package:localpocket/src/kernel/sql_utils.dart';
 import 'package:test/test.dart';
 
 /// First-value result helpers used by the raw-SQL layers (counts, keyset

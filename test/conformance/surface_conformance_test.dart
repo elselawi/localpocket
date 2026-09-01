@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/core/database_adapter.dart' show Database;
-import 'package:localpocket/src/core/ids.dart' show generateRecordId;
+import 'package:localpocket/src/kernel/database_adapter.dart' show Database;
+import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
 import 'package:localpocket/src/files/blob_store.dart' show MemoryBlobStore;
 import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;

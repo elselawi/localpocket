@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/core/ids.dart' show generateRecordId;
-import 'package:localpocket/src/core/local_pocket.dart' as kernel
+import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
+import 'package:localpocket/src/kernel/local_pocket.dart' as kernel
     show KernelDatabase;
 import 'package:localpocket/src/runtime/runtime_client.dart';
 import 'package:localpocket/src/typed/write.dart';

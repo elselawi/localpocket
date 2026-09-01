@@ -10,7 +10,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:localpocket/src/core/ids.dart'
+import 'package:localpocket/src/kernel/ids.dart'
     show generateRecordId, recordIdPattern;
 import 'package:localpocket/src/kernel/sync/sync_backend.dart' show formatPbTimestamp;
 

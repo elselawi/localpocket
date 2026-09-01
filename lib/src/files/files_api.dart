@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
-import '../core/database_adapter.dart';
+import '../kernel/database_adapter.dart';
 
-import '../core/change_bus.dart';
-import '../core/ids.dart';
-import '../core/local_pocket.dart';
-import '../core/row_models.dart';
-import '../core/sql_utils.dart';
+import '../kernel/change_bus.dart';
+import '../kernel/ids.dart';
+import '../kernel/local_pocket.dart';
+import '../kernel/row_models.dart';
+import '../kernel/sql_utils.dart';
 import 'blob_store.dart';
 import '../kernel/sync/sync_tables.dart';
 

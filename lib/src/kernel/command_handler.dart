@@ -5,7 +5,7 @@
 /// coordination, maintenance). Because the request hierarchy is sealed, the
 /// compiler rejects this switch the moment a new command variant is added
 /// without a corresponding case — no wildcard, no silent omission.
-part of '../core/local_pocket.dart';
+part of 'local_pocket.dart';
 
 /// Marker used to unwind a held transaction/savepoint body on rollback.
 class _RollbackSignal implements Exception {

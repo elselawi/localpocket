@@ -1,6 +1,6 @@
-import 'package:localpocket/src/core/query/search_builder/search_builder.dart';
-import 'package:localpocket/src/core/query/search_builder/search_forwarder.dart';
-import 'package:localpocket/src/core/schema.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart';
+import 'package:localpocket/src/kernel/query/search_builder/search_forwarder.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/web/facade/facade_host.dart';
 
 import 'web_contract_forwarder.dart';

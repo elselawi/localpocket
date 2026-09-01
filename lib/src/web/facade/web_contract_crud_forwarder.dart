@@ -1,5 +1,5 @@
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/core/local_pocket.dart' show DurabilityClass;
+import 'package:localpocket/src/kernel/local_pocket.dart' show DurabilityClass;
 import 'package:localpocket/src/web/facade/facade_host.dart';
 
 /// Typed-contract CRUD surface for the main-thread collection proxy.

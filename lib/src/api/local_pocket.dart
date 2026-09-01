@@ -6,7 +6,7 @@
 /// — the same commands a remote runtime would carry, byte for byte.
 library;
 
-import '../core/local_pocket.dart' as kernel
+import '../kernel/local_pocket.dart' as kernel
     show DurabilityClass, KernelDatabase;
 import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';

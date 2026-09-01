@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:meta/meta.dart';
 
-import '../../core/change_bus.dart';
-import '../../core/local_pocket.dart';
+import '../../kernel/change_bus.dart';
+import '../../kernel/local_pocket.dart';
 import 'apply_lane.dart';
 import 'puller.dart';
 import 'pusher.dart';

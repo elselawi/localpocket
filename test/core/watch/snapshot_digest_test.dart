@@ -1,4 +1,4 @@
-import 'package:localpocket/src/core/watch.dart' show computeSnapshotDigest;
+import 'package:localpocket/src/kernel/watch.dart' show computeSnapshotDigest;
 import 'package:test/test.dart';
 
 void main() {
