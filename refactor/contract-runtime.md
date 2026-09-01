@@ -1297,3 +1297,23 @@ exported; the destination `LocalPocket` owns the name. Gates: analyze 0, suite
 - `dart analyze` on the whole tree is green, but `example/` carries
   pre-existing `implementation_imports` infos (it imports `src/` directly);
   it now imports `raw_surface.dart` and stays error-free.
+
+### Phase 9 gate confirmed (2026-09-01, after the raw_surface web-parity fix)
+
+- Browser matrix PASS (17 pages × 3 browsers). The first run caught that the
+  two typed smoke pages (`typed_smoke`, `typed_sync_runtime_smoke`) open
+  through the WEB FACADE `LocalPocket`; `raw_surface.dart` now mirrors the
+  old barrel's conditional export (raw kernel on the VM, web facade under
+  `dart.library.js_interop`) and drops the `dart:io` `native_backup_file`
+  export (web-hostile).
+- Pair-and-keep disposition: the destination API's behavior suite
+  (`test/api/` + `test/conformance/`, direct + loopback + remote) is the
+  ported-intent home for CRUD/rows/queries/transactions/search/files/
+  conflicts/sync/events/maintenance. Storage/migration/codec/merge/PocketBase/
+  blob unit tests STAY internal on `src/internal/raw_surface.dart` (§13.1) and
+  retire together with the old architecture in Phase 10.
+- No application test imports a deleted public type: tests import either
+  `src/api/api.dart` (destination) or `src/internal/raw_surface.dart`
+  (internal).
+- Final gates: analyze 0, `dart test` `+2767 ~83`, local web gate 7/7, API
+  snapshot PASS, browser matrix PASS.
