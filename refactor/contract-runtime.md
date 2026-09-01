@@ -1428,3 +1428,26 @@ part of the Phase 10 gate command list.
   genuine durability fix for the destination web runtime.
 - Worker asset refreshed after the re-home (paths changed the compiled JS);
   browser matrix green (5×3), local web gate green, api snapshot unchanged.
+
+## P10.7 typed pins deleted; typed surface gate retired (commit e5c2014)
+
+- `test/typed/` (45 files: algebra/def/get_all/model/pagination/parity/pocket/
+  query/registry/row/schema_parity/upsert/web/write/sync_engine_native +
+  the 27-file `compile_fail` corpus + support) DELETED. Their intent lives in
+  the destination `test/api` + `test/conformance` (CRUD/query/pagination/tx/
+  rows/search) and the compile fixture `test/compile_fixtures/final_api_vm.dart`;
+  the old typed surface's compile-fail corpus pinned the deleted API and will
+  be rebuilt against the destination API in Phase 11 (plan §13.4).
+- `tool/typed_surface_gate.dart` retired (it scanned the deleted `lib/typed.dart`
+  + `lib/src/typed` for record-map writes). Its `typed_surface_gate` release
+  step removed from `tool/release.dart`, `tool/release_test.dart`,
+  `test/release/full_gate_test.dart`, and
+  `test/release/api_surface_gates_test.dart` (case 165 removed; raw_api_gate
+  retained).
+- Full suite `+2357 ~82` (down from `+2632` — the deleted typed pins).
+- `lib/src/typed/*` STILL EXISTS (the old app surface) — its deletion is
+  gated on migrating `benchmark/` + `example/` to the destination API (they
+  still call the kernel's `TypedCollection`-returning `store()` / use
+  `TypedRow`), which is the next sub-step. `raw_surface.dart` still re-exports
+  `../typed/typed.dart` for those consumers.
+
