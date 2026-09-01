@@ -158,7 +158,7 @@ void main() {
           reason: 'the warning must call out the PocketBase backend');
       // The wire-level gap is documented where the write happens.
       final clientSource =
-          await File('lib/src/pocketbase/pb_client.dart').readAsString();
+          await File('lib/src/adapters/pocketbase/pb_client.dart').readAsString();
       expect(
         clientSource,
         contains('LAST-WRITE-WINS'),

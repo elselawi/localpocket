@@ -21,4 +21,4 @@ export 'transaction.dart';
 // The token bridge types back `PocketBaseSyncOptions`; re-exported here so
 // the sync attachment is usable from this one import (the same pairing the
 // typed layer already exposes).
-export '../pocketbase/auth.dart' show Token, TokenProvider;
+export '../adapters/pocketbase/auth.dart' show Token, TokenProvider;

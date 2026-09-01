@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/pocketbase/auth.dart';
+import 'package:localpocket/src/adapters/pocketbase/auth.dart';
 import 'package:localpocket/src/runtime/runtime_client.dart';
 import 'package:localpocket/src/typed/sync_engine_remote.dart';
 import 'package:test/test.dart';

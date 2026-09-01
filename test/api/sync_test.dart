@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/pocketbase/backend.dart'
+import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
 import 'package:test/test.dart';
 

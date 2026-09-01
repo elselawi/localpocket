@@ -11,7 +11,7 @@ library;
 import 'dart:async';
 
 import '../contract/contract.dart';
-import '../pocketbase/auth.dart' show TokenProvider;
+import '../adapters/pocketbase/auth.dart' show TokenProvider;
 import '../runtime/runtime_client.dart';
 
 /// {@template localpocket.pocket_base_sync_options}

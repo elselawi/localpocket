@@ -68,9 +68,9 @@ export '../files/native_blob_store_platform.dart';
 export '../files/files_api.dart';
 
 // -- PocketBase adapter --------------------------------------------------------
-export '../pocketbase/backend.dart';
-export '../pocketbase/auth.dart';
-export '../pocketbase/filter_builder.dart';
-export '../pocketbase/pb_client.dart';
-export '../pocketbase/sse.dart';
-export '../pocketbase/transport.dart';
+export '../adapters/pocketbase/backend.dart';
+export '../adapters/pocketbase/auth.dart';
+export '../adapters/pocketbase/filter_builder.dart';
+export '../adapters/pocketbase/pb_client.dart';
+export '../adapters/pocketbase/sse.dart';
+export '../adapters/pocketbase/transport.dart';

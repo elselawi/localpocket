@@ -14,10 +14,10 @@ import 'find_repo_root.dart';
 ///      in the files layer (see `test/core/layering_test.dart`).
 /// 2. `lib/` must not contain any `print(` statements.
 /// 3. Layering rules:
-///    - `lib/src/core/` must never import from `lib/src/kernel/sync/`, `lib/src/pocketbase/`, or `lib/src/files/`.
-///    - `lib/src/kernel/sync/` must never import from `lib/src/pocketbase/`.
+///    - `lib/src/core/` must never import from `lib/src/kernel/sync/`, `lib/src/adapters/pocketbase/`, or `lib/src/files/`.
+///    - `lib/src/kernel/sync/` must never import from `lib/src/adapters/pocketbase/`.
 ///    - `lib/src/typed/` (and `lib/typed.dart`) must never import from
-///      `lib/src/pocketbase/` or `package:localpocket/pocketbase.dart` — the
+///      `lib/src/adapters/pocketbase/` or `package:localpocket/pocketbase.dart` — the
 ///      typed layer imports only the public core surface.
 ///    - `lib/localpocket.dart` is the composition root: it may EXPORT the
 ///      pocketbase barrel (the single-import requirement) but must never
@@ -63,7 +63,7 @@ void main(List<String> args) {
 
       // Check forbidden http imports
       if (RegExp(r'''^\s*import\s+['"]package:http/''').hasMatch(line)) {
-        if (!relPath.startsWith('lib/src/pocketbase/')) {
+        if (!relPath.startsWith('lib/src/adapters/pocketbase/')) {
           violations.add(
               '$relPath:$lineNum: Forbidden import of package:http outside pocketbase adapter.');
         }

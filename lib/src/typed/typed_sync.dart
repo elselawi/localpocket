@@ -1,4 +1,4 @@
-import 'package:localpocket/src/pocketbase/backend.dart';
+import 'package:localpocket/src/adapters/pocketbase/backend.dart';
 import 'typed_pocket.dart';
 
 /// The typed PocketBase backend for native wiring: a [PBBackend] whose

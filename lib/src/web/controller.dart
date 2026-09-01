@@ -16,7 +16,7 @@ import '../core/errors.dart';
 import '../core/local_pocket.dart';
 import '../core/schema.dart';
 import '../files/web_blob_store.dart';
-import '../pocketbase/backend.dart' show PocketBaseSyncBackendFactory;
+import '../adapters/pocketbase/backend.dart' show PocketBaseSyncBackendFactory;
 import 'cipher_bridge.dart';
 import 'open_options.dart';
 import 'protocol.dart';

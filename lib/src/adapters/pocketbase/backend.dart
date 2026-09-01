@@ -12,8 +12,8 @@ library;
 
 import 'dart:async';
 
-import '../core/hashing.dart';
-import '../kernel/sync/sync_backend.dart';
+import '../../core/hashing.dart';
+import '../../kernel/sync/sync_backend.dart';
 import 'auth.dart';
 import 'pb_client.dart';
 import 'sse.dart';

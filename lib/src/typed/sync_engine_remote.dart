@@ -12,7 +12,7 @@ import 'dart:async';
 import 'package:meta/meta.dart';
 
 import '../contract/contract.dart';
-import '../pocketbase/auth.dart' show TokenProvider;
+import '../adapters/pocketbase/auth.dart' show TokenProvider;
 import '../runtime/runtime_client.dart';
 import 'typed_pocket.dart';
 import 'typed_sync_host.dart';

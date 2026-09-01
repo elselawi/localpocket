@@ -5,19 +5,21 @@ import 'package:test/test.dart';
 /// Static import-boundary enforcement.
 ///
 /// The documented architecture (see the PocketBase adapter under
-/// `lib/src/pocketbase/`) is one-directional:
+/// `lib/src/adapters/pocketbase/`) is one-directional:
 ///
-///   core  <--  sync  <--  pocketbase (adapter)
+///   core  <--  kernel/sync  <--  adapters/pocketbase
 ///                    ^
 ///                    `--- files (platform I/O lives here)
 ///
 /// The rules that are actually enforceable and checked here:
 ///   R1  `lib/src/core/**` and `lib/src/kernel/sync/**` never import
-///       `pocketbase` (neither `../pocketbase/...` nor a pocketbase barrel).
+///       `pocketbase` (neither `../adapters/pocketbase/...` nor a pocketbase
+///       barrel).
 ///   R2  `lib/src/core/**` and `lib/src/kernel/sync/**` never import `dart:io`,
 ///       `dart:html`, `dart:js*`, or `package:http` — they must stay
 ///       web-clean and transport-free.
-///   R3  Nothing outside `lib/src/pocketbase/**` may import `pocketbase`.
+///   R3  Nothing outside `lib/src/adapters/pocketbase/**` may import
+///       `pocketbase`.
 ///   R4  The public barrel `lib/localpocket.dart` stays free of `dart:io`
 ///       and `package:http`.
 ///
@@ -35,7 +37,7 @@ import 'package:test/test.dart';
 void main() {
   final core = _filesUnder('lib/src/core');
   final sync = _filesUnder('lib/src/kernel/sync');
-  final pocketbase = _filesUnder('lib/src/pocketbase');
+  final pocketbase = _filesUnder('lib/src/adapters/pocketbase');
   final files = _filesUnder('lib/src/files');
   final allSrc = [...core, ...sync, ...pocketbase, ...files];
 
@@ -43,7 +45,9 @@ void main() {
     for (final f in [...core, ...sync]) {
       final imports = _imports(f);
       for (final i in imports) {
-        expect(i.startsWith('../pocketbase/') || i.contains('pocketbase.dart'),
+        expect(
+            i.startsWith('../adapters/pocketbase/') ||
+                i.contains('pocketbase.dart'),
             isFalse,
             reason: '$f must not import "$i" (core/sync -> pocketbase)');
       }
@@ -78,8 +82,8 @@ void main() {
       }
     }
     // The adapter has no public barrel: `lib/pocketbase.dart` is gone with
-    // the auxiliary barrels (Phase 9). Only `src/pocketbase/**` may be
-    // imported, by tests/internal surfaces.
+    // the auxiliary barrels (Phase 9). Only `src/adapters/pocketbase/**` may
+    // be imported, by tests/internal surfaces.
     expect(File('lib/pocketbase.dart').existsSync(), isFalse,
         reason: 'the pocketbase adapter is internal-only after Phase 9');
   });

@@ -5,7 +5,7 @@ library;
 
 import 'dart:async';
 
-import '../pocketbase/auth.dart' show TokenProvider;
+import '../adapters/pocketbase/auth.dart' show TokenProvider;
 import '../kernel/sync/engine.dart';
 import '../kernel/sync/status.dart';
 import 'typed_pocket.dart';

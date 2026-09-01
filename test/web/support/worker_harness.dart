@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/pocketbase/backend.dart'
+import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
 import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/web/conversions.dart';

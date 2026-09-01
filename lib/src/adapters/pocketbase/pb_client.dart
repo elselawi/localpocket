@@ -5,7 +5,7 @@ library;
 
 import 'dart:convert';
 
-import '../kernel/sync/sync_backend.dart';
+import '../../kernel/sync/sync_backend.dart';
 import 'auth.dart';
 import 'filter_builder.dart';
 import 'transport.dart';
