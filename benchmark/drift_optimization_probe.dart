@@ -25,7 +25,9 @@ library;
 
 import 'dart:io';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/canonical_json.dart' show canonicalizeInto;
+import 'package:localpocket/src/kernel/database_adapter.dart' show DirectSqliteDatabase;
+import 'package:localpocket/src/kernel/local_pocket.dart' show LocalPocket;
 
 import 'persist.dart';
 import 'profile_util.dart';

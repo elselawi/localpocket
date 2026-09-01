@@ -1,4 +1,4 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/localpocket.dart';
 
 final class BenchmarkWidgets extends StoreDef<BenchmarkWidgets> {
   BenchmarkWidgets._() : super(name: 'widgets', version: 1);
@@ -28,4 +28,7 @@ final class BenchmarkWidgets extends StoreDef<BenchmarkWidgets> {
         indexSpec(<FieldDef<BenchmarkWidgets, Object?>>[_name, _qty]),
         indexSpec([_qty]),
       ];
+
+  @override
+  FtsSpec? get fts => ftsSpec<BenchmarkWidgets>([_name, _body]);
 }

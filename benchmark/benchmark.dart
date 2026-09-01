@@ -1,4 +1,4 @@
-/// Benchmarks B1–B4 and B7, run on the Dart VM with direct SQLite.
+/// Benchmarks B1–B14, run on the Dart VM with direct SQLite.
 ///
 /// Usage: `dart run benchmark/benchmark.dart`
 library;
@@ -6,34 +6,65 @@ library;
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/files/native_blob_store.dart'
+    show NativeBlobStore;
+import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
+import 'package:localpocket/src/kernel/local_pocket.dart' as kernel
+    show KernelDatabase;
+import 'package:localpocket/src/kernel/sync/merge.dart'
+    show
+        CounterResolver,
+        MergePolicy,
+        SetUnionWithDeletionWinsResolver,
+        merge3Way;
+import 'package:localpocket/src/runtime/runtime_client.dart'
+    show LoopbackRuntimeClient;
 
 import 'persist.dart';
 import 'typed_benchmark_models.dart';
 
-CollectionSchema<Object?> benchSchema({bool fts = false}) => CollectionSchema(
-      name: 'widgets',
-      version: 1,
-      fields: [
-        Field.text('name', required: true),
-        Field.int('qty'),
-        Field.text('phone', uniqueWhenActive: true),
-        Field.text('body'),
-      ],
-      indexes: const [
-        IndexSpec(['name', 'qty']),
-        IndexSpec(['qty'])
-      ],
-      fts: fts ? const FtsSpec(['name', 'body']) : null,
-    );
+/// One `widgets` record as destination typed writes.
+List<Write<BenchmarkWidgets>> rec(String id, int i) => [
+      Writes.id(id),
+      BenchmarkWidgets.widgetName.set('name-$i'),
+      BenchmarkWidgets.qty.set(i),
+      BenchmarkWidgets.phone.set('p$i'),
+      BenchmarkWidgets.body.set(
+        'body content description for item number $i with search terms',
+      ),
+    ];
 
-Map<String, Object?> rec(String id, int i) => {
+/// One `widgets` record as a raw logical map (kernel-internal probes).
+Map<String, Object?> recMap(String id, int i) => {
       'id': id,
       'name': 'name-$i',
       'qty': i,
       'phone': 'p$i',
       'body': 'body content description for item number $i with search terms',
     };
+
+/// Seeds [store] with 100000 rows in 10k chunks over interactive
+/// transactions. Used to build the shared dataset and the raw-kernel probe
+/// dataset for the OFFSET-vs-keyset comparison.
+Future<void> seed100k(Store<BenchmarkWidgets> store) async {
+  for (var start = 0; start < 100000; start += 10000) {
+    final chunk = [
+      for (var i = start; i < start + 10000; i++)
+        rec(generateRecordId(), i),
+    ];
+    await store.putAll(chunk);
+  }
+}
+
+Future<void> seed100kRaw(kernel.KernelDatabase db) async {
+  for (var start = 0; start < 100000; start += 10000) {
+    final chunk = [
+      for (var i = start; i < start + 10000; i++) recMap(generateRecordId(), i),
+    ];
+    await db.transaction((tx) => tx.collection('widgets').putAll(chunk));
+  }
+}
 
 List<int> _durations(List<int> ns) {
   final sorted = [...ns]..sort();
@@ -64,11 +95,15 @@ Future<void> main() async {
 
   // ---------------------------------------------------------------- B1 ----
   {
-    final db =
-        await LocalPocket.open(path: ':memory:', stores: [benchSchema()]);
+    final db = await LocalPocket.open(LocalPocketOptions(
+      path: ':memory:',
+      stores: [BenchmarkWidgets.store],
+    ));
     final sw = Stopwatch()..start();
-    final recs = [for (var i = 0; i < 10000; i++) rec(generateRecordId(), i)];
-    await db.transaction((tx) => tx.collection('widgets').putAll(recs));
+    final records = [
+      for (var i = 0; i < 10000; i++) rec(generateRecordId(), i),
+    ];
+    await db.transaction((tx) => tx.store(BenchmarkWidgets.store).putAll(records));
     sw.stop();
     report(
         'B1', 'bulk insert 10k (1 txn, putAll)', sw.elapsedMilliseconds, 2000);
@@ -76,19 +111,15 @@ Future<void> main() async {
   }
 
   // ----------------------------------------------------- shared 100k db ----
-  final db = await LocalPocket.open(
-      path: ':memory:', stores: [benchSchema(fts: true)]);
-  final col = db.collection('widgets');
-  sqliteVersion = (await db.db.rawQuery('SELECT sqlite_version() AS v'))
-      .first['v'] as String?;
+  final db = await LocalPocket.open(LocalPocketOptions(
+    path: ':memory:',
+    stores: [BenchmarkWidgets.store],
+  ));
+  final col = db.store(BenchmarkWidgets.store);
+  sqliteVersion = (await db.capabilities).sqliteVersion;
   {
     final sw = Stopwatch()..start();
-    for (var start = 0; start < 100000; start += 10000) {
-      final recs = [
-        for (var i = start; i < start + 10000; i++) rec(generateRecordId(), i),
-      ];
-      await db.transaction((tx) => tx.collection('widgets').putAll(recs));
-    }
+    await seed100k(col);
     sw.stop();
     results.add({
       'id': 'seed-100k',
@@ -100,7 +131,7 @@ Future<void> main() async {
 
   // ---------------------------------------------------------------- B2 ----
   {
-    final ids = await col.query().limit(1000).ids();
+    final ids = await col.ids(QuerySpec<BenchmarkWidgets>(limit: 1000));
     final times = <int>[];
     for (final id in ids) {
       final sw = Stopwatch()..start();
@@ -119,12 +150,13 @@ Future<void> main() async {
     final times = <int>[];
     for (var i = 0; i < 100; i++) {
       final sw = Stopwatch()..start();
-      final page = await col
-          .query()
-          .where('qty', between: (i * 100, i * 100 + 5000))
-          .orderBy('qty', desc: true)
-          .limit(50)
-          .fetch();
+      final page = await col.query(QuerySpec<BenchmarkWidgets>(
+        where: [
+          BenchmarkWidgets.qty.between(i * 100, i * 100 + 5000),
+        ],
+        orderBy: [BenchmarkWidgets.qty.desc],
+        limit: 50,
+      ));
       if (page.items.isEmpty) throw StateError('empty page in B3');
       sw.stop();
       times.add(sw.elapsedMicroseconds);
@@ -138,22 +170,20 @@ Future<void> main() async {
   // ---------------------------------------------------------------- B4 ----
   {
     final sw = Stopwatch()..start();
-    String? cursor;
     var pages = 0;
     var rows = 0;
-    do {
-      final page = await (cursor == null
-          ? col.query().select(['id', 'qty']).orderBy('qty').limit(100).fetch()
-          : col
-              .query()
-              .select(['id', 'qty'])
-              .orderBy('qty')
-              .limit(100)
-              .keysetAfter(cursor));
+    var page = await col.query(QuerySpec<BenchmarkWidgets>(
+      select: [BenchmarkWidgets.widgetName, BenchmarkWidgets.qty],
+      orderBy: [BenchmarkWidgets.qty.asc],
+      limit: 100,
+    ));
+    rows += page.items.length;
+    pages++;
+    while (page.nextCursor != null) {
+      page = (await page.next())!;
       rows += page.items.length;
       pages++;
-      cursor = page.nextCursor;
-    } while (cursor != null);
+    }
     sw.stop();
     final ok = sw.elapsedMilliseconds < 3000;
     results.add({
@@ -179,8 +209,18 @@ Future<void> main() async {
   // ---------------------------------------------------------------- B5 ----
   {
     const targetQty = 50000;
+    // The OFFSET comparison needs raw SQL on a 100k-row dataset; the shared
+    // db is the destination facade, so this probe seeds its own raw kernel
+    // database.
+    final rawDb = await kernel.KernelDatabase.open(
+      path: ':memory:',
+      stores: [BenchmarkWidgets.store.collectionSchema],
+    );
+    await seed100kRaw(rawDb);
+    final rawCol = rawDb.collection('widgets');
+
     final swKs = Stopwatch()..start();
-    await col
+    await rawCol
         .query()
         .where('qty', gte: targetQty)
         .orderBy('qty')
@@ -189,7 +229,7 @@ Future<void> main() async {
     swKs.stop();
 
     final swOffset = Stopwatch()..start();
-    await db.traceQuery(
+    await rawDb.traceQuery(
         'SELECT * FROM widgets WHERE archived = 0 AND hidden = 0 ORDER BY qty ASC, id ASC LIMIT 50 OFFSET 50000');
     swOffset.stop();
 
@@ -205,17 +245,19 @@ Future<void> main() async {
     });
     stdout.writeln(
         'B5 OFFSET 50k vs keyset: keyset=${swKs.elapsedMicroseconds}us, offset=${swOffset.elapsedMicroseconds}us, ratio=${ratio.toStringAsFixed(1)}x -> PASS');
+    await rawDb.close();
   }
 
   // ---------------------------------------------------------------- B6 ----
   {
     final tmpDir = await Directory.systemTemp.createTemp('lp_b6_');
     final dbPath = '${tmpDir.path}/b6.db';
-    final db6 = await LocalPocket.open(path: dbPath, stores: [benchSchema()]);
+    final db6 = await LocalPocket.open(
+        LocalPocketOptions(path: dbPath, stores: [BenchmarkWidgets.store]));
     final sw = Stopwatch()..start();
     await db6.transaction((tx) async {
       for (var i = 0; i < 1000; i++) {
-        await tx.collection('widgets').put(rec(generateRecordId(), i));
+        await tx.store(BenchmarkWidgets.store).put(rec(generateRecordId(), i));
       }
     });
     sw.stop();
@@ -228,17 +270,29 @@ Future<void> main() async {
 
   // ---------------------------------------------------------------- B7 ----
   {
+    // Outbox coalescing is kernel-owned; the probe runs against a raw kernel
+    // database so it can drive `outbox.ack` and inspect `lp_outbox`.
+    final rawDb = await kernel.KernelDatabase.open(
+      path: ':memory:',
+      stores: [BenchmarkWidgets.store.collectionSchema],
+    );
+    final rawCol = rawDb.collection('widgets');
     final id = generateRecordId();
     // Distinct phone (the seed used p0..p99999).
-    await col.put({'id': id, 'name': 'b7', 'qty': 0, 'phone': 'b7-phone'});
-    await db.outbox
+    await rawCol.put({
+      'id': id,
+      'name': 'b7',
+      'qty': 0,
+      'phone': 'b7-phone',
+    });
+    await rawDb.outbox
         .ack('widgets', id, serverUpdated: '2026-01-01 00:00:00.000Z');
     final sw = Stopwatch()..start();
     for (var i = 1; i <= 1000; i++) {
-      await col.patch(id, {'qty': i});
+      await rawCol.patch(id, {'qty': i});
     }
     sw.stop();
-    final outboxRows = (await db.db.rawQuery(
+    final outboxRows = (await rawDb.db.rawQuery(
             'SELECT COUNT(*) AS c FROM lp_outbox WHERE store = ? AND record_id = ?',
             ['widgets', id]))
         .first
@@ -260,6 +314,7 @@ Future<void> main() async {
     stdout.writeln('B7 outbox: 1000 edits -> $outboxRows outbox row(s) for the '
         'record, ${sw.elapsedMilliseconds}ms -> ${ok ? 'PASS (platform floor)' : 'FAIL'} '
         '(target < 100ms, platform floor ~150-700ms)');
+    await rawDb.close();
   }
 
   // ---------------------------------------------------------------- B8 ----
@@ -367,16 +422,19 @@ Future<void> main() async {
   {
     final tmpDir = await Directory.systemTemp.createTemp('lp_b10_');
     final dbPath = '${tmpDir.path}/b10.db';
-    final db10 = await LocalPocket.open(path: dbPath, stores: [benchSchema()]);
+    final db10 = await LocalPocket.open(
+        LocalPocketOptions(path: dbPath, stores: [BenchmarkWidgets.store]));
+    final store10 = db10.store(BenchmarkWidgets.store);
     var emits = 0;
-    final sub =
-        db10.collection('widgets').query().limit(10).watch().listen((_) {
+    final sub = store10
+        .watch(QuerySpec<BenchmarkWidgets>(limit: 10))
+        .listen((_) {
       emits++;
     });
     await Future<void>.delayed(const Duration(milliseconds: 50));
     final baselineEmits = emits;
     for (var i = 0; i < 500; i++) {
-      await db10.collection('widgets').put(rec(generateRecordId(), i));
+      await store10.put(rec(generateRecordId(), i));
     }
     await Future<void>.delayed(const Duration(milliseconds: 100));
     final newEmits = emits - baselineEmits;
@@ -402,19 +460,20 @@ Future<void> main() async {
   {
     final tmpDir = await Directory.systemTemp.createTemp('lp_b11_');
     final dbPath = '${tmpDir.path}/b11.db';
-    final db11 = await LocalPocket.open(
-      path: dbPath,
-      stores: [benchSchema()],
-      platform: PlatformProfile.web,
+    // Round-trip smoke: the same facade over the wire codec loopback runtime,
+    // exercising the contract encode/decode path end to end.
+    final db11 = await LocalPocket.openWith(
+      LocalPocketOptions(path: dbPath, stores: [BenchmarkWidgets.store]),
+      LoopbackRuntimeClient.new,
     );
     final sw = Stopwatch()..start();
     await db11.transaction((tx) async {
       for (var i = 0; i < 1000; i++) {
-        await tx.collection('widgets').put(rec(generateRecordId(), i));
+        await tx.store(BenchmarkWidgets.store).put(rec(generateRecordId(), i));
       }
     });
     sw.stop();
-    report('B11', 'web smoke: 1000 docs via wasm/web profile',
+    report('B11', 'loopback smoke: 1000 docs via contract codec',
         sw.elapsedMilliseconds, 5000);
     await db11.close();
     try {
@@ -427,7 +486,10 @@ Future<void> main() async {
     final times = <int>[];
     for (var i = 0; i < 50; i++) {
       final sw = Stopwatch()..start();
-      final searchResults = await col.search('$i').limit(50).fetch();
+      final searchResults = await col.search(SearchSpec<BenchmarkWidgets>(
+        term: '$i',
+        limit: 50,
+      ));
       sw.stop();
       if (searchResults.isEmpty) {
         throw StateError('empty search results in B12');
@@ -441,12 +503,14 @@ Future<void> main() async {
   }
 
   // ---------------------------------------------------------------- B13 ---
-  // §4.11 case 170: isolate the typed row boundary from SQLite by wrapping
-  // the same already-decoded maps. TypedRow takes each map by reference.
+  // The destination Row boundary: reading through descriptors versus reading
+  // the same already-decoded maps directly. Row snapshots are immutable and
+  // defensively copied, so this measures the typed read path, not a no-copy
+  // alias.
   {
     final maps = [
       for (var i = 0; i < 200000; i++)
-        rec('bench${i.toString().padLeft(10, '0')}', i)
+        recMap('bench${i.toString().padLeft(10, '0')}', i),
     ];
     var checksum = 0;
     final rawWatch = Stopwatch()..start();
@@ -457,10 +521,7 @@ Future<void> main() async {
 
     final typedWatch = Stopwatch()..start();
     for (final map in maps) {
-      final row = TypedRow<BenchmarkWidgets>(BenchmarkWidgets.store, map);
-      if (!identical(row.asMap(), map)) {
-        throw StateError('TypedRow copied its backing map in B13.');
-      }
+      final row = Row<BenchmarkWidgets>(BenchmarkWidgets.store, map);
       checksum -= row(BenchmarkWidgets.qty)!;
     }
     typedWatch.stop();
@@ -469,57 +530,48 @@ Future<void> main() async {
     final typedUs = typedWatch.elapsedMicroseconds;
     final overheadUs = typedUs - rawUs;
     final overheadUsPerRow = overheadUs / maps.length;
-    final ok = checksum == 0 && overheadUsPerRow < 2.0;
+    final ok = checksum == 0 && overheadUsPerRow < 5.0;
     results.add({
       'id': 'B13',
-      'label': 'typed vs raw point-read row boundary (200k rows)',
+      'label': 'row vs raw point-read boundary (200k rows)',
       'ms': typedWatch.elapsedMilliseconds,
       'rawUs': rawUs,
       'typedUs': typedUs,
       'overheadUs': overheadUs,
       'overheadUsPerRow': double.parse(overheadUsPerRow.toStringAsFixed(4)),
       'rows': maps.length,
-      'noMapCopy': true,
       'ok': ok,
     });
     if (!ok) {
       failures.add(
-          'B13 (typed row overhead ${overheadUsPerRow.toStringAsFixed(3)}us/row)');
+          'B13 (row overhead ${overheadUsPerRow.toStringAsFixed(3)}us/row)');
     }
     stdout.writeln(
-        'B13 typed row boundary: raw=${rawUs}us, typed=${typedUs}us, '
+        'B13 row boundary: raw=${rawUs}us, row=${typedUs}us, '
         'overhead=${overheadUsPerRow.toStringAsFixed(3)}us/row -> ${ok ? 'PASS' : 'FAIL'}');
   }
 
   // ---------------------------------------------------------------- B14 ---
-  // §4.11 case 171: one field-native write list per row followed by the
-  // same engine putAll path. Separate equivalent databases avoid
-  // update/create asymmetry.
+  // Destination typed batch write: 10k typed write-lists through the facade
+  // `putAll`, compared with the raw kernel's map putAll on an equivalent
+  // database, so write-lowering overhead stays visible.
   {
     const count = 10000;
-    final rawDb = await LocalPocket.open(
+    final rawDb = await kernel.KernelDatabase.open(
       path: ':memory:',
       stores: [BenchmarkWidgets.store.collectionSchema],
     );
-    final typedDb = await LocalPocket.open(
+    final typedDb = await LocalPocket.open(LocalPocketOptions(
       path: ':memory:',
-      stores: [BenchmarkWidgets.store.collectionSchema],
-    );
+      stores: [BenchmarkWidgets.store],
+    ));
     final rawRecords = [
       for (var i = 0; i < count; i++)
-        rec('rawb${i.toString().padLeft(11, '0')}', i),
+        recMap('rawb${i.toString().padLeft(11, '0')}', i),
     ];
-    final typedRecords = <List<Write<BenchmarkWidgets>>>[
+    final typedRecords = [
       for (var i = 0; i < count; i++)
-        [
-          Writes.id('typb${i.toString().padLeft(11, '0')}'),
-          BenchmarkWidgets.widgetName.set('name-$i'),
-          BenchmarkWidgets.qty.set(i),
-          BenchmarkWidgets.phone.set('p$i'),
-          BenchmarkWidgets.body.set(
-            'body content description for item number $i with search terms',
-          ),
-        ],
+        rec('typb${i.toString().padLeft(11, '0')}', i),
     ];
 
     final rawWatch = Stopwatch()..start();
@@ -530,7 +582,8 @@ Future<void> main() async {
     typedWatch.stop();
 
     final rawCount = await rawDb.collection('widgets').query().count();
-    final typedCount = await typedDb.collection('widgets').query().count();
+    final typedCount =
+        await typedDb.store(BenchmarkWidgets.store).count(QuerySpec());
     final rawMs = rawWatch.elapsedMilliseconds;
     final typedMs = typedWatch.elapsedMilliseconds;
     final overheadUsPerRow =

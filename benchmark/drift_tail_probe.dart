@@ -13,7 +13,7 @@ library;
 
 import 'dart:io';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/local_pocket.dart' show LocalPocket;
 
 import 'persist.dart';
 import 'profile_util.dart';

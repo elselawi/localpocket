@@ -5,7 +5,7 @@ library;
 
 import 'dart:io';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/schema.dart';
 
 import 'persist.dart';
 

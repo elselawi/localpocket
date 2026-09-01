@@ -20,7 +20,9 @@ library;
 
 import 'dart:io';
 
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
+import 'package:localpocket/src/kernel/local_pocket.dart' show DurabilityClass, LocalPocket;
+import 'package:localpocket/src/kernel/schema.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
 import 'persist.dart';
