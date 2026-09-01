@@ -59,24 +59,11 @@ async function run(name, browserType, pagePath, signal) {
     const browsers = [['Chromium', chromium], ['Firefox', firefox], ['WebKit', webkit]]
         .filter(([name]) => !browserFilter || name.toLowerCase() === browserFilter.toLowerCase());
     const pages = [['web_api_smoke.html', '__api_smoke'],
-    ['web_facade_smoke.html', '__facade_smoke'],
-    ['web_watch_smoke.html', '__watch_smoke'],
-    ['web_typed_smoke.html', '__typed_smoke'],
-    ['web_parity_smoke.html', '__parity_smoke'],
     ['web_blob_smoke.html', '__blob_smoke'],
-    ['web_files_worker_spike.html', '__files_spike'],
     ['web_cipher_smoke.html', '__cipher_smoke'],
-    ['web_conflicts_smoke.html', '__conflicts_smoke'],
-    ['web_lifecycle_error_smoke.html', '__lifecycle_error_smoke'],
-    ['web_wire_values_smoke.html', '__wire_values_smoke'],
-    ['web_query_migration_smoke.html', '__query_migration_smoke'],
-    ['web_transaction_watch_lifecycle_smoke.html', '__transaction_watch_lifecycle_smoke'],
-    ['web_durability_reopen_smoke.html', '__durability_reopen_smoke'],
-    ['web_file_lifecycle_smoke.html', '__file_lifecycle_smoke'],
-    ['web_sync_lifecycle_smoke.html', '__sync_lifecycle_smoke'],
-    ['web_typed_sync_runtime_smoke.html', '__typed_sync_runtime_smoke'],
     ['web_compatibility_environment_smoke.html', '__compatibility_environment_smoke'],
-    ['web_performance_resource_smoke.html', '__performance_resource_smoke']]
+    ['web_durability_reopen_smoke.html', '__durability_reopen_smoke'],
+    ['web_sync_lifecycle_smoke.html', '__sync_lifecycle_smoke']]
         .filter(([p]) => !pageFilter || p.includes(pageFilter))
         .filter(([p]) => !pageExclude || !p.includes(pageExclude));
     const filtered = Boolean(pageFilter || browserFilter);

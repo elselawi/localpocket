@@ -17,13 +17,13 @@ Future<void> main() async {
       '-o',
       '${Directory.systemTemp.path}/localpocket_core_web.wasm'
     ],
-    'facade web compile': [
+    'destination cipher smoke web compile': [
       'compile',
       'js',
       '-O4',
-      'tool/web_smoke/facade_smoke_main.dart',
+      'tool/web_smoke/cipher_smoke_main.dart',
       '-o',
-      '${Directory.systemTemp.path}/localpocket_facade_web.js'
+      '${Directory.systemTemp.path}/localpocket_cipher_web.js'
     ],
     'destination facade web compile': [
       'compile',

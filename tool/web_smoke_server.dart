@@ -8,7 +8,7 @@ Future<void> main(List<String> args) async {
   stdout.writeln('WEB_SMOKE_SERVER http://${server.address.host}:$port/');
   await for (final request in server) {
     final pathPart = request.uri.path == '/'
-        ? '/tool/web_smoke/pages/web_facade_smoke.html'
+        ? '/tool/web_smoke/pages/web_api_smoke.html'
         : request.uri.path;
     final file =
         File('${root.path}${pathPart.replaceAll('/', Platform.pathSeparator)}');

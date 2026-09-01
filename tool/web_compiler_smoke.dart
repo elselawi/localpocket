@@ -10,7 +10,7 @@ Future<void> main() async {
     'compile',
     'js',
     '-O4',
-    'tool/web_smoke/facade_smoke_main.dart',
+    'tool/web_smoke/cipher_smoke_main.dart',
     '-o',
     js.path,
   ]);
@@ -21,7 +21,7 @@ Future<void> main() async {
   final wasmResult = await Process.run('dart', [
     'compile',
     'wasm',
-    'tool/web_smoke/facade_smoke_main.dart',
+    'tool/web_smoke/cipher_smoke_main.dart',
     '-o',
     wasm.path,
   ]);

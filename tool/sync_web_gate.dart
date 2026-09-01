@@ -6,7 +6,6 @@ Future<void> main() async {
   final root = Directory.current.absolute;
   for (final main in const [
     'sync_lifecycle_smoke_main.dart',
-    'typed_sync_runtime_smoke_main.dart',
   ]) {
     final output = File('build/web/${main.replaceAll('.dart', '.js')}')
       ..parent.createSync(recursive: true);

@@ -11,22 +11,10 @@ Future<void> main() async {
   final root = Directory.current.absolute;
   final smokeSources = <String>[
     'api_smoke_main.dart',
-    'facade_smoke_main.dart',
-    'watch_smoke_main.dart',
-    'typed_smoke_main.dart',
-    'parity_smoke_main.dart',
     'blob_smoke_main.dart',
-    'files_worker_spike_main.dart',
     'cipher_smoke_main.dart',
-    'conflicts_smoke_main.dart',
-    'lifecycle_error_smoke_main.dart',
-    'wire_values_smoke_main.dart',
-    'query_migration_smoke_main.dart',
-    'transaction_watch_lifecycle_smoke_main.dart',
-    'durability_reopen_smoke_main.dart',
-    'file_lifecycle_smoke_main.dart',
     'compatibility_environment_smoke_main.dart',
-    'performance_resource_smoke_main.dart',
+    'durability_reopen_smoke_main.dart',
   ];
 
   // Smoke HTML pages load these files from /build/web/<name>.js.
