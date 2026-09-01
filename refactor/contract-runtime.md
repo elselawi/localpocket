@@ -1388,3 +1388,43 @@ part of the Phase 10 gate command list.
   `native_backup_file`) now import `../kernel/files/blob_store.dart` and stay
   until the `platform/*` split. Layering hub pin updated (hub wires
   `sync/*` + `files/*`/`file_service.dart`).
+
+## P10.6 web collapse (commits 9eb57bb, dfa605a, 20c1f8d)
+
+- `lib/src/web/` is GONE. `facade/`, `facade.dart`, `controller.dart`,
+  `conversions.dart`, `wire_args.dart`, `open_options.dart` deleted
+  (open_options was restored as the worker's pure-Dart open-args parser at
+  `platform/web/worker/open_options.dart`; `wire_args.dart` restored at
+  `platform/web/worker/wire_args.dart` — the worker `open` handshake still
+  uses it). Surviving transport re-homed: page → `platform/web/page/`
+  (`protocol`, `web_sender`, `assets`, `connector`, `lifecycle`,
+  `open_core`, `web_storage_capabilities`), worker → `platform/web/worker/`
+  (`main`, `controller`, `worker_engine`, `worker_engine_crud`,
+  `open_options`, `wire_args`), `cipher_bridge.dart` →
+  `platform/web/crypto.dart`.
+- Smokes: 13 old-facade smokes retired (deleted files + HTML pages +
+  `run_smoke.cjs` manifest + `browser_web_gate.dart` page list 17→5);
+  `cipher`/`durability_reopen`/`compatibility_environment`/`sync_lifecycle`
+  ported to the destination API (`api/api.dart` + `typed/typed.dart`
+  imports, `StoreDef`/`Store`/`QuerySpec`/`PocketBaseSync`). The browser
+  matrix is now 5 destination pages × 3 browsers (api, blob, cipher,
+  durability_reopen, compatibility_environment) + the sync gate's
+  `sync_lifecycle` page. The retired smokes' feature intent is covered by the
+  destination conformance suite (direct + loopback + remote).
+- Tests: 16 `test/web` facade-pinning files deleted + `fake_facade_host.dart`
+  (their intent lives in `test/api` + `test/conformance`); surviving
+  `test/web` transport tests re-homed to the platform paths. Full suite
+  `+2632 ~83` (down from `+2767` — the deleted tests pinned the old facade).
+- `raw_surface.dart` + `typed/typed_pocket_platform.dart` facade conditionals
+  removed; `raw_surface` now exports the kernel `LocalPocket` typedef
+  directly.
+- REAL BUG FOUND + FIXED (commit 20c1f8d): the destination web close did not
+  dispose the sqlite3_web worker connection, so committed BLOB data could be
+  lost on WebKit when the page tore down (the old facade called
+  `_remoteDb.dispose()`). `LocalPocket` gained an `onClose` hook
+  (`LocalPocket.internal(runtime, onClose:)`); `open_web.dart` passes
+  `() => connectResult.database.dispose()`. Proved by the cipher smoke's
+  reopen-cross-instance stage, which now passes on all 3 browsers. This is a
+  genuine durability fix for the destination web runtime.
+- Worker asset refreshed after the re-home (paths changed the compiled JS);
+  browser matrix green (5×3), local web gate green, api snapshot unchanged.
