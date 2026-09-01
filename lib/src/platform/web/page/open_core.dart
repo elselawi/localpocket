@@ -9,7 +9,7 @@ library;
 
 import 'dart:async';
 
-import '../../kernel/capabilities.dart';
+import '../../../kernel/capabilities.dart';
 import 'web_storage_capabilities.dart';
 
 /// {@template localpocket.resolved_asset}

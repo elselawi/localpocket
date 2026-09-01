@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:localpocket/src/kernel/capabilities.dart';
-import 'package:localpocket/src/web/facade/open_core.dart';
-import 'package:localpocket/src/web/facade/web_storage_capabilities.dart';
+import 'package:localpocket/src/platform/web/page/open_core.dart';
+import 'package:localpocket/src/platform/web/page/web_storage_capabilities.dart';
 import 'package:test/test.dart';
 
 void main() {

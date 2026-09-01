@@ -22,14 +22,17 @@ export '../kernel/perf_counters.dart';
 export '../kernel/schema.dart';
 export '../kernel/ddl_compiler.dart';
 export '../kernel/database_adapter.dart';
-// ONE `LocalPocket` name: the raw kernel on the VM, the web facade under
-// `dart.library.js_interop` — the same conditional the old barrel used, so
-// web smoke pages (which open through the facade) and VM tests (which open
-// the raw kernel) both keep working.
+// ONE `LocalPocket` name: the raw kernel (`LocalPocket = KernelDatabase`) on
+// the VM. The old web facade's conditional claim on the name retired with the
+// web collapse (the facade is deleted); web applications use the destination
+// `LocalPocket` from the public barrel.
 export '../kernel/local_pocket.dart'
-    show DurabilityClass, TestHooks, KernelDatabase, PointReadCache;
-export '../kernel/local_pocket.dart'
-    if (dart.library.js_interop) '../web/facade.dart' show LocalPocket;
+    show
+        DurabilityClass,
+        TestHooks,
+        KernelDatabase,
+        PointReadCache,
+        LocalPocket;
 export '../kernel/transaction.dart';
 export '../kernel/store.dart';
 export '../kernel/query_plan.dart';

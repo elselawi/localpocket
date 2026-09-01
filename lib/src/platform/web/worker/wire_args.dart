@@ -1,6 +1,6 @@
 library;
 
-import 'protocol.dart';
+import '../page/protocol.dart';
 
 /// {@template localpocket.wire_args}
 /// Validated, typed access to a wire request's arguments.

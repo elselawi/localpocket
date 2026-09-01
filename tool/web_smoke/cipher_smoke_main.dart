@@ -5,7 +5,8 @@ import 'dart:typed_data';
 
 import 'package:localpocket/src/api/api.dart';
 import 'package:localpocket/src/typed/typed.dart';
-import 'package:localpocket/src/web/cipher_bridge.dart' show WebCipherUnsupportedError;
+import 'package:localpocket/src/platform/web/crypto.dart'
+    show WebCipherUnsupportedError;
 
 /// Browser smoke for the field-AES-256-GCM cipher bridge through the
 /// destination facade over the worker runtime.
@@ -57,8 +58,8 @@ Future<void> main() async {
         LocalPocketOptions(
           path: path,
           stores: [Vault.store],
-          encryption: EncryptionConfig.aesGcm256(
-              key: Uint8List.fromList(keyBytes)),
+          encryption:
+              EncryptionConfig.aesGcm256(key: Uint8List.fromList(keyBytes)),
           bootstrap: const BootstrapOptions(
             workerAssetPath: 'assets/localpocket_worker.js',
             wasmAssetPath: 'assets/sqlite3.wasm',

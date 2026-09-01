@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:localpocket/src/kernel/sync/status.dart';
-import 'package:localpocket/src/web/lifecycle.dart';
-import 'package:localpocket/src/web/protocol.dart';
-import 'package:localpocket/src/web/web_sender.dart';
+import 'package:localpocket/src/platform/web/page/lifecycle.dart';
+import 'package:localpocket/src/platform/web/page/protocol.dart';
+import 'package:localpocket/src/platform/web/page/web_sender.dart';
 import 'package:test/test.dart';
 
 void main() {

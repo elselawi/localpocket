@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import '../contract/contract.dart';
-import '../web/protocol.dart' as wire;
-import '../web/web_sender.dart';
+import '../platform/web/page/protocol.dart' as wire;
+import '../platform/web/page/web_sender.dart';
 import 'runtime_client.dart';
 
 /// The remote runtime: the typed contract carried across the worker

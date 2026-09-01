@@ -4,11 +4,11 @@ import 'dart:js_interop';
 import 'package:sqlite3_web/sqlite3_web.dart';
 
 import '../runtime/remote_runtime_client.dart';
-import '../web/assets.dart';
-import '../web/cipher_bridge.dart';
-import '../web/connector.dart';
-import '../web/facade/open_core.dart';
-import '../web/lifecycle.dart';
+import '../platform/web/page/assets.dart';
+import '../platform/web/crypto.dart';
+import '../platform/web/page/connector.dart';
+import '../platform/web/page/open_core.dart';
+import '../platform/web/page/lifecycle.dart';
 import 'local_pocket.dart';
 import 'options.dart';
 

@@ -63,8 +63,8 @@ Future<void> main() async {
             Durability.batch.set(1),
           ]
       ]);
-      final count =
-          await store.count(const QuerySpec<Durability>(limit: Limits.unbounded));
+      final count = await store
+          .count(const QuerySpec<Durability>(limit: Limits.unbounded));
       if (count != ids.length) {
         throw StateError('Large batch count mismatch before reopen: $count');
       }
@@ -85,8 +85,8 @@ Future<void> main() async {
     );
     try {
       final store = reopened.store(Durability.store);
-      final count =
-          await store.count(const QuerySpec<Durability>(limit: Limits.unbounded));
+      final count = await store
+          .count(const QuerySpec<Durability>(limit: Limits.unbounded));
       if (count != ids.length) {
         throw StateError('OPFS/IndexedDB reopen count mismatch: $count');
       }

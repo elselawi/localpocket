@@ -10,16 +10,16 @@ import 'package:sqlite3/src/wasm/sqlite3.dart';
 import 'package:sqlite3_web/sqlite3_web.dart';
 import 'package:web/web.dart' show FileSystemDirectoryHandle;
 
-import '../kernel/capabilities.dart';
-import '../kernel/database_adapter.dart';
-import '../kernel/errors.dart';
-import '../kernel/local_pocket.dart';
-import '../kernel/schema.dart';
-import '../files/web_blob_store.dart';
-import '../adapters/pocketbase/backend.dart' show PocketBaseSyncBackendFactory;
-import 'cipher_bridge.dart';
+import '../../../kernel/capabilities.dart';
+import '../../../kernel/database_adapter.dart';
+import '../../../kernel/errors.dart';
+import '../../../kernel/local_pocket.dart';
+import '../../../kernel/schema.dart';
+import '../../../files/web_blob_store.dart';
+import '../../../adapters/pocketbase/backend.dart' show PocketBaseSyncBackendFactory;
+import '../crypto.dart';
 import 'open_options.dart';
-import 'protocol.dart';
+import '../page/protocol.dart';
 import 'worker_engine.dart';
 
 /// {@template localpocket.local_pocket_database_controller}

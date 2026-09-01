@@ -4,9 +4,9 @@ import 'dart:typed_data';
 
 import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/web/conversions.dart';
-import 'package:localpocket/src/web/protocol.dart';
-import 'package:localpocket/src/web/worker_engine.dart';
+
+import 'package:localpocket/src/platform/web/page/protocol.dart';
+import 'package:localpocket/src/platform/web/worker/worker_engine.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

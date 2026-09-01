@@ -8,7 +8,7 @@ Future<void> main() async {
     'compile',
     'js',
     '-O4',
-    'lib/src/web/worker_main.dart',
+    'lib/src/platform/web/worker/main.dart',
     '-o',
     output.path,
   ]);

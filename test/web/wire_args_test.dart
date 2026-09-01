@@ -1,5 +1,5 @@
-import 'package:localpocket/src/web/protocol.dart';
-import 'package:localpocket/src/web/wire_args.dart';
+import 'package:localpocket/src/platform/web/page/protocol.dart';
+import 'package:localpocket/src/platform/web/worker/wire_args.dart';
 import 'package:test/test.dart';
 
 void main() {

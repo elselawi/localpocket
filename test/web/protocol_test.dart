@@ -1,4 +1,4 @@
-import 'package:localpocket/src/web/protocol.dart';
+import 'package:localpocket/src/platform/web/page/protocol.dart';
 import 'package:test/test.dart';
 
 void main() {

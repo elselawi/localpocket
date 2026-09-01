@@ -1,13 +1,11 @@
-/// Platform seam for [LocalPocket]: the same conditional export the main
-/// barrel uses, so the typed layer references ONE name that resolves to the
-/// core engine on the VM and to the worker-backed web facade under
-/// `dart.library.js_interop`.
+/// Platform seam for [LocalPocket]: the typed layer references ONE name that
+/// resolves to the core engine. The web facade's conditional claim on the
+/// name retired with the web collapse; web applications use the destination
+/// `LocalPocket` from the public barrel.
 ///
-/// Importing the core `local_pocket.dart` directly would pin the typed layer
-/// to the native engine (whose database factory throws on the web — the
-/// facade must own the worker there). This file is the only place the typed
-/// layer decides "which LocalPocket".
+/// Importing the core `local_pocket.dart` directly pins the typed layer to
+/// the native engine (whose database factory throws on the web). The typed
+/// layer is itself transitional and retires with the old architecture.
 library;
 
-export '../kernel/local_pocket.dart'
-    if (dart.library.js_interop) '../web/facade.dart' show LocalPocket;
+export '../kernel/local_pocket.dart';

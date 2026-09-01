@@ -5,9 +5,9 @@ import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
 import 'package:localpocket/src/runtime/remote_runtime_client.dart';
-import 'package:localpocket/src/web/conversions.dart';
-import 'package:localpocket/src/web/protocol.dart';
-import 'package:localpocket/src/web/worker_engine.dart';
+
+import 'package:localpocket/src/platform/web/page/protocol.dart';
+import 'package:localpocket/src/platform/web/worker/worker_engine.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 

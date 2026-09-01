@@ -34,13 +34,13 @@ import 'dart:async';
 
 import 'package:sqlite3/common.dart';
 
-import '../contract/contract.dart' as contract;
-import '../kernel/database_adapter.dart';
-import '../kernel/errors.dart';
-import '../kernel/local_pocket.dart';
-import '../kernel/schema_manifest.dart';
-import '../kernel/schema.dart';
-import 'protocol.dart';
+import '../../../contract/contract.dart' as contract;
+import '../../../kernel/database_adapter.dart';
+import '../../../kernel/errors.dart';
+import '../../../kernel/local_pocket.dart';
+import '../../../kernel/schema_manifest.dart';
+import '../../../kernel/schema.dart';
+import '../page/protocol.dart';
 import 'wire_args.dart';
 
 part 'worker_engine_crud.dart';

@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:localpocket/src/kernel/compiled_query_runner.dart';
-import 'package:localpocket/src/web/conversions.dart' show encodeWireValue;
+import 'package:localpocket/src/contract/contract.dart' show encodeWireValue;
 
 /// Measures compiled-plan execution and serialized wire size.
 ///

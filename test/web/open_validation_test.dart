@@ -1,4 +1,4 @@
-import 'package:localpocket/src/web/lifecycle.dart';
+import 'package:localpocket/src/platform/web/page/lifecycle.dart';
 import 'package:test/test.dart';
 
 void main() {
