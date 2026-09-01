@@ -1,5 +1,5 @@
 // Case 152: typed aggregates accept numeric descriptors only.
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 

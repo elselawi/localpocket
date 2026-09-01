@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../file_ref.dart';
 

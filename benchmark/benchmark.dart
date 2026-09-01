@@ -6,7 +6,7 @@ library;
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import 'persist.dart';
 import 'typed_benchmark_models.dart';

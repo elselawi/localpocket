@@ -1,6 +1,6 @@
 // v2: conditions carry their store — a Tasks condition cannot enter a Users
 // query through the named-argument terminals.
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 import '../support/users.dart';

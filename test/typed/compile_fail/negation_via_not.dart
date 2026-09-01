@@ -1,6 +1,6 @@
 // Negation lives in the `~` operator now: the descriptor surface has no
 // not-equal method and no IS NOT NULL member (`~field.isNull()` covers it).
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 

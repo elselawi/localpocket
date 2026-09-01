@@ -42,7 +42,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:sqlite3/sqlite3.dart' as raw_sqlite3;
 
 import 'comparative_peers.dart';

@@ -2,7 +2,7 @@
 /// tests.
 library;
 
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 /// A store mixing an encrypted and a plain text field.
 final class SecretNotes extends StoreDef<SecretNotes> {

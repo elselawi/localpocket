@@ -1,5 +1,5 @@
 // Case 146: rec(Users.email) on a TypedRow<Tasks> — cross-store read.
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 import '../support/users.dart';

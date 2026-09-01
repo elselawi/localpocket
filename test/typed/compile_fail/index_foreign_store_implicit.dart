@@ -1,6 +1,6 @@
 // A foreign descriptor must not be accepted by a helper with the local
 // StoreDef type argument.
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 import '../support/users.dart';

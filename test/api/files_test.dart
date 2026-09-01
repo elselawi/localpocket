@@ -63,10 +63,8 @@ void main() {
       ));
       addTearDown(db.close);
       final files = db.store(Tasks.store).files;
-      final id = (await db
-              .store(Tasks.store)
-              .put([Tasks.title.set('streamed')]))
-          .id;
+      final id =
+          (await db.store(Tasks.store).put([Tasks.title.set('streamed')])).id;
 
       final payload = utf8.encode('streamed attachment');
       final ref = await files.attach(
@@ -80,8 +78,7 @@ void main() {
       );
       expect(ref.remoteName, 's.bin');
 
-      final bytes =
-          await (await files.open(ref)).expand((c) => c).toList();
+      final bytes = await (await files.open(ref)).expand((c) => c).toList();
       expect(utf8.decode(bytes), 'streamed attachment');
     });
 
@@ -110,7 +107,8 @@ void main() {
       );
     });
 
-    test('a volatile blob store reports honest durability and refuses '
+    test(
+        'a volatile blob store reports honest durability and refuses '
         'attachment without opt-in', () async {
       final db = await LocalPocket.open(LocalPocketOptions(
         path: ':memory:',

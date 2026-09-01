@@ -2,7 +2,7 @@
 /// `TypedStoreRegistry` unit tests plus the `db.store`/`tx.store` wiring.
 library;
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:test/test.dart';
 
 import 'support/tasks.dart';

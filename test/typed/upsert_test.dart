@@ -3,7 +3,7 @@
 /// pinned against the engine's raw behavior (mirroring `put`/`putAll`).
 library;
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

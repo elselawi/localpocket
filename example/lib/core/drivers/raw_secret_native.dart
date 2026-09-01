@@ -1,4 +1,4 @@
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 /// Native: raw SQLite read of the `secret` column on the local (unencrypted-at
 /// this layer) engine. The encrypted column stores base64 ciphertext.

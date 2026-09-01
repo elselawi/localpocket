@@ -1,6 +1,6 @@
 // `&&` and `||` are boolean operators, not condition operators — the algebra
 // uses the single-character `&` and `|`.
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 

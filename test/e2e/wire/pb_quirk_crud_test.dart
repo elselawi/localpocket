@@ -1,9 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/src/sync/sync_tables.dart'
-    show outboxColumns, syncRowColumns;
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart' show record, tempDbPath;

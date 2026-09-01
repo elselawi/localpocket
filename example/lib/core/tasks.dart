@@ -1,4 +1,4 @@
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 enum TaskStatus { todo, inProgress, done }
 

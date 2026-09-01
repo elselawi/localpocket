@@ -1,4 +1,4 @@
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 final class BenchmarkWidgets extends StoreDef<BenchmarkWidgets> {
   BenchmarkWidgets._() : super(name: 'widgets', version: 1);

@@ -1,4 +1,4 @@
-import 'package:localpocket/sync.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:test/test.dart';
 
 /// The `SyncBackend` seam's DEFAULT file methods — the concrete bodies a

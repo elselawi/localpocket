@@ -9,7 +9,7 @@
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 void report(String key, String status, [String? detail]) {
   globalContext.setProperty(key.toJS, status.toJS);

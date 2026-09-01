@@ -10,9 +10,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:localpocket/localpocket.dart'
+import 'package:localpocket/src/core/ids.dart'
     show generateRecordId, recordIdPattern;
-import 'package:localpocket/sync.dart';
+import 'package:localpocket/src/sync/sync_backend.dart' show formatPbTimestamp;
 
 class PbRecord {
   PbRecord({

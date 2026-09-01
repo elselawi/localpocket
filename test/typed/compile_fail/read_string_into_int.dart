@@ -1,5 +1,5 @@
 // Case 145: `final int x = rec(Tasks.title);` — String read into an int.
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 

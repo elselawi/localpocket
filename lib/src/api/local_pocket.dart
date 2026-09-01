@@ -18,8 +18,6 @@ import 'store.dart';
 import 'sync.dart';
 import 'transaction.dart';
 
-export '../core/schema.dart' show CollectionSchema;
-
 /// {@template localpocket.local_pocket}
 /// A local-first database with PocketBase sync.
 ///

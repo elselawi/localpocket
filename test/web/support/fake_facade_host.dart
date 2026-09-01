@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/typed/registry.dart';

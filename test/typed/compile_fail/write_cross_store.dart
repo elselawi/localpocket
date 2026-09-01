@@ -1,5 +1,5 @@
 // Case 147: Users.email.set('x') inside a tasks patch — cross-store write.
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 import '../support/users.dart';

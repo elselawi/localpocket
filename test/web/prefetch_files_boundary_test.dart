@@ -1,5 +1,5 @@
-import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/sync.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:localpocket/src/web/open_options.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:localpocket/src/web/worker_engine.dart';

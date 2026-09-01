@@ -1,4 +1,4 @@
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:localpocket/src/core/execution_context.dart';
 import 'package:test/test.dart';
 

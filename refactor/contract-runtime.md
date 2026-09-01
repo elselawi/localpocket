@@ -1225,3 +1225,75 @@ API snapshot PASS.
   evaluates the `late` field at registration and throws `LateError`.
 - The fixture's `TokenProvider` stub comes from the api barrel's re-export —
   the sync attachment vocabulary compiles from one import.
+
+---
+
+# Phase 9 — barrel switch (2026-09-01)
+
+`lib/localpocket.dart` is now the ONE supported application barrel, exporting
+the destination facade (`src/api/api.dart`) plus the schema declaration layer
+(`src/typed/{cond,field_def,limits,schema_helpers,store_def,write}.dart`) and
+the kept schema helper types (`IndexSpec`, `IndexScope`, `FtsSpec`,
+`FtsNormalization`, `StoreMigration`). The raw `LocalPocket = KernelDatabase`
+typedef and the old web facade's conditional claim on the name are no longer
+exported; the destination `LocalPocket` owns the name. Gates: analyze 0, suite
+`+2767 ~83`, API snapshot PASS (regenerated in this commit), local web gate
+7/7 (asset unchanged), browser matrix PASS.
+
+## The switch
+
+- `lib/localpocket.dart` rewritten to the curated exports above; the raw
+  schema/database/query/page/tx/sync-engine/PocketBase-client/file exports are
+  gone. `CollectionSchema`, `Field`, `Collection`, `Page`, `QueryBuilder`,
+  `SearchBuilder`, `QueryPlan`, `Database`, `DatabaseExecutor`, `Tx`,
+  `ChangeSet` (and friends) are no longer public. `query_plan.dart` stays
+  kernel-internal; only its barrel export died.
+- The compile fixture `test/compile_fixtures/final_api_vm.dart` FLIPPED to
+  `import 'package:localpocket/localpocket.dart'` (removed the `src/api/api.dart`
+  import) — the executable definition of the destination API now proves one
+  import gives the whole surface, unchanged in body as the plan specified.
+- `lib/src/api/local_pocket.dart` no longer exports `CollectionSchema` (the
+  facade-barrel leak is closed).
+- `lib/src/web/facade/web_conflicts.dart` now imports `src/sync/conflicts.dart`
+  directly — no lib code imports the public barrel.
+
+## Internal test surface (decision)
+
+- NEW `lib/src/internal/raw_surface.dart`: an INTERNAL library re-exporting the
+  raw kernel/storage/query/sync/pocketbase/files types for internal unit tests
+  (`test/core`, `test/sync`, `test/files`, `test/pocketbase`, `test/fts`,
+  `test/security`, `test/e2e`, `test/web`), the benchmarks, and the example.
+  It is NOT exported by the public barrel; applications must not import it
+  (`package:localpocket/src/...` is internal by convention, and the plan
+  §13.1 explicitly lets internal tests import `src/`). This was the
+  highest-leverage way to move ~256 importers off the barrel without rewriting
+  kernel pins (Rule 10): the internal suites stayed green on the first pass.
+- `test/support/helpers.dart` imports the raw `src/` types directly.
+- Application-level destination tests (`test/api`, `test/conformance`) import
+  `src/api/api.dart` (they predate the barrel; they can flip later without
+  behavior change).
+
+## Auxiliary barrels deleted
+
+- `lib/typed.dart`, `lib/sync.dart`, `lib/pocketbase.dart` are deleted; the
+  internal tests that imported them now import `raw_surface.dart` (or the
+  specific `src/` file — `mock_pb_server.dart` imports `src/core/ids.dart` +
+  `src/sync/sync_backend.dart` because the adapter's `HttpRequest`/`HttpResponse`
+  collide with `dart:io`).
+- `test/core/layering_test.dart` R3/R4 pins updated: R3 now asserts
+  `lib/pocketbase.dart` does NOT exist (the adapter is internal-only), R4
+  asserts the single barrel is web-clean AND the three aux barrels are gone.
+
+## Gotchas learned this pass
+- The barrel switch cascades to ~256 importers; a single internal re-export
+  (`raw_surface.dart`) plus one uniform package-import replacement brought the
+  test error count from 6921 to 0 with no kernel edits.
+- `mock_pb_server.dart` needed `dart:io`'s `HttpRequest`/`HttpResponse` — the
+  adapter's transport types collide by name, so it imports the two specific
+  `src/` files instead of `raw_surface.dart`.
+- Files that imported the barrel AND an aux barrel ended up with duplicate
+  `raw_surface.dart` imports after the uniform replace; a second pass removed
+  the duplicates.
+- `dart analyze` on the whole tree is green, but `example/` carries
+  pre-existing `implementation_imports` infos (it imports `src/` directly);
+  it now imports `raw_surface.dart` and stays error-free.

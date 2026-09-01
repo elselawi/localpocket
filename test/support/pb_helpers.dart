@@ -1,7 +1,7 @@
 /// Shared helpers for the PocketBase adapter tests.
 library;
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import 'helpers.dart';
 import 'mock_pb_server.dart';

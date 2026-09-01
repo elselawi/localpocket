@@ -1,5 +1,4 @@
-import 'package:localpocket/pocketbase.dart';
-import 'package:localpocket/sync.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'support/mock_pb_server.dart';
 import 'support/pb_helpers.dart';
 

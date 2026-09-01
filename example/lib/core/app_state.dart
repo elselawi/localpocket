@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import 'database_service.dart';
 import 'drivers/sync_driver.dart';

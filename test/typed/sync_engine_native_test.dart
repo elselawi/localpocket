@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:localpocket/localpocket.dart' hide HttpResponse;
+import 'package:localpocket/src/internal/raw_surface.dart' hide HttpResponse;
 import 'package:test/test.dart';
 
 final class ProbeStore extends StoreDef<ProbeStore> {

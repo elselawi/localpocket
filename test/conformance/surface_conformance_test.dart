@@ -80,15 +80,14 @@ void main() {
           expect(ref.recordId, id);
           expect((await files.list(recordId: id)).single.refId, ref.refId);
 
-          final bytes =
-              await (await files.open(ref)).expand((c) => c).toList();
+          final bytes = await (await files.open(ref)).expand((c) => c).toList();
           expect(utf8.decode(bytes), 'conformance file payload');
 
           expect(await files.isBlobStorageDurable, isFalse,
               reason: 'the conformance blob store is a MemoryBlobStore');
           await files.remove(ref);
-          expect((await files.list(recordId: id)).single.state,
-              'pending_remove');
+          expect(
+              (await files.list(recordId: id)).single.state, 'pending_remove');
         });
 
         test('gc and storage cap round-trip the kernel counters', () async {

@@ -1,4 +1,4 @@
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import 'drivers/db_open.dart';
 import 'sample_data.dart';

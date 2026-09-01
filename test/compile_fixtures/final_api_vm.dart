@@ -5,15 +5,11 @@
 // kernel-owned pages, aggregates, search, interactive transactions, watches,
 // committed-fact events, maintenance, files, conflicts, and the PocketBase
 // sync attachment. The analyzer is the gate: this file must stay at zero
-// issues.
-//
-// It imports the facade library directly because the barrel switch has not
-// landed yet; when it does, this import flips to
-// `package:localpocket/localpocket.dart` unchanged in body.
+// issues. It imports ONLY the public barrel — proof that one import gives
+// the whole destination API.
 import 'dart:typed_data';
 
-import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/typed/typed.dart';
+import 'package:localpocket/localpocket.dart';
 
 /// Compile-only token provider: proves the sync attachment vocabulary
 /// compiles without wiring real auth.
@@ -204,7 +200,8 @@ Future<void> exerciseAll() async {
   ref.hash;
   ref.state;
   ref.remoteName;
-  final List<FileRef> refs = await files.list(recordId: id, field: 'attachment');
+  final List<FileRef> refs =
+      await files.list(recordId: id, field: 'attachment');
   // ignore: unnecessary_statements
   refs.length;
   final Stream<List<int>> bytes = await files.open(ref);

@@ -2,7 +2,7 @@
 /// and independent registry binding.
 library;
 
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 /// The canonical typed definition of the `users` store.
 final class Users extends StoreDef<Users> {

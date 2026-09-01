@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/sync.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:test/test.dart';
 
 import '../sync/engine/engine_helpers.dart';

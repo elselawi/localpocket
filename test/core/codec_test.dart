@@ -1,7 +1,6 @@
 import 'dart:convert';
 
-import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/src/core/codec.dart' show decodeDbRowsProjected;
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';

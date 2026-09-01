@@ -3,7 +3,7 @@
 // Every section below mirrors a README section; run it with
 // `dart run api_full_example.dart`.
 // ignore_for_file: avoid_print
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 enum TaskStatus { todo, inProgress, done }
 

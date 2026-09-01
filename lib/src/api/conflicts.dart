@@ -188,8 +188,7 @@ final class StoreConflicts<S extends StoreDef<S>> {
             if (event is ConflictsSnapshot &&
                 event.subscription == subscription) {
               controller.add([
-                for (final c in event.conflicts)
-                  Conflict<S>.fromData(def, c),
+                for (final c in event.conflicts) Conflict<S>.fromData(def, c),
               ]);
             }
           },

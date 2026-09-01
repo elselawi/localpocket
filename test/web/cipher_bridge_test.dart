@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:localpocket/src/web/cipher_bridge.dart';
 import 'package:test/test.dart';
 

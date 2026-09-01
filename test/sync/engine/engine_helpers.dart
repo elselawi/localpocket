@@ -2,7 +2,7 @@
 /// never fire on their own (tests drive cycles explicitly).
 library;
 
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../../support/helpers.dart';
 import 'mock_backend.dart';

@@ -1,4 +1,4 @@
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import 'file_ref.dart';
 import 'drivers/files_ops_native.dart'

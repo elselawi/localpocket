@@ -1,8 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/src/core/hashing.dart' show sha256HexBytes;
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:test/test.dart';
 
 /// Tests for the public hashing and record-ID helpers.

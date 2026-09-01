@@ -1,4 +1,4 @@
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 /// Shared helpers for the playground pages.
 class Helpers {

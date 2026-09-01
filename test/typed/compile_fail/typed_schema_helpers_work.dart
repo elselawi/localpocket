@@ -1,5 +1,5 @@
 // Typed index and FTS declarations accept descriptors owned by the same store.
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 

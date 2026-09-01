@@ -187,3 +187,17 @@ requests the Phase 7 cutovers already shipped):
 
 `TokenProvider`/`Token` are re-exported from the api barrel so the sync
 attachment is usable from one import (recorded layering note in the ledger).
+
+## 7. Phase 9 barrel switch (2026-09-01)
+
+`lib/localpocket.dart` is now the ONE supported application barrel: the
+destination facade (`src/api/api.dart`) + the schema declaration layer
+(`src/typed/{cond,field_def,limits,schema_helpers,store_def,write}.dart`) +
+the kept schema helpers (`IndexSpec`, `IndexScope`, `FtsSpec`,
+`FtsNormalization`, `StoreMigration`). The raw exports (`CollectionSchema`,
+`Field`, `Collection`, `Page`, `Tx`, `QueryBuilder`, `SearchBuilder`,
+`QueryPlan`, `Database`, `DatabaseExecutor`, `ChangeSet`, ...) and the
+`LocalPocket = KernelDatabase` typedef claim are no longer public; the
+destination `LocalPocket` owns the name. `lib/typed.dart`, `lib/sync.dart`,
+`lib/pocketbase.dart` are deleted. Internal unit tests and the benchmarks/
+example import `src/internal/raw_surface.dart` (internal, never exported).

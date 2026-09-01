@@ -7,7 +7,7 @@
 /// The tests double as the pattern's proof.
 library;
 
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 /// Access roles for the tasks store.
 enum Role { admin, member, guest }

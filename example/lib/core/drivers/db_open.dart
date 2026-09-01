@@ -1,4 +1,4 @@
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import 'db_open_native.dart' if (dart.library.js_interop) 'db_open_web.dart';
 

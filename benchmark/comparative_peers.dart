@@ -23,7 +23,7 @@ import 'dart:math';
 import 'package:drift/native.dart' as drift_native;
 import 'package:hive/hive.dart';
 import 'package:isar/isar.dart' hide CollectionSchema;
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:sembast/sembast.dart' as sembast;
 import 'package:sembast/sembast_io.dart' as sembast_io;
 import 'package:sqlite3/sqlite3.dart' as raw_sqlite3;

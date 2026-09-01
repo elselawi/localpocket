@@ -1,4 +1,4 @@
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 /// Web: the web facade does not expose raw SQLite access. Instead, run a query
 /// selecting the `secret` field; the worker decodes it, but we can still show

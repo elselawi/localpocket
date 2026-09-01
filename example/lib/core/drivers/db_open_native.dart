@@ -1,4 +1,4 @@
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 /// Native open: uses an in-memory DB plus a [MemoryBlobStore] so the
 /// file-attachment demo needs no filesystem plugins.

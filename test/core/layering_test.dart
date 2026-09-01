@@ -4,7 +4,8 @@ import 'package:test/test.dart';
 
 /// Static import-boundary enforcement.
 ///
-/// The documented architecture (see `lib/pocketbase.dart`) is one-directional:
+/// The documented architecture (see the PocketBase adapter under
+/// `lib/src/pocketbase/`) is one-directional:
 ///
 ///   core  <--  sync  <--  pocketbase (adapter)
 ///                    ^
@@ -12,13 +13,12 @@ import 'package:test/test.dart';
 ///
 /// The rules that are actually enforceable and checked here:
 ///   R1  `lib/src/core/**` and `lib/src/sync/**` never import `pocketbase`
-///       (neither `../pocketbase/...` nor `package:localpocket/pocketbase.dart`).
+///       (neither `../pocketbase/...` nor a pocketbase barrel).
 ///   R2  `lib/src/core/**` and `lib/src/sync/**` never import `dart:io`,
 ///       `dart:html`, `dart:js*`, or `package:http` — they must stay
 ///       web-clean and transport-free.
-///   R3  Nothing outside `lib/src/pocketbase/**` and `lib/pocketbase.dart`
-///       may import `pocketbase`.
-///   R4  The umbrella `lib/localpocket.dart` (core) stays free of `dart:io`
+///   R3  Nothing outside `lib/src/pocketbase/**` may import `pocketbase`.
+///   R4  The public barrel `lib/localpocket.dart` stays free of `dart:io`
 ///       and `package:http`.
 ///
 /// Deliberate, documented exception: `lib/src/core/local_pocket.dart` and
@@ -77,23 +77,29 @@ void main() {
             reason: '$f must not import "$i"');
       }
     }
-    // The umbrella lib/pocketbase.dart is the only non-src entry point.
-    final umbrella = File('lib/pocketbase.dart');
-    expect(umbrella.existsSync(), isTrue);
+    // The adapter has no public barrel: `lib/pocketbase.dart` is gone with
+    // the auxiliary barrels (Phase 9). Only `src/pocketbase/**` may be
+    // imported, by tests/internal surfaces.
+    expect(File('lib/pocketbase.dart').existsSync(), isFalse,
+        reason: 'the pocketbase adapter is internal-only after Phase 9');
   });
 
-  test('umbrella core entrypoint is web-clean (R4)', () {
+  test('public barrel entrypoint is web-clean (R4)', () {
     final f = File('lib/localpocket.dart');
     final content = f.readAsStringSync();
     for (final bad in ['dart:io', 'package:http', 'dart:html', 'dart:js']) {
       expect(content.contains("import '$bad'"), isFalse,
           reason: 'lib/localpocket.dart must not import $bad');
     }
-    final syncUmbrella = File('lib/sync.dart');
-    final syncContent = syncUmbrella.readAsStringSync();
-    for (final bad in ['dart:io', 'package:http', 'dart:html', 'dart:js']) {
-      expect(syncContent.contains("import '$bad'"), isFalse,
-          reason: 'lib/sync.dart must not import $bad');
+    // The auxiliary barrels (typed/sync/pocketbase) are deleted; the one
+    // supported application barrel is `lib/localpocket.dart`.
+    for (final aux in [
+      'lib/typed.dart',
+      'lib/sync.dart',
+      'lib/pocketbase.dart'
+    ]) {
+      expect(File(aux).existsSync(), isFalse,
+          reason: '$aux must not exist after the barrel switch');
     }
   });
 

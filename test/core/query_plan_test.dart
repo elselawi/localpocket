@@ -1,5 +1,4 @@
-import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/src/core/query_plan.dart' show queryCompilerVersion;
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:test/test.dart';
 
 void main() {

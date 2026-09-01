@@ -1,4 +1,4 @@
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import 'drivers/raw_secret_native.dart'
     if (dart.library.js_interop) 'drivers/raw_secret_web.dart';

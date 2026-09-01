@@ -1,94 +1,35 @@
-/// LocalPocket — a local-first SQLite database with eventually-consistent
-/// PocketBase sync.
+/// LocalPocket — a local-first SQLite database with PocketBase sync.
 ///
-/// One import gives you the whole package: the typed data-model layer
-/// (schema declaration + strictly typed CRUD, queries, and search), the raw
-/// map API underneath it, the sync engine, the PocketBase adapter, and the
-/// files layer:
+/// One import gives you the whole destination API: open a [LocalPocket],
+/// declare each store once as a [StoreDef], and work with typed [Store]s,
+/// immutable [Row] snapshots, declarative [QuerySpec]/[SearchSpec]s,
+/// interactive [Transaction]s, committed-change events, store-scoped
+/// [Files]/[StoreConflicts], and the [PocketBaseSync] attachment. The same
+/// import compiles on mobile, desktop, and web — the facade runs over the
+/// direct runtime on native targets and the worker contract runtime on web.
 ///
 /// ```dart
 /// import 'package:localpocket/localpocket.dart';
 ///
-/// final db = await openTyped(path: 'app.db', stores: [Tasks.store]);
-/// await db.store(Tasks.store).put([Tasks.title.set('Ship it')]);
+/// final db = await LocalPocket.open(
+///   LocalPocketOptions(path: 'app.db', stores: [Tasks.store]),
+/// );
+/// final tasks = db.store(Tasks.store);
+/// await tasks.put([Tasks.title.set('Ship it')]);
 /// ```
-///
-/// Narrower entry points exist if you want a single slice only —
-/// `typed.dart`, `sync.dart`, `pocketbase.dart` — and everything they
-/// export is already included here.
-///
-/// The same import compiles on mobile, desktop, and web: the conditional
-/// exports below pick the right implementation per target.
 library;
 
-export 'src/core/canonical_json.dart' show canonicalize;
-export 'src/core/codec.dart'
-    show
-        buildPayload,
-        canonicalPayload,
-        payloadHash,
-        encodeDbRow,
-        encodeDbRows,
-        encodeDbRowsAsync,
-        decodeDbRow,
-        decodeDbRows,
-        decodeDbRowsAsync;
-export 'src/core/ids.dart'
-    show generateRecordId, isValidRecordId, recordIdPattern;
-export 'src/core/hashing.dart' show sha256Hex;
-export 'src/core/cipher.dart'
-    show
-        FieldCipher,
-        CryptoProvider,
-        SingleKeyCryptoProvider,
-        AesGcmFieldCipher,
-        fieldAad;
-export 'src/core/errors.dart';
-export 'src/core/capabilities.dart' show SqliteCapabilities, PlatformProfile;
-export 'src/core/perf_counters.dart';
-export 'src/core/schema.dart'
-    show
-        CollectionSchema,
-        Field,
-        FieldKind,
-        IndexSpec,
-        IndexScope,
-        FtsSpec,
-        FtsNormalization,
-        StoreMigration,
-        ConflictPolicy,
-        MissingRemotePolicy,
-        DocumentMigration,
-        applyDocumentMigrations;
-export 'src/core/ddl_compiler.dart' show DdlCompiler, CompiledSchema;
-export 'src/core/database_adapter.dart'
-    show Database, DatabaseExecutor, ConflictAlgorithm, DirectSqliteDatabase;
-export 'src/core/local_pocket.dart' show DurabilityClass, TestHooks;
-export 'src/core/local_pocket.dart'
-    if (dart.library.js_interop) 'src/web/facade.dart' show LocalPocket;
-export 'src/core/transaction.dart' show Tx;
-export 'src/core/store.dart' show Collection, Page, MutationAction;
-export 'src/core/query/query_builder/query_builder.dart';
-export 'src/core/query/query_builder/query_dsl.dart';
-export 'src/core/query/query_builder/query_forwarder.dart';
-export 'src/core/query/search_builder/search_builder.dart';
-export 'src/core/query/search_builder/search_dsl.dart';
-export 'src/core/query/search_builder/search_forwarder.dart';
-export 'src/core/query_plan.dart' show QueryPlan;
-export 'src/core/change_bus.dart'
-    show
-        ChangeSet,
-        ChangeBus,
-        RecordChangeEvent,
-        ChangeOrigin,
-        ChangeAction,
-        RecordChangeEventStreamExtension;
-export 'src/core/watch.dart';
+// The destination public API: the facade barrel plus the schema declaration
+// layer (typed descriptors ARE the destination schema source).
+export 'src/api/api.dart';
+export 'src/typed/cond.dart';
+export 'src/typed/field_def.dart';
+export 'src/typed/limits.dart';
+export 'src/typed/schema_helpers.dart';
+export 'src/typed/store_def.dart';
+export 'src/typed/write.dart';
 
-// ---------------------------------------------------------------------------
-// the rest of the package: typed layer, sync engine, PocketBase adapter
-// (each domain's barrel is the single source of truth for its exports)
-// ---------------------------------------------------------------------------
-export 'typed.dart';
-export 'sync.dart';
-export 'pocketbase.dart';
+// The schema helper types store declarations name. The raw schema types
+// (CollectionSchema, Field, ...) are kernel-internal and not exported.
+export 'src/core/schema.dart'
+    show IndexSpec, IndexScope, FtsSpec, FtsNormalization, StoreMigration;

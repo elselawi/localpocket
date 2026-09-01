@@ -1,4 +1,4 @@
-import 'package:localpocket/sync.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:test/test.dart';
 
 /// Dirty-diff tests.

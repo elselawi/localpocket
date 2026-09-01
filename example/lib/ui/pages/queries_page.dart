@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:localpocket/localpocket.dart' as lp;
+import 'package:localpocket/src/internal/raw_surface.dart' as lp;
 
 import '../../core/app_state.dart';
 import '../widgets/demo_panel.dart';

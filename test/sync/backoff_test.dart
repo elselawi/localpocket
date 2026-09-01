@@ -1,4 +1,4 @@
-import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 import 'package:localpocket/src/sync/backoff.dart';
 import 'package:localpocket/src/sync/sync_config.dart';
 import 'package:test/test.dart';

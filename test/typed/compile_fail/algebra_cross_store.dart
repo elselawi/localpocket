@@ -1,6 +1,6 @@
 // Conditions carry their store: a foreign condition cannot be an operand of
 // `&`, `|`, or `~` either — the algebra is store-typed like every other slot.
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 import '../support/users.dart';

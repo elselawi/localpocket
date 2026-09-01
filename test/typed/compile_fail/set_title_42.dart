@@ -1,5 +1,5 @@
 // Case 144: Tasks.title.set(42) — int into a String field.
-import 'package:localpocket/typed.dart';
+import 'package:localpocket/src/internal/raw_surface.dart';
 
 import '../support/tasks.dart';
 
