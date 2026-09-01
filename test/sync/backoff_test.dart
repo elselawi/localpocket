@@ -1,6 +1,6 @@
 import 'package:localpocket/src/internal/raw_surface.dart';
-import 'package:localpocket/src/sync/backoff.dart';
-import 'package:localpocket/src/sync/sync_config.dart';
+import 'package:localpocket/src/kernel/sync/backoff.dart';
+import 'package:localpocket/src/kernel/sync/sync_config.dart';
 import 'package:test/test.dart';
 
 /// ONE retry primitive. Sync cycle backoff and

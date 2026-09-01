@@ -1,16 +1,16 @@
 import 'dart:convert';
 import 'dart:math';
 
-import '../core/database_adapter.dart';
+import '../../core/database_adapter.dart';
 
-import '../core/codec.dart';
-import '../core/change_bus.dart';
-import '../core/errors.dart';
-import '../core/hashing.dart';
-import '../core/local_pocket.dart';
-import '../core/sql_utils.dart';
-import '../core/store.dart';
-import '../core/transaction.dart';
+import '../../core/codec.dart';
+import '../../core/change_bus.dart';
+import '../../core/errors.dart';
+import '../../core/hashing.dart';
+import '../../core/local_pocket.dart';
+import '../../core/sql_utils.dart';
+import '../../core/store.dart';
+import '../../core/transaction.dart';
 import 'merge.dart';
 import 'sync_tables.dart';
 

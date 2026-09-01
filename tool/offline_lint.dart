@@ -7,15 +7,15 @@ import 'find_repo_root.dart';
 /// Rules:
 /// 1. `dart:io` leaking into web-compatible libraries.
 ///    - `lib/localpocket.dart`, `lib/typed.dart`, and everything under
-///      `lib/src/core/`, `lib/src/sync/`, and `lib/src/typed/` must never
+///      `lib/src/core/`, `lib/src/kernel/sync/`, and `lib/src/typed/` must never
 ///      import `dart:io` or `package:http`.
 ///    - `native_blob_store.dart` and `native_backup_file.dart` are the only
 ///      files allowed to import `dart:io` — the designated platform-I/O home
 ///      in the files layer (see `test/core/layering_test.dart`).
 /// 2. `lib/` must not contain any `print(` statements.
 /// 3. Layering rules:
-///    - `lib/src/core/` must never import from `lib/src/sync/`, `lib/src/pocketbase/`, or `lib/src/files/`.
-///    - `lib/src/sync/` must never import from `lib/src/pocketbase/`.
+///    - `lib/src/core/` must never import from `lib/src/kernel/sync/`, `lib/src/pocketbase/`, or `lib/src/files/`.
+///    - `lib/src/kernel/sync/` must never import from `lib/src/pocketbase/`.
 ///    - `lib/src/typed/` (and `lib/typed.dart`) must never import from
 ///      `lib/src/pocketbase/` or `package:localpocket/pocketbase.dart` — the
 ///      typed layer imports only the public core surface.
@@ -71,7 +71,7 @@ void main(List<String> args) {
 
       // Layering: core/sync/files/typed cannot import pocketbase
       if (relPath.startsWith('lib/src/core/') ||
-          relPath.startsWith('lib/src/sync/') ||
+          relPath.startsWith('lib/src/kernel/sync/') ||
           relPath.startsWith('lib/src/files/') ||
           relPath.startsWith('lib/src/typed/') ||
           relPath == 'lib/localpocket.dart' ||

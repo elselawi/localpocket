@@ -12,9 +12,9 @@ import 'package:test/test.dart';
 ///                    `--- files (platform I/O lives here)
 ///
 /// The rules that are actually enforceable and checked here:
-///   R1  `lib/src/core/**` and `lib/src/sync/**` never import `pocketbase`
-///       (neither `../pocketbase/...` nor a pocketbase barrel).
-///   R2  `lib/src/core/**` and `lib/src/sync/**` never import `dart:io`,
+///   R1  `lib/src/core/**` and `lib/src/kernel/sync/**` never import
+///       `pocketbase` (neither `../pocketbase/...` nor a pocketbase barrel).
+///   R2  `lib/src/core/**` and `lib/src/kernel/sync/**` never import `dart:io`,
 ///       `dart:html`, `dart:js*`, or `package:http` — they must stay
 ///       web-clean and transport-free.
 ///   R3  Nothing outside `lib/src/pocketbase/**` may import `pocketbase`.
@@ -34,7 +34,7 @@ import 'package:test/test.dart';
 /// web-clean; the web worker wires its own OPFS hooks instead).
 void main() {
   final core = _filesUnder('lib/src/core');
-  final sync = _filesUnder('lib/src/sync');
+  final sync = _filesUnder('lib/src/kernel/sync');
   final pocketbase = _filesUnder('lib/src/pocketbase');
   final files = _filesUnder('lib/src/files');
   final allSrc = [...core, ...sync, ...pocketbase, ...files];
@@ -107,7 +107,7 @@ void main() {
     // This is the DOCUMENTED exception: LocalPocket owns the sync/file
     // sub-systems. If this is ever refactored away, update this test.
     final hub = File('lib/src/core/local_pocket.dart').readAsStringSync();
-    expect(hub.contains("import '../sync/"), isTrue,
+    expect(hub.contains("import '../kernel/sync/"), isTrue,
         reason: 'LocalPocket (the hub) intentionally wires sync');
     expect(hub.contains("import '../files/"), isTrue,
         reason: 'LocalPocket (the hub) intentionally wires files');

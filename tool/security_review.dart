@@ -113,7 +113,7 @@ void main(List<String> args) {
     final pullerContent = pullerFile.readAsStringSync();
     if (!pullerContent.contains('isValidRecordId')) {
       violations.add(
-          'lib/src/sync/puller.dart: Puller must enforce isValidRecordId check on remote records.');
+          'lib/src/kernel/sync/puller.dart: Puller must enforce isValidRecordId check on remote records.');
     }
   }
 

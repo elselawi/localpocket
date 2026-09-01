@@ -13,7 +13,7 @@ import 'dart:async';
 
 import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';
-import '../sync/conflicts.dart' show remoteDeletedKey;
+import '../kernel/sync/conflicts.dart' show remoteDeletedKey;
 import '../typed/store_def.dart';
 import '../typed/write.dart';
 import 'row.dart';

@@ -1,5 +1,5 @@
 import 'package:localpocket/src/internal/raw_surface.dart';
-import 'package:localpocket/src/sync/sync_backend.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:localpocket/src/web/protocol.dart';
 import 'package:test/test.dart';
 

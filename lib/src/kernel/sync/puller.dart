@@ -1,15 +1,15 @@
 import 'dart:convert';
 
-import '../core/database_adapter.dart';
+import '../../core/database_adapter.dart';
 
-import '../core/canonical_json.dart';
-import '../core/change_bus.dart';
-import '../core/codec.dart';
-import '../core/ids.dart';
-import '../core/local_pocket.dart';
-import '../core/schema.dart';
-import '../core/transaction.dart';
-import '../files/file_sync_lane.dart';
+import '../../core/canonical_json.dart';
+import '../../core/change_bus.dart';
+import '../../core/codec.dart';
+import '../../core/ids.dart';
+import '../../core/local_pocket.dart';
+import '../../core/schema.dart';
+import '../../core/transaction.dart';
+import '../../files/file_sync_lane.dart';
 import 'apply_lane.dart';
 import 'mapping.dart';
 import 'merge.dart';

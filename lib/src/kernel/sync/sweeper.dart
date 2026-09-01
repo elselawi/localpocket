@@ -1,4 +1,4 @@
-import '../core/local_pocket.dart';
+import '../../core/local_pocket.dart';
 import 'puller.dart';
 import 'sync_backend.dart';
 import 'sync_config.dart';

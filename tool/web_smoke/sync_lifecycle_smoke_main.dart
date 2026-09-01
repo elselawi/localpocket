@@ -3,7 +3,7 @@ import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
 import 'package:localpocket/src/core/schema.dart';
-import 'package:localpocket/src/sync/status.dart';
+import 'package:localpocket/src/kernel/sync/status.dart';
 import 'package:localpocket/src/web/facade.dart';
 
 Future<void> main() async {

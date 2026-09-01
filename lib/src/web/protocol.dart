@@ -13,7 +13,7 @@ library;
 // ignore_for_file: public_member_api_docs
 
 import '../core/errors.dart';
-import '../sync/sync_backend.dart';
+import '../kernel/sync/sync_backend.dart';
 
 /// Protocol version for every envelope. Bump on any incompatible change.
 /// v2: all reads are compiled query plans (`compiled_query`); descriptor-based

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:localpocket/src/sync/apply_lane.dart';
+import 'package:localpocket/src/kernel/sync/apply_lane.dart';
 import 'package:test/test.dart';
 
 /// Unit pins for the shared remote-application lane.

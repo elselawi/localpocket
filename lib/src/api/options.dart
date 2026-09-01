@@ -10,7 +10,7 @@ import 'dart:typed_data';
 
 import '../core/cipher.dart';
 import '../files/blob_store.dart' show BlobStore;
-import '../sync/sync_backend.dart' show SyncBackendFactory;
+import '../kernel/sync/sync_backend.dart' show SyncBackendFactory;
 import '../typed/store_def.dart';
 
 /// Re-exported so callers configuring durability can name it from the same

@@ -12,7 +12,7 @@ import 'dart:io';
 
 import 'package:localpocket/src/core/ids.dart'
     show generateRecordId, recordIdPattern;
-import 'package:localpocket/src/sync/sync_backend.dart' show formatPbTimestamp;
+import 'package:localpocket/src/kernel/sync/sync_backend.dart' show formatPbTimestamp;
 
 class PbRecord {
   PbRecord({

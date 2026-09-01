@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
-import '../core/local_pocket.dart';
+import '../../core/local_pocket.dart';
 import 'sync_tables.dart';
 
 /// {@template localpocket.op_queue}

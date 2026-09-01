@@ -8,7 +8,7 @@ import '../core/local_pocket.dart';
 import '../core/row_models.dart';
 import '../core/sql_utils.dart';
 import 'blob_store.dart';
-import '../sync/sync_tables.dart';
+import '../kernel/sync/sync_tables.dart';
 
 /// {@template localpocket.file_ref}
 /// Representation of a file ref in `lp_file_refs`.

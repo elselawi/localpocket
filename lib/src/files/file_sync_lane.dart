@@ -6,9 +6,9 @@ import '../core/change_bus.dart';
 import '../core/ids.dart';
 import '../core/local_pocket.dart';
 import 'blob_store.dart';
-import '../sync/sync_backend.dart';
-import '../sync/sync_config.dart';
-import '../sync/sync_tables.dart';
+import '../kernel/sync/sync_backend.dart';
+import '../kernel/sync/sync_config.dart';
+import '../kernel/sync/sync_tables.dart';
 
 /// {@template localpocket.file_sync_report}
 /// A summary of the work performed by a file synchronization pass.

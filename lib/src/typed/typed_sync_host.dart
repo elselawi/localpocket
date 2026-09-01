@@ -10,7 +10,7 @@ library;
 
 import 'dart:async';
 
-import '../sync/status.dart';
+import '../kernel/sync/status.dart';
 import 'typed_pocket.dart';
 
 /// {@template localpocket.pocket_base_sync_host}

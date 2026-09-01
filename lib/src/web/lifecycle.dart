@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import '../sync/status.dart';
+import '../kernel/sync/status.dart';
 import 'protocol.dart';
 
 /// Fails every worker-owned stream with a [DatabaseWorkerClosedException]

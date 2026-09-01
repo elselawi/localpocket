@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:meta/meta.dart';
 
-import '../core/change_bus.dart';
-import '../core/local_pocket.dart';
+import '../../core/change_bus.dart';
+import '../../core/local_pocket.dart';
 import 'apply_lane.dart';
 import 'puller.dart';
 import 'pusher.dart';
@@ -12,7 +12,7 @@ import 'sweeper.dart';
 import 'sync_backend.dart';
 import 'sync_config.dart';
 import 'sync_store.dart';
-import '../files/file_sync_lane.dart';
+import '../../files/file_sync_lane.dart';
 
 /// {@template localpocket.sync_engine}
 /// Coordinates pull, visibility sweep, push, realtime hints, and file sync.

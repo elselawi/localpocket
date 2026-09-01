@@ -15,8 +15,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-import '../sync/backoff.dart';
-import '../sync/sync_backend.dart';
+import '../kernel/sync/backoff.dart';
+import '../kernel/sync/sync_backend.dart';
 import 'auth.dart';
 import 'pb_client.dart';
 import 'transport.dart';

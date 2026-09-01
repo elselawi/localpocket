@@ -30,7 +30,7 @@ class _RecordingBatchBackend extends MockSyncBackend {
 ///   key).
 void main() {
   final backendSource =
-      File('lib/src/sync/sync_backend.dart').readAsStringSync();
+      File('lib/src/kernel/sync/sync_backend.dart').readAsStringSync();
 
   Future<SyncRowState?> sr(LocalPocket pocket, String id) =>
       pocket.outbox.readSyncRow(pocket.db, 'widgets', id);

@@ -25,7 +25,7 @@ import '../core/schema.dart';
 import '../core/schema_manifest.dart';
 import '../core/store.dart';
 import '../contract/contract.dart' as contract;
-import '../sync/status.dart';
+import '../kernel/sync/status.dart';
 import '../typed/query_surface.dart';
 import '../typed/typed.dart';
 import '../typed/typed_collection.dart' show TypedStoreSurface;

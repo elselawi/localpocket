@@ -15,8 +15,8 @@ import 'local_pocket.dart';
 import 'schema.dart';
 import 'transaction.dart';
 import 'watch.dart';
-import '../sync/outbox.dart';
-import '../sync/sync_tables.dart';
+import '../kernel/sync/outbox.dart';
+import '../kernel/sync/sync_tables.dart';
 
 part 'mutation_service.dart';
 

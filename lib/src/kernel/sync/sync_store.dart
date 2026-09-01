@@ -2,10 +2,10 @@
 /// (`lp_sync_state`). Cursors are identity-scoped.
 library;
 
-import '../core/database_adapter.dart';
+import '../../core/database_adapter.dart';
 
-import '../core/local_pocket.dart';
-import '../core/sql_utils.dart';
+import '../../core/local_pocket.dart';
+import '../../core/sql_utils.dart';
 
 /// {@template localpocket.pull_cursor}
 /// Identity-scoped pull cursor.

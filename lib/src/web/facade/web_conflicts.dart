@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:localpocket/src/contract/contract.dart' as contract;
-import 'package:localpocket/src/sync/conflicts.dart' show ConflictRecord;
+import 'package:localpocket/src/kernel/sync/conflicts.dart' show ConflictRecord;
 import 'package:localpocket/src/web/facade/facade_host.dart';
 
 /// {@template localpocket.web_conflicts}

@@ -227,7 +227,7 @@ void main() {
       // Regression pin: the remote-shrink reconciliation previously only ran
       // when the pulled record's `imgs` was non-empty, so removing the ONLY
       // file on a record left the peer's stale ref (and its blob) behind
-      // forever. lib/src/sync/puller.dart now observes remote files even for
+      // forever. lib/src/kernel/sync/puller.dart now observes remote files even for
       // empty `imgs` when the record exists locally.
       final (a, b) = await twoClients(s);
 

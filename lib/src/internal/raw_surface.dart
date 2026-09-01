@@ -46,20 +46,20 @@ export '../core/query/search_builder/search_forwarder.dart';
 export '../typed/typed.dart';
 
 // -- sync engine --------------------------------------------------------------
-export '../sync/sync_backend.dart';
-export '../sync/sync_tables.dart';
-export '../sync/outbox.dart';
-export '../sync/op_queue.dart';
-export '../sync/mapping.dart';
-export '../sync/merge.dart';
-export '../sync/conflicts.dart';
-export '../sync/sync_config.dart';
-export '../sync/status.dart';
-export '../sync/sync_store.dart';
-export '../sync/puller.dart';
-export '../sync/sweeper.dart';
-export '../sync/pusher.dart';
-export '../sync/engine.dart';
+export '../kernel/sync/sync_backend.dart';
+export '../kernel/sync/sync_tables.dart';
+export '../kernel/sync/outbox.dart';
+export '../kernel/sync/op_queue.dart';
+export '../kernel/sync/mapping.dart';
+export '../kernel/sync/merge.dart';
+export '../kernel/sync/conflicts.dart';
+export '../kernel/sync/sync_config.dart';
+export '../kernel/sync/status.dart';
+export '../kernel/sync/sync_store.dart';
+export '../kernel/sync/puller.dart';
+export '../kernel/sync/sweeper.dart';
+export '../kernel/sync/pusher.dart';
+export '../kernel/sync/engine.dart';
 
 // -- files --------------------------------------------------------------------
 export '../files/file_sync_lane.dart';

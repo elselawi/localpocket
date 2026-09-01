@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:localpocket/src/internal/raw_surface.dart';
-import 'package:localpocket/src/sync/apply_lane.dart';
+import 'package:localpocket/src/kernel/sync/apply_lane.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
