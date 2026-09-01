@@ -3,8 +3,7 @@ import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 
-import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/typed/typed.dart';
+import 'package:localpocket/localpocket.dart';
 import 'package:localpocket/src/platform/web/crypto.dart'
     show WebCipherUnsupportedError;
 

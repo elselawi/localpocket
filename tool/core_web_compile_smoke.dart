@@ -1,4 +1,11 @@
-import 'package:localpocket/src/internal/raw_surface.dart';
+import 'package:localpocket/localpocket.dart';
+import 'package:localpocket/src/kernel/hashing.dart' show sha256Hex;
+import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
+import 'package:localpocket/src/kernel/schema.dart' show FieldKind;
+import 'package:localpocket/src/kernel/sync/sync_backend.dart'
+    show BackendHintKind, formatPbTimestamp, pbTimestampToDateTime;
+import 'package:localpocket/src/kernel/sync/sync_tables.dart'
+    show OpQueueKind, SyncState;
 
 enum _SmokeRole { author, reader }
 
@@ -49,19 +56,21 @@ Future<void> _retainTypedWebSurface(LocalPocket pocket) async {
   await notes.patch(id, [_SmokeNotes.published.set(true)]);
   await notes.get(id);
   await notes.query(
-    where: [_SmokeNotes.published.eq(true)],
-    select: <FieldDef<_SmokeNotes, Object?>>[
-      _SmokeNotes.title,
-      _SmokeNotes.role,
-    ],
-    orderBy: [_SmokeNotes.createdAt.desc],
-    limit: 5,
+    QuerySpec(
+      where: [_SmokeNotes.published.eq(true)],
+      select: <FieldDef<_SmokeNotes, Object?>>[
+        _SmokeNotes.title,
+        _SmokeNotes.role,
+      ],
+      orderBy: [_SmokeNotes.createdAt.desc],
+      limit: 5,
+    ),
   );
-  final querySub = notes.watch(limit: 5).listen((_) {});
-  final oneSub = notes.watchOne(id).listen((_) {});
-  await notes.search('Typed', limit: 5);
+  final querySub = notes.watch(const QuerySpec(limit: 5)).listen((_) {});
+  final changeSub = notes.changes.listen((_) {});
+  await notes.search(const SearchSpec(term: 'Typed', limit: 5));
   await querySub.cancel();
-  await oneSub.cancel();
+  await changeSub.cancel();
 }
 
 /// Web-compile smoke for the CORE + SYNC + TYPED public API.

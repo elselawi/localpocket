@@ -45,9 +45,6 @@ export '../kernel/query/search_builder/search_builder.dart';
 export '../kernel/query/search_builder/search_dsl.dart';
 export '../kernel/query/search_builder/search_forwarder.dart';
 
-// -- typed (interim app surface) ---------------------------------------------
-export '../typed/typed.dart';
-
 // -- sync engine --------------------------------------------------------------
 export '../kernel/sync/sync_backend.dart';
 export '../kernel/sync/sync_tables.dart';

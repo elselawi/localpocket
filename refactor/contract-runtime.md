@@ -1495,3 +1495,37 @@ part of the Phase 10 gate command list.
 - Gates: `dart analyze lib test tool benchmark example` 0; full suite
   `+2357 ~82`; targeted gate suites green; `api_snapshot` PASS (regenerated).
 
+## P10.9 kernel hub rework + typed app surface deleted (commits …)
+
+- Kernel hub rework: `lib/src/kernel/local_pocket.dart` no longer owns a
+  `TypedStoreRegistry` nor a `TypedCollection<S> store<S>(S def)` method (the
+  kernel is reached through `collection(...)` / the contract dispatcher);
+  `transaction.dart` drops `Tx.store`; `kernel_context.dart` drops the
+  `typedRegistry` getter. The destination facade's `db.store(StoreDef)` →
+  `Store<S>` (in `src/api/`) is the ONE store-view entry point.
+- `lib/src/typed/` (15 files: typed_collection, typed_query, typed_search,
+  typed_pocket, typed_pocket_platform, typed_model, typed_sync,
+  typed_sync_host, sync_engine_native/platform/remote, query_surface,
+  registry, typed_row, typed.dart) DELETED. `raw_surface.dart` no longer
+  re-exports `../typed/typed.dart`. The benchmark + example migrations (P10.8)
+  were the last consumers of the old typed surface.
+- The 5 destination smokes + `test/api/*` + `tasks_store.dart` +
+  `facade_conformance_test.dart` flipped `src/typed/typed.dart` →
+  `package:localpocket/localpocket.dart` (the barrel exports every name they
+  used: StoreDef/FieldDef/Cond/Writes/IndexSpec/FtsSpec/...). Redundant
+  `src/api/api.dart` imports removed.
+- `tool/core_web_compile_smoke.dart` migrated to the barrel + specific
+  `src/kernel/*` imports; the `watchOne` retention call became `changes`
+  (the destination Store has no `watchOne`; single-record events ride
+  `changes`). `test/web/typed_sync_remote_test.dart` DELETED — it pinned the
+  deleted `typed/sync_engine_remote.dart` (`PocketBaseSyncEngine.forSurface`);
+  its intent (sync over the remote runtime) lives in
+  `test/conformance/surface_conformance_test.dart` (runs
+  `attachPocketBaseSync` over direct/loopback/remote) + `test/api/sync_test.dart`.
+- Worker asset refreshed (kernel/typed sources changed the compiled worker):
+  recompiled, copied to `assets/localpocket_worker.js`, `.sha256` rewritten
+  (lowercase hex, two spaces, filename, no BOM). Local web gate 7/7.
+- Gates: `dart analyze lib test tool benchmark example` 0; full suite
+  `+2350 ~82` (down from `+2357` — the deleted typed sync remote pin);
+  `api_snapshot` PASS (barrel unchanged this step).
+

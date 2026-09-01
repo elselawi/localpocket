@@ -2,8 +2,7 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
-import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/typed/typed.dart';
+import 'package:localpocket/localpocket.dart';
 
 /// Browser smoke for the destination facade over the worker runtime: the
 /// page holds the typed contract client only, and every command below is one

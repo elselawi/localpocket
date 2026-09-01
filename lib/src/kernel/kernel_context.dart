@@ -87,9 +87,6 @@ final class KernelContext {
   /// File attachment and blob lifecycle port.
   LocalPocketFiles get files => database.files;
 
-  /// The typed store registry backing `db.store` and `Tx.store`.
-  TypedStoreRegistry get typedRegistry => database.typedRegistry;
-
   /// The transaction coordinator (durability, group commit, read txs).
   TransactionCoordinator get transactions => database.transactionCoordinator;
 

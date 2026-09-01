@@ -35,7 +35,6 @@ import 'sync/sync_tables.dart';
 import 'sync/sync_backend.dart' show SyncBackendFactory, SyncTokenSource;
 import 'files/blob_store.dart';
 import 'file_service.dart';
-import '../typed/typed.dart';
 import '../contract/contract.dart';
 
 part 'kernel_context.dart';
@@ -367,10 +366,6 @@ class KernelDatabase with ChangeBusAwareLP {
 
   final Map<String, StoreTable> _tables = {};
   bool _closed = false;
-
-  /// The typed store registry backing [store] (and `Tx.store`): one per
-  /// [LocalPocket], keyed by store name, enforced by reference identity.
-  final TypedStoreRegistry typedRegistry = TypedStoreRegistry();
 
   /// Tracked `synchronous` pragma state lives on the [TransactionCoordinator]
   /// (durability transitions are a transaction concern).
@@ -754,34 +749,6 @@ class KernelDatabase with ChangeBusAwareLP {
     return Collection.internal(this, requireTable(name));
   }
 
-  /// Returns a typed handle for the store definition [def].
-  ///
-  /// The first `store` call binds [def] in this pocket's typed registry
-  /// (name-keyed, reference identity): re-binding the identical instance is
-  /// idempotent, and binding a different instance under an already-bound
-  /// name throws [TypedStoreMismatchError] naming the store. The store's
-  /// schema must have been registered at [LocalPocket.open] (`stores:`);
-  /// otherwise the engine's "no store registered" error surfaces unchanged.
-  ///
-  /// The returned wrapper is cached per pocket: repeated calls with the
-  /// same canonical definition return the identical object until
-  /// [close]. Inside a transaction, use `tx.store(def)` instead.
-  TypedCollection<S> store<S extends StoreDef<S>>(S def) {
-    _guardOutsideTx();
-    // Verify structure and existence BEFORE binding so a failed lookup leaves
-    // the typed registry untouched (matching tx.store and the web facades).
-    final table = requireTable(def.name);
-    def.verifyRegisteredSchema(table.schema);
-    typedRegistry.bind(def);
-    return typedRegistry.cachedCollection<S>(
-      def,
-      () => TypedCollection<S>.native(
-        def,
-        Collection.internal(this, table),
-      ),
-    );
-  }
-
   /// Runs [action] in a serialized, single-writer transaction.
   ///
   /// All domain, outbox, and sync-state changes performed through the [Tx]
@@ -1045,7 +1012,6 @@ class KernelDatabase with ChangeBusAwareLP {
     if (_closed) return;
     _closed = true;
     changeBus.close();
-    typedRegistry.clearHandles();
     try {
       await db.execute('PRAGMA optimize');
       optimizeRanOnClose = true;

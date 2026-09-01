@@ -1,8 +1,7 @@
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
-import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/typed/typed.dart';
+import 'package:localpocket/localpocket.dart';
 import 'package:web/web.dart' as web;
 
 /// Browser smoke for the destination facade over the worker runtime in the

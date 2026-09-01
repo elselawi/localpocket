@@ -1,4 +1,4 @@
-import 'package:localpocket/src/typed/typed.dart';
+import 'package:localpocket/localpocket.dart';
 
 /// The canonical store definition shared by the api tests.
 final class Tasks extends StoreDef<Tasks> {

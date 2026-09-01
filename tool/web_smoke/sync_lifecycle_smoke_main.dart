@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
-import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/kernel/sync/status.dart' show SyncStatus;
-import 'package:localpocket/src/typed/typed.dart';
+import 'package:localpocket/localpocket.dart';
 
 /// A caller-owned token provider for the sync smoke. Token values never
 /// persist; the fixture server accepts any bearer token.

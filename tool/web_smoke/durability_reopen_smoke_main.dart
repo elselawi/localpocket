@@ -1,8 +1,7 @@
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
-import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/typed/typed.dart';
+import 'package:localpocket/localpocket.dart';
 
 /// Browser smoke for the destination facade over the worker runtime: proves
 /// that a 2000-row batch survives a worker reopen in OPFS/IndexedDB, that a

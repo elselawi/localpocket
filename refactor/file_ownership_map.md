@@ -46,21 +46,30 @@ Every current production file in `lib/` → destination file (Phase 10 tree,
 | `watch.dart` | `kernel/watcher_service.dart` (one digest policy, §10.5) |
 | `web_compat.dart` | DELETE when the last consumer is re-homed (audit before Phase 10) |
 
-## `lib/src/typed/` — declaration files SPLIT to `schema/` + `api/` (P10.4, commit e8a1aeb) ✔
+## `lib/src/typed/` — DELETED (P10.9, commit …) ✔
+
+> The declaration files were split to `schema/` + `api/` in P10.4; the rest of
+> the old app surface was DELETED in P10.9 once benchmark + example migrated.
+> The destination facade (`src/api/`) owns every surface the typed layer used
+> to mirror: `Store<S>` (`api/store.dart`), `Row<S>` (`api/row.dart`),
+> `QuerySpec`/`SearchSpec`/`Page`/`Cursor` (`api/query.dart`),
+> `PocketBaseSync` (`api/sync.dart`), `Write`/`Writes` (`api/writes.dart`).
+> `raw_surface.dart` no longer re-exports `typed/typed.dart`.
 
 | Current | Action |
 |---|---|
-| `store_def.dart`, `field_def.dart`, `cond.dart`, `write.dart` | ✔ → `src/schema/{store_def,field_def,cond}.dart` + `src/api/writes.dart` (P10.4); remove map-surface deps |
+| `store_def.dart`, `field_def.dart`, `cond.dart`, `write.dart` | ✔ → `src/schema/{store_def,field_def,cond}.dart` + `src/api/writes.dart` (P10.4) |
 | `schema_helpers.dart` | ✔ → `src/schema/schema_helpers.dart` (P10.4) |
-| `registry.dart` | DELETE (Phase 3) — `kernel/store_registry.dart` + manifest handshake replace `verifyRegisteredSchema` |
-| `limits.dart` | ✔ → `src/api/limits.dart` (P10.4; kept as own file, may fold into `api/query.dart`) |
-| `typed_row.dart` | `api/row.dart` (`Row<S>`) |
-| `typed_model.dart` | DELETE (§16 — no model base class); migrate any used helpers |
-| `typed_pocket.dart`, `typed_pocket_platform.dart` | `api/local_pocket.dart` (fold lifecycle into one facade) |
-| `typed_collection.dart` | `api/store.dart` (fold lowering; delete surface adapters) |
-| `typed_query.dart`, `typed_search.dart` | `api/query.dart`, `api/search.dart` (immutable specs) |
-| `query_surface.dart` | DELETE — lowering happens once in common code |
-| `typed_sync.dart`, `typed_sync_host.dart`, `sync_engine_native.dart`, `sync_engine_platform.dart` | `api/sync.dart` (`PocketBaseSync`) — one host, `start()` owns realtime |
+| `limits.dart` | ✔ → `src/api/limits.dart` (P10.4) |
+| `registry.dart` | ✔ DELETED (P10.9) — `kernel/store_registry.dart` + manifest handshake replace `verifyRegisteredSchema` |
+| `typed_row.dart` | ✔ DELETED (P10.9) — `api/row.dart` (`Row<S>`) |
+| `typed_model.dart` | ✔ DELETED (P10.9) |
+| `typed_pocket.dart`, `typed_pocket_platform.dart` | ✔ DELETED (P10.9) — `api/local_pocket.dart` owns the facade |
+| `typed_collection.dart` | ✔ DELETED (P10.9) — `api/store.dart` owns the typed store view |
+| `typed_query.dart`, `typed_search.dart` | ✔ DELETED (P10.9) — `api/query.dart`/`api/search.dart` |
+| `query_surface.dart` | ✔ DELETED (P10.9) |
+| `typed_sync.dart`, `typed_sync_host.dart`, `sync_engine_native.dart`, `sync_engine_platform.dart`, `sync_engine_remote.dart` | ✔ DELETED (P10.9) — `api/sync.dart` (`PocketBaseSync`) is the one host |
+| `typed.dart` | ✔ DELETED (P10.9) |
 
 ## `lib/src/sync/` — ALL MOVED to `lib/src/kernel/sync/` (P10.1, commit de0ee66) ✔
 
