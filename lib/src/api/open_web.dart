@@ -98,5 +98,12 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   // transport's own closed classification.
   unawaited(connectResult.database.closed.then((_) => runtime.close()));
 
-  return LocalPocket.internal(runtime);
+  // On close, dispose the worker connection so the OPFS file handle is
+  // flushed (sqlite3_web `Database.dispose()`). Without this, committed blob
+  // data can be lost on some browsers when the page tears down after the
+  // kernel close command.
+  return LocalPocket.internal(
+    runtime,
+    onClose: () => connectResult.database.dispose(),
+  );
 }

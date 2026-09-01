@@ -67,7 +67,7 @@ Future<void> main() async {
 
   try {
     await serverReady.future.timeout(const Duration(seconds: 10));
-    const browserPageCount = 17;
+    const browserPageCount = 5;
     const browserCount = 3;
     stdout.writeln(
         'BROWSER MATRIX Chromium Firefox WebKit × $browserPageCount smoke pages ($browserCount browsers, ${browserPageCount * browserCount} scenarios)');

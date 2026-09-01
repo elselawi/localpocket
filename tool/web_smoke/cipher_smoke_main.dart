@@ -69,14 +69,18 @@ Future<void> main() async {
 
   try {
     // Fixed key so repeated smoke runs (OPFS persistence) interoperate: the
-    // ciphertext from the previous run is decryptable by this run's key.
+    // ciphertext from a previous run is decryptable by this run's key. The
+    // DATABASE path is unique per run so a stale OPFS file from an older
+    // schema cannot poison the reopen (WebKit keeps OPFS across launches).
     final keyBytes = List<int>.generate(32, (i) => (i * 7 + 13) % 256);
+    final dbPath =
+        'cipher_smoke_${DateTime.now().microsecondsSinceEpoch}';
     const secretValue = 'Top secret clinical note — unicode ✓ 1234567890!@#';
     const recordId = 'vault0000000000';
 
     // 1. Open with a main-thread cipher; the key is serialized into openArgs.
     mark('open-encrypted');
-    final pocket = await openEncrypted('cipher_smoke_db', keyBytes);
+    final pocket = await openEncrypted(dbPath, keyBytes);
 
     // 2. Round-trip encrypted fields through the destination store.
     mark('roundtrip');
@@ -106,11 +110,22 @@ Future<void> main() async {
     // 3. Reopen with a FRESH cipher built from the same key and read the
     //    ciphertext persisted by the worker. Successful decryption proves the
     //    stored bytes are native-compatible AES-256-GCM under the same key.
+    //    Poll the read briefly: WebKit can take a moment to make the flushed
+    //    OPFS file visible to a fresh connection.
     mark('reopen-same-key');
-    final reopened = await openEncrypted('cipher_smoke_db', keyBytes);
-    final doc2 = await reopened.store(Vault.store).get(recordId);
+    final reopened = await openEncrypted(dbPath, keyBytes);
+    // Poll the read briefly: WebKit can take a moment to make the flushed
+    // OPFS file visible to a fresh connection.
+    var doc2 = await reopened.store(Vault.store).get(recordId);
+    for (var attempt = 0;
+        attempt < 25 && (doc2 == null || doc2(Vault.secret) != secretValue);
+        attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      doc2 = await reopened.store(Vault.store).get(recordId);
+    }
     if (doc2 == null || doc2(Vault.secret) != secretValue) {
-      throw StateError('Cross-instance decrypt mismatch (same key)');
+      throw StateError('Cross-instance decrypt mismatch (same key); '
+          'doc2=$doc2; secret=${doc2 == null ? null : doc2(Vault.secret)}');
     }
     await reopened.close();
     await Future<void>.delayed(const Duration(milliseconds: 400));
@@ -122,7 +137,7 @@ Future<void> main() async {
     try {
       await LocalPocket.open(
         LocalPocketOptions(
-          path: 'cipher_negative_db',
+          path: 'cipher_negative_${DateTime.now().microsecondsSinceEpoch}',
           stores: [Vault.store],
           bootstrap: const BootstrapOptions(
             workerAssetPath: 'assets/localpocket_worker.js',

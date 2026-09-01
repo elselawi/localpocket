@@ -30,7 +30,14 @@ final class LocalPocket {
   /// the platform openers (`open_native.dart`, `open_web.dart`) construct the
   /// facade once their runtime is up — on web the kernel lives behind the
   /// worker transport, so nothing is opened in-process.
-  LocalPocket.internal(this._runtime);
+  ///
+  /// [onClose] runs at [close] time after the close command, letting a
+  /// platform opener tear down its own resources — on web this disposes the
+  /// worker connection so the OPFS file handle is flushed (the sqlite3_web
+  /// `Database.dispose()`), without which committed blob data can be lost on
+  /// some browsers when the page tears down.
+  LocalPocket.internal(this._runtime, {Future<void> Function()? onClose})
+      : _onClose = onClose;
 
   /// Opens a database on the current platform: the direct in-process runtime
   /// on native targets, the typed contract over the dedicated worker on web.
@@ -69,6 +76,7 @@ final class LocalPocket {
   }
 
   final RuntimeClient _runtime;
+  final Future<void> Function()? _onClose;
   bool _closed = false;
 
   /// The engine's capabilities as observed at open time.
@@ -175,13 +183,19 @@ final class LocalPocket {
   }
 
   /// Closes the database. Subsequent sends fail with a typed error; live
-  /// event and watch streams end.
+  /// event and watch streams end. The platform opener's [LocalPocket.internal
+  /// onClose] hook (web: dispose the worker connection so OPFS is flushed)
+  /// runs after the close command.
   Future<void> close() async {
     if (_closed) return;
     try {
       await _send(const CloseRequest());
     } finally {
       _closed = true;
+      final onClose = _onClose;
+      if (onClose != null) {
+        await onClose();
+      }
       await _runtime.close();
     }
   }
