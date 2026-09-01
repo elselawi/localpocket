@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:localpocket/src/files/native_blob_store_platform.dart';
+import 'package:localpocket/src/platform/native/blob_store.dart';
 import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
@@ -25,7 +25,7 @@ import '../support/helpers.dart';
 /// the identical in-memory fallback semantics of [MemoryBlobStore].
 void main() {
   group('WebBlobStore durability wiring (structural)', () {
-    final source = File('lib/src/files/web_blob_store.dart').readAsStringSync();
+    final source = File('lib/src/platform/web/worker/blob_store.dart').readAsStringSync();
 
     test('reports durability from a cached OPFS probe', () {
       expect(source, contains('Future<bool> get isDurable'));

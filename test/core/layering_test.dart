@@ -31,7 +31,7 @@ import 'package:test/test.dart';
 /// remains forbidden.
 ///
 /// The native database factory (`lib/src/kernel/database_factory_native.dart`)
-/// also imports `../files/native_backup_file.dart` so the destructive-migration
+/// also imports `../platform/native/backup_store.dart` so the destructive-migration
 /// backup file hooks can use `dart:io` from the files layer (core stays
 /// web-clean; the web worker wires its own OPFS hooks instead).
 void main() {
@@ -123,8 +123,8 @@ void main() {
   test('files platform implementations are the only dart:io consumers', () {
     // dart:io is allowed ONLY in the native platform implementations.
     const allowedIoConsumers = {
-      'lib/src/files/native_blob_store.dart',
-      'lib/src/files/native_backup_file.dart',
+      'lib/src/platform/native/blob_store.dart',
+      'lib/src/platform/native/backup_store.dart',
     };
     for (final f in allSrc) {
       final hasIo = _imports(f).any((i) => i.startsWith('dart:io'));

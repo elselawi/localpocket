@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart' show sha256;
-import 'package:localpocket/src/files/native_blob_store_platform.dart';
+import 'package:localpocket/src/platform/native/blob_store.dart';
 import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/schema.dart';

@@ -15,7 +15,7 @@ import '../../../kernel/database_adapter.dart';
 import '../../../kernel/errors.dart';
 import '../../../kernel/local_pocket.dart';
 import '../../../kernel/schema.dart';
-import '../../../files/web_blob_store.dart';
+import 'blob_store.dart';
 import '../../../adapters/pocketbase/backend.dart' show PocketBaseSyncBackendFactory;
 import '../crypto.dart';
 import 'open_options.dart';

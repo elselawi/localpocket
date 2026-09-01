@@ -94,16 +94,23 @@ Every current production file in `lib/` → destination file (Phase 10 tree,
 | `sweeper.dart` | ✔ `kernel/sync/sweeper.dart` |
 | `apply_lane.dart` | ✔ `kernel/sync/apply_lane.dart` — move-only |
 
-## `lib/src/files/` — common code RE-HOMED (P10.5, commit 37913f7) ✔
+## `lib/src/files/` — common code RE-HOMED (P10.5, commit 37913f7) + PLATFORM SPLIT (P10.11, commit …) ✔
+
+> The `lib/src/files/` directory is now EMPTY: common code went to
+> `kernel/files/` + `kernel/file_service.dart` (P10.5), and the platform
+> implementations moved to `platform/native/` + `platform/web/` in P10.11.
+> The conditional export (`native_blob_store_platform.dart`/`_web.dart`) and
+> the web `NativeBlobStore` placeholder were DELETED — web applications
+> inject a `WebBlobStore`, native applications a `NativeBlobStore`.
 
 | Current | Action |
 |---|---|
 | `blob_store.dart` | ✔ `kernel/files/blob_store.dart` (port + memory impl) |
-| `native_blob_store.dart` | `platform/native/blob_store.dart` (dart:io stays here) — pending |
-| `native_blob_store_platform.dart` / `_web.dart` | conditional export collapses into `platform/*/blob_store.dart` entries — pending |
-| `web_blob_store.dart` | `platform/web/worker/blob_store.dart` (OPFS / volatile fallback) — pending |
-| `web_blob_object_url.dart` | `platform/web/page/object_urls.dart` — pending |
-| `native_backup_file.dart` | `platform/native/backup_store.dart` — pending |
+| `native_blob_store.dart` | ✔ `platform/native/blob_store.dart` (dart:io stays here) |
+| `native_blob_store_platform.dart` / `_web.dart` | ✔ DELETED (P10.11) — conditional export collapsed |
+| `web_blob_store.dart` | ✔ `platform/web/worker/blob_store.dart` (OPFS / volatile fallback) |
+| `web_blob_object_url.dart` | ✔ `platform/web/page/object_urls.dart` |
+| `native_backup_file.dart` | ✔ `platform/native/backup_store.dart` |
 | `files_api.dart` | ✔ `kernel/file_service.dart` (`api/files.dart` is the destination facade) |
 | `file_sync_lane.dart` | ✔ `kernel/files/file_sync.dart` |
 

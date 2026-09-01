@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
-import 'package:localpocket/src/files/web_blob_object_url.dart';
-import 'package:localpocket/src/files/web_blob_store.dart';
+import 'package:localpocket/src/platform/web/page/object_urls.dart';
+import 'package:localpocket/src/platform/web/worker/blob_store.dart';
 
 Future<void> main() async {
   void report(String status, [String? detail]) {

@@ -1,13 +1,15 @@
 import 'dart:async';
 
-import 'package:localpocket/src/files/native_blob_store_platform.dart';
+import 'package:localpocket/src/platform/web/worker/blob_store.dart';
 
 /// Web-compile smoke: if dart:io leaked into the web build this would fail to
-/// compile for JS. The conditional export must select the web stub.
+/// compile for JS. The web worker blob store (OPFS + volatile fallback) is the
+/// web-appropriate store; constructing it and streaming a put retains the
+/// worker blob surface in the web output.
 void main() async {
-  final store = NativeBlobStore('/web/root');
+  final store = WebBlobStore();
   await store
       .put(const Stream.empty())
-      // UnsupportedError is expected on web.
+      // OPFS is absent under a compile-only probe; any outcome is fine.
       .catchError((Object e) => Future.value('ignored'));
 }

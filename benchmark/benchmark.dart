@@ -7,7 +7,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:localpocket/localpocket.dart';
-import 'package:localpocket/src/files/native_blob_store.dart'
+import 'package:localpocket/src/platform/native/blob_store.dart'
     show NativeBlobStore;
 import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
 import 'package:localpocket/src/kernel/local_pocket.dart' as kernel

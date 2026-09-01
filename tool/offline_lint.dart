@@ -53,8 +53,8 @@ void main(List<String> args) {
       // Check forbidden dart:io imports
       if (RegExp(r'''^\s*import\s+['"]dart:io['"]''').hasMatch(line)) {
         final isPlatformIo =
-            relPath == 'lib/src/files/native_blob_store.dart' ||
-                relPath == 'lib/src/files/native_backup_file.dart';
+            relPath == 'lib/src/platform/native/blob_store.dart' ||
+                relPath == 'lib/src/platform/native/backup_store.dart';
         if (!isPlatformIo) {
           violations
               .add('$relPath:$lineNum: Forbidden direct import of dart:io.');

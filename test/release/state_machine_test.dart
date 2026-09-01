@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:localpocket/src/files/native_blob_store_platform.dart';
+import 'package:localpocket/src/platform/native/blob_store.dart';
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/kernel/sync/engine.dart';
 import 'package:localpocket/src/kernel/sync/merge.dart';

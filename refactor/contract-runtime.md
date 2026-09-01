@@ -1554,3 +1554,32 @@ part of the Phase 10 gate command list.
   export line wrapped by `dart format` — cosmetic). Local web gate 7/7
   (worker asset unchanged; `raw_surface` was unreachable from the worker).
 
+## P10.11 files platform split (commit …)
+
+- `lib/src/files/` is EMPTY. Platform files moved (git mv): `native_blob_store.dart`
+  → `platform/native/blob_store.dart`, `native_backup_file.dart` →
+  `platform/native/backup_store.dart`, `web_blob_store.dart` →
+  `platform/web/worker/blob_store.dart`, `web_blob_object_url.dart` →
+  `platform/web/page/object_urls.dart`. Internal `../kernel/files/blob_store.dart`
+  imports became `../../`/`../../../kernel/files/blob_store.dart`.
+- The conditional export COLLAPSED: `native_blob_store_platform.dart` +
+  `native_blob_store_web.dart` DELETED (and the web `NativeBlobStore`
+  placeholder with them). Web applications inject a `WebBlobStore`
+  (`platform/web/worker/blob_store.dart`); native applications a
+  `NativeBlobStore` (`platform/native/blob_store.dart`).
+- External importers re-pointed: `database_factory_native.dart` (backup_store),
+  `platform/web/worker/controller.dart` (sibling `blob_store.dart`), the
+  benchmark, `test/files/*` + `test/release/*` (native store), the
+  `blob_smoke_main.dart` page (web worker store + page object_urls), and the
+  structural file-path scans in `blob_durability_test.dart` /
+  `web_blob_open_errors_test.dart`.
+- `tool/web_blob_compile_smoke.dart` now retains `WebBlobStore` (the web
+  store) instead of the deleted `NativeBlobStore` web stub. `web_blob_conditional_test.dart`
+  rewritten to pin the NEW split (native store is dart:io; web worker store is
+  pure Dart; the old shim files are gone).
+- `offline_lint.dart` + `layering_test.dart` dart:io-consumer pins updated to
+  `platform/native/{blob_store,backup_store}.dart`. Worker asset refreshed
+  (worker source moved); local web gate 7/7. Full suite `+2349 ~82` green;
+  `dart analyze lib test tool benchmark example` 0; offline_lint 0 violations
+  (the three pre-existing typed-layer violations vanished with `typed/`).
+
