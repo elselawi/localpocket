@@ -2,12 +2,11 @@ import 'dart:async';
 
 import 'package:localpocket/src/contract/contract.dart';
 
-/// The caller side of the runtime boundary. The public API talks to this
-/// interface only; it never knows whether the kernel is reached directly or
-/// through a transport.
+/// The caller side of the runtime boundary: the public API only ever talks
+/// to this interface, regardless of how the kernel is reached.
 abstract interface class RuntimeClient {
-  /// Sends one typed command and returns its typed result. The runtime
-  /// verifies the result family actually answers the request.
+  /// Sends one typed command; the runtime verifies the result family answers
+  /// the request.
   Future<R> send<R extends Result>(Request<R> request);
 
   /// Committed facts and watch snapshots emitted by the kernel.
@@ -17,9 +16,10 @@ abstract interface class RuntimeClient {
   Future<void> close();
 }
 
-/// Direct runtime: calls the kernel handler in-process. Requests are not
-/// serialized — the typed objects travel as-is.
+/// Direct runtime: calls the kernel handler in-process; requests travel
+/// as-is, unserialized.
 final class LocalRuntimeClient implements RuntimeClient {
+  /// Creates a direct client over [handler].
   LocalRuntimeClient(this._handler);
 
   final CommandHandler _handler;
@@ -38,13 +38,12 @@ final class LocalRuntimeClient implements RuntimeClient {
   Future<void> close() => _handler.close();
 }
 
-/// Loopback runtime: exercises the REAL wire contract on the VM. Every
-/// command is encoded into its wire envelope, decoded back, handed to the
-/// kernel as the decoded value, and the result travels back through the
-/// result codec with tag correlation. No JavaScript or browser needed — this
-/// is the cheap conformance harness that keeps native and remote runtimes
-/// honest.
+/// Loopback runtime: exercises the REAL wire contract on the VM — every
+/// command is encode/decode round-tripped through [ContractCodec] with tag
+/// correlation. The cheap conformance harness keeping native and remote
+/// runtimes honest.
 final class LoopbackRuntimeClient implements RuntimeClient {
+  /// Creates a loopback client over [handler].
   LoopbackRuntimeClient(this._handler);
 
   final CommandHandler _handler;
@@ -55,8 +54,8 @@ final class LoopbackRuntimeClient implements RuntimeClient {
     final decoded =
         ContractCodec.decodeRequest(ContractCodec.encodeRequest(request));
     final result = await _handler.handle(decoded);
-    // Encode → decode with correlation: the caller only ever accepts the
-    // result family that answers its request.
+    // Encode → decode with correlation: only the answering result family is
+    // accepted.
     final decodedResult =
         ContractCodec.decodeResult(request, ContractCodec.encodeResult(result));
     return decodedResult as R;
