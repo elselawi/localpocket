@@ -11,12 +11,11 @@ import 'field_def.dart';
 
 /// Builds an index declaration from store-owned field descriptors.
 ///
-/// The descriptor names are copied into the same raw [IndexSpec] shape used by
-/// the database. Supplying a foreign store's descriptor is rejected by the
-/// static type checker when the call's type argument is the intended store
-/// type. This helper is intentionally not `const`: descriptors are runtime
-/// objects, so helper-based declarations trade const construction for
-/// typo- and cross-store-resistant column selection.
+/// Descriptor names are copied into the same raw [IndexSpec] shape the
+/// database uses; a foreign store's descriptor is rejected by the static type
+/// checker. Intentionally not `const`: descriptors are runtime objects, so
+/// helper-based declarations trade const construction for typo- and
+/// cross-store-resistant column selection.
 IndexSpec indexSpec<S>(
   List<FieldDef<S, Object?>> fields, {
   bool unique = false,
@@ -30,11 +29,10 @@ IndexSpec indexSpec<S>(
 
 /// Builds an FTS declaration from store-owned field descriptors.
 ///
-/// The name is intentionally `ftsSpec`, rather than `fts`: [StoreDef] already
-/// exposes an `fts` getter, and an instance member would shadow a top-level
-/// helper with that name inside a store definition. This helper is also not
-/// `const` because its descriptor inputs are runtime objects. Its output is
-/// the same raw [FtsSpec] shape used by the database.
+/// Named `ftsSpec` rather than `fts`: [StoreDef] already exposes an `fts`
+/// getter, which would shadow a top-level helper inside a store definition.
+/// Not `const` — descriptor inputs are runtime objects. Output is the same
+/// raw [FtsSpec] shape used by the database.
 ///
 /// When the descriptor list is empty, pass the owner explicitly, for example
 /// `ftsSpec<MyStore>([])`, so the intended store type is documented at the

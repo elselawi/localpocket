@@ -1,10 +1,9 @@
-/// Typed field descriptors: the one declaration per field that is
-/// simultaneously the schema declaration and the compile-time-typed
-/// accessor.
+/// Typed field descriptors: one declaration per field, serving as both the
+/// schema declaration and the compile-time-typed accessor.
 ///
 /// Each descriptor **wraps** the database's public `Field` factories — it
 /// never extends `Field` (the database class has a private constructor).
-/// the database continues to see plain maps and plain `Field`s; typing lives
+/// The database continues to see plain maps and plain `Field`s; typing lives
 /// entirely at this consumer-facing boundary.
 library;
 
@@ -23,11 +22,8 @@ typedef FieldEncodeFn<T> = Object? Function(T value);
 /// type [T].
 ///
 /// The base class holds no state of type [T]: [T] appears only in member
-/// signatures ([decode]/[encode]), never in stored values. That is what
-/// makes the `.req()` nullability flip sound with no cast — an optional
-/// descriptor's `.req()` returns a *new* descriptor whose static type is
-/// non-nullable, and the non-nullable [decode] is the only thing that
-/// changed.
+/// signatures ([decode]/[encode]), never in stored values — that is what
+/// makes the `.req()` nullability flip sound with no cast.
 ///
 /// [owner] is the store definition instance this field belongs to
 /// (the phantom store type [S] binds it for compile-time cross-store
@@ -35,9 +31,8 @@ typedef FieldEncodeFn<T> = Object? Function(T value);
 /// {@endtemplate}
 abstract base class FieldDef<S, T> {
   /// [decode]/[encode] default to an unchecked cast / identity; kinds with a
-  /// boundary codec (enum, dateTime) pass closures instead. A defense-in-depth
-  /// guard rejects the impossible combination `required: true` with a
-  /// nullable [T] — such a descriptor can only be built by hand, never by
+  /// boundary codec (enum, dateTime) pass closures instead. A guard rejects
+  /// `required: true` with a nullable [T] — hand-buildable only, never via
   /// the [Fields] factories.
   ///
   /// {@macro localpocket.field_def}
@@ -74,27 +69,20 @@ abstract base class FieldDef<S, T> {
   /// Encodes a value of type [T] into its raw logical-map form.
   Object? encode(T value) => _encode == null ? value : _encode!(value);
 
-  /// Builds the database [Field] this descriptor maps to.
-  ///
-  /// This is the single place the kind → `Field` factory mapping lives, so
-  /// a descriptor can never disagree with the database about constraints.
+  /// Builds the database [Field] this descriptor maps to — the single place
+  /// the kind → `Field` factory mapping lives, so constraints can never
+  /// diverge.
   Field toField();
 
-  // ---------------------------------------------------------------------
-  // Universal query family: conditions and order terms are VALUES built
-  // beside the descriptor — this call site is where the field's value type
-  // is enforced. Query entry points accept them as plain named-argument
-  // lists (`TypedCollection.query(where: [...])`) and stay fully typed.
-  // ---------------------------------------------------------------------
+  // Universal query family: conditions/order terms are values built beside
+  // the descriptor — this call site is where the value type is enforced.
 
   /// `field == value`. For an optional field, `eq(null)` reads as SQL
-  /// `IS NULL` (the typed layer routes it there; SQL `= NULL` never
-  /// matches). On a required field the null case is a compile error because
-  /// the value type is non-nullable.
+  /// `IS NULL` (the typed layer routes it there; SQL `= NULL` never matches);
+  /// on a required field the null case is a compile error.
   ///
   /// Conditions compose into boolean trees with `&`, `|`, and `~` —
-  /// `field.eq(v) & other.gt(0)`, `field.a | field.b`, `~field.eq(v)` for
-  /// not-equal.
+  /// `~field.eq(v)` spells not-equal.
   FieldCond<S> eq(T value) =>
       FieldCond<S>(owner, name, 'eq', <Object?>[encode(value)]);
 
@@ -108,8 +96,8 @@ abstract base class FieldDef<S, T> {
         <Object?>[for (final value in values) encode(value)]);
   }
 
-  /// `field BETWEEN a AND b` — inclusive on both ends, matching SQL
-  /// `BETWEEN`. For a half-open window use `gte(a)` with `lt(b)`.
+  /// `field BETWEEN a AND b` — inclusive on both ends. For a half-open
+  /// window use `gte(a)` with `lt(b)`.
   FieldCond<S> between(T a, T b) =>
       FieldCond<S>(owner, name, 'between', <Object?>[encode(a), encode(b)]);
 
@@ -119,12 +107,8 @@ abstract base class FieldDef<S, T> {
   /// Descending order term for this field.
   OrderTerm<S> get desc => OrderTerm<S>(this, desc: true);
 
-  /// For an optional descriptor: the required counterpart returned by the
-  /// most recent `req()` call, or `null` if `req()` was never called.
-  /// Required descriptors return `null`.
-  ///
-  /// This is bookkeeping for `StoreDef.verify()` (detecting a field that
-  /// was created through `f.` but omitted from the `fields` list) — normal
+  /// The required counterpart of an optional descriptor after `req()`; null
+  /// otherwise. Bookkeeping for `StoreDef.verify()` (omitted-field check) —
   /// consumers never need it.
   FieldDef<S, Object?>? get reqCounterpart => null;
 
@@ -168,9 +152,7 @@ abstract interface class NumericFieldDef<S> {
   String get name;
 }
 
-// ---------------------------------------------------------------------------
 // text
-// ---------------------------------------------------------------------------
 
 /// {@template localpocket.text_field_opt}
 /// Optional (nullable [String]) text descriptor.
@@ -240,9 +222,7 @@ final class TextFieldReq<S> extends FieldDef<S, String>
       required: true, uniqueWhenActive: uniqueWhenActive, encrypted: encrypted);
 }
 
-// ---------------------------------------------------------------------------
 // int
-// ---------------------------------------------------------------------------
 
 /// {@template localpocket.int_field_opt}
 /// Optional (nullable [int]) integer descriptor.
@@ -291,9 +271,7 @@ final class IntFieldReq<S> extends FieldDef<S, int>
   Field toField() => Field.int(name, required: true, encrypted: encrypted);
 }
 
-// ---------------------------------------------------------------------------
 // real
-// ---------------------------------------------------------------------------
 
 /// {@template localpocket.real_field_opt}
 /// Optional (nullable [num]) real-number descriptor.
@@ -342,16 +320,14 @@ final class RealFieldReq<S> extends FieldDef<S, num>
   Field toField() => Field.real(name, required: true, encrypted: encrypted);
 }
 
-// ---------------------------------------------------------------------------
 // bool
-// ---------------------------------------------------------------------------
 
 /// {@template localpocket.bool_field_opt}
 /// Optional (nullable [bool]) boolean descriptor.
 ///
-/// `schema.boolean` deliberately has **no** `encrypted` parameter: the database's
+/// `schema.boolean` has **no** `encrypted` parameter: the database's
 /// `Field.bool` does not support encryption, so the impossible constraint
-/// is unspellable rather than a runtime error.
+/// is unspellable.
 /// {@endtemplate}
 base class BoolFieldOpt<S> extends FieldDef<S, bool?>
     with NullableFieldCond<S, bool?>
@@ -387,16 +363,13 @@ final class BoolFieldReq<S> extends FieldDef<S, bool>
   Field toField() => Field.bool(name, required: true);
 }
 
-// ---------------------------------------------------------------------------
 // date
-// ---------------------------------------------------------------------------
 
 /// {@template localpocket.date_field_opt}
 /// Optional (nullable [int]) date descriptor.
 ///
-/// The logical type is epoch milliseconds — the database's type for
-/// `Field.date`. This adapter is pass-through (no `DateTime` conversion);
-/// use `schema.dateTime` for a `DateTime` boundary codec over the same column.
+/// Logical type is epoch milliseconds (the database's `Field.date` type);
+/// pass-through, no `DateTime` conversion — use `schema.dateTime` for that.
 /// {@endtemplate}
 base class DateFieldOpt<S> extends FieldDef<S, int?>
     with ComparableFieldDef<S, int?>, NullableFieldCond<S, int?>
@@ -433,13 +406,10 @@ final class DateFieldReq<S> extends FieldDef<S, int>
   Field toField() => Field.date(name, required: true);
 }
 
-// ---------------------------------------------------------------------------
 // dateTime
-// ---------------------------------------------------------------------------
 
-/// Shared UTC boundary codec for the date-time descriptor pair. Decode
-/// produces an `isUtc: true` value; encode converts through
-/// [DateTime.toUtc] before extracting epoch milliseconds, so the two
+/// Shared UTC boundary codec for the date-time pair: decode yields an
+/// `isUtc: true` value; encode converts through [DateTime.toUtc]. The two
 /// adapters are interchangeable on the wire over the same column.
 DateTime? _decodeUtcOpt(String name, Object? raw) =>
     raw == null ? null : _decodeUtcReq(name, raw);
@@ -461,9 +431,7 @@ Object? _encodeUtc(DateTime? value) => value?.toUtc().millisecondsSinceEpoch;
 ///
 /// Maps to the same `Field.date` column as [DateFieldOpt] — only the
 /// boundary codec differs. Both directions are **UTC-pinned**: decode
-/// produces an `isUtc: true` value and encode converts through
-/// [DateTime.toUtc] before extracting epoch milliseconds, so the two
-/// adapters are interchangeable on the wire over the same column.
+/// yields `isUtc: true`; encode converts through [DateTime.toUtc].
 /// {@endtemplate}
 base class DateTimeFieldOpt<S> extends FieldDef<S, DateTime?>
     with ComparableFieldDef<S, DateTime?>, NullableFieldCond<S, DateTime?>
@@ -511,18 +479,16 @@ final class DateTimeFieldReq<S> extends FieldDef<S, DateTime>
   Field toField() => Field.date(name, required: true);
 }
 
-// ---------------------------------------------------------------------------
 // enum
-// ---------------------------------------------------------------------------
 
 /// Shared enum codec members for the optional/required enum descriptor
-/// pair: the value snapshot, the wire mapping, and the raw decode.
+/// pair: value snapshot, wire mapping, raw decode.
 base mixin EnumCodec<E extends Enum> {
   /// The database field name this codec is bound to (from the descriptor).
   String get name;
 
-  /// The accepted enum values. This snapshot cannot diverge after schema
-  /// compilation even if the caller later mutates its source list.
+  /// The accepted enum values (unmodifiable snapshot; cannot diverge after
+  /// schema compilation).
   abstract final List<E> values;
 
   /// Per-value wire-string overrides; unmapped values use [Enum.name].
@@ -642,6 +608,9 @@ void _verifyEnumCodec<E extends Enum>(
   List<E> values,
   Map<E, String> wire,
 ) {
+  if (values.isEmpty) {
+    throw StateError('Enum field "$name" must accept at least one value.');
+  }
   if (values.toSet().length != values.length) {
     throw StateError('Enum field "$name" contains duplicate values.');
   }
@@ -671,9 +640,8 @@ void _verifyEnumCodec<E extends Enum>(
 /// {@template localpocket.json_field}
 /// JSON-object descriptor (`Map<String, Object?>`), optional by definition.
 ///
-/// There is no `.req()` and no `required` flag: the database's `Field.json`
-/// has no `required` parameter, so the impossible constraint is
-/// unspellable. (The raw path also admits a `List` here — a documented
+/// There is no `.req()`/`required` flag: the database's `Field.json` has no
+/// `required` parameter. (The raw path also admits a `List` — a documented
 /// asymmetry; the typed surface is the stricter one.)
 /// {@endtemplate}
 final class JsonField<S> extends FieldDef<S, Map<String, Object?>?>
@@ -714,8 +682,8 @@ final class JsonListField<S, T> extends FieldDef<S, List<T>?>
       throw ValidationException('Field "$name" must hold a JSON array.',
           field: name);
     }
-    // jsonDecode yields `List<dynamic>`; cast per element so a well-formed
-    // list decodes and an off-contract element fails loudly.
+    // jsonDecode yields List<dynamic>; per-element cast makes an
+    // off-contract element fail loudly.
     return [for (final e in raw) e as T];
   }
 
@@ -727,8 +695,8 @@ final class JsonListField<S, T> extends FieldDef<S, List<T>?>
 /// Reference descriptor (a record id of type [String]), optional by
 /// definition.
 ///
-/// There is no `.req()` and no `required` flag: the database's `Field.ref`
-/// has no `required` parameter.
+/// There is no `.req()`/`required` flag: the database's `Field.ref` has no
+/// `required` parameter.
 /// {@endtemplate}
 final class RefField<S> extends FieldDef<S, String?>
     with NullableFieldCond<S, String?>

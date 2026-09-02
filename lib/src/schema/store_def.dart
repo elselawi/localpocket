@@ -1,5 +1,5 @@
 /// Store definitions: the `Fields` factory object and the `StoreDef` base
-/// class that compiles descriptors into an database `CollectionSchema`.
+/// class that compiles descriptors into a database `CollectionSchema`.
 library;
 
 import 'dart:collection';
@@ -46,10 +46,9 @@ final class _SystemFieldDef<S, T> extends FieldDef<S, T> {
 /// {@template localpocket.fields}
 /// The per-store field factory.
 ///
-/// One instance per store, created by [StoreDef]. Each factory method
-/// returns a typed descriptor whose [FieldDef.owner] is bound to the store,
-/// and records it so [StoreDef.verify] can detect a descriptor that was
-/// created but omitted from the `fields` list.
+/// One instance per store, created by [StoreDef]. Each factory method returns
+/// a typed descriptor with [FieldDef.owner] bound to the store, and records
+/// it so [StoreDef.verify] can detect one omitted from the `fields` list.
 /// {@endtemplate}
 final class Fields<S> {
   /// Creates the field factory for [owner].
@@ -66,7 +65,7 @@ final class Fields<S> {
   /// Declares an optional text field.
   TextFieldOpt<S> text(
     String name, {
-    /// [uniqueWhenActive] is the field unique
+    /// Whether non-archived records must have unique values.
     bool uniqueWhenActive = false,
     bool encrypted = false,
   }) {
@@ -116,9 +115,8 @@ final class Fields<S> {
 
   /// Declares an optional enum field over [values].
   ///
-  /// The default wire codec is `E.name` / name-based decoding; [wire]
-  /// overrides the wire string per value (unmapped values fall back to
-  /// `.name`). the database's `Field.enumValue` receives the wire strings.
+  /// Default wire codec is `E.name`; [wire] overrides per value (unmapped
+  /// values fall back to `.name`). The database receives the wire strings.
   EnumFieldOpt<S, E> enumOf<E extends Enum>(
     String name,
     List<E> values, {
@@ -179,19 +177,17 @@ final class Fields<S> {
 /// }
 /// ```
 ///
-/// Descriptors are public statics: they initialize lazily after
-/// `store` has settled, so every file reaches the same definition —
-/// and the same typed descriptor objects — through `Tasks.title` with
-/// zero plumbing. The private constructor makes a second instance
-/// unconstructible outside the class; binding a second instance under a
-/// used name throws [TypedStoreMismatchError].
+/// Descriptors are public statics: they initialize lazily after `store` has
+/// settled, so every file reaches the same typed descriptor objects through
+/// `Tasks.title` with zero plumbing. The private constructor makes a second
+/// instance unconstructible outside the class; binding a second instance
+/// under a used name throws [TypedStoreMismatchError].
 ///
-/// [fields] is the single, explicit, ordered registry of user fields: it
-/// *references* the descriptor objects — it never restates their metadata —
-/// so there is still exactly one definition per field, and column order in
-/// the compiled [collectionSchema] is list order (deterministic, independent of
-/// declaration/access order). System columns (`id`, `archived`) are exposed
-/// through [id]/[archived] and are **not** part of [fields].
+/// [fields] *references* descriptors — it never restates their metadata —
+/// so there is exactly one definition per field, and compiled column order
+/// is list order (deterministic, independent of declaration/access order).
+/// System columns (`id`, `archived`) are exposed through [id]/[archived] and
+/// are **not** part of [fields].
 /// {@endtemplate}
 abstract base class StoreDef<S extends StoreDef<S>> {
   /// Creates a store definition.
@@ -216,10 +212,8 @@ abstract base class StoreDef<S extends StoreDef<S>> {
 
   /// Builds an index for this store from its field descriptors — the typed
   /// twin of a raw [IndexSpec], with column names derived from the
-  /// descriptors instead of hand-typed strings.
-  ///
-  /// The receiver fixes the owner type [S], so a foreign descriptor is an
-  /// analysis error. Outside a [StoreDef] use the top-level `indexSpec`.
+  /// descriptors. The receiver fixes owner type [S], so a foreign descriptor
+  /// is an analysis error. Outside a [StoreDef] use the top-level `indexSpec`.
   IndexSpec indexSpec(
     List<FieldDef<S, Object?>> fields, {
     bool unique = false,
@@ -228,11 +222,9 @@ abstract base class StoreDef<S extends StoreDef<S>> {
       schema_helpers.indexSpec<S>(fields, unique: unique, scope: scope);
 
   /// Builds an FTS declaration for this store from its field descriptors —
-  /// the typed twin of a raw [FtsSpec], with field names derived from the
-  /// descriptors. Named `ftsSpec` because this class's FTS getter already
-  /// occupies the `fts` name.
-  ///
-  /// Outside a [StoreDef] use the top-level `ftsSpec`.
+  /// the typed twin of a raw [FtsSpec]. Named `ftsSpec` because the `fts`
+  /// getter below occupies that name. Outside a [StoreDef] use the top-level
+  /// `ftsSpec`.
   FtsSpec ftsSpec(
     List<FieldDef<S, Object?>> fields, {
     bool fuzzy = false,
@@ -240,31 +232,23 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   }) =>
       schema_helpers.ftsSpec<S>(fields, fuzzy: fuzzy, normalize: normalize);
 
-  /// Schema indexes, forwarded verbatim to the database.
-  ///
-  /// Prefer the typed [indexSpec] helper so column names come from this store's
-  /// field descriptors. Raw [IndexSpec] values remain supported for dynamic
-  /// declarations and boundary schemas. Helper-based declarations are
-  /// non-const because descriptors are runtime objects.
+  /// Schema indexes, forwarded verbatim to the database. Prefer [indexSpec]
+  /// so column names come from this store's descriptors; raw [IndexSpec]
+  /// values remain supported for dynamic declarations.
   List<IndexSpec> get indexes => const [];
 
   /// Optional FTS5 configuration, forwarded verbatim to the database.
-  ///
-  /// Prefer [ftsSpec] to derive FTS field names from this store's descriptors.
-  /// The helper is intentionally named `ftsSpec`, not `fts`, because this
-  /// getter already occupies the `fts` name. Raw [FtsSpec] values remain
-  /// supported, and helper-based declarations are non-const.
+  /// Prefer [ftsSpec] to derive FTS field names from descriptors; raw
+  /// [FtsSpec] values remain supported.
   FtsSpec? get fts => null;
 
   /// Forward store migrations, forwarded verbatim to the database.
   ///
-  /// Descriptor policy (plan Rule 4): callbacks never cross a runtime
-  /// boundary. The open-time schema manifest records every callback presence
-  /// as a boolean descriptor (`SchemaManifest.unsupportedFeatures`), and the
-  /// web worker REJECTS any store carrying one before any DDL runs — so
-  /// worker-backed databases are always descriptor-only. Native targets keep
-  /// the legacy in-process path (plan Rule 10: behavior moved, not
-  /// rewritten); the split is pinned by `test/refactor/manifest/`.
+  /// Descriptor policy: callbacks never cross a runtime boundary. The
+  /// manifest records their presence (`SchemaManifest.unsupportedFeatures`)
+  /// and the web worker rejects any store carrying one before DDL runs, so
+  /// worker-backed databases are descriptor-only. Native targets keep the
+  /// legacy in-process path; the split is pinned by `test/refactor/manifest/`.
   List<StoreMigration> get migrations => const [];
 
   /// Conflict resolution policy; `null` means the database's default
@@ -282,9 +266,9 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// Whether archived records that never existed remotely stay archived
   /// locally (soft archive) instead of vanishing on [Collection.archive].
   ///
-  /// the database drops archived rows whose server-side existence was never
-  /// confirmed — there is no network operation to record. Override this to
-  /// keep such rows locally; forward-verbatim like every other schema extra.
+  /// The database drops such rows (no network operation recorded them);
+  /// override to keep them locally. Forwarded verbatim like every schema
+  /// extra.
   bool get keepUnsyncedArchives => false;
 
   /// Whether remote file references on this store should be prefetched
@@ -295,12 +279,11 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// The local attachment field name for this store's files, or `null` for
   /// the shared default (`attachmentFieldDefault`).
   ///
-  /// This is a metadata label on the store's file references and the default
-  /// `field:` of the file API (`store.files.attach/list/open`); the bytes
-  /// live in the local blob store and in the sync backend's attachment
-  /// storage. The PocketBase adapter owns the REMOTE field name — declare the
-  /// matching file field on your PB collection (default `imgs`) or configure
-  /// it through the adapter's field-name options.
+  /// A metadata label on the store's file references and the default `field:`
+  /// of the file API (`store.files.attach/list/open`); bytes live in the local
+  /// blob store and the sync backend's attachment storage. The PocketBase
+  /// adapter owns the REMOTE field name — declare the matching file field on
+  /// your PB collection (default `imgs`) or configure it via adapter options.
   String? get attachmentField => null;
 
   /// The system `id` descriptor (database-owned record id column). Readable
@@ -317,28 +300,24 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// inconsistency:
   ///
   /// - a descriptor created through [schema] but **omitted from [fields]** —
-  ///   a field left out is an error, never silently dropped. (An
-  ///   unforced `late final` descriptor is invisible — no mirrors — so the
-  ///   check covers every descriptor that has actually been created,
-  ///   e.g. through a static accessor);
+  ///   a field left out is an error, never silently dropped (an unforced
+  ///   `late final` descriptor is invisible — no mirrors — so the check
+  ///   covers every descriptor actually created);
   /// - a **foreign descriptor** whose [FieldDef.owner] is not this store;
   /// - a **duplicate column name**.
   ///
-  /// Reserved-name and identifier checks stay with the database
-  /// (`DdlCompiler`/`Field.validateName`) and fire unchanged at
-  /// registration; the nullability guard (`required: true` + nullable `T`)
-  /// fires at descriptor construction, before [verify] can observe it.
+  /// Reserved-name/identifier checks stay with the database
+  /// (`DdlCompiler`/`Field.validateName`); the nullability guard
+  /// (`required: true` + nullable `T`) fires at descriptor construction,
+  /// before [verify] runs.
   void verify() => _verify(fields);
 
   /// The compiled database schema, memoized: repeated reads return the
   /// identical instance. Compilation forces [fields] first (deterministic
   /// column order), runs [verify], then maps each descriptor through its
-  /// [FieldDef.toField].
-  ///
-  /// Library-internal seam (`@internal`): the public API surface carries only
-  /// the typed definition; the kernel-internal [CollectionSchema] type never
-  /// appears in a public signature (plan Rule 1 and the Phase 10 deletion
-  /// list). The kernel boots from this — applications never touch it.
+  /// [FieldDef.toField]. Library-internal seam (`@internal`): the public API
+  /// surface carries only the typed definition; the kernel boots from this —
+  /// applications never touch it.
   @internal
   CollectionSchema<Object?> get compiledSchema =>
       _compiledSchema ??= _compile();

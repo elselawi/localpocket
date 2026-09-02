@@ -66,13 +66,13 @@ final class FieldCond<S> extends Cond<S> {
   /// {@macro localpocket.field_cond}
   const FieldCond(this.owner, this.field, this.operator, this.args);
 
-  /// The canonical store definition instance that owns the field.
+  /// The canonical store definition instance owning the field.
   final S owner;
 
-  /// the database field name.
+  /// The database field name.
   final String field;
 
-  /// the database operator name (`eq`, `gt`, `startsWith`, …).
+  /// The database operator name (`eq`, `gt`, `startsWith`, …).
   final String operator;
 
   /// Encoded operator arguments.
@@ -156,7 +156,7 @@ final class NotCond<S> extends Cond<S> {
 
 /// {@template localpocket.order_term}
 /// One ordering term, built through a descriptor's `asc`/`desc` getters.
-/// the database supplies its normal id tiebreaker.
+/// The database supplies its normal id tiebreaker.
 /// {@endtemplate}
 final class OrderTerm<S> {
   /// {@macro localpocket.order_term}
