@@ -1,13 +1,12 @@
 /// Realtime: the SSE connection to PocketBase.
 ///
-/// Wire shape: `GET /api/realtime` → `PB_CONNECT:<clientId>` handshake
-/// → `POST /api/realtime {clientId, subscriptions}` (token in header AND body)
+/// Wire shape: `GET /api/realtime` → `PB_CONNECT:<clientId>` handshake →
+/// `POST /api/realtime {clientId, subscriptions}` (token in header AND body)
 /// → `event:data` frames `{record, action}` with the full embedded record.
 ///
-/// Missed events are never replayed after a gap (live-verified); every
-/// (re)connect therefore reports a gap so the engine re-pulls all stores.
-/// The connection auto-reconnects with exponential backoff + jitter (capped)
-/// that resets to the base delay after a successful connect.
+/// Missed events are never replayed after a gap (live-verified), so every
+/// (re)connect reports a gap and the engine re-pulls all stores. Reconnects
+/// use capped exponential backoff + jitter, reset to base on success.
 library;
 
 import 'dart:async';
@@ -17,7 +16,6 @@ import 'dart:typed_data';
 
 import '../../kernel/sync/backoff.dart';
 import '../../kernel/sync/sync_backend.dart';
-import 'auth.dart';
 import 'pb_client.dart';
 import 'transport.dart';
 
@@ -77,7 +75,7 @@ class PbRealtime {
   final PbClient client;
 
   /// Remote collection names to subscribe to (PB realtime is per-collection,
-  /// e.g. ['data'] — NOT the local store names).
+  /// e.g. `['data']` — not the local store names).
   final List<String> collectionNames;
 
   /// Base delay for the first reconnect after a failure (default 200 ms).
@@ -89,14 +87,13 @@ class PbRealtime {
   /// Jitter source, `0.5..1.5` (default uniform). Inject for determinism.
   final double Function(int attempt) jitter;
 
-  /// Reconnect delay for the given failed-connect [attempt] (below 1 treated
-  /// as 1). Defaults to exponential backoff mirroring `SyncConfig.delayFor`
-  /// (`min(base * 2^(attempt-1), cap) * jitter`); inject for deterministic
-  /// tests.
+  /// Reconnect delay for failed-connect [attempt] (below 1 treated as 1).
+  /// Defaults to exponential backoff mirroring `SyncConfig.delayFor`
+  /// (`min(base * 2^(attempt-1), cap) * jitter`); inject for tests.
   final Duration Function(int attempt) delayFor;
 
-  /// Called after every successful handshake (including the first connect) —
-  /// a gap has just closed, so all stores must be re-pulled.
+  /// Called after every successful handshake (first connect included) — a
+  /// gap just closed, so all stores must be re-pulled.
   final void Function() onGapClosed;
 
   /// Called for every parsed event frame.
@@ -107,6 +104,14 @@ class PbRealtime {
   Completer<void>? _sessionDone;
   Future<void> _frameTail = Future.value();
   int _connectCount = 0;
+
+  /// Most recent unexpected realtime-tail failure — a bookkeeping or
+  /// callback throw that is neither a frame nor a transport failure —
+  /// recorded for diagnostics instead of being silently dropped.
+  Object? lastUnexpectedError;
+
+  /// Stack trace accompanying [lastUnexpectedError], when available.
+  StackTrace? lastUnexpectedTrace;
 
   /// Total number of successful stream connections established.
   int get connectCount => _connectCount;
@@ -130,9 +135,8 @@ class PbRealtime {
   }
 
   Future<void> _runLoop() async {
-    // Consecutive failed connect attempts. Any successful connect resets the
-    // backoff to the base delay; failures grow it exponentially (with jitter,
-    // capped) so a down server never triggers a reconnect storm.
+    // Consecutive failed connects; any success resets to base. Growth is
+    // capped so a down server never triggers a reconnect storm.
     var attempt = 0;
     while (_running) {
       try {
@@ -160,8 +164,8 @@ class PbRealtime {
     if (res.status != 200) {
       throw HttpTransportException('realtime connect status ${res.status}');
     }
-    // A stop() raced in while the connect was in flight: close the stream
-    // without leaving a dangling subscription or a session that never ends.
+    // A stop() raced in during the connect: close the stream without a
+    // dangling subscription or a session that never ends.
     if (!_running) {
       final orphan = res.stream.listen((_) {});
       await orphan.cancel();
@@ -177,30 +181,38 @@ class PbRealtime {
       (chunk) {
         final frames = parser.feed(chunk);
         for (final f in frames) {
-          // Frame handling is serialized so the subscribe POST always
-          // precedes any event processing. A bad frame or a throwing callback
-          // must never poison the tail with an unhandled rejection.
+          // Serialized so the subscribe POST always precedes event
+          // processing; a throwing callback must never poison the tail.
           _frameTail = _frameTail.then((_) async {
             if (failed) return;
             try {
               await _handleFrame(f, token);
             } catch (_) {
-              // The subscribe POST failed (e.g. 401/5xx): the handshake
-              // never completed, so onGapClosed must NOT fire and no frame
-              // from this session may be trusted. End the session; _runLoop
-              // reconnects with a fresh token.
+              // Subscribe POST failed (e.g. 401/5xx): handshake never
+              // completed, so onGapClosed must NOT fire and no frame from
+              // this session may be trusted. _runLoop reconnects fresh.
               failed = true;
               await _sub?.cancel();
               if (!_sessionDone!.isCompleted) _sessionDone!.complete();
               return;
             }
-            // Gap-close bookkeeping runs only after a successful handshake;
-            // a failed subscribe never reports a closed gap.
+            // Gap-close bookkeeping only after a successful handshake; a
+            // throw here is unexpected, so record it rather than contain it.
             if (!handshaken && f.clientId != null) {
               handshaken = true;
-              onGapClosed();
+              try {
+                onGapClosed();
+              } catch (e, st) {
+                lastUnexpectedError = e;
+                lastUnexpectedTrace = st;
+              }
             }
-          }).catchError((Object _) {});
+          }).catchError((Object e, StackTrace st) {
+            // The tail must never produce an unhandled async error; record
+            // unexpected failures instead of dropping them.
+            lastUnexpectedError ??= e;
+            lastUnexpectedTrace ??= st;
+          });
         }
       },
       onDone: () {
@@ -213,9 +225,9 @@ class PbRealtime {
     await _sessionDone!.future;
     _sub = null;
     if (failed) {
-      // The subscribe POST never succeeded, so this attempt must count as a
-      // failure: throwing makes _runLoop grow the reconnect backoff instead
-      // of resetting it to the base delay.
+      // The subscribe POST never succeeded, so count this attempt as a
+      // failure: throwing makes _runLoop grow the backoff instead of
+      // resetting it to base.
       throw HttpTransportException('realtime subscribe failed');
     }
   }
@@ -223,7 +235,7 @@ class PbRealtime {
   Future<void> _handleFrame(_SseFrame frame, Token token) async {
     final clientId = frame.clientId;
     if (clientId != null) {
-      // Handshake: subscribe with token in header AND body.
+      // Handshake: subscribe, token in header AND body.
       final sub = await client.transport.send(HttpRequest(
         method: 'POST',
         url: client.baseUrl.resolve('/api/realtime'),
@@ -257,15 +269,21 @@ class PbRealtime {
 
   RemoteRecord _parseRecord(Map<dynamic, dynamic> raw) {
     final id = raw['id'];
-    final store = raw[client.fieldNames.storeField];
     final updated = raw['updated'];
+    // Same policy as the list path: missing id/updated is a protocol error,
+    // dropped here (the periodic pull is the backstop) — never normalized
+    // into an empty id/version that could travel through the fast path.
+    if (id is! String || updated is! String) {
+      throw ProtocolError('Realtime record missing id/updated.');
+    }
+    final store = raw[client.fieldNames.storeField];
     final data = raw[client.fieldNames.dataField];
-    // The record's attachment field maps onto the generic attachments list.
     final attachments = raw[client.fieldNames.attachmentsField];
+    // `store` may be absent on projected responses, mirroring the list path.
     return RemoteRecord(
-      id: id is String ? id : '',
+      id: id,
       store: store is String ? store : '',
-      updated: updated is String ? updated : '',
+      updated: updated,
       data: data is Map ? Map<String, Object?>.from(data) : const {},
       attachments: attachments is List
           ? attachments.whereType<String>().toList()
@@ -285,9 +303,9 @@ class PbRealtime {
 /// ```
 /// Older servers sent a bare `PB_CONNECT:<clientId>` line; both are handled.
 ///
-/// Raw bytes are buffered and decoded LINE by line, so a multibyte UTF-8
-/// sequence split across chunk boundaries is reassembled before decoding —
-/// decoding each chunk independently would corrupt it into U+FFFD.
+/// Bytes are buffered and decoded LINE by line so a multibyte UTF-8 sequence
+/// split across chunks is reassembled before decoding — per-chunk decoding
+/// would corrupt it into U+FFFD.
 class _SseParser {
   final BytesBuilder _buffer = BytesBuilder();
   String? _event;
@@ -303,9 +321,9 @@ class _SseParser {
       if (nl < 0) break;
       final lineBytes = data.sublist(start, nl);
       start = nl + 1;
-      // A complete line: 0x0A is never a UTF-8 continuation byte, so a valid
-      // multibyte sequence never spans a line boundary. Whole-line decoding
-      // therefore preserves Unicode regardless of how the chunks were split.
+      // 0x0A is never a UTF-8 continuation byte, so a valid multibyte
+      // sequence never spans a line boundary — whole-line decoding
+      // preserves Unicode regardless of chunk splits.
       final line = utf8.decode(lineBytes, allowMalformed: true).trimRight();
       final frame = _dispatchLine(line);
       if (frame != null) frames.add(frame);
@@ -358,7 +376,7 @@ class _SseParser {
       return _SseFrame(clientId: line.substring('PB_CONNECT:'.length).trim());
     }
     if (line.startsWith(':')) {
-      // Ignore comments/keepalive frames; they never carry event payload state.
+      // Keepalive/comments carry no event state.
       return null;
     }
     if (line.startsWith('event:')) {
@@ -370,7 +388,7 @@ class _SseParser {
       if (value.isNotEmpty) _data.add(value);
       return null;
     }
-    // retry / blank / other metadata are ignored and do not affect active state.
+    // retry / blank / other metadata lines are ignored.
     return null;
   }
 }

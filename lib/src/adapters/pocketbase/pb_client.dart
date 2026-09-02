@@ -1,6 +1,6 @@
-/// PocketBase wire client: list/get/create/update/batch
-/// over [HttpTransport] with token injection, single-flight 401 refresh-retry,
-/// and typed error mapping. Raw JSON in, typed errors out.
+/// PocketBase wire client: list/get/create/update/batch over [HttpTransport]
+/// with token injection, single-flight 401 refresh-retry, and typed error
+/// mapping. Raw JSON in, typed errors out.
 library;
 
 import 'dart:convert';
@@ -109,9 +109,8 @@ class PbClient {
   }
 
   /// Duplicate-id shapes (live-verified): PB v0.23+ returns
-  /// `data.id.code == 'validation_pk_invalid'` (the id is the PK); older
-  /// builds return `validation_not_unique`. Any other 400 is a plain
-  /// validation failure (PayloadError).
+  /// `data.id.code == 'validation_pk_invalid'`; older builds return
+  /// `validation_not_unique`. Any other 400 is a plain validation failure.
   bool _isDuplicateId(HttpResponse res) {
     try {
       final body = _decode(res);
@@ -134,19 +133,13 @@ class PbClient {
     required String dataJson,
     String? baseUpdated,
   }) async {
-    // [baseUpdated] is accepted for contract parity with version-aware
-    // backends; PocketBase has no conditional writes (no If-Match / version
-    // predicate on PATCH), so it is intentionally IGNORED here.
-    //
-    // WIRE SEMANTICS — LAST-WRITE-WINS: on a real PocketBase server two
-    // clients that both GET -> merge -> PATCH the same record concurrently
-    // overwrite each other's field edits silently, and BOTH settle clean.
-    // The client-side 3-way merge only protects pushes that are time-
-    // serialized (GET sees a concurrent edit) or served by a backend that
-    // throws [RemoteVersionConflict]. Apps needing strict OCC must enforce
-    // it server-side (e.g. a PB record hook rejecting stale `updated`
-    // values, or a custom check endpoint). See the README section
-    // "Concurrent edits & last-write-wins".
+    // [baseUpdated] exists only for contract parity: PocketBase has no
+    // conditional writes, so it is ignored here. Concurrent GET → merge →
+    // PATCH on a real PB server silently overwrites fields and BOTH clients
+    // settle clean — last-write-wins at the wire. The client-side 3-way merge
+    // only protects time-serialized pushes or backends that throw
+    // [RemoteVersionConflict]; strict OCC must be enforced server-side (PB
+    // hook or custom endpoint). See README "Concurrent edits & last-write-wins".
     final uri = _record(id);
     final res = await _sendAuth('PATCH', uri,
         body: jsonEncode({fieldNames.dataField: jsonDecode(dataJson)}));
@@ -224,9 +217,9 @@ class PbClient {
     if (res.status == 400) throw BatchFailedError(_errorMessage(res));
     _expectStatus(res, [200], uri);
 
-    // Real PB batch response (live-verified): a top-level JSON array of
-    // `{body, status}` — one per request, in request order. (The adapter also
-    // accepts the older `{data:{results:[...]}}` envelope for compatibility.)
+    // Live-verified: PB batch responds with a top-level array of
+    // `{body, status}`, one per request in order. The older
+    // `{data:{results:[...]}}` envelope is also accepted for compatibility.
     final decoded = jsonDecode(res.body);
     List<Object?> results;
     if (decoded is List) {
@@ -241,12 +234,12 @@ class PbClient {
     } else {
       throw ProtocolError('Batch response is not a list or envelope.');
     }
-    // PB answers by REQUEST ORDER (it cannot echo client opIds), so results
-    // map back by index — never by a server-supplied id. The wire contract is
-    // exact: one entry per request, every entry a JSON object. A shorter or
-    // longer array (or a non-object entry) is a server bug and must never be
-    // silently truncated or skipped — mapping by index on a partial array can
-    // settle the wrong op.
+    // PB answers in REQUEST ORDER (it cannot echo client opIds), so results
+    // map back by index. This order-trust is part of the adapter's wire
+    // contract with PocketBase (pinned by the batch tests): a future server
+    // or proxy that reorders responses would need server-side identifiers
+    // before this mapping can change. The array must match the request count
+    // exactly: a partial array mapped by index could settle the wrong op.
     if (results.length != ops.length) {
       throw ProtocolError(
           'Batch response has ${results.length} results for ${ops.length} requests.');
@@ -262,12 +255,10 @@ class PbClient {
     return parsed;
   }
 
-  /// Batch capability probe: 403 = the batch API is disabled; 200/3xx/400
-  /// (a server that answers the empty batch, e.g. 400 = rejected by an ENABLED
-  /// server) = enabled. A still-401 after the refresh-retry is an auth
-  /// failure; 408/429/5xx are transient. Both are surfaced as typed errors so
-  /// `prepare()` can re-probe on the next start instead of caching a wrong
-  /// capability.
+  /// Batch capability probe: 403 = disabled; 200/3xx/400 (an ENABLED server
+  /// answers the empty batch) = enabled. 401 after the refresh-retry is an
+  /// auth failure; 408/429/5xx are transient. Both are typed errors so
+  /// `prepare()` can re-probe instead of caching a wrong capability.
   Future<bool> probeBatch() async {
     final uri = baseUrl.resolve('/api/batch');
     final res = await _sendAuth('POST', uri,
@@ -285,8 +276,8 @@ class PbClient {
   Uri _records() =>
       baseUrl.resolve('/api/collections/${fieldNames.collection}/records');
 
-  /// NOTE: must build the full path — `_records().resolve(id)` would resolve
-  /// against the last segment and drop `records`.
+  // Must build the full path: `_records().resolve(id)` would resolve against
+  // the last segment and drop `records`.
   Uri _record(String id) => baseUrl.resolve(
       '/api/collections/${fieldNames.collection}/records/${Uri.encodeComponent(id)}');
 
@@ -404,9 +395,8 @@ class PbClient {
     }
     // `store` may be absent on projected sweep responses (fields=id,updated).
     final storeStr = store is String ? store : '';
-    // data.id is normalized by the engine's `normalizeRemote` (a mismatch
-    // becomes a MapFailure and quarantines that record — never fails the
-    // whole store). The adapter passes data through verbatim.
+    // data is passed through verbatim; the engine's `normalizeRemote`
+    // quarantines mismatches instead of failing the whole store.
     final data = raw[fieldNames.dataField];
     final dataMap =
         data is Map ? Map<String, Object?>.from(data) : <String, Object?>{};

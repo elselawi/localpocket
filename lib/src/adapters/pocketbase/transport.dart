@@ -1,7 +1,7 @@
-/// Minimal HTTP transport seam. The adapter talks to PocketBase
-/// through [HttpTransport] so the whole wire layer is testable in-process and
-/// swappable per platform (native `dart:io` today; a browser `fetch` transport
-/// can be added for web without touching the adapter).
+/// Minimal HTTP transport seam: the adapter talks to PocketBase through
+/// [HttpTransport], keeping the wire layer testable in-process and swappable
+/// per platform (native `dart:io` today; a browser `fetch` transport can be
+/// added without touching the adapter).
 library;
 
 import 'dart:convert';
@@ -36,8 +36,8 @@ class HttpRequest {
 }
 
 /// {@template localpocket.http_multipart_file}
-/// A streamed multipart file. The length is required by package:http so the
-/// multipart body can be sent without buffering the file contents.
+/// A streamed multipart file; [length] lets package:http send the body
+/// without buffering the file contents.
 /// {@endtemplate}
 class HttpMultipartFile {
   /// Creates a streamed multipart file.
@@ -78,7 +78,7 @@ class HttpMultipartRequest {
     this.files = const [],
   });
 
-  /// HTTP method, normally `PATCH` for PocketBase file updates.
+  /// HTTP method (normally `PATCH` for PocketBase file updates).
   final String method;
 
   /// Destination URL.
@@ -154,33 +154,22 @@ class StreamedHttpResponse {
 
 /// Platform-neutral HTTP transport abstraction.
 ///
-/// Implement this interface to use a browser `fetch` client, a test fake, or a
-/// platform-specific networking stack. [openStream] is used for SSE and file
-/// downloads; [sendMultipart] is used for streamed attachment uploads.
+/// Implement this to use a browser `fetch` client, a test fake, or a
+/// platform-specific stack. [openStream] serves SSE and file downloads;
+/// [sendMultipart] serves streamed attachment uploads.
 abstract class HttpTransport {
   /// Sends a buffered request and buffers its response.
   Future<HttpResponse> send(HttpRequest request);
 
   /// Sends a multipart request without buffering file contents in Dart.
-  ///
-  /// Each [HttpMultipartFile.streamFactory] must create a fresh stream so the
-  /// request can be retried after authentication refresh.
+  /// Each [HttpMultipartFile.streamFactory] must create a fresh stream so
+  /// the request can be retried after an auth refresh.
   Future<HttpResponse> sendMultipart(HttpMultipartRequest request) =>
       throw UnsupportedError(
           'Streaming multipart is not supported by this transport.');
 
   /// Opens a request and returns headers plus a live response body stream.
-  ///
-  /// ```dart
-  /// final response = await transport.openStream(
-  ///   HttpRequest(method: 'GET', url: uri),
-  /// );
-  /// await for (final chunk in response.stream) {
-  ///   consume(chunk);
-  /// }
-  /// ```
-  ///
-  /// This is used for realtime SSE and streamed downloads. Throws
+  /// Used for realtime SSE and streamed downloads. Throws
   /// [HttpTransportException] on transport errors; HTTP error statuses are
   /// returned, not thrown.
   Future<StreamedHttpResponse> openStream(HttpRequest request);
@@ -190,9 +179,8 @@ abstract class HttpTransport {
 }
 
 /// {@template localpocket.package_http_transport}
-/// Default transport backed by `package:http` (persistent connection, gzip,
-/// per-request [timeout] in seconds).
-/// `package:http` implementation of [HttpTransport].
+/// Default `package:http` implementation of [HttpTransport]
+/// (persistent connection, gzip, per-request [timeout]).
 /// {@endtemplate}
 class PackageHttpTransport implements HttpTransport {
   /// Creates an HTTP transport, optionally using [client].
@@ -217,8 +205,7 @@ class PackageHttpTransport implements HttpTransport {
     } on HttpTransportException {
       rethrow;
     } catch (e) {
-      // Body consumption failures (stream error, timeout, malformed UTF-8)
-      // surface as transport exceptions, never raw errors.
+      // Body-consumption failures surface as transport exceptions.
       throw HttpTransportException(
           'HTTP ${request.method} ${request.url} body failed', e);
     }
@@ -245,8 +232,7 @@ class PackageHttpTransport implements HttpTransport {
     } on HttpTransportException {
       rethrow;
     } catch (e) {
-      // A throwing stream factory or a failing body decode is a transport
-      // failure, never a raw error.
+      // Throwing stream factory or failing body decode = transport failure.
       throw HttpTransportException(
           'HTTP multipart ${request.method} ${request.url} failed', e);
     }

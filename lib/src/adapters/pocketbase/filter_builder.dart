@@ -9,14 +9,12 @@
 /// ```
 library;
 
-/// Single-quote a string literal for a PB filter, escaping embedded quotes.
+/// Single-quote a string literal for a PB filter.
 ///
-/// Real PocketBase treats `\` as an escape ONLY before `'`: `\'` → `'`, and
-/// a backslash before any other character is a LITERAL backslash — `\\` stays
-/// two backslashes and `\x` stays `\x` (verified live against pb.apexo.app).
-/// So only quotes are escaped and backslashes pass through verbatim. That is
-/// injection-safe: every `'` in the value is escaped, so no embedded quote —
-/// even one preceded by a backslash — can ever terminate the literal early.
+/// Live-verified: PB treats `\` as an escape ONLY before `'` — `\\` and
+/// `\x` stay literal backslashes. So only quotes are escaped and backslashes
+/// pass through verbatim; this stays injection-safe because every `'` is
+/// escaped, so no embedded quote can terminate the literal early.
 String quote(String s) => "'${s.replaceAll("'", "\\'")}'";
 
 /// `(store='{store}' && updated>='{fromUpdated}')` — the delta-pull filter.
@@ -30,12 +28,11 @@ String pullPageFilter(String filter, String fromId) =>
     '$filter && id>${quote(fromId)}';
 
 /// `(store='{store}' && id~'{bucket}%' [&& id>'{fromId}'])` — the anti-entropy
-/// bucket scan. The keyset continuation is appended only when [fromId] is set.
+/// bucket scan; the keyset continuation is appended only when [fromId] is set.
 /// [storeField] names the record's store field (default `store`).
 String sweepFilter(String store, String bucket,
     {String? fromId, String storeField = 'store'}) {
-  final base =
-      '($storeField=${quote(store)} && id~${quote('$bucket%')}';
+  final base = '($storeField=${quote(store)} && id~${quote('$bucket%')}';
   if (fromId == null) return '$base)';
   return '$base && id>${quote(fromId)})';
 }

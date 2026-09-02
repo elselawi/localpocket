@@ -1,13 +1,8 @@
-/// The PocketBase adapter: a [SyncBackend] over the real PB wire
-/// contract. Confined to `localpocket/pocketbase.dart` — core and sync never
-/// import it (layering rule 3).
-///
-/// Owns:
-/// - the wire client (list/get/create/update/batch),
-/// - the auth manager (single-flight refresh, proactive 75 %),
-/// - the realtime SSE layer (debounced 300 ms per store, delete verification,
-///   reconnect → gap hints, fast-path records),
-/// - the batch probe (200 enables; 403 disables permanently).
+/// The PocketBase adapter: a [SyncBackend] over the real PB wire contract.
+/// Confined to `localpocket/pocketbase.dart` — core and sync never import it
+/// (layering rule 3). Owns the wire client, the auth manager, the realtime
+/// SSE layer (debounce, delete verification, gap hints), and the batch probe
+/// (200 enables; 403 disables permanently).
 library;
 
 import 'dart:async';
@@ -23,7 +18,7 @@ import 'transport.dart';
 /// {@template localpocket.pocket_base_backend}
 /// PocketBase implementation of [SyncBackend].
 ///
-/// Create one backend for the authenticated user and pass it to [SyncEngine]:
+/// Create one backend per authenticated user and pass it to [SyncEngine]:
 ///
 /// ```dart
 /// final backend = PocketBaseBackend(
@@ -35,16 +30,13 @@ import 'transport.dart';
 /// await engine.start();
 /// ```
 ///
-/// PocketBase batch support is probed during [prepare]. Realtime is optional;
-/// polling and anti-entropy sweeps remain the correctness backstop.
+/// Batch support is probed during [prepare]; realtime is optional — polling
+/// and anti-entropy sweeps remain the correctness backstop.
 ///
-/// CONCURRENCY CONTRACT — LAST-WRITE-WINS AT THE WIRE: PocketBase has no
-/// conditional writes, so [updateRecord] cannot reject a stale write. Two
-/// clients editing the same record concurrently resolve last-write-wins on
-/// the server; the client-side 3-way merge only protects pushes that are
-/// time-serialized. Apps needing strict optimistic concurrency must enforce
-/// it server-side (PB record hook / custom endpoint) — the client keeps its
-/// `RemoteVersionConflict` re-merge machinery for backends that CAN throw it.
+/// CONCURRENCY — LAST-WRITE-WINS AT THE WIRE: PocketBase has no conditional
+/// writes, so concurrent edits resolve last-write-wins on the server; the
+/// client-side 3-way merge only protects time-serialized pushes. Strict
+/// optimistic concurrency must be enforced server-side.
 /// {@endtemplate}
 abstract base class PBBackend implements SyncBackend {
   /// Creates a PocketBase synchronization backend.
@@ -71,7 +63,10 @@ abstract base class PBBackend implements SyncBackend {
   }
 
   /// LocalPocket stores represented in the remote data collection.
-  List<String> get storeNames => const [];
+  ///
+  /// Abstract: every concrete backend must declare the stores it serves. An
+  /// empty default would silently present a backend that syncs nothing.
+  List<String> get storeNames;
 
   /// The wire-field configuration: collection and record field names.
   ///
@@ -79,8 +74,8 @@ abstract base class PBBackend implements SyncBackend {
   /// only the generic `RemoteRecord` vocabulary.
   final PbFieldNames fieldNames;
 
-  /// The PocketBase collection holding synced records: the explicitly set
-  /// realtime collection when given, else [PbFieldNames.collection].
+  /// The realtime subscription collection: the explicitly set realtime
+  /// collection when given, else [PbFieldNames.collection].
   String get effectiveCollection =>
       _explicitRealtimeCollection ?? fieldNames.collection;
 
@@ -100,13 +95,12 @@ abstract base class PBBackend implements SyncBackend {
   final int maxBatch;
 
   /// Stable login identity (used for scope file naming). When null, derived
-  /// from [TokenProvider.identity]; when both are null, accessing [scopeId]
-  /// throws so sync state is never shared across accounts.
+  /// from [TokenProvider.identity]; when both are null, [scopeId] throws so
+  /// sync state is never shared across accounts.
   final String? identity;
 
-  /// The remote collection the realtime client subscribes to. Defaults to
-  /// [PbFieldNames.collection]; set explicitly to subscribe elsewhere (PB
-  /// realtime is per-collection).
+  /// Remote collection the realtime client subscribes to (PB realtime is
+  /// per-collection). Defaults to [PbFieldNames.collection].
   final String? _explicitRealtimeCollection;
 
   /// HTTP transport used by the adapter.
@@ -154,11 +148,11 @@ abstract base class PBBackend implements SyncBackend {
       );
 
   /// Identity fingerprint: a change of (baseUrl, identity) switches the DB
-  /// scope and therefore invalidates every cursor.
+  /// scope and invalidates every cursor.
   ///
   /// Throws when neither this backend nor its [tokenProvider] exposes an
-  /// identity: without one, every account on the same server would collapse
-  /// into a single scope and bleed cursors/watermarks across users.
+  /// identity — without one, every account on the server would share a single
+  /// scope and bleed cursors/watermarks across users.
   @override
   String get scopeId {
     final id = identity ?? tokenProvider.identity;
@@ -174,10 +168,9 @@ abstract base class PBBackend implements SyncBackend {
 
   // ------------------------------------------------------------ lifecycle --
 
-  /// Opens the realtime SSE connection. Idempotent.
-  ///
-  /// Realtime events are treated as hints. The sync engine still performs
-  /// authoritative pulls when events are missed or a connection reconnects.
+  /// Opens the realtime SSE connection. Idempotent. Realtime events are
+  /// hints; the engine still performs authoritative pulls when events are
+  /// missed or the connection reconnects.
   Future<void> startRealtime() async {
     if (_realtime != null) return;
     final rt = PbRealtime(
@@ -212,20 +205,19 @@ abstract base class PBBackend implements SyncBackend {
   // ------------------------------------------------------------- realtime --
 
   void _onGapClosed() {
-    // A connect (or reconnect) just happened: a gap is closed, so every store
-    // must be re-pulled — never assume nothing changed.
+    // (Re)connect just closed a gap: every store must be re-pulled.
     for (final s in storeNames) {
       _debounce(s, BackendHint(s));
     }
   }
 
   void _onRealtimeEvent(PbRealtimeEvent ev) {
-    // The remote collection carries every store; only events for stores this
-    // backend manages may become hints (the engine also guards, but dropping
-    // foreign events here avoids the wasted delete-verification GET too).
+    // The remote collection carries every store; drop events for foreign
+    // stores here so no wasted delete-verification GET is issued (the
+    // engine also guards).
     if (!storeNames.contains(ev.record.store)) return;
     if (ev.action == 'delete') {
-      // delete events always verify via targeted GET.
+      // Deletes always verify via targeted GET.
       unawaited(_verifyDelete(ev.record));
       return;
     }
@@ -249,7 +241,7 @@ abstract base class PBBackend implements SyncBackend {
       _debounce(ev.store, BackendHint(ev.store, BackendHintKind.deleted));
       return;
     }
-    // Still visible: re-deliver as a changed event (fast-path or pull).
+    // Still visible: re-deliver as changed (fast-path or pull).
     _debounce(
         ev.store, BackendHint(ev.store, BackendHintKind.changed, current));
   }
@@ -387,6 +379,8 @@ abstract base class PBBackend implements SyncBackend {
       _client.pushBatch(ops);
 }
 
+/// PocketBase backend with its realtime/SSE layer exposed for raw probing
+/// (tests and tooling); regular clients use [PocketBaseBackend].
 final class PocketBaseRawBackend extends PBBackend {
   /// Creates a PocketBase synchronization backend.
   ///
@@ -411,16 +405,15 @@ final class PocketBaseRawBackend extends PBBackend {
   List<String> get storeNames => stores;
 }
 
-/// The runtime-facing sync backend factory: the kernel's sync start command
-/// builds its engine backend through this seam, and releases adapter state
-/// (the realtime connection and HTTP client) through [dispose]. This keeps
-/// the adapter layer out of the runtime's import graph (R1/R3).
+/// Runtime-facing sync backend factory: the kernel's sync start builds its
+/// engine backend through this seam and releases adapter state (realtime
+/// connection, HTTP client) through [dispose]. Keeps the adapter layer out
+/// of the runtime's import graph (R1/R3).
 class PocketBaseSyncBackendFactory implements SyncBackendFactory {
   /// Creates the PocketBase backend factory.
   const PocketBaseSyncBackendFactory({this.fieldNames = const PbFieldNames()});
 
-  /// The wire-field configuration every backend created by this factory
-  /// uses (collection + record field names).
+  /// Wire-field configuration every backend created by this factory uses.
   final PbFieldNames fieldNames;
 
   @override
@@ -467,5 +460,5 @@ final class _SourceTokenProvider implements TokenProvider {
       Token(await _source.currentToken());
 
   @override
-  String get identity => _source.identity;
+  String? get identity => _source.identity;
 }
