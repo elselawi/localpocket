@@ -16,6 +16,7 @@ import 'store.dart';
 /// One open interactive transaction session.
 /// {@endtemplate}
 final class Transaction {
+  /// Internal: created by the runtime when a transaction begins.
   Transaction.internal({
     required RuntimeClient runtime,
     required this.session,

@@ -27,8 +27,8 @@ final class Row<S extends StoreDef<S>> {
   /// Creates a row snapshot over [map]. The map is copied: later mutations
   /// to the caller's map are invisible to the row.
   ///
-  /// [projected], when non-null, records the set of field names included by
-  /// a `select` projection; reading a field outside the set throws
+  /// [projected], when non-null, is the set of field names included by a
+  /// `select` projection; reading outside it throws
   /// [FieldNotSelectedError].
   Row(this.def, Map<String, Object?> map, {Set<String>? projected})
       : _map = _copyMap(map),
@@ -91,9 +91,16 @@ final class Row<S extends StoreDef<S>> {
     if (projected != null && !projected.contains(field.name)) {
       throw FieldNotSelectedError(field.name);
     }
+    final present = _map.containsKey(field.name);
     final raw = _map[field.name];
+    if (!present && field.required) {
+      throw ValidationException(
+          'Field "${field.name}" is required but missing from the row.',
+          field: field.name);
+    }
     if (raw == null && field.required) {
-      throw ValidationException('Field "${field.name}" is required.',
+      throw ValidationException(
+          'Field "${field.name}" is required but holds null.',
           field: field.name);
     }
     return decodeStored(field, raw);

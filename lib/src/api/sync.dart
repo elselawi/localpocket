@@ -1,17 +1,16 @@
 /// PocketBase sync attachment for the public facade.
 ///
-/// `LocalPocket.attachPocketBaseSync` returns one [PocketBaseSync] host that
-/// drives the shared contract runtime: [PocketBaseSync.start] starts the
-/// kernel-owned engine (and, with it, its realtime connection — sync start
-/// owns realtime, so there is no separate realtime command). The same host
-/// works identically on native (direct runtime) and web (worker runtime);
-/// the sync logic always lives in the kernel's [SyncEngine].
+/// `LocalPocket.attachPocketBaseSync` returns one [PocketBaseSync] host;
+/// [PocketBaseSync.start] starts the kernel-owned engine and its realtime
+/// connection (sync start owns realtime — there is no separate realtime
+/// command). The host works identically on native (direct runtime) and web
+/// (worker runtime); the sync logic lives in the kernel's [SyncEngine].
 library;
 
 import 'dart:async';
 
 import '../contract/contract.dart';
-import '../adapters/pocketbase/auth.dart' show TokenProvider;
+import '../kernel/sync/sync_backend.dart' show TokenProvider;
 import '../runtime/runtime_client.dart';
 
 /// {@template localpocket.pocket_base_sync_options}
@@ -19,8 +18,9 @@ import '../runtime/runtime_client.dart';
 ///
 /// The [tokenProvider] stays caller-owned: its current value crosses only
 /// through the sync start and auth-update commands — never persisted, never
-/// logged. [identity] scopes the engine's bookkeeping; it defaults engine-side
-/// when omitted.
+/// logged. [identity] scopes the engine's bookkeeping; it is REQUIRED:
+/// sync start fails typed when omitted, because a shared default would
+/// collapse every account of the same server into one sync scope.
 /// {@endtemplate}
 final class PocketBaseSyncOptions {
   /// {@macro localpocket.pocket_base_sync_options}
@@ -36,7 +36,8 @@ final class PocketBaseSyncOptions {
   /// Supplies and refreshes the bearer token for the sync session.
   final TokenProvider tokenProvider;
 
-  /// Optional stable identity for sync-scoped bookkeeping (account id).
+  /// Stable identity for sync-scoped bookkeeping (account id). Must be
+  /// stable per account; sync start fails typed when omitted.
   final String? identity;
 }
 
@@ -50,6 +51,7 @@ final class PocketBaseSyncOptions {
 /// no longer accepted — fetch a fresh one and push it with [updateAuth].
 /// {@endtemplate}
 final class PocketBaseSync {
+  /// Internal: created by the attachment on the database.
   PocketBaseSync.internal(this._runtime, this._options);
 
   final RuntimeClient _runtime;

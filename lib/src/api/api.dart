@@ -18,6 +18,6 @@ export 'sync.dart';
 export 'transaction.dart';
 
 // The token bridge types back `PocketBaseSyncOptions`; re-exported here so
-// the sync attachment is usable from this one import (the same pairing the
-// typed layer already exposes).
-export '../adapters/pocketbase/auth.dart' show Token, TokenProvider;
+// the sync attachment is usable from this one import. They live on the
+// kernel sync seam — the boundary's vocabulary — not in any one adapter.
+export '../kernel/sync/sync_backend.dart' show Token, TokenProvider;

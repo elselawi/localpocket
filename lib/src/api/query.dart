@@ -92,6 +92,7 @@ final class SearchSpec<S extends StoreDef<S>> {
 /// [StaleCursorError].
 /// {@endtemplate}
 final class Cursor<S extends StoreDef<S>> {
+  /// Internal constructor; callers receive cursors from page results.
   const Cursor.internal(this._token);
 
   /// The opaque kernel-minted token.
@@ -111,6 +112,7 @@ final class Cursor<S extends StoreDef<S>> {
 /// when there is nothing to continue into.
 /// {@endtemplate}
 final class Page<S extends StoreDef<S>> {
+  /// Internal constructor; the typed layer assembles pages from kernel rows.
   Page.internal({
     required List<Row<S>> items,
     required this.hasNext,
@@ -159,6 +161,7 @@ final class Page<S extends StoreDef<S>> {
 /// typed fetch of the record.
 /// {@endtemplate}
 final class SearchHit<S extends StoreDef<S>> {
+  /// Internal constructor; the typed layer mints hits from search results.
   SearchHit.internal(this.id, this.score, this._fetchRow);
 
   /// The record id.

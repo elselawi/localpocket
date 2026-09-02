@@ -57,19 +57,18 @@ final class LocalPocketOptions {
   /// Builds the sync backend the kernel uses for sync start commands, or
   /// `null` when sync is not used on this database.
   ///
-  /// The PocketBase adapter supplies [SyncBackendFactory]'s implementation;
-  /// on web the worker boot configures it itself, so this is primarily the
-  /// native (direct runtime) wiring. A runtime without a factory fails sync
-  /// start with a typed error.
+  /// Primarily the native wiring: on web the worker configures its own
+  /// backend (a non-PocketBase factory fails the web open typed instead of
+  /// being silently ignored). A runtime without a factory fails sync start
+  /// with a typed error.
   final SyncBackendFactory? syncBackendFactory;
 
   /// The blob store holding attachment bytes for this database, or `null`
   /// when files are not used.
   ///
-  /// On web the worker resolves its own platform blob store (OPFS with a
-  /// volatile in-memory fallback); on native targets this is the storage
-  /// adapter for attachment bytes. A database without a blob store fails
-  /// file operations with a typed error.
+  /// On web the worker resolves its own store (OPFS with a volatile fallback);
+  /// natively this is the storage adapter. Without one, file operations fail
+  /// with a typed error.
   final BlobStore? blobStore;
 }
 
@@ -79,11 +78,8 @@ final class LocalPocketOptions {
 final class EncryptionConfig {
   const EncryptionConfig._(this.fieldCipher);
 
-  /// AES-256-GCM field encryption keyed by [key] (32 bytes).
-  ///
-  /// The key never leaves this object: it is handed to the kernel's field
-  /// cipher and is never logged, persisted, or sent across a runtime
-  /// boundary.
+  /// AES-256-GCM field encryption keyed by [key] (32 bytes). The key never
+  /// leaves this object — handed only to the kernel's field cipher.
   static EncryptionConfig aesGcm256({required Uint8List key}) =>
       EncryptionConfig._(AesGcmFieldCipher(key));
 

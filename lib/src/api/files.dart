@@ -2,10 +2,10 @@
 /// contract.
 ///
 /// `Store.files` is the record-facing file service: attach bytes (as a
-/// bounded [FileSource]), list what is attached, stream a download back, and
-/// remove references. Uploads ride the kernel's bounded chunk sessions and
-/// downloads ride the credit-windowed [FileChunkEvent] flow, so no single
-/// request or reply ever carries a whole file across the runtime boundary.
+/// bounded [FileSource]), list attachments, stream downloads, and remove
+/// references. Uploads use bounded chunk sessions and downloads a
+/// credit-windowed [FileChunkEvent] flow — no single request or reply ever
+/// carries a whole file across the runtime boundary.
 library;
 
 import 'dart:async';
@@ -16,11 +16,9 @@ import '../kernel/files/attachment_field.dart';
 import '../runtime/runtime_client.dart';
 import '../schema/store_def.dart';
 
-/// One immutable file reference: the same shape both platforms expose.
-///
-/// This is the typed view of the contract's [FileRefData] — the wire-safe
-/// snapshot of one `lp_file_refs` row. It carries no behavior; bytes live in
-/// the runtime's blob store and metadata lives in the kernel.
+/// One immutable file reference: the typed view of the contract's
+/// [FileRefData] — a wire-safe snapshot of one `lp_file_refs` row. Bytes
+/// live in the runtime's blob store; metadata lives in the kernel.
 final class FileRef {
   /// Creates a file reference.
   const FileRef({
@@ -141,6 +139,7 @@ final class FileSource {
 /// attachment.
 /// {@endtemplate}
 final class Files<S extends StoreDef<S>> {
+  /// Internal: created by the store's `files` getter.
   Files.internal({
     required RuntimeClient runtime,
     required this.def,
@@ -167,22 +166,19 @@ final class Files<S extends StoreDef<S>> {
   /// The store's declared attachment field, or the shared default. This is
   /// the default `field:` for [attach]/[list] — declared once on the
   /// [StoreDef] (`attachmentField`), never re-stated at call sites.
-  String get defaultField =>
-      def.attachmentField ?? attachmentFieldDefault;
+  String get defaultField => def.attachmentField ?? attachmentFieldDefault;
 
   /// Attaches [source] to [recordId] in [field] and returns the new file
   /// reference (or the existing one when the kernel deduplicates an
   /// identical attachment).
   ///
-  /// Bytes are streamed in bounded chunks at the kernel's accepted limit —
-  /// when [FileSource.length] is declared, chunks cross the runtime boundary
-  /// as they are consumed and never accumulate: memory stays bounded no
-  /// matter how large the file. A source without a declared length must be
-  /// buffered to learn its size (the begin request declares it), which the
-  /// caller opts into by omitting `length`. When the blob store is volatile
-  /// (see [isBlobStorageDurable]) the attachment fails with a typed error
-  /// unless [allowVolatileBlobs] is `true` — the loss of bytes on restart
-  /// becomes an explicit choice.
+  /// Bytes stream in bounded chunks: with [FileSource.length] declared,
+  /// chunks cross the boundary as they are consumed and memory stays bounded
+  /// no matter how large the file. Without a declared length the source is
+  /// buffered first to learn its size. A volatile blob store (see
+  /// [isBlobStorageDurable]) fails the attach with a typed error unless
+  /// [allowVolatileBlobs] is `true` — byte loss on restart becomes an
+  /// explicit choice.
   Future<FileRef> attach({
     required String recordId,
     required FileSource source,
@@ -228,8 +224,8 @@ final class Files<S extends StoreDef<S>> {
       final ref = await _send(FileFinishRequest(session: session.session));
       return FileRef.fromData(ref.ref!);
     } catch (_) {
-      // Best-effort abort keeps the kernel's upload registry from retaining
-      // a partial session after a chunk or finish failure.
+      // Best-effort abort so the kernel does not retain a partial upload
+      // session after a chunk or finish failure.
       try {
         await _send(FileAbortRequest(session: session.session));
       } catch (_) {}
@@ -237,9 +233,8 @@ final class Files<S extends StoreDef<S>> {
     }
   }
 
-  /// The bounded streaming upload path: [declared] is the source's declared
-  /// byte length, so the begin request can carry it and every chunk can be
-  /// sent as the source produces it.
+  /// Streaming upload path: [declared] lets the begin request carry the
+  /// size and every chunk flow as the source produces it.
   Future<FileRef> _attachStreamed({
     required String recordId,
     required FileSource source,
@@ -257,8 +252,8 @@ final class Files<S extends StoreDef<S>> {
     ));
     try {
       final chunkBytes = session.maxChunkBytes;
-      // Chunks are flushed at exactly [chunkBytes]; the tail remainder is
-      // flushed before finish. Only one bounded buffer ever exists.
+      // Flush full [chunkBytes] chunks as they accumulate; the tail goes
+      // out before finish. Only one bounded buffer ever exists.
       var pending = BytesBuilder(copy: false);
       var pendingLength = 0;
       var total = 0;
@@ -329,18 +324,16 @@ final class Files<S extends StoreDef<S>> {
     return [for (final ref in result.refs) FileRef.fromData(ref)];
   }
 
-  /// Streams the bytes of [ref] back as a bounded, credit-windowed stream.
-  ///
-  /// The kernel pushes chunks only as fast as the caller consumes them (a
-  /// credit window bounds the outstanding bytes), so the runtime never
-  /// buffers and delivers a whole file in one reply. The stream ends after
-  /// the terminal chunk event; a failed stream surfaces the kernel's error.
+  /// Streams the bytes of [ref] back as a bounded, credit-windowed stream:
+  /// the kernel pushes chunks only as fast as the caller consumes them, and
+  /// the stream ends after the terminal chunk event (a failed stream
+  /// surfaces the kernel's error).
   Future<Stream<List<int>>> open(FileRef ref) async {
     _ensureOpen();
     // ignore: close_sinks
     final controller = StreamController<List<int>>();
     // Chunk events can overtake the open reply (they travel a different
-    // channel), so events for a not-yet-known stream are buffered briefly.
+    // channel); buffer events for the not-yet-known stream briefly.
     final buffered = <FileChunkEvent>[];
     var streamId = '';
     var closed = false;
@@ -374,10 +367,9 @@ final class Files<S extends StoreDef<S>> {
     });
     controller.onCancel = () async {
       await sub.cancel();
-      // Abandoning the subscription is an explicit close: tell the kernel to
-      // release the stream's credit window and subscription instead of
-      // leaving it paused forever (plan Phase 8 Files). Idempotent — the
-      // kernel answers Ok for unknown/finished streams.
+      // Explicit close: release the kernel's credit window and subscription
+      // instead of leaving it paused forever. Idempotent — the kernel
+      // answers Ok for unknown/finished streams.
       if (streamId.isNotEmpty && !closed) {
         try {
           await _send(FileCloseRequest(stream: streamId));
@@ -439,8 +431,7 @@ final class Files<S extends StoreDef<S>> {
     try {
       await _send(FileCreditRequest(stream: stream, bytes: bytes));
     } catch (_) {
-      // Best effort: the runtime may already be closed, and the kernel
-      // settles download state on close either way.
+      // Best effort: the kernel settles download state on close anyway.
     }
   }
 

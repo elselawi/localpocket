@@ -1,18 +1,15 @@
 /// Typed access to one store over the runtime contract.
 ///
-/// A `Store` is a value view: every method sends one typed command through
-/// the runtime and wraps the kernel's answer. Records cross the boundary as
-/// logical field maps — values already lowered through the field
-/// descriptors' boundary codecs (enum wire strings, UTC datetimes, JSON
-/// containers); encryption happens kernel-side and is never this layer's
-/// business.
+/// A `Store` is a value view: every method sends one typed command and wraps
+/// the kernel's answer. Records cross the boundary as logical field maps
+/// (values already lowered through the field codecs); encryption is
+/// kernel-side and never this layer's business.
 library;
 
 import 'dart:async';
 
-import '../kernel/ddl_compiler.dart' show DdlCompiler;
-import '../kernel/ids.dart' show generateRecordId;
 import '../contract/contract.dart';
+import '../kernel/schema.dart' show Field;
 import '../runtime/runtime_client.dart';
 import '../schema/cond.dart';
 import '../schema/field_def.dart';
@@ -21,6 +18,7 @@ import '../api/writes.dart';
 import 'conflicts.dart';
 import 'events.dart';
 import 'files.dart';
+import 'local_pocket.dart' show LocalPocket;
 import 'query.dart';
 import 'row.dart';
 
@@ -33,6 +31,7 @@ import 'row.dart';
 /// session's executor, so its reads see its own uncommitted writes.
 /// {@endtemplate}
 final class Store<S extends StoreDef<S>> {
+  /// Internal: created by the database facade (or a transaction view).
   Store.internal({
     required RuntimeClient runtime,
     required this.def,
@@ -60,7 +59,7 @@ final class Store<S extends StoreDef<S>> {
   /// created row can be returned.
   Future<Row<S>> put(List<Write<S>> writes) async {
     final record = _buildRecord(writes, allowId: true);
-    record.putIfAbsent('id', generateRecordId);
+    record.putIfAbsent('id', LocalPocket.newRecordId);
     await _send(MutateRequest(
       store: name,
       mutation: MutationPut(record),
@@ -73,7 +72,7 @@ final class Store<S extends StoreDef<S>> {
   /// exists, and returns the resulting snapshot.
   Future<Row<S>> upsert(List<Write<S>> writes) async {
     final record = _buildRecord(writes, allowId: true);
-    record.putIfAbsent('id', generateRecordId);
+    record.putIfAbsent('id', LocalPocket.newRecordId);
     await _send(MutateRequest(
       store: name,
       mutation: MutationUpsert(record),
@@ -101,6 +100,11 @@ final class Store<S extends StoreDef<S>> {
       ));
 
   /// Applies a partial update and returns the updated snapshot.
+  ///
+  /// The returned snapshot is a fresh post-write read. If a concurrent sync
+  /// apply removes or hides the record between the commit and that read, the
+  /// write still committed but no snapshot can be returned — this fails with
+  /// [RecordNotFoundException], the same contract as [put]/[upsert].
   Future<Row<S>> patch(String id, List<Write<S>> writes) async {
     await _send(MutateRequest(
       store: name,
@@ -299,12 +303,11 @@ final class Store<S extends StoreDef<S>> {
   // -- reactivity -----------------------------------------------------------
 
   /// Emits the matching rows of [spec] every time the store changes in a way
-  /// that affects the query — including pure reorders, where the same rows
-  /// come back in a different order. The spec needs a page size or
-  /// [Limits.unbounded].
+  /// that affects the query — including pure reorders. The spec needs a
+  /// page size or [Limits.unbounded].
   ///
   /// Watches are rejected inside transactions: a watch outlives the body
-  /// that would start it, so a session-bound watch is a caller bug.
+  /// that would start it.
   Stream<List<Row<S>>> watch(QuerySpec<S> spec) {
     if (_session != null) {
       throw ValidationException(
@@ -312,8 +315,8 @@ final class Store<S extends StoreDef<S>> {
       );
     }
     final data = lowerQuerySpec(spec, def, requireLimit: true);
-    // The returned stream's owner controls the controller's lifetime: it is
-    // torn down on cancel, and the kernel-side watch dies with it.
+    // The stream's owner controls the controller's lifetime (torn down on
+    // cancel; the kernel-side watch dies with it).
     // ignore: close_sinks
     late final StreamController<List<Row<S>>> controller;
     StreamSubscription<Event>? events;
@@ -335,8 +338,8 @@ final class Store<S extends StoreDef<S>> {
     }
 
     controller = StreamController<List<Row<S>>>(
-      // The caller owns the stream; the controller lives as long as the
-      // subscription and is torn down in onCancel.
+      // The controller lives as long as the subscription; torn down in
+      // onCancel.
       // ignore: close_sinks
       onListen: () async {
         final started =
@@ -361,8 +364,7 @@ final class Store<S extends StoreDef<S>> {
   }
 
   /// Committed changes to this store: one notification per committed record
-  /// change, carrying the record payloads (old/new state, origin, action,
-  /// and touched fields).
+  /// change, with old/new payloads, origin, action, and touched fields.
   Stream<ChangeNotification> get changes => _runtime.events
       .where((event) => event is CommittedChange)
       .cast<CommittedChange>()
@@ -379,10 +381,10 @@ final class Store<S extends StoreDef<S>> {
             changedFields: Set.of(event.changedFields),
           ));
 
-  /// Typed committed record events for this store (plan §6.8): one
-  /// [RecordChange] per committed record change, with immutable typed row
-  /// snapshots decoded against this store's definition. A create carries a
-  /// null `oldRecord`, a purge a null `newRecord`.
+  /// Typed committed record events for this store: one [RecordChange] per
+  /// committed record change, with immutable typed row snapshots decoded
+  /// against this store's definition. A create carries a null `oldRecord`,
+  /// a purge a null `newRecord`.
   Stream<RecordChange<S>> get events => _runtime.events
       .where((event) => event is CommittedChange)
       .cast<CommittedChange>()
@@ -404,8 +406,12 @@ final class Store<S extends StoreDef<S>> {
     final id = record['id']! as String;
     final row = await get(id);
     if (row == null) {
-      throw StateError('Write reported success for "$id" but the record '
-          'is not readable.');
+      // Same contract as patch(): the write committed, but the post-write
+      // read cannot see the row (e.g. a concurrent sync apply removed or
+      // hid it between the two operations). One typed error for the whole
+      // "write committed but snapshot unavailable" family.
+      throw RecordNotFoundException(
+          'Write reported success for "$id" but the record is not readable.');
     }
     return row;
   }
@@ -519,7 +525,7 @@ final class Store<S extends StoreDef<S>> {
   }
 
   void _validateExtraKey(String key) {
-    if (DdlCompiler.reservedColumns.contains(key) ||
+    if (Field.reservedColumns.contains(key) ||
         def.compiledSchema.declaredFieldNames.contains(key)) {
       throw ValidationException(
         'Key "$key" is declared or reserved and cannot be set as extra.',

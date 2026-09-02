@@ -2,11 +2,10 @@
 /// contract.
 ///
 /// `Store.conflicts` is the typed conflict surface: open conflicts come back
-/// as immutable [Conflict] snapshots (the same shape on native and web),
-/// watch emits the current list on every add/resolve/modify, and the three
-/// resolution paths are explicit commands — a custom decision lowers typed
-/// [Write]s into the merged document, `acceptLocal`/`acceptRemote` choose
-/// one side wholesale.
+/// as immutable [Conflict] snapshots, watch emits the list on every
+/// add/resolve/modify, and resolution is explicit — a custom decision
+/// lowers typed [Write]s into the merged document, while
+/// `acceptLocal`/`acceptRemote` choose one side wholesale.
 library;
 
 import 'dart:async';
@@ -28,6 +27,7 @@ import 'row.dart';
 /// typed.
 /// {@endtemplate}
 final class Conflict<S extends StoreDef<S>> {
+  /// Internal: built by the typed layer from the wire snapshot.
   Conflict.internal({
     required this.def,
     required this.store,
@@ -41,12 +41,9 @@ final class Conflict<S extends StoreDef<S>> {
     this.resolved,
   });
 
-  /// Maps the contract's wire snapshot onto the typed view.
-  ///
-  /// The stored conflict documents carry field maps (no system columns); the
-  /// [Row] views are enriched with `id: recordId` so `row.id` and the
-  /// resolve base work naturally. Archive state is not part of a conflict
-  /// document and is left absent.
+  /// Maps the contract's wire snapshot onto the typed view. Conflict
+  /// documents carry no system columns, so the [Row]s are enriched with
+  /// `id: recordId` and archive state stays absent.
   factory Conflict.fromData(S def, ConflictData data) => Conflict.internal(
         def: def,
         store: data.store,
@@ -94,9 +91,8 @@ final class Conflict<S extends StoreDef<S>> {
 
   /// Whether the remote side is a deletion tombstone (a delete-conflict).
   bool get remoteDeleted {
-    // The kernel marks a delete-conflict's remote as a tombstone map whose
-    // only entry is [remoteDeletedKey]; the injected `id` enrichment is
-    // ignored for the check.
+    // A delete-conflict's remote is a tombstone map whose only entry is
+    // [remoteDeletedKey]; the injected `id` enrichment is ignored.
     final doc = Map<String, Object?>.of(remote.toJson())..remove('id');
     return doc.length == 1 && doc[remoteDeletedKey] == true;
   }
@@ -110,6 +106,7 @@ final class Conflict<S extends StoreDef<S>> {
 /// web.
 /// {@endtemplate}
 final class StoreConflicts<S extends StoreDef<S>> {
+  /// Internal: created by the store's `conflicts` getter.
   StoreConflicts.internal({
     required RuntimeClient runtime,
     required this.def,
@@ -204,21 +201,18 @@ final class StoreConflicts<S extends StoreDef<S>> {
   /// Resolves the open conflict for [id] with an application-selected merged
   /// document.
   ///
-  /// [merged] is a list of typed writes naming the fields the caller chooses
-  /// for the resolution. The final document is the conflict's current local
-  /// document with those writes applied on top — unmentioned fields keep
-  /// their local values — and is lowered through the store's field codecs
-  /// before crossing the runtime boundary.
+  /// [merged] names the fields the caller decides; unmentioned fields keep
+  /// their local values. The merged document is lowered through the store's
+  /// field codecs before crossing the runtime boundary.
   Future<void> resolve(String id, {required List<Write<S>> merged}) async {
     _ensureOpen();
     final current = await get(id);
     if (current == null) {
       throw StateError('No conflict found for $name/$id');
     }
-    // Start from the current local document and apply the chosen writes:
-    // an explicit resolution names the fields it decides, everything else
-    // keeps the local value. The kernel forces `id` to the conflicted
-    // record's id either way.
+    // The decision names its fields; everything else keeps the local
+    // value. The kernel forces `id` to the conflicted record's id either
+    // way.
     final lowered = _lowerWrites(merged, allowId: false);
     final document = <String, Object?>{...current.local.toJson(), ...lowered};
     await _send(ResolveConflictRequest(

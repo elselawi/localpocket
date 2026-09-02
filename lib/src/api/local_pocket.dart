@@ -8,6 +8,7 @@ library;
 
 import '../kernel/local_pocket.dart' as kernel
     show DurabilityClass, KernelDatabase;
+import '../kernel/ids.dart' show generateRecordId;
 import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';
 import '../schema/store_def.dart';
@@ -26,18 +27,21 @@ import 'transaction.dart';
 /// [transaction] and [read], and listen for committed facts on [changes].
 /// {@endtemplate}
 final class LocalPocket {
-  /// Binds the facade to an already-running runtime. Library-internal seam:
-  /// the platform openers (`open_native.dart`, `open_web.dart`) construct the
-  /// facade once their runtime is up — on web the kernel lives behind the
-  /// worker transport, so nothing is opened in-process.
+  /// Binds the facade to an already-running runtime (library-internal seam:
+  /// platform openers construct it once their runtime is up).
   ///
-  /// [onClose] runs at [close] time after the close command, letting a
-  /// platform opener tear down its own resources — on web this disposes the
-  /// worker connection so the OPFS file handle is flushed (the sqlite3_web
-  /// `Database.dispose()`), without which committed blob data can be lost on
-  /// some browsers when the page tears down.
+  /// [onClose] runs after the close command so the platform opener can tear
+  /// down its own resources — on web it disposes the worker connection to
+  /// flush OPFS, without which committed blob data can be lost.
   LocalPocket.internal(this._runtime, {Future<void> Function()? onClose})
       : _onClose = onClose;
+
+  /// Mints one client-side record id (PocketBase-compatible, creation-ordered
+  /// so id-index inserts stay append-only). The id format is engine-owned;
+  /// the facade exposes this seam so writes can carry their id — `put`
+  /// assigns one when the caller omits it — without reaching into engine
+  /// internals.
+  static String newRecordId() => generateRecordId();
 
   /// Opens a database on the current platform: the direct in-process runtime
   /// on native targets, the typed contract over the dedicated worker on web.
@@ -45,8 +49,7 @@ final class LocalPocket {
       openPlatform(options);
 
   /// Opens a database over a caller-supplied runtime — the seam that lets
-  /// the same facade run against the wire round-trip runtime, and the
-  /// conformance harness prove every facade body over the worker path.
+  /// the conformance harness prove every facade body over the worker path.
   static Future<LocalPocket> openWith(
     LocalPocketOptions options,
     RuntimeClient Function(CommandHandler handler) createRuntime,
@@ -69,9 +72,13 @@ final class LocalPocket {
     );
     try {
       return LocalPocket.internal(createRuntime(db.commands));
-    } catch (_) {
-      await db.close();
-      rethrow;
+    } catch (e, st) {
+      try {
+        await db.close();
+      } catch (_) {
+        // Cleanup must never replace the original open error.
+      }
+      Error.throwWithStackTrace(e, st);
     }
   }
 
@@ -103,12 +110,9 @@ final class LocalPocket {
       );
 
   /// Runs [action] inside one write transaction and commits when it
-  /// completes.
-  ///
-  /// The returned future resolves only after the commit has succeeded, so
-  /// everything awaited inside the body — and every event the body's writes
-  /// cause — is ordered before it. A body that throws (or a commit that
-  /// fails) rolls the session back and rethrows the original error.
+  /// completes. The returned future resolves only after the commit succeeds,
+  /// so the body and the events it causes are ordered before it; a body
+  /// that throws (or a failed commit) rolls back and rethrows.
   ///
   /// [durability] trades commit latency for power-loss safety: [normal]
   /// relies on the WAL default, [full] flushes on every commit.
@@ -132,9 +136,8 @@ final class LocalPocket {
       _runSession(action, const TransactionBeginRequest(readOnly: true));
 
   /// Committed changes across every store: one notification per committed
-  /// record change, carrying the record payloads (old/new state, origin,
-  /// action, and touched fields) exactly as the contract's committed-change
-  /// event delivers them on every runtime.
+  /// record change, with old/new payloads, origin, action, and touched
+  /// fields.
   Stream<ChangeNotification> get changes => _runtime.events
       .where((event) => event is CommittedChange)
       .cast<CommittedChange>()
@@ -154,15 +157,13 @@ final class LocalPocket {
   ///
   /// The host drives the shared contract runtime: [PocketBaseSync.start]
   /// starts the kernel-owned sync engine and its realtime connection. The
-  /// [PocketBaseSyncOptions.tokenProvider] stays caller-owned and its token
-  /// crosses only through the sync start and auth-update commands. The same
-  /// host behaves identically on native and web — sync start owns realtime,
-  /// so there is no separate realtime command on this surface.
+  /// [PocketBaseSyncOptions.tokenProvider] stays caller-owned; its token
+  /// crosses only the sync start and auth-update commands. Sync start owns
+  /// realtime — there is no separate realtime command on this surface.
   ///
   /// One database owns ONE sync host: the first call creates it, later calls
-  /// return the same host (a second independent host would race its own
-  /// start/stop state against the shared runtime). Attaching with different
-  /// options than the existing host's throws a [StateError].
+  /// return the same host, and attaching with different baseUrl/identity
+  /// throws a [StateError].
   PocketBaseSync attachPocketBaseSync(PocketBaseSyncOptions options) {
     _ensureOpen();
     final existing = _syncHost;
@@ -213,9 +214,8 @@ final class LocalPocket {
   }
 
   /// Closes the database. Subsequent sends fail with a typed error; live
-  /// event and watch streams end. The platform opener's [LocalPocket.internal
-  /// onClose] hook (web: dispose the worker connection so OPFS is flushed)
-  /// runs after the close command.
+  /// event and watch streams end. The platform opener's onClose hook (web:
+  /// flush OPFS via the worker connection) runs after the close command.
   Future<void> close() async {
     if (_closed) return;
     try {
@@ -250,8 +250,7 @@ final class LocalPocket {
       try {
         await _send(TransactionRollbackRequest(session: begun.session));
       } catch (_) {
-        // The original error is the one worth surfacing; the session is
-        // already gone kernel-side.
+        // Surface the original error; the session is already gone.
       }
       rethrow;
     }
@@ -275,12 +274,12 @@ final class LocalPocket {
 }
 
 /// {@template localpocket.engine_capabilities}
-/// What the underlying engine supports, as observed at open time.
-///
-/// Every value is the ACTIVE runtime's honest report (plan Rule 8): on web
-/// the worker's open handshake is authoritative, and the page never guesses.
+/// What the underlying engine supports, as observed at open time — the
+/// active runtime's honest report; on web the worker's handshake is
+/// authoritative.
 /// {@endtemplate}
 final class EngineCapabilities {
+  /// {@macro localpocket.engine_capabilities}
   const EngineCapabilities({
     required this.sqliteVersion,
     required this.hasStrict,
@@ -311,9 +310,8 @@ final class EngineCapabilities {
   /// web.
   final String storage;
 
-  /// Whether attachment bytes survive a restart. `false` when the blob store
-  /// degrades to volatile memory (e.g. OPFS unavailable and the volatile
-  /// fallback accepted).
+  /// Whether attachment bytes survive a restart; `false` when the blob
+  /// store degraded to volatile memory.
   final bool durable;
 
   /// The live journal mode reported by the engine (e.g. `'wal'`).

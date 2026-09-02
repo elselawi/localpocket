@@ -55,14 +55,12 @@ final class ChangeNotification {
   /// The field names the change touched.
   final Set<String> changedFields;
 
-  /// The record ids touched by this committed change. One committed envelope
-  /// carries exactly one record; this convenience keeps multi-record call
-  /// sites readable.
+  /// The record ids touched by this committed change (one envelope carries
+  /// exactly one record).
   List<String> get ids => [id];
 
   @override
-  String toString() =>
-      'ChangeNotification($storeName, $id, ${action.name}, '
+  String toString() => 'ChangeNotification($storeName, $id, ${action.name}, '
       'changed: $changedFields)';
 }
 
