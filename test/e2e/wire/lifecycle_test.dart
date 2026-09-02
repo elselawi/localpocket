@@ -4,7 +4,7 @@ import 'package:localpocket/src/kernel/schema.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
-import '../../sync/invariants_oracle.dart';
+import '../../support/invariants_oracle.dart';
 import '../support/wire_server.dart';
 
 /// Cipher + lifecycle / restart over the wire (tests.md #31-34) — a single

@@ -6,7 +6,7 @@ import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart' show record, tempDbPath;
-import '../../secret.dart';
+import '../../support/secret.dart';
 import '../support/wire_server.dart';
 
 /// PocketBase wire-contract quirks — create/update/delete (tests.md section

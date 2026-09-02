@@ -4,7 +4,7 @@ import 'package:test/test.dart';
 
 /// Runs the compile-fail corpus through `tool/compile_fail_runner.dart`.
 ///
-/// The corpus (`test/compile_fail/`) pins the plan's compile-time pressure:
+/// The corpus (`test/support/compile_fail/`) pins the plan's compile-time pressure:
 /// foreign-store fields, raw map writes, and undeclared fields must stay
 /// COMPILE errors on the typed surface. Spawned as a subprocess because each
 /// corpus file needs its own analyzer invocation.

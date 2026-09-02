@@ -10,7 +10,7 @@ import 'package:localpocket/src/api/writes.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
-import 'tasks_store.dart';
+import '../support/fixtures/tasks_store.dart';
 
 /// Store-scoped conflicts on the destination facade over the direct runtime.
 /// Conflict rows are seeded directly into `lp_conflicts` (the kernel's

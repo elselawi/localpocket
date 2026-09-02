@@ -352,5 +352,222 @@ void main() {
       final decoded = decodeError(encodeError(const FormatException('nope')));
       expect(decoded, isA<WireException>());
     });
+
+    test('every typed kernel error keeps its identity across the wire', () {
+      final cases = <Object, Matcher>{
+        ValidationException('bad'): isA<ValidationException>(),
+        UniqueConstraintException(field: 'qty', message: 'dup'):
+            isA<UniqueConstraintException>(),
+        NotNullConstraintException(field: 'title', message: 'null'):
+            isA<NotNullConstraintException>(),
+        CheckConstraintException('check'): isA<CheckConstraintException>(),
+        PrimaryKeyConstraintException('pk'):
+            isA<PrimaryKeyConstraintException>(),
+        ForeignKeyConstraintException('fk'):
+            isA<ForeignKeyConstraintException>(),
+        UnsupportedSchemaFeatureError('nope'):
+            isA<UnsupportedSchemaFeatureError>(),
+        FtsUnavailableError('no fts'): isA<FtsUnavailableError>(),
+        SchemaRegistrationError('bad schema'): isA<SchemaRegistrationError>(),
+        SchemaTooNewError('too new'): isA<SchemaTooNewError>(),
+        StorageError('disk full'): isA<StorageError>(),
+        RecordNotFoundException('gone'): isA<RecordNotFoundException>(),
+        StaleCursorError('stale'): isA<StaleCursorError>(),
+        MissingLimitError('limit'): isA<MissingLimitError>(),
+        ConflictBlockedError('blocked'): isA<ConflictBlockedError>(),
+        DestructiveMigrationRefusedError('refused'):
+            isA<DestructiveMigrationRefusedError>(),
+        ReadOnlyTxError('read only'): isA<ReadOnlyTxError>(),
+        TypedStoreMismatchError('mismatch'): isA<TypedStoreMismatchError>(),
+      };
+      cases.forEach((error, matcher) {
+        final decoded = decodeError(encodeError(error));
+        expect(decoded, matcher,
+            reason: '${error.runtimeType} lost its identity over the wire');
+        expect((decoded as LocalPocketError).message,
+            (error as LocalPocketError).message);
+      });
+    });
+
+    test('constraint field details survive the wire', () {
+      final unique =
+          decodeError(encodeError(UniqueConstraintException(field: 'qty')))
+              as UniqueConstraintException;
+      expect(unique.field, 'qty');
+
+      final notNull =
+          decodeError(encodeError(NotNullConstraintException(field: 'title')))
+              as NotNullConstraintException;
+      expect(notNull.field, 'title');
+    });
+
+    test('plain errors carry no details key', () {
+      final encoded = encodeError(StorageError('disk full'));
+      expect(encoded.containsKey('details'), isFalse);
+    });
+
+    test('runtime error categories are named, never raw', () {
+      expect(
+          decodeError(encodeError(WireException('w'))), isA<WireException>());
+      expect(decodeError(encodeError(StateError('s'))), isA<StateError>());
+      final decodedArg =
+          decodeError(encodeError(ArgumentError('a'))) as ArgumentError;
+      expect(decodedArg.message, 'a');
+      final decodedRange =
+          decodeError(encodeError(RangeError('r'))) as RangeError;
+      expect(decodedRange.message, 'r');
+    });
+
+    test('a truly unknown object degrades with a category name', () {
+      final encoded = encodeError(const FormatException('nope'));
+      expect(encoded['type'], 'unknown');
+      final decoded = decodeError(encoded) as WireException;
+      expect(decoded.message, contains('nope'));
+    });
+
+    test('decoding a wire error without a message yields an empty message', () {
+      final decoded = decodeError({'type': 'StorageError'}) as StorageError;
+      expect(decoded.message, '');
+    });
+  });
+
+  group('malformed payload hardening', () {
+    ConflictData validConflict() => ConflictData(
+          store: 's',
+          recordId: 'i',
+          base: {'id': 'i'},
+          local: {'id': 'i'},
+          remote: {'id': 'i'},
+          dirtyLocal: const {'a'},
+          dirtyRemote: const {'b'},
+          detectedAt: 7,
+        );
+
+    test('a conflict with a missing or wrong-typed required field fails typed',
+        () {
+      for (final field in ['store', 'recordId', 'base', 'detectedAt']) {
+        final payload = validConflict().toJson()..remove(field);
+        expect(
+          () => ConflictData.fromJson(payload),
+          throwsA(isA<WireException>()),
+          reason: 'missing "$field" fails typed',
+        );
+        final wrongTyped = validConflict().toJson();
+        wrongTyped[field] = field == 'detectedAt' ? 'seven' : 42;
+        expect(
+          () => ConflictData.fromJson(wrongTyped),
+          throwsA(isA<WireException>()),
+          reason: 'wrong-typed "$field" fails typed',
+        );
+      }
+      final badDirty = validConflict().toJson();
+      badDirty['dirtyLocal'] = ['a', 3];
+      expect(
+        () => ConflictData.fromJson(badDirty),
+        throwsA(isA<WireException>()),
+        reason: 'a non-string dirty-field entry fails typed',
+      );
+    });
+
+    test('a file ref with a wrong-typed optional field fails typed', () {
+      expect(
+        () => FileRefData.fromJson({
+          'refId': 'r',
+          'store': 's',
+          'recordId': 'i',
+          'field': 'blob',
+          'hash': 'h',
+          'state': 'synced',
+          'nextRetryAt': 'soon',
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a wrong-typed nextRetryAt fails typed, never defaults',
+      );
+      expect(
+        () => FileRefData.fromJson({
+          'refId': 'r',
+          'store': 's',
+          'recordId': 'i',
+          'field': 'blob',
+          'hash': 9,
+          'state': 'synced',
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a wrong-typed hash fails typed',
+      );
+    });
+
+    test('a wrong-typed status timestamp fails typed, never reads as never',
+        () {
+      final payload = SyncStatusData.closed.toJson();
+      payload['lastSyncAt'] = 12345;
+      expect(
+        () => SyncStatusData.fromJson(payload),
+        throwsA(isA<WireException>()),
+        reason: 'a present non-DateTime lastSyncAt is rejected',
+      );
+      expect(SyncStatusData.fromJson(SyncStatusData.closed.toJson()).lastSyncAt,
+          isNull,
+          reason: 'an absent timestamp legitimately means never');
+    });
+
+    test('a wrong-typed query predicate fails typed, never becomes unfiltered',
+        () {
+      final payload = QuerySpecData().toJson();
+      payload['predicate'] = 7;
+      expect(
+        () => QuerySpecData.fromJson(payload),
+        throwsA(isA<WireException>()),
+      );
+      // Absent and null stay legal: no predicate means no filter.
+      expect(QuerySpecData.fromJson(payload..remove('predicate')).predicate,
+          isNull);
+    });
+
+    test('a wrong-typed tx durability fails typed, never silently normal', () {
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'txBegin',
+          'payload': {'readOnly': false, 'durability': 123},
+        }),
+        throwsA(isA<WireException>()),
+      );
+      final decoded = ContractCodec.decodeRequest({
+        'tag': 'txBegin',
+        'payload': {'readOnly': false, 'durability': 'full'},
+      });
+      expect((decoded as TransactionBeginRequest).durability,
+          TransactionDurability.full);
+      // Absent keeps the documented default.
+      final defaulted = ContractCodec.decodeRequest({
+        'tag': 'txBegin',
+        'payload': {'readOnly': false},
+      }) as TransactionBeginRequest;
+      expect(defaulted.durability, TransactionDurability.normal);
+    });
+
+    test('a malformed element in a list payload names its index', () {
+      try {
+        ContractCodec.decodeResult(
+            const RowsRequest(store: 's', ids: ['a', 'b', 'c']), {
+          'tag': RowsResult.tagValue,
+          'payload': encodeWireValue({
+            'rows': [
+              {'id': 'a'},
+              {'id': 'b'},
+              'not-a-map',
+            ],
+          }),
+        });
+        fail('expected a WireException');
+      } on WireException catch (e) {
+        expect(e.message, contains('rows[2]'));
+      }
+    });
+
+    test('every event sample family round-trips, conflicts included', () {
+      final tags = ContractCodec.eventSamples.map((e) => e.tag).toSet();
+      expect(tags, contains(ConflictsSnapshot.tagValue));
+    });
   });
 }

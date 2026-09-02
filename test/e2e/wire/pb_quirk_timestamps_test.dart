@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:test/test.dart';
 
-import '../../secret.dart';
+import '../../support/secret.dart';
 import '../support/wire_server.dart';
 
 /// PocketBase wire-contract quirks — timestamps & ordering (tests.md section

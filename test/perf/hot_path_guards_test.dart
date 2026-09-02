@@ -3,8 +3,8 @@ import 'package:localpocket/src/kernel/ids.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
-import '../sync/engine/engine_helpers.dart';
-import '../sync/engine/mock_backend.dart';
+import '../support/engine_helpers.dart';
+import '../support/mock_backend.dart';
 
 /// Regression guards for the hot-path optimizations (point-read, sync-apply):
 ///  - `Collection.get` must be a single SQL round-trip (a plain indexed

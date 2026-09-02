@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:localpocket/localpocket.dart';
 import 'package:test/test.dart';
 
-import 'tasks_store.dart';
+import '../support/fixtures/tasks_store.dart';
 
 void main() {
   LocalPocketOptions blobOptions() => LocalPocketOptions(
@@ -14,7 +14,7 @@ void main() {
         blobStore: MemoryBlobStore(),
       );
 
-  group('bounded upload streaming (plan Phase 8 Files)', () {
+  group('bounded upload streaming', () {
     test('a declared-length source streams without buffering', () async {
       final db = await LocalPocket.open(blobOptions());
       addTearDown(db.close);
@@ -87,7 +87,7 @@ void main() {
     });
   });
 
-  group('download close (plan Phase 8 Files)', () {
+  group('download close', () {
     test('cancelling a download mid-stream closes it without hanging',
         () async {
       final db = await LocalPocket.open(blobOptions());

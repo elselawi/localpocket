@@ -4,7 +4,7 @@ import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
-import '../../sync/invariants_oracle.dart';
+import '../../support/invariants_oracle.dart';
 import '../support/wire_server.dart';
 
 /// Remote-authoritative mutations & idempotency over the wire (tests.md
@@ -14,7 +14,7 @@ import '../support/wire_server.dart';
 ///
 /// Every scenario is written ONCE against the [WireServer] facade and runs
 /// against BOTH the in-process MockPbServer and the LIVE PocketBase server
-/// (`test/secret.dart`, tagged `real`) — see [wireTest].
+/// (`test/support/secret.dart`, tagged `real`) — see [wireTest].
 ///
 /// Mechanics pinned here (verified against production):
 /// - a remote hard delete is discovered by the anti-entropy sweep as a

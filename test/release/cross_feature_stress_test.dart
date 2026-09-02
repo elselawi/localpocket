@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:test/test.dart';
 
-import '../sync/engine/engine_helpers.dart';
-import '../sync/engine/mock_backend.dart';
+import '../support/engine_helpers.dart';
+import '../support/mock_backend.dart';
 
 /// Cross-feature concurrency stress: a seeded, deterministic suite
 /// combining concurrent local writes, reads, watchers, pull/push barriers,

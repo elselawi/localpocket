@@ -12,10 +12,10 @@ import 'package:localpocket/src/runtime/runtime_client.dart';
 import 'package:localpocket/src/api/writes.dart';
 import 'package:test/test.dart';
 
-import '../api/tasks_store.dart';
+import '../support/fixtures/tasks_store.dart';
 import '../support/helpers.dart';
 import '../support/mock_pb_server.dart';
-import '../web/support/worker_harness.dart';
+import '../support/worker_harness.dart';
 
 /// Surface conformance for the Phase-8 destination API families: files,
 /// conflicts, and the PocketBase sync attachment must behave identically over

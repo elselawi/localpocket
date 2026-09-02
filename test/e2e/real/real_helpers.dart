@@ -1,6 +1,6 @@
 /// Helpers for the LIVE PocketBase E2E suite (`test/e2e/real/`).
 ///
-/// These tests hit the real server configured in `test/secret.dart`
+/// These tests hit the real server configured in `test/support/secret.dart`
 /// (gitignored): `pb.apexo.app`, superuser `test@flutter.com`.
 ///
 /// Every test runs in its own isolated remote `store` and cleans its records
@@ -20,7 +20,7 @@ import 'package:localpocket/src/kernel/sync/engine.dart';
 import 'package:localpocket/src/kernel/sync/sync_config.dart';
 import 'package:test/test.dart';
 
-import '../../secret.dart';
+import '../../support/secret.dart';
 import '../../support/helpers.dart';
 
 /// Logs in against the `_superusers` collection with the test credentials and

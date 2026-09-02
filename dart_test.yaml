@@ -20,4 +20,4 @@ tags:
   real:
     skip: "Live PocketBase server tests — run with: dart test --tags real --run-skipped test/e2e/"
   gate:
-    skip: 'Release/web gate child-process tests — run with: dart test --tags "gate || real" --run-skipped -j 1 test/release/ test/web/ test/e2e/real/'
+    skip: 'Release/web gate child-process tests — run with: dart test --tags "gate || real" --run-skipped -j 1 test/release/ test/platform/web/ test/e2e/real/'

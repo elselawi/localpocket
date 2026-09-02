@@ -14,7 +14,7 @@ import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
-import '../web/support/worker_harness.dart';
+import '../support/worker_harness.dart';
 
 /// File-family conformance: bounded upload sessions, credit-windowed
 /// downloads, and the metadata RPCs must produce equal results over the

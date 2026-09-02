@@ -2,7 +2,7 @@
 ///
 /// Scenarios are written ONCE against [WireServer] and run against BOTH the
 /// in-process `MockPbServer` (hermetic, untagged) and the LIVE PocketBase
-/// server in `test/secret.dart` (tagged `real`) via [wireTest]. The test body
+/// server in `test/support/secret.dart` (tagged `real`) via [wireTest]. The test body
 /// is never duplicated — only the server implementation differs. Scenarios
 /// that rely on fault injection that only the mock can do (poison batches,
 /// forced status codes, server restarts, garbage SSE) simply register
@@ -24,7 +24,7 @@ import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:localpocket/src/kernel/sync/sync_config.dart';
 import 'package:test/test.dart';
 
-import '../../secret.dart';
+import '../../support/secret.dart';
 import '../../support/helpers.dart';
 import '../../support/mock_pb_server.dart';
 import '../../support/pb_helpers.dart';
@@ -286,7 +286,7 @@ class MockWireServer extends WireServer {
   }
 }
 
-/// Live variant: speaks raw HTTP to the server in `test/secret.dart`, with
+/// Live variant: speaks raw HTTP to the server in `test/support/secret.dart`, with
 /// clients built like `RealHarness`.
 class RealWireServer extends WireServer {
   RealWireServer()

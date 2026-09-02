@@ -4,6 +4,9 @@ import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/contract/contract.dart';
+import 'package:localpocket/src/platform/web/page/protocol.dart'
+    show WireOp, ProtocolEnvelopeException, webProtocolVersion;
+import 'package:localpocket/src/runtime/remote_runtime_client.dart';
 import 'package:localpocket/src/runtime/runtime_client.dart';
 import 'package:test/test.dart';
 
@@ -276,6 +279,72 @@ void main() {
       await db.collection('widgets').put(record(name: 'watched2'));
       await Future<void>.delayed(const Duration(milliseconds: 150));
       expect(snapshots.length, count, reason: 'no snapshots after cancel');
+    });
+  });
+
+  /// The remote runtime's protocol-containment behavior, over fake transports:
+  /// malformed envelopes are diagnosed correctly and one malformed event can
+  /// never break delivery of the well-formed ones behind it.
+  group('remote runtime containment', () {
+    test('a non-map error field is a protocol error, not a missing result',
+        () async {
+      final client = RemoteRuntimeClient(transport: (envelope) async {
+        return {
+          'v': webProtocolVersion,
+          'i': envelope['i'],
+          'r': {
+            'tag': 'health',
+            'error': 'something broke',
+          },
+        };
+      });
+      await expectLater(
+        client.send(const HealthRequest()),
+        throwsA(isA<ProtocolEnvelopeException>().having(
+            (e) => e.message, 'message', contains('malformed "error" field'))),
+      );
+    });
+
+    test('a malformed event is dropped and the stream keeps delivering',
+        () async {
+      final client = RemoteRuntimeClient(transport: (envelope) async {
+        return {
+          'v': webProtocolVersion,
+          'i': envelope['i'],
+          'r': {
+            'tag': 'health',
+            'result': {'tag': 'health', 'payload': {}}
+          },
+        };
+      });
+      final received = <Event>[];
+      final sub = client.events.listen(received.add);
+      addTearDown(sub.cancel);
+
+      client.handleWorkerEvent({
+        'op': WireOp.contractEvent,
+        'event': {
+          'tag': 'committedChange',
+          'payload': encodeWireValue({'store': 's'}),
+        },
+      });
+      client.handleWorkerEvent({
+        'op': WireOp.contractEvent,
+        'event': {
+          'tag': 'committedChange',
+          'payload': encodeWireValue({
+            'store': 's',
+            'id': 'i',
+            'origin': 'local',
+            'action': 'create',
+            'changedFields': ['name'],
+          }),
+        },
+      });
+      await _waitFor(() => received.isNotEmpty);
+      expect(received, hasLength(1),
+          reason: 'the malformed event was dropped; the good one arrived');
+      expect(received.first, isA<CommittedChange>());
     });
   });
 }

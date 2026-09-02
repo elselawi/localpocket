@@ -5,12 +5,11 @@ import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
-import '../sync/engine/engine_helpers.dart';
-import '../sync/engine/mock_backend.dart';
+import '../support/engine_helpers.dart';
+import '../support/mock_backend.dart';
 
 /// A batch-enabled mock that records the opIds of every batch attempt.
 class _RecordingBatchBackend extends MockSyncBackend {
-
   _RecordingBatchBackend() {
     batchEnabled = true;
   }
@@ -44,18 +43,21 @@ void main() {
       expect(backendSource, contains('idempotency key'));
       expect(backendSource, contains('binary-split retry'),
           reason: 'the doc must explain WHY the invariant exists');
-      expect(backendSource, contains('applies the mutation twice'));
+      expect(backendSource, contains('never applies twice'));
     });
 
     test('createRecord documents the client id as the create key', () {
-      expect(backendSource, contains('the same [id] either creates the record'),
+      expect(backendSource,
+          contains('creates key on the client-supplied record id'),
           reason: 'a retried create must never produce a second copy');
+      expect(backendSource,
+          contains('retry creates once or fails with [DuplicateIdError]'));
       expect(backendSource, contains('DuplicateIdError'));
     });
 
     test('updateRecord documents the full-state retry safety contract', () {
-      expect(backendSource, contains('Retry contract'));
-      expect(backendSource, contains('FULL desired record state'),
+      expect(backendSource, contains('Safe to retry after a lost response'));
+      expect(backendSource, contains('never a diff'),
           reason: 're-applying the full payload while the base still matches '
               'is what makes update retries idempotent');
       expect(backendSource, contains('RemoteVersionConflict'));

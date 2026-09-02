@@ -8,7 +8,7 @@ import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
-import '../../secret.dart' show testPBServer;
+import '../../support/secret.dart' show testPBServer;
 import '../support/wire_server.dart';
 
 /// PocketBase realtime/SSE wire-contract quirks (tests.md section 5,

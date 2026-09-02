@@ -5,7 +5,7 @@ import 'package:localpocket/src/kernel/files/blob_store.dart' show MemoryBlobSto
 import 'package:localpocket/src/api/writes.dart';
 import 'package:test/test.dart';
 
-import 'tasks_store.dart';
+import '../support/fixtures/tasks_store.dart';
 
 /// Files on the store facade over the direct runtime: attach, list, streamed
 /// open, remove, and the store-less blob lifecycle verbs. The behavior is

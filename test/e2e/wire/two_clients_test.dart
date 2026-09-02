@@ -6,7 +6,7 @@ import '../support/wire_server.dart';
 
 /// The canonical two-client suite, written ONCE against the [WireServer]
 /// facade and run against BOTH the in-process MockPbServer and the live
-/// PocketBase server (`test/secret.dart`, tagged `real`) — see [wireTest].
+/// PocketBase server (`test/support/secret.dart`, tagged `real`) — see [wireTest].
 ///
 /// Focus: cross-client concurrency no single-batch file owns — disjoint and
 /// overlapping concurrent edits, independent transports, multi-round

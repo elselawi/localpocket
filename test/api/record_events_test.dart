@@ -1,20 +1,19 @@
 import 'package:localpocket/localpocket.dart';
 import 'package:test/test.dart';
 
-import 'tasks_store.dart';
+import '../support/fixtures/tasks_store.dart';
 
 void main() {
   LocalPocketOptions options() =>
       LocalPocketOptions(path: ':memory:', stores: [Tasks.store]);
 
-  group('typed record events (plan §6.8)', () {
+  group('typed record events', () {
     late LocalPocket db;
 
     setUp(() async => db = await LocalPocket.open(options()));
     tearDown(() => db.close());
 
-    test('store events carry typed old/new rows, origin, and fields',
-        () async {
+    test('store events carry typed old/new rows, origin, and fields', () async {
       final tasks = db.store(Tasks.store);
       final events = <RecordChange<Tasks>>[];
       final sub = tasks.events.listen(events.add);
@@ -62,9 +61,41 @@ void main() {
     });
   });
 
-  group('capabilities describe reality (plan Rule 8)', () {
-    test('the facade reports storage, durability, and journal mode',
-        () async {
+  group('notification surfaces', () {
+    test('ChangeNotification prints store, id, action, and fields', () {
+      const notification = ChangeNotification(
+        storeName: 'tasks',
+        id: 'r1',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.update,
+        changedFields: {'title'},
+      );
+      expect(notification.toString(),
+          'ChangeNotification(tasks, r1, update, changed: {title})');
+    });
+
+    test('RecordChange prints the store type, id, and action', () {
+      const change = RecordChange<Tasks>(
+        id: 'r1',
+        origin: ChangeOrigin.remote,
+        action: ChangeAction.create,
+      );
+      expect(change.toString(), 'RecordChange<Tasks>(r1, create, changed: {})');
+    });
+
+    test('the ids convenience lists the single touched record', () {
+      const notification = ChangeNotification(
+        storeName: 'tasks',
+        id: 'r2',
+        origin: ChangeOrigin.resolution,
+        action: ChangeAction.update,
+      );
+      expect(notification.ids, ['r2']);
+    });
+  });
+
+  group('capabilities describe reality', () {
+    test('the facade reports storage, durability, and journal mode', () async {
       final db = await LocalPocket.open(options());
       addTearDown(db.close);
       final caps = await db.capabilities;

@@ -10,11 +10,11 @@ import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
-import '../../secret.dart';
+import '../../support/secret.dart';
 import '../../support/helpers.dart';
 import 'real_helpers.dart';
 
-/// LIVE PocketBase E2E suite — hits the real server in `test/secret.dart`.
+/// LIVE PocketBase E2E suite — hits the real server in `test/support/secret.dart`.
 ///
 /// Every test runs in an isolated remote `store` (unique per run) and cleans
 /// up after itself. Run with:

@@ -9,11 +9,11 @@ import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
-import '../pocketbase/fake_transport.dart';
+import '../adapters/pocketbase/fake_transport.dart';
 import '../support/pb_helpers.dart';
 import '../support/helpers.dart';
-import '../sync/engine/engine_helpers.dart';
-import '../sync/engine/mock_backend.dart';
+import '../support/engine_helpers.dart';
+import '../support/mock_backend.dart';
 
 /// Resource and stream leak checks: after repeated start/stop,
 /// cancelled watches, failed requests, failed uploads/downloads, and close,

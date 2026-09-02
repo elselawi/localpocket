@@ -11,8 +11,8 @@ import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
-import '../sync/engine/engine_helpers.dart';
-import '../sync/engine/mock_backend.dart';
+import '../support/engine_helpers.dart';
+import '../support/mock_backend.dart';
 
 void main() {
   group('Isolates — Delta Pull Normalization & Document Batch Decrypt/Encrypt',

@@ -9,8 +9,8 @@ import 'package:localpocket/localpocket.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
-import '../api/tasks_store.dart';
-import '../web/support/worker_harness.dart';
+import '../support/fixtures/tasks_store.dart';
+import '../support/worker_harness.dart';
 
 /// Runtime conformance for the public facade: the SAME bodies run against
 /// the direct runtime, the loopback runtime (full codec round-trip), and the

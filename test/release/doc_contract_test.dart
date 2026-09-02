@@ -8,7 +8,7 @@ import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:test/test.dart';
 
-import '../pocketbase/fake_transport.dart';
+import '../adapters/pocketbase/fake_transport.dart';
 import '../support/pb_helpers.dart';
 import '../support/helpers.dart';
 
@@ -163,13 +163,13 @@ void main() {
       expect(readme.toLowerCase(), contains('pocketbase'),
           reason: 'the warning must call out the PocketBase backend');
       // The wire-level gap is documented where the write happens.
-      final clientSource =
-          await File('lib/src/adapters/pocketbase/pb_client.dart')
-              .readAsString();
+      final backendSource =
+          await File('lib/src/adapters/pocketbase/backend.dart').readAsString();
       expect(
-        clientSource,
+        backendSource,
         contains('LAST-WRITE-WINS'),
-        reason: 'PbClient.updateRecord must document the ignored baseUpdated',
+        reason: 'PocketBaseBackend.updateRecord must document the ignored '
+            'baseUpdated',
       );
     });
   });

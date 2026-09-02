@@ -3,7 +3,7 @@ import 'package:localpocket/src/runtime/runtime_client.dart';
 import 'package:localpocket/localpocket.dart';
 import 'package:test/test.dart';
 
-import 'tasks_store.dart';
+import '../support/fixtures/tasks_store.dart';
 
 LocalPocketOptions _options() =>
     LocalPocketOptions(path: ':memory:', stores: [Tasks.store]);

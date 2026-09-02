@@ -7,7 +7,7 @@ import 'package:localpocket/src/kernel/sync/status.dart';
 import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:test/test.dart';
 
-import '../../secret.dart' show testPBServer;
+import '../../support/secret.dart' show testPBServer;
 import '../../support/helpers.dart' show record;
 import '../../support/pb_helpers.dart' show TestTokenProvider;
 import '../support/wire_server.dart';

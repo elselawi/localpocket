@@ -5,7 +5,7 @@ import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/sync/status.dart';
 import 'package:test/test.dart';
 
-import '../../secret.dart' show testPBServer;
+import '../../support/secret.dart' show testPBServer;
 import '../../support/helpers.dart' show record, tempDbPath;
 import '../support/wire_server.dart';
 

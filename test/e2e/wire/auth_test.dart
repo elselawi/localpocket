@@ -4,7 +4,7 @@ import 'package:localpocket/src/kernel/sync/status.dart';
 import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:test/test.dart';
 
-import '../../secret.dart';
+import '../../support/secret.dart';
 import '../../support/helpers.dart';
 import '../../support/pb_helpers.dart' show TestTokenProvider, dbContains;
 import '../real/real_helpers.dart' show RealPbTokenProvider;

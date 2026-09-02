@@ -4,7 +4,7 @@ import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
-import '../../sync/invariants_oracle.dart';
+import '../../support/invariants_oracle.dart';
 import '../support/wire_server.dart';
 
 /// Conflict & merge over the wire — a SINGLE source of scenarios run against

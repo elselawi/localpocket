@@ -3,10 +3,11 @@ import 'dart:async';
 import 'package:localpocket/src/api/api.dart';
 import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
+import 'package:localpocket/src/kernel/errors.dart' show ValidationException;
 import 'package:test/test.dart';
 
 import '../support/mock_pb_server.dart';
-import 'tasks_store.dart';
+import '../support/fixtures/tasks_store.dart';
 
 class _FakeTokens implements TokenProvider {
   _FakeTokens(this._value);
@@ -79,6 +80,28 @@ void main() {
       );
     });
 
+    test('start without an identity fails typed instead of sharing a scope',
+        () async {
+      final server = await MockPbServer().start();
+      addTearDown(server.stop);
+      final db = await LocalPocket.open(LocalPocketOptions(
+        path: ':memory:',
+        stores: [Tasks.store],
+        syncBackendFactory: const PocketBaseSyncBackendFactory(),
+      ));
+      addTearDown(db.close);
+      final sync = db.attachPocketBaseSync(PocketBaseSyncOptions(
+        baseUrl: server.baseUrl,
+        tokenProvider: _FakeTokens('jwt'),
+      ));
+      await expectLater(
+        sync.start(),
+        throwsA(isA<ValidationException>().having((e) => e.message, 'message',
+            contains('requires a stable per-account identity'))),
+      );
+      expect(sync.isRunning, isFalse);
+    });
+
     test('status pushes snapshots and authRequired fires on a 401 server',
         () async {
       final server = await MockPbServer().start();
@@ -95,6 +118,7 @@ void main() {
       final sync = db.attachPocketBaseSync(PocketBaseSyncOptions(
         baseUrl: server.baseUrl,
         tokenProvider: _FakeTokens('wrong-token'),
+        identity: 'status-test',
       ));
       final auth = sync.authRequired.first;
       await sync.start();

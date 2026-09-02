@@ -4,7 +4,7 @@ import 'package:localpocket/localpocket.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
-import 'tasks_store.dart';
+import '../support/fixtures/tasks_store.dart';
 
 LocalPocketOptions options({String path = ':memory:'}) =>
     LocalPocketOptions(path: path, stores: [Tasks.store]);

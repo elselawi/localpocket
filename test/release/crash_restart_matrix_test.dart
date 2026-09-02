@@ -13,8 +13,8 @@ import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
-import '../sync/engine/engine_helpers.dart';
-import '../sync/engine/mock_backend.dart';
+import '../support/engine_helpers.dart';
+import '../support/mock_backend.dart';
 
 /// Crash/restart matrix completion: durable file-backed scenarios
 /// where a crash (process kill or interrupted I/O) happens mid-operation and a
