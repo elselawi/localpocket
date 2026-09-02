@@ -1,5 +1,53 @@
 ## Unreleased
 
+- **Robustness sweep across the wire, engine, and adapter boundaries.**
+  Highlights:
+  - **Wire decoders are strict about present-but-wrong-typed values**
+    everywhere: query spec fields (`order`/`select`/`limit`/`cursor`/`all`/…),
+    capability/health booleans, aggregate values, id lists, cursors, and the
+    open fingerprint manifest now reject a wrong-typed present value with a
+    `WireException` instead of silently defaulting it (an absent value keeps
+    its documented default). List-payload element casts never leak raw
+    `TypeError`s.
+  - **User JSON objects shaped like a wire tag survive the boundary.** A map
+    carrying the reserved `__lp_t` key is escaped on encode, so a stored
+    object like `{"__lp_t": "datetime", "v": 123}` round-trips as data on
+    loopback/worker instead of being silently reconstructed into a
+    `DateTime`.
+  - **Sync errors keep their subtype identity across the wire** (including
+    `ServerBusyError.retryAfter`), and `UniqueConstraintException.value`
+    crosses the boundary; loopback conformance now round-trips application
+    errors through the error codec like the remote leg.
+  - **Event envelopes are version-validated on the page side** (a stale
+    worker surfaces a loud protocol error into the event stream instead of
+    silently dead watches), and worker death now ends live event/watch
+    streams on the remote runtime.
+  - **Interactive transaction sessions idle out.** A session that receives
+    no session-scoped command for five minutes is force-rolled back so an
+    abandoned transaction can never hold the write queue forever.
+  - **`orGroups` only lower `eq` members** — any other operator in a wire
+    or-group is rejected with a typed error instead of silently widening the
+    query; `eq(null)` on the flat condition path lowers to `IS NULL` (never a
+    no-op filter); null comparison args (`gt(null)`, `between`, null
+    `inValues` members) are rejected at the typed schema layer.
+  - **Projected `watch()` rows enforce the projection contract** — reading a
+    field excluded by the spec throws the same `FieldNotSelectedError` a
+    `query()` row throws.
+  - **File downloads credit only as fast as the consumer drains** (a paused
+    consumer holds the kernel's credit window instead of buffering
+    unboundedly), and non-200 downloads release the response stream.
+  - **Realtime recovers a revoked token**: SSE connect/subscribe refresh
+    once on 401 and retry before the failure counts against backoff.
+  - **PocketBase file downloads use the configured collection name**
+    (renamed deployments no longer 404 on attachment downloads), and a
+    non-JSON 200 batch response is a typed protocol error.
+  - **The web worker's open-options parser is strict**: a malformed `stores`
+    list or wrong-typed option fails the open with a typed protocol error
+    instead of silently opening with no stores; worker connection sinks are
+    pruned when connections close.
+  - **A failed web open releases its fetched `blob:` URLs** (and best-effort
+    disposes the worker connection) instead of leaking them per retry.
+
 - **Test suite reorganized to mirror the production tree.** `test/` now has
   one directory per production layer — `adapters/pocketbase/`, `api/`,
   `contract/`, `kernel/` (with `change_bus/`, `capabilities/`, `cipher/`,
