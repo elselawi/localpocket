@@ -87,19 +87,32 @@ abstract base class FieldDef<S, T> {
       FieldCond<S>(owner, name, 'eq', <Object?>[encode(value)]);
 
   /// `field IN (values)`. The list must not be empty — the database would
-  /// otherwise emit invalid SQL.
+  /// otherwise emit invalid SQL. A `null` member is rejected: SQL `IN (NULL)`
+  /// never matches, so the condition would silently shrink the result set
+  /// (`eq(null)` has real IS NULL semantics; `inValues` does not).
   FieldCond<S> inValues(List<T> values) {
     if (values.isEmpty) {
       throw ArgumentError.value(values, 'values', 'inValues cannot be empty.');
+    }
+    if (values.contains(null)) {
+      throw ArgumentError.value(
+          values, 'values', 'inValues cannot contain null — use isNull().');
     }
     return FieldCond<S>(owner, name, 'inValues',
         <Object?>[for (final value in values) encode(value)]);
   }
 
   /// `field BETWEEN a AND b` — inclusive on both ends. For a half-open
-  /// window use `gte(a)` with `lt(b)`.
-  FieldCond<S> between(T a, T b) =>
-      FieldCond<S>(owner, name, 'between', <Object?>[encode(a), encode(b)]);
+  /// window use `gte(a)` with `lt(b)`. A `null` bound is rejected: it would
+  /// compile to SQL that never matches.
+  FieldCond<S> between(T a, T b) {
+    if (a == null || b == null) {
+      throw ArgumentError.value(
+          null, 'a/b', 'between(null, …) never matches — use isNull().');
+    }
+    return FieldCond<S>(
+        owner, name, 'between', <Object?>[encode(a), encode(b)]);
+  }
 
   /// Ascending order term for this field.
   OrderTerm<S> get asc => OrderTerm<S>(this, desc: false);

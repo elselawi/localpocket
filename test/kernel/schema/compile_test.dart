@@ -322,8 +322,7 @@ void main() {
           openPocket(stores: [dupIx]), throwsA(isA<sqlite.SqliteException>()));
     });
 
-    test(
-        'store name collision across stores: rejected before any DDL',
+    test('store name collision across stores: rejected before any DDL',
         () async {
       final a = CollectionSchema<Object?>(
         name: 'same',

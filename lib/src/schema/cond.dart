@@ -185,20 +185,36 @@ base mixin NullableFieldCond<S, V> on FieldDef<S, V> {
 /// date-time descriptors.
 base mixin ComparableFieldDef<S, V> on FieldDef<S, V> {
   /// `field > value`.
-  FieldCond<S> gt(V value) =>
-      FieldCond<S>(owner, name, 'gt', <Object?>[encode(value)]);
+  ///
+  /// A `null` argument is rejected: SQL `> NULL` never matches, so the
+  /// condition would silently yield an empty result set. `eq(null)` routes
+  /// to `isNull()` instead; there is no meaningful null comparison here.
+  FieldCond<S> gt(V value) => FieldCond<S>(owner, name, 'gt', <Object?>[
+        _nonNullArg(value, 'gt'),
+      ]);
 
   /// `field >= value`.
-  FieldCond<S> gte(V value) =>
-      FieldCond<S>(owner, name, 'gte', <Object?>[encode(value)]);
+  FieldCond<S> gte(V value) => FieldCond<S>(owner, name, 'gte', <Object?>[
+        _nonNullArg(value, 'gte'),
+      ]);
 
   /// `field < value`.
-  FieldCond<S> lt(V value) =>
-      FieldCond<S>(owner, name, 'lt', <Object?>[encode(value)]);
+  FieldCond<S> lt(V value) => FieldCond<S>(owner, name, 'lt', <Object?>[
+        _nonNullArg(value, 'lt'),
+      ]);
 
   /// `field <= value`.
-  FieldCond<S> lte(V value) =>
-      FieldCond<S>(owner, name, 'lte', <Object?>[encode(value)]);
+  FieldCond<S> lte(V value) => FieldCond<S>(owner, name, 'lte', <Object?>[
+        _nonNullArg(value, 'lte'),
+      ]);
+
+  Object? _nonNullArg(Object? value, String op) {
+    if (value == null) {
+      throw ArgumentError.value(
+          value, 'value', '$op(null) never matches — use isNull() instead.');
+    }
+    return encode(value as V);
+  }
 }
 
 /// Kind-scoped LIKE operators mixed into text descriptors.

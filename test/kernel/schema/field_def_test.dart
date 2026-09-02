@@ -77,6 +77,22 @@ void main() {
       expect(Box.count.lte(1).operator, 'lte');
     });
 
+    test('null comparison args are rejected, never compiled to SQL', () {
+      // `> NULL` and friends never match a row, so the condition would
+      // silently yield an empty result set; `eq(null)` has real IS NULL
+      // semantics, these operators do not.
+      expect(() => Box.count.gt(null), throwsArgumentError);
+      expect(() => Box.count.gte(null), throwsArgumentError);
+      expect(() => Box.count.lt(null), throwsArgumentError);
+      expect(() => Box.count.lte(null), throwsArgumentError);
+      expect(() => Box.madeOn.gt(null), throwsArgumentError);
+      expect(() => Box.count.between(1, null), throwsArgumentError);
+      expect(() => Box.count.between(null, 5), throwsArgumentError);
+      expect(() => Box.count.inValues([1, null]), throwsArgumentError);
+      expect(
+          () => Box.stage.inValues([Stage.draft, null]), throwsArgumentError);
+    });
+
     test('text members carry the raw pattern', () {
       expect(Box.label.startsWith('a').operator, 'startsWith');
       expect(Box.label.startsWith('a').args, ['a']);
@@ -195,7 +211,7 @@ void main() {
 
     test('an empty enum value list is rejected at construction', () {
       expect(
-        () => Box.store.schema.enumOf('empty', const []),
+        () => Box.store.schema.enumOf<Enum>('empty', const []),
         throwsStateError,
         reason: 'an enum with no members cannot encode or decode anything; '
             'it must fail at declaration, not at first use',
