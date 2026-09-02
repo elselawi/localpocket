@@ -1,0 +1,22 @@
+// COMPILE FAIL: the typed write path accepts typed [Write] values, never raw
+// maps (plan Rule 1: a public CRUD method must not accept Map records).
+//
+// expect-error: argument_type_not_assignable
+// expect-error: argument_type_not_assignable
+
+import 'package:localpocket/localpocket.dart';
+
+final class Tasks extends StoreDef<Tasks> {
+  Tasks._() : super(name: 'tasks', version: 1);
+  static final Tasks store = Tasks._();
+  static final title = store.schema.text('title').req();
+
+  @override
+  List<FieldDef<Tasks, Object?>> get fields => [title];
+}
+
+Future<void> scenario(LocalPocket db) async {
+  final tasks = db.store(Tasks.store);
+  await tasks.put({'title': 'raw map'});
+  await tasks.patch('abc', {'title': 'raw map'});
+}

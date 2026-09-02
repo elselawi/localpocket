@@ -1,0 +1,31 @@
+// COMPILE FAIL: a typed store handle is bound to its own definition type —
+// rebinding it to another store's definition cannot compile.
+//
+// expect-error: argument_type_not_assignable
+
+import 'package:localpocket/localpocket.dart';
+
+final class Tasks extends StoreDef<Tasks> {
+  Tasks._() : super(name: 'tasks', version: 1);
+  static final Tasks store = Tasks._();
+  static final title = store.schema.text('title').req();
+
+  @override
+  List<FieldDef<Tasks, Object?>> get fields => [title];
+}
+
+final class Notes extends StoreDef<Notes> {
+  Notes._() : super(name: 'notes', version: 1);
+  static final Notes store = Notes._();
+  static final body = store.schema.text('body').req();
+
+  @override
+  List<FieldDef<Notes, Object?>> get fields => [body];
+}
+
+Future<void> scenario(LocalPocket db) async {
+  final Store<Tasks> tasks = db.store(Tasks.store);
+  final Store<Tasks> wrong = db.store(Notes.store); // foreign definition.
+  await tasks.put([Tasks.title.set('x')]);
+  await wrong.put([Tasks.title.set('x')]);
+}

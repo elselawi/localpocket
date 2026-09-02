@@ -1,0 +1,21 @@
+// COMPILE FAIL: only declared descriptors exist — an undeclared field name
+// has no getter to call, so typos die at compile time.
+//
+// expect-error: undefined_getter
+
+import 'package:localpocket/localpocket.dart';
+
+final class Tasks extends StoreDef<Tasks> {
+  Tasks._() : super(name: 'tasks', version: 1);
+  static final Tasks store = Tasks._();
+  static final title = store.schema.text('title').req();
+
+  @override
+  List<FieldDef<Tasks, Object?>> get fields => [title];
+}
+
+Future<void> scenario(LocalPocket db) async {
+  final tasks = db.store(Tasks.store);
+  final row = await tasks.get('abc');
+  row!.get(Tasks.titel); // typo: `titel` was never declared.
+}

@@ -1,0 +1,34 @@
+// COMPILE FAIL: a condition built for one store cannot filter another
+// store's query — the phantom type parameters make cross-store usage a
+// compile-time error, not a runtime mismatch.
+//
+// expect-error: list_element_type_not_assignable
+// expect-error: undefined_method
+
+import 'package:localpocket/localpocket.dart';
+
+final class Tasks extends StoreDef<Tasks> {
+  Tasks._() : super(name: 'tasks', version: 1);
+  static final Tasks store = Tasks._();
+  static final title = store.schema.text('title').req();
+  static final done = store.schema.boolean('done');
+
+  @override
+  List<FieldDef<Tasks, Object?>> get fields => [title, done];
+}
+
+final class Notes extends StoreDef<Notes> {
+  Notes._() : super(name: 'notes', version: 1);
+  static final Notes store = Notes._();
+  static final body = store.schema.text('body').req();
+
+  @override
+  List<FieldDef<Notes, Object?>> get fields => [body];
+}
+
+Future<void> scenario(LocalPocket db) async {
+  final notes = db.store(Notes.store);
+  await notes
+      .query(QuerySpec(where: [Tasks.done.eq(false)], limit: 5))
+      .fetch();
+}
