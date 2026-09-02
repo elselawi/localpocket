@@ -20,6 +20,7 @@ import 'package:collection/collection.dart';
 import 'package:localpocket/src/kernel/change_bus.dart'
     show ChangeAction, ChangeOrigin;
 import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/files/attachment_field.dart';
 import 'package:localpocket/src/kernel/sync/status.dart';
 
 // The typed error hierarchy crosses the runtime boundary via the error

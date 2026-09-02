@@ -142,7 +142,7 @@ abstract final class ContractCodec {
         refId: 'r',
         store: 's',
         recordId: 'i',
-        field: 'imgs',
+        field: attachmentFieldDefault,
         hash: 'h',
         state: 'pending_upload',
       ),
@@ -242,7 +242,7 @@ abstract final class ContractCodec {
           store: _store(m),
           recordId: _required(m, 'recordId'),
           size: size,
-          field: m['field'] is String ? m['field']! as String : 'imgs',
+          field: m['field'] is String ? m['field']! as String : attachmentFieldDefault,
           name: m['name'] is String ? m['name']! as String : 'blob.bin',
           expectedSha256: m['expectedSha256'] is String
               ? m['expectedSha256']! as String
@@ -263,7 +263,7 @@ abstract final class ContractCodec {
         return FilesListRequest(
           store: _store(m),
           recordId: _required(m, 'recordId'),
-          field: m['field'] is String ? m['field']! as String : 'imgs',
+          field: m['field'] is String ? m['field']! as String : attachmentFieldDefault,
         );
       case 'fileOpen':
         final index = m['index'];
@@ -273,7 +273,7 @@ abstract final class ContractCodec {
         return FileOpenRequest(
           store: _store(m),
           recordId: _required(m, 'recordId'),
-          field: m['field'] is String ? m['field']! as String : 'imgs',
+          field: m['field'] is String ? m['field']! as String : attachmentFieldDefault,
           index: index is int ? index : 0,
           refId: m['refId'] is String ? m['refId']! as String : null,
         );
@@ -283,6 +283,8 @@ abstract final class ContractCodec {
           throw WireException('Malformed fileCredit payload.');
         }
         return FileCreditRequest(stream: _required(m, 'stream'), bytes: bytes);
+      case 'fileClose':
+        return FileCloseRequest(stream: _required(m, 'stream'));
       case 'fileRemove':
         final index = m['index'];
         if (index != null && index is! int) {
@@ -291,7 +293,7 @@ abstract final class ContractCodec {
         return FileRemoveRequest(
           store: _store(m),
           recordId: _required(m, 'recordId'),
-          field: m['field'] is String ? m['field']! as String : 'imgs',
+          field: m['field'] is String ? m['field']! as String : attachmentFieldDefault,
           index: index is int ? index : 0,
           refId: m['refId'] is String ? m['refId']! as String : null,
         );

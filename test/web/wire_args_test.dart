@@ -46,8 +46,8 @@ void main() {
     });
 
     test('optional returns null when absent and validates when present', () {
-      const w = WireArgs({'field': 'imgs'});
-      expect(w.optionalString('field'), 'imgs');
+      const w = WireArgs({'field': 'attachments'});
+      expect(w.optionalString('field'), 'attachments');
       expect(w.optionalString('missing'), isNull);
       const bad = WireArgs({'field': 5});
       expect(

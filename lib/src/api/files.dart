@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import '../contract/contract.dart';
+import '../kernel/files/attachment_field.dart';
 import '../runtime/runtime_client.dart';
 import '../schema/store_def.dart';
 
@@ -163,37 +164,53 @@ final class Files<S extends StoreDef<S>> {
   Future<bool> get isBlobStorageDurable async =>
       (await _send(const StorageStatusRequest())).durable;
 
+  /// The store's declared attachment field, or the shared default. This is
+  /// the default `field:` for [attach]/[list] — declared once on the
+  /// [StoreDef] (`attachmentField`), never re-stated at call sites.
+  String get defaultField =>
+      def.attachmentField ?? attachmentFieldDefault;
+
   /// Attaches [source] to [recordId] in [field] and returns the new file
   /// reference (or the existing one when the kernel deduplicates an
   /// identical attachment).
   ///
-  /// Bytes are streamed in bounded chunks at the kernel's accepted limit, so
-  /// no single request crosses the runtime boundary with a large payload.
-  /// When the blob store is volatile (see [isBlobStorageDurable]) the
-  /// attachment fails with a typed error unless [allowVolatileBlobs] is
-  /// `true` — the loss of bytes on restart becomes an explicit choice.
+  /// Bytes are streamed in bounded chunks at the kernel's accepted limit —
+  /// when [FileSource.length] is declared, chunks cross the runtime boundary
+  /// as they are consumed and never accumulate: memory stays bounded no
+  /// matter how large the file. A source without a declared length must be
+  /// buffered to learn its size (the begin request declares it), which the
+  /// caller opts into by omitting `length`. When the blob store is volatile
+  /// (see [isBlobStorageDurable]) the attachment fails with a typed error
+  /// unless [allowVolatileBlobs] is `true` — the loss of bytes on restart
+  /// becomes an explicit choice.
   Future<FileRef> attach({
     required String recordId,
     required FileSource source,
-    String field = 'imgs',
+    String? field,
     bool allowVolatileBlobs = false,
   }) async {
     _ensureOpen();
+    final resolvedField = field ?? defaultField;
+    final declared = source.length;
+    if (declared != null) {
+      return _attachStreamed(
+        recordId: recordId,
+        source: source,
+        field: resolvedField,
+        declared: declared,
+        allowVolatileBlobs: allowVolatileBlobs,
+      );
+    }
     final builder = BytesBuilder(copy: false);
     await for (final chunk in source.chunks) {
       builder.add(chunk);
     }
     final payload = builder.takeBytes();
-    final declared = source.length;
-    if (declared != null && declared != payload.length) {
-      throw StateError(
-          'Size mismatch: declared $declared but got ${payload.length}');
-    }
     final session = await _send(FileBeginUploadRequest(
       store: name,
       recordId: recordId,
       size: payload.length,
-      field: field,
+      field: resolvedField,
       name: source.name ?? 'blob.bin',
       allowVolatileBlobs: allowVolatileBlobs,
     ));
@@ -220,16 +237,94 @@ final class Files<S extends StoreDef<S>> {
     }
   }
 
+  /// The bounded streaming upload path: [declared] is the source's declared
+  /// byte length, so the begin request can carry it and every chunk can be
+  /// sent as the source produces it.
+  Future<FileRef> _attachStreamed({
+    required String recordId,
+    required FileSource source,
+    required String field,
+    required int declared,
+    required bool allowVolatileBlobs,
+  }) async {
+    final session = await _send(FileBeginUploadRequest(
+      store: name,
+      recordId: recordId,
+      size: declared,
+      field: field,
+      name: source.name ?? 'blob.bin',
+      allowVolatileBlobs: allowVolatileBlobs,
+    ));
+    try {
+      final chunkBytes = session.maxChunkBytes;
+      // Chunks are flushed at exactly [chunkBytes]; the tail remainder is
+      // flushed before finish. Only one bounded buffer ever exists.
+      var pending = BytesBuilder(copy: false);
+      var pendingLength = 0;
+      var total = 0;
+
+      Future<void> flushReady() async {
+        while (pendingLength >= chunkBytes) {
+          final buf = pending.takeBytes();
+          pending = BytesBuilder(copy: false);
+          pendingLength = 0;
+          var offset = 0;
+          while (buf.length - offset >= chunkBytes) {
+            await _send(FileChunkRequest(
+              session: session.session,
+              chunk: Uint8List.sublistView(buf, offset, offset + chunkBytes),
+            ));
+            offset += chunkBytes;
+            total += chunkBytes;
+          }
+          if (buf.length > offset) {
+            final rest = Uint8List.sublistView(buf, offset);
+            pending.add(rest);
+            pendingLength += rest.length;
+          }
+        }
+      }
+
+      await for (final chunk in source.chunks) {
+        final bytes = chunk is Uint8List ? chunk : Uint8List.fromList(chunk);
+        pending.add(bytes);
+        pendingLength += bytes.length;
+        await flushReady();
+      }
+      // Flush the sub-chunk tail.
+      if (pendingLength > 0) {
+        final buf = pending.takeBytes();
+        await _send(FileChunkRequest(
+          session: session.session,
+          chunk: Uint8List.sublistView(buf, 0, buf.length),
+        ));
+        total += buf.length;
+        pendingLength = 0;
+      }
+      if (total != declared) {
+        throw StateError('Size mismatch: declared $declared but got $total');
+      }
+      final ref = await _send(FileFinishRequest(session: session.session));
+      return FileRef.fromData(ref.ref!);
+    } catch (_) {
+      try {
+        await _send(FileAbortRequest(session: session.session));
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
   /// The file references attached to [recordId] in [field], in kernel order.
+  /// [field] defaults to the store's declared attachment field.
   Future<List<FileRef>> list({
     required String recordId,
-    String field = 'imgs',
+    String? field,
   }) async {
     _ensureOpen();
     final result = await _send(FilesListRequest(
       store: name,
       recordId: recordId,
-      field: field,
+      field: field ?? defaultField,
     ));
     return [for (final ref in result.refs) FileRef.fromData(ref)];
   }
@@ -277,7 +372,18 @@ final class Files<S extends StoreDef<S>> {
         consume(event);
       }
     });
-    controller.onCancel = () => sub.cancel();
+    controller.onCancel = () async {
+      await sub.cancel();
+      // Abandoning the subscription is an explicit close: tell the kernel to
+      // release the stream's credit window and subscription instead of
+      // leaving it paused forever (plan Phase 8 Files). Idempotent — the
+      // kernel answers Ok for unknown/finished streams.
+      if (streamId.isNotEmpty && !closed) {
+        try {
+          await _send(FileCloseRequest(stream: streamId));
+        } catch (_) {}
+      }
+    };
     try {
       final opened = await _send(FileOpenRequest(
         store: name,

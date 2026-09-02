@@ -166,7 +166,7 @@ void main() {
         'ref_id': refId,
         'store': 'widgets',
         'record_id': rec,
-        'field': 'imgs',
+        'field': 'attachments',
         'hash': 'a' * 64,
         'remote_name': 'remote.png',
         'state': 'remote_only',
@@ -262,7 +262,7 @@ void main() {
           bytes: Stream.value(bytes),
           allowVolatileBlobs: true);
 
-      // list() defaults to the `imgs` field; query the raw table for all.
+      // list() defaults to the `attachments` field; query the raw table for all.
       final all = await pocket.db.query('lp_file_refs',
           where: "store = 'widgets' AND record_id = ?", whereArgs: [rec]);
       expect(all.length, 2,
@@ -384,7 +384,7 @@ void main() {
           'ref_id': 'ok',
           'store': 5,
           'record_id': 'r',
-          'field': 'imgs',
+          'field': 'attachments',
           'hash': 'h',
           'state': 'x'
         },
@@ -392,7 +392,7 @@ void main() {
           'ref_id': 'ok',
           'store': 'widgets',
           'record_id': 'r',
-          'field': 'imgs',
+          'field': 'attachments',
           'hash': 'h',
           'state': 9
         },
@@ -413,7 +413,7 @@ void main() {
         'ref_id': 'ok',
         'store': 'widgets',
         'record_id': 'r',
-        'field': 'imgs',
+        'field': 'attachments',
         'hash': 'a' * 64,
         'remote_name': 'f.png',
         'state': 'synced',

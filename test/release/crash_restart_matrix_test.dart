@@ -160,7 +160,7 @@ void main() {
     final engine = SyncEngine(pocket: pocket, backend: mock, config: conv());
     await engine.start();
     final recId =
-        mock.seed(store: 'widgets', data: {'name': 'w'}, imgs: ['f.bin']);
+        mock.seed(store: 'widgets', data: {'name': 'w'}, attachments: ['f.bin']);
 
     // First pass: the download dies mid-stream.
     Stream<List<int>> flaky() async* {

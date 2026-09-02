@@ -79,7 +79,7 @@ void main() {
 
       // Record exists on mock server with uploaded file
       expect(mock.records.containsKey(recId), isTrue);
-      expect(mock.records[recId]!.imgs.length, 1);
+      expect(mock.records[recId]!.attachments.length, 1);
 
       // File ref is now synced
       final refs = await h.pocket.files.list(store: 'widgets', recordId: recId);
@@ -124,7 +124,7 @@ void main() {
       );
       await h.engine.syncNow();
 
-      expect(mock.records[recId]!.imgs.length, 2);
+      expect(mock.records[recId]!.attachments.length, 2);
     });
 
     test('lost upload response adopts existing by hash prefix', () async {
@@ -145,7 +145,7 @@ void main() {
       final recId = mock.seed(
         store: 'widgets',
         data: {'name': 'w'},
-        imgs: ['myphoto_mock_server_assigned.bin'],
+        attachments: ['myphoto_mock_server_assigned.bin'],
       );
       await h.engine.syncNow();
 
@@ -187,7 +187,7 @@ void main() {
       final recId = mock.seed(
         store: 'widgets',
         data: {'name': 'legacy'},
-        imgs: ['legacy_photo.png'],
+        attachments: ['legacy_photo.png'],
       );
       mock.serverFiles['$recId/legacy_photo.png'] = utf8.encode('legacy bytes');
 
@@ -217,7 +217,7 @@ void main() {
       final recId = mock.seed(
         store: 'widgets',
         data: {'name': 'w'},
-        imgs: ['remote_doc.pdf'],
+        attachments: ['remote_doc.pdf'],
       );
       mock.serverFiles['$recId/remote_doc.pdf'] = utf8.encode('pdf bytes');
 
@@ -268,7 +268,7 @@ void main() {
       final recId = mock.seed(
         store: 'widgets',
         data: {'name': 'prefetch_item'},
-        imgs: ['eager.png'],
+        attachments: ['eager.png'],
       );
       mock.serverFiles['$recId/eager.png'] = utf8.encode('eager bytes');
 
@@ -298,7 +298,7 @@ void main() {
       final recId = mock.seed(
         store: 'widgets',
         data: {'name': 'w'},
-        imgs: ['avatar.jpg'],
+        attachments: ['avatar.jpg'],
       );
 
       await h.engine.syncNow();
@@ -344,13 +344,13 @@ void main() {
       );
       await h.engine.syncNow();
 
-      expect(mock.records[recId]!.imgs.length, 1);
+      expect(mock.records[recId]!.attachments.length, 1);
 
       // Remove file
       await h.pocket.files.remove(store: 'widgets', recordId: recId);
       await h.engine.syncNow();
 
-      expect(mock.records[recId]!.imgs.length, 0);
+      expect(mock.records[recId]!.attachments.length, 0);
       final refs = await h.pocket.files.list(store: 'widgets', recordId: recId);
       expect(refs, isEmpty);
     });
@@ -394,7 +394,7 @@ void main() {
       );
       await h.engine.syncNow();
 
-      expect(mock.records[recId]!.imgs.length, 1);
+      expect(mock.records[recId]!.attachments.length, 1);
       final refs = await h.pocket.files.list(store: 'widgets', recordId: recId);
       expect(refs.length, 1);
       expect(refs.first.state, 'synced');
@@ -474,7 +474,7 @@ void main() {
       refs = await h.pocket.files.list(store: 'widgets', recordId: recId);
       expect(refs.single.state, 'synced');
       expect((await queueOpRow(h, 'fileUpload'))['state'], 'done');
-      expect(mock.records[recId]!.imgs.length, 1);
+      expect(mock.records[recId]!.attachments.length, 1);
     });
 
     test('remove transient failure is retried with backoff', () async {
@@ -497,7 +497,7 @@ void main() {
         allowVolatileBlobs: true,
       );
       await h.engine.syncNow();
-      expect(mock.records[recId]!.imgs.length, 1);
+      expect(mock.records[recId]!.attachments.length, 1);
 
       await h.pocket.files.remove(store: 'widgets', recordId: recId);
 
@@ -518,7 +518,7 @@ void main() {
       await h.pocket.db.execute(
           "UPDATE lp_op_queue SET next_retry_at = 0 WHERE kind = 'fileRemove'");
       await h.engine.syncNow();
-      expect(mock.records[recId]!.imgs, isEmpty, reason: 'remove applied');
+      expect(mock.records[recId]!.attachments, isEmpty, reason: 'remove applied');
       refs = await h.pocket.files.list(store: 'widgets', recordId: recId);
       expect(refs, isEmpty);
       expect((await queueOpRow(h, 'fileRemove'))['state'], 'done');
@@ -535,7 +535,7 @@ void main() {
       });
 
       final recId = mock.seed(
-          store: 'widgets', data: {'name': 'w'}, imgs: ['remote_doc.pdf']);
+          store: 'widgets', data: {'name': 'w'}, attachments: ['remote_doc.pdf']);
       mock.serverFiles['$recId/remote_doc.pdf'] = utf8.encode('pdf bytes');
       await h.engine.syncNow();
 
@@ -652,7 +652,7 @@ void main() {
       });
 
       final recId = mock.seed(
-          store: 'widgets', data: {'name': 'w'}, imgs: ['a.png', 'b.png']);
+          store: 'widgets', data: {'name': 'w'}, attachments: ['a.png', 'b.png']);
       mock.serverFiles['$recId/a.png'] = utf8.encode('bytes a');
       mock.serverFiles['$recId/b.png'] = utf8.encode('bytes b');
       await h.engine.syncNow();
@@ -672,7 +672,7 @@ void main() {
       final bHash = bRef.hash;
 
       // b is removed remotely.
-      mock.records[recId]!.imgs = ['a.png'];
+      mock.records[recId]!.attachments = ['a.png'];
       mock.mutate(recId, {'id': recId, 'name': 'w'});
       await h.engine.syncNow();
 
@@ -699,7 +699,7 @@ void main() {
       });
 
       final recId = mock.seed(
-          store: 'widgets', data: {'name': 'w'}, imgs: ['a.png', 'b.png']);
+          store: 'widgets', data: {'name': 'w'}, attachments: ['a.png', 'b.png']);
       mock.serverFiles['$recId/a.png'] = utf8.encode('bytes a');
       mock.serverFiles['$recId/b.png'] = utf8.encode('bytes b');
       await h.engine.syncNow();
@@ -708,7 +708,7 @@ void main() {
       expect(refs.length, 2);
       expect(refs.every((r) => r.state == 'remote_only'), isTrue);
 
-      mock.records[recId]!.imgs = ['a.png'];
+      mock.records[recId]!.attachments = ['a.png'];
       mock.mutate(recId, {'id': recId, 'name': 'w'});
       await h.engine.syncNow();
 
@@ -762,7 +762,7 @@ void main() {
       });
 
       final recId = mock.seed(
-          store: 'widgets', data: {'name': 'w'}, imgs: ['a.png', 'b.png']);
+          store: 'widgets', data: {'name': 'w'}, attachments: ['a.png', 'b.png']);
       mock.serverFiles['$recId/a.png'] = utf8.encode('bytes a');
       mock.serverFiles['$recId/b.png'] = utf8.encode('bytes b');
       await h.engine.syncNow();
@@ -782,7 +782,7 @@ void main() {
       await h.engine.syncNow();
 
       // Remote also no longer lists a.png.
-      mock.records[recId]!.imgs = ['b.png'];
+      mock.records[recId]!.attachments = ['b.png'];
       mock.mutate(recId, {'id': recId, 'name': 'w'});
       await h.engine.syncNow();
 
@@ -884,7 +884,7 @@ void main() {
               .single
               .state,
           'synced');
-      expect(mock.records[recId]!.imgs, isNotEmpty);
+      expect(mock.records[recId]!.attachments, isNotEmpty);
     });
 
     test('adoption GET throwing a non-SyncError still falls back to upload',
@@ -916,10 +916,10 @@ void main() {
               .single
               .state,
           'synced');
-      expect(mock.records[recId]!.imgs, isNotEmpty);
+      expect(mock.records[recId]!.attachments, isNotEmpty);
     });
 
-    test('upload response with no imgs falls back to the requested name',
+    test('upload response with no attachments falls back to the requested name',
         () async {
       final mock = MockSyncBackend();
       final h = await EngineHarness.create(
@@ -942,7 +942,7 @@ void main() {
             store: 'widgets',
             updated: '2026-08-15 00:00:00.000Z',
             data: {'id': recId, 'name': 'w'},
-            imgs: const [])),
+            attachments: const [])),
       ]);
 
       final report = await h.engine.fileLane.syncFiles();
@@ -952,7 +952,7 @@ void main() {
           (await h.pocket.files.list(store: 'widgets', recordId: recId)).single;
       expect(ref.state, 'synced');
       expect(ref.remoteName, 'fallback.png',
-          reason: 'empty imgs -> the requested name is adopted');
+          reason: 'empty attachments -> the requested name is adopted');
     });
 
     test('remove op with a null remote name never calls the backend', () async {
@@ -971,7 +971,7 @@ void main() {
         'ref_id': refId,
         'store': 'widgets',
         'record_id': recId,
-        'field': 'imgs',
+        'field': 'attachments',
         'hash': 'c' * 64,
         'state': 'pending_remove',
       });
@@ -982,7 +982,7 @@ void main() {
         'kind': 'fileRemove',
         'payload_json': jsonEncode({
           'ref_id': refId,
-          'field': 'imgs',
+          'field': 'attachments',
           'remote_name': null,
           'hash': 'c' * 64,
         }),
@@ -1048,7 +1048,7 @@ void main() {
       );
       addTearDown(h.close);
       final recId =
-          mock.seed(store: 'widgets', data: {'name': 'w'}, imgs: ['f.bin']);
+          mock.seed(store: 'widgets', data: {'name': 'w'}, attachments: ['f.bin']);
       // First pass: the prefetch download fails outright, so the ref stays
       // remote_only (observation happens in the same pass as prefetch).
       mock.script('downloadFile', [MockThrow(TransientNetworkError())]);
@@ -1090,7 +1090,7 @@ void main() {
       );
       addTearDown(h.close);
       final recId =
-          mock.seed(store: 'widgets', data: {'name': 'w'}, imgs: ['f.bin']);
+          mock.seed(store: 'widgets', data: {'name': 'w'}, attachments: ['f.bin']);
       await h.engine.syncNow(); // pull observes + prefetches the named file
       final downloadsBefore = mock.downloadFileCalls;
 
@@ -1100,7 +1100,7 @@ void main() {
         'ref_id': generateRecordId(),
         'store': 'widgets',
         'record_id': recId,
-        'field': 'imgs',
+        'field': 'attachments',
         'hash': 'unknown_ghost.bin',
         'remote_name': null,
         'state': 'remote_only',
@@ -1140,7 +1140,7 @@ void main() {
         'kind': 'fileUpload',
         'payload_json': jsonEncode({
           'ref_id': 'missing-ref',
-          'field': 'imgs',
+          'field': 'attachments',
           'hash': hash,
           'name': '$hash.bin',
         }),
@@ -1174,7 +1174,7 @@ void main() {
       final recId = mock.seed(
           store: 'widgets',
           data: {'name': 'w'},
-          imgs: ['a.bin', 'a.bin', 'b.bin']);
+          attachments: ['a.bin', 'a.bin', 'b.bin']);
       await h.engine.syncNow();
 
       final refs = await h.pocket.files.list(store: 'widgets', recordId: recId);
@@ -1208,7 +1208,7 @@ void main() {
       addTearDown(h.close);
       final bytes = utf8.encode('prefetched content');
       final recId =
-          mock.seed(store: 'widgets', data: {'name': 'w'}, imgs: ['pf.bin']);
+          mock.seed(store: 'widgets', data: {'name': 'w'}, attachments: ['pf.bin']);
       mock.serverFiles['$recId/pf.bin'] = bytes;
       await h.engine.syncNow();
 
@@ -1229,7 +1229,7 @@ void main() {
       );
       addTearDown(h.close);
       final recId =
-          mock.seed(store: 'widgets', data: {'name': 'w'}, imgs: ['photo.png']);
+          mock.seed(store: 'widgets', data: {'name': 'w'}, attachments: ['photo.png']);
       await h.engine.syncNow();
       await h.pocket.files.attach(
           store: 'widgets',
@@ -1241,7 +1241,7 @@ void main() {
       final report = await h.engine.fileLane.syncFiles();
       expect(report.uploaded, 1);
       // The remote already lists photo.png; the upload adopts it (no dup).
-      expect(mock.records[recId]!.imgs, ['photo.png']);
+      expect(mock.records[recId]!.attachments, ['photo.png']);
       final refs = await h.pocket.files.list(store: 'widgets', recordId: recId);
       expect(refs.length, 2,
           reason: 'remote_only observation ref + the adopted upload ref');

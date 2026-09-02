@@ -662,6 +662,7 @@ class CollectionSchema<T> {
     this.migrations = const [],
     this.documentMigrations = const {},
     this.validator,
+    this.attachmentField,
   });
 
   /// Reconstructs a schema from a JSON-compatible map.
@@ -681,6 +682,8 @@ class CollectionSchema<T> {
           ],
           keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
           prefetchFiles: j['prefetchFiles'] == true,
+          attachmentField:
+              j['attachmentField'] is String ? j['attachmentField']! as String : null,
           fts: j['fts'] is Map
               ? FtsSpec.fromJson(j['fts']! as Map<String, Object?>)
               : null,
@@ -724,6 +727,13 @@ class CollectionSchema<T> {
   /// Optional application-level validation callback.
   final List<String> Function(Map<String, Object?> record)? validator;
 
+  /// The local attachment field name for this store's files, or `null` for
+  /// the shared default (`attachmentFieldDefault`). This is a metadata label
+  /// on `lp_file_refs` and the file API's default `field:` — the bytes live
+  /// in the blob store locally and in the backend's attachment storage
+  /// remotely; only the sync adapter decides the remote field name.
+  final String? attachmentField;
+
   /// Cached declared-name set. The identity-keyed Expando preserves the const
   /// constructor while avoiding rebuilding the Set on every encode/payload
   /// pass (cache immutable schema metadata).
@@ -752,6 +762,7 @@ class CollectionSchema<T> {
         'indexes': [for (final ix in indexes) ix.toJson()],
         'keepUnsyncedArchives': keepUnsyncedArchives,
         'prefetchFiles': prefetchFiles,
+        if (attachmentField != null) 'attachmentField': attachmentField,
         if (fts != null) 'fts': fts!.toJson(),
         'migrations': [for (final migration in migrations) migration.toJson()],
       };

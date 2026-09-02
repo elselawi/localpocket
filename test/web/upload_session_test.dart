@@ -17,7 +17,7 @@ void main() {
         sessionId: 'u1',
         store: 'tasks',
         recordId: 'task000000000001',
-        field: 'imgs',
+        field: 'attachments',
         name: 'test.png',
         expectedSize: 100,
         expectedSha256: null,

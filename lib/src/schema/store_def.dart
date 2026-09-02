@@ -4,9 +4,9 @@ library;
 
 import 'dart:collection';
 
-import 'package:localpocket/src/kernel/canonical_json.dart';
 import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/schema.dart';
+import 'package:meta/meta.dart';
 import 'field_def.dart';
 
 import 'schema_helpers.dart' as schema_helpers;
@@ -257,6 +257,14 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   FtsSpec? get fts => null;
 
   /// Forward store migrations, forwarded verbatim to the database.
+  ///
+  /// Descriptor policy (plan Rule 4): callbacks never cross a runtime
+  /// boundary. The open-time schema manifest records every callback presence
+  /// as a boolean descriptor (`SchemaManifest.unsupportedFeatures`), and the
+  /// web worker REJECTS any store carrying one before any DDL runs — so
+  /// worker-backed databases are always descriptor-only. Native targets keep
+  /// the legacy in-process path (plan Rule 10: behavior moved, not
+  /// rewritten); the split is pinned by `test/refactor/manifest/`.
   List<StoreMigration> get migrations => const [];
 
   /// Conflict resolution policy; `null` means the database's default
@@ -264,11 +272,11 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   ConflictPolicy? get conflictPolicy => null;
 
   /// Lazy document-format migrations keyed by target version, forwarded
-  /// verbatim to the database.
+  /// verbatim to the database. See the descriptor policy on [migrations].
   Map<int, DocumentMigration> get documentMigrations => const {};
 
   /// Optional application-level validation callback, forwarded verbatim to
-  /// the database.
+  /// the database. See the descriptor policy on [migrations].
   List<String> Function(Map<String, Object?> record)? get validator => null;
 
   /// Whether archived records that never existed remotely stay archived
@@ -284,6 +292,17 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// database default is false.
   bool get prefetchFiles => false;
 
+  /// The local attachment field name for this store's files, or `null` for
+  /// the shared default (`attachmentFieldDefault`).
+  ///
+  /// This is a metadata label on the store's file references and the default
+  /// `field:` of the file API (`store.files.attach/list/open`); the bytes
+  /// live in the local blob store and in the sync backend's attachment
+  /// storage. The PocketBase adapter owns the REMOTE field name — declare the
+  /// matching file field on your PB collection (default `imgs`) or configure
+  /// it through the adapter's field-name options.
+  String? get attachmentField => null;
+
   /// The system `id` descriptor (database-owned record id column). Readable
   /// and queryable, never settable through the typed write path.
   late final FieldDef<S, String> id =
@@ -293,44 +312,6 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// and queryable; `archive()`/`restore()` own that state transition.
   late final FieldDef<S, bool> archived =
       _SystemFieldDef<S, bool>(this as S, 'archived');
-
-  /// The compiled database schema, memoized: repeated reads return the
-  /// identical instance. Compilation forces [fields] first (deterministic
-  /// column order), runs [verify], then maps each descriptor through its
-  /// [FieldDef.toField].
-  late final CollectionSchema<Object?> collectionSchema = _compile();
-
-  CollectionSchema<Object?> _compile() {
-    final fs = fields; // force late-final descriptors in LIST order, once
-    _verify(fs);
-    return CollectionSchema<Object?>(
-      name: name,
-      version: version,
-      fields: [for (final fd in fs) fd.toField()],
-      indexes: indexes,
-      conflictPolicy: conflictPolicy ?? const ConflictPolicy(),
-      fts: fts,
-      migrations: migrations,
-      documentMigrations: documentMigrations,
-      validator: validator,
-      keepUnsyncedArchives: keepUnsyncedArchives,
-      prefetchFiles: prefetchFiles,
-    );
-  }
-
-  /// Verifies that [registered] is exactly the database schema compiled by
-  /// this definition. A typed handle must never interpret a same-name raw
-  /// schema with different fields, constraints, codecs, or versions.
-  void verifyRegisteredSchema(CollectionSchema<Object?> registered) {
-    final expectedJson = canonicalize(collectionSchema.toJson());
-    final registeredJson = canonicalize(registered.toJson());
-    if (expectedJson != registeredJson) {
-      throw TypedStoreMismatchError(
-        'Typed definition "$name" does not match the schema registered in '
-        'this LocalPocket instance.',
-      );
-    }
-  }
 
   /// Verifies the definition and throws a [StateError] on the first
   /// inconsistency:
@@ -348,6 +329,40 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// registration; the nullability guard (`required: true` + nullable `T`)
   /// fires at descriptor construction, before [verify] can observe it.
   void verify() => _verify(fields);
+
+  /// The compiled database schema, memoized: repeated reads return the
+  /// identical instance. Compilation forces [fields] first (deterministic
+  /// column order), runs [verify], then maps each descriptor through its
+  /// [FieldDef.toField].
+  ///
+  /// Library-internal seam (`@internal`): the public API surface carries only
+  /// the typed definition; the kernel-internal [CollectionSchema] type never
+  /// appears in a public signature (plan Rule 1 and the Phase 10 deletion
+  /// list). The kernel boots from this — applications never touch it.
+  @internal
+  CollectionSchema<Object?> get compiledSchema =>
+      _compiledSchema ??= _compile();
+
+  CollectionSchema<Object?>? _compiledSchema;
+
+  CollectionSchema<Object?> _compile() {
+    final fs = fields; // force late-final descriptors in LIST order, once
+    _verify(fs);
+    return CollectionSchema<Object?>(
+      name: name,
+      version: version,
+      fields: [for (final fd in fs) fd.toField()],
+      indexes: indexes,
+      conflictPolicy: conflictPolicy ?? const ConflictPolicy(),
+      fts: fts,
+      migrations: migrations,
+      documentMigrations: documentMigrations,
+      validator: validator,
+      keepUnsyncedArchives: keepUnsyncedArchives,
+      prefetchFiles: prefetchFiles,
+      attachmentField: attachmentField,
+    );
+  }
 
   void _verify(List<FieldDef<S, Object?>> fs) {
     final registered = HashSet<FieldDef<S, Object?>>.identity()..addAll(fs);

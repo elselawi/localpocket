@@ -88,7 +88,7 @@ final class FileBeginUploadRequest extends Request<FileUploadSessionResult> {
     required this.store,
     required this.recordId,
     required this.size,
-    this.field = 'imgs',
+    this.field = attachmentFieldDefault,
     this.name = 'blob.bin',
     this.expectedSha256,
     this.allowVolatileBlobs = false,
@@ -158,6 +158,24 @@ final class FileFinishRequest extends Request<FileRefResult> {
   Map<String, Object?> toJson() => {'session': session};
 }
 
+/// Closes (cancels) an in-progress download stream: the kernel releases the
+/// stream's subscription and credit window, so an abandoned download stops
+/// pushing chunks instead of starving until close. Idempotent — an unknown or
+/// already-finished stream answers Ok.
+final class FileCloseRequest extends Request<OkResult> {
+  const FileCloseRequest({required this.stream});
+
+  final String stream;
+
+  @override
+  String get tag => 'fileClose';
+  @override
+  String get resultTag => OkResult.tagValue;
+
+  @override
+  Map<String, Object?> toJson() => {'stream': stream};
+}
+
 /// Aborts an upload session and releases its buffered bytes.
 final class FileAbortRequest extends Request<OkResult> {
   const FileAbortRequest({required this.session});
@@ -182,7 +200,7 @@ final class FilesListRequest extends Request<FileRefsResult> {
   const FilesListRequest({
     required this.store,
     required this.recordId,
-    this.field = 'imgs',
+    this.field = attachmentFieldDefault,
   });
 
   final String store;
@@ -207,7 +225,7 @@ final class FileOpenRequest extends Request<FileOpenResult> {
   const FileOpenRequest({
     required this.store,
     required this.recordId,
-    this.field = 'imgs',
+    this.field = attachmentFieldDefault,
     this.index = 0,
     this.refId,
   });
@@ -258,7 +276,7 @@ final class FileRemoveRequest extends Request<OkResult> {
   const FileRemoveRequest({
     required this.store,
     required this.recordId,
-    this.field = 'imgs',
+    this.field = attachmentFieldDefault,
     this.index = 0,
     this.refId,
   });

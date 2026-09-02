@@ -5,6 +5,7 @@ import '../database_adapter.dart';
 import '../change_bus.dart';
 import '../ids.dart';
 import '../local_pocket.dart';
+import 'attachment_field.dart';
 import 'blob_store.dart';
 import '../sync/sync_backend.dart';
 import '../sync/sync_config.dart';
@@ -169,7 +170,7 @@ class FileSyncLane {
     String? adoptedFilename;
     if (remoteRec != null) {
       final hashPrefix = hash.substring(0, hash.length.clamp(0, 10));
-      for (final existingName in remoteRec.imgs) {
+      for (final existingName in remoteRec.attachments) {
         if ((hashPrefix.isNotEmpty && existingName.startsWith(hashPrefix)) ||
             existingName.startsWith(name)) {
           adoptedFilename = existingName;
@@ -182,7 +183,8 @@ class FileSyncLane {
     if (adoptedFilename != null) {
       remoteFilename = adoptedFilename;
     } else {
-      // Send multipart upload with modifier imgs+
+      // Streamed multipart upload through the backend's attachment
+      // modifier — the adapter owns the wire encoding.
       final updatedRec = await backend.updateRecordFilesStream(
         id: op.recordId,
         uploads: {
@@ -194,7 +196,8 @@ class FileSyncLane {
         },
       );
       // Adopt returned filename
-      remoteFilename = updatedRec.imgs.isNotEmpty ? updatedRec.imgs.last : name;
+      remoteFilename =
+          updatedRec.attachments.isNotEmpty ? updatedRec.attachments.last : name;
     }
 
     await pocket.transaction((tx) async {
@@ -220,7 +223,8 @@ class FileSyncLane {
     final hash = payload['hash']! as String;
 
     if (remoteName != null) {
-      // Send JSON {"imgs-": [remoteName]}
+      // Removal request — the adapter encodes its own wire form (the
+      // PocketBase adapter sends the attachment-remove modifier).
       await backend.updateRecordFiles(
         id: op.recordId,
         removeNames: [remoteName],
@@ -305,14 +309,17 @@ class FileSyncLane {
 
     for (final filename in remoteFilenames) {
       if (!knownRemoteNames.contains(filename)) {
-        // Unknown remote file: create remote_only ref
+        // Unknown remote file: create remote_only ref under the store's
+        // declared attachment field (local metadata label — the remote field
+        // mapping is the adapter's concern).
         await exec.insert(
             'lp_file_refs',
             {
               'ref_id': generateRecordId(),
               'store': store,
               'record_id': recordId,
-              'field': 'imgs',
+              'field': pocket.requireTable(store).schema.attachmentField ??
+                  attachmentFieldDefault,
               'hash': 'unknown_$filename',
               'remote_name': filename,
               'state': 'remote_only',

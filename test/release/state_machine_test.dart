@@ -221,7 +221,7 @@ void main() {
     fileRefs = await reopened.files.list(store: 'widgets', recordId: id);
     expect(fileRefs.single.state, 'synced',
         reason: 'the restarted file lane completed the upload');
-    expect(mock.records[id]!.imgs, isNotEmpty);
+    expect(mock.records[id]!.attachments, isNotEmpty);
     await engine2.stop();
   });
 

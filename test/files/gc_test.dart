@@ -325,7 +325,7 @@ void main() {
       expect(report.uploaded, 0);
       expect(mock.updateFilesCalls, filesCallsBefore,
           reason: 'no upload is ever sent for a purged record');
-      expect(mock.records[recId]!.imgs, isEmpty);
+      expect(mock.records[recId]!.attachments, isEmpty);
     });
 
     test('purge neutralizes failed ops and leaves done ops alone', () async {

@@ -7,6 +7,7 @@ import 'ids.dart';
 import 'local_pocket.dart';
 import 'row_models.dart';
 import 'sql_utils.dart';
+import 'files/attachment_field.dart';
 import 'files/blob_store.dart';
 import 'sync/sync_tables.dart';
 
@@ -90,6 +91,10 @@ class LocalPocketFiles {
 
   final LocalPocket _pocket;
 
+  /// The explicit execution context executor (root context — file lifecycle
+  /// operations never run inside an application transaction).
+  DatabaseExecutor get _ex => _pocket.kernel.executionContext.executor;
+
   /// Blob store used for attachment bytes.
   final BlobStore? blobStore;
 
@@ -118,6 +123,15 @@ class LocalPocketFiles {
     return bs.isDurable;
   }
 
+  /// The effective attachment field for [store]: an explicit [field] wins,
+  /// then the store's declared `attachmentField`, then the shared default.
+  /// An unregistered store falls back to the shared default (the files API
+  /// tolerates unknown stores).
+  String _fieldFor(String store, String? field) =>
+      field ??
+      _pocket.tableOrNull(store)?.schema.attachmentField ??
+      attachmentFieldDefault;
+
   /// Lists file references attached to a record field.
   ///
   /// ```dart
@@ -129,12 +143,12 @@ class LocalPocketFiles {
   Future<List<FileRef>> list({
     required String store,
     required String recordId,
-    String field = 'imgs',
+    String? field,
   }) async {
-    final rows = await _pocket.db.query(
+    final rows = await _ex.query(
       'lp_file_refs',
       where: 'store = ? AND record_id = ? AND field = ?',
-      whereArgs: [store, recordId, field],
+      whereArgs: [store, recordId, _fieldFor(store, field)],
     );
     return rows.map(FileRef.fromRow).toList();
   }
@@ -157,7 +171,7 @@ class LocalPocketFiles {
     required String store,
     required String recordId,
     required Stream<List<int>> bytes,
-    String field = 'imgs',
+    String? field,
     String? name,
     int? expectedSize,
     String? expectedSha256,
@@ -171,6 +185,7 @@ class LocalPocketFiles {
         'attach anyway.',
       );
     }
+    final resolvedField = _fieldFor(store, field);
     final hash = await bs.put(
       bytes,
       expectedSha256: expectedSha256,
@@ -201,7 +216,7 @@ class LocalPocketFiles {
           'last_error',
         ],
         where: 'store = ? AND record_id = ? AND field = ? AND hash = ?',
-        whereArgs: [store, recordId, field, hash],
+        whereArgs: [store, recordId, resolvedField, hash],
         limit: 1,
       );
       if (existingRef.isNotEmpty) {
@@ -231,7 +246,7 @@ class LocalPocketFiles {
             'ref_id': refId,
             'store': store,
             'record_id': recordId,
-            'field': field,
+            'field': resolvedField,
             'hash': hash,
             'remote_name': name,
             'state': 'pending_upload',
@@ -246,7 +261,7 @@ class LocalPocketFiles {
         'kind': OpQueueKind.fileUpload.name,
         'payload_json': jsonEncode({
           'ref_id': refId,
-          'field': field,
+          'field': resolvedField,
           'hash': hash,
           'name': name ?? '$hash.bin',
         }),
@@ -261,7 +276,7 @@ class LocalPocketFiles {
         refId: refId,
         store: store,
         recordId: recordId,
-        field: field,
+        field: resolvedField,
         hash: hash,
         remoteName: name,
         state: 'pending_upload',
@@ -291,7 +306,7 @@ class LocalPocketFiles {
   Future<Stream<List<int>>> open({
     required String store,
     required String recordId,
-    String field = 'imgs',
+    String? field,
     int index = 0,
     String? refId,
   }) async {
@@ -309,7 +324,7 @@ class LocalPocketFiles {
       throw StateError('File is remote_only; download it before opening.');
     }
 
-    await _pocket.db.execute(
+    await _ex.execute(
       'UPDATE lp_blobs SET last_access = ? WHERE hash = ?',
       [_pocket.now(), ref.hash],
     );
@@ -324,7 +339,7 @@ class LocalPocketFiles {
   Future<void> remove({
     required String store,
     required String recordId,
-    String field = 'imgs',
+    String? field,
     int index = 0,
     String? refId,
   }) async {
@@ -451,7 +466,7 @@ class LocalPocketFiles {
           var offset = 0;
           final known = <String>{};
           while (true) {
-            final rows = await _pocket.db.query(
+            final rows = await _ex.query(
               'lp_blobs',
               columns: ['hash'],
               orderBy: 'hash ASC',
@@ -484,7 +499,7 @@ class LocalPocketFiles {
     // 4. Clean blobs with refcount = 0 and last_access older than grace
     const pageSize2 = 250;
     while (true) {
-      final deadBlobs = await _pocket.db.query(
+      final deadBlobs = await _ex.query(
         'lp_blobs',
         columns: ['hash'],
         where: 'refcount <= 0 AND last_access <= ?',
@@ -511,7 +526,7 @@ class LocalPocketFiles {
     if (bs == null) return 0;
 
     final totalSizeRow =
-        await _pocket.db.rawQuery('SELECT SUM(size) as total FROM lp_blobs');
+        await _ex.rawQuery('SELECT SUM(size) as total FROM lp_blobs');
     var currentSize = firstIntValue(totalSizeRow) ?? 0;
     if (currentSize <= maxBytes) return 0;
 
@@ -519,7 +534,7 @@ class LocalPocketFiles {
     // Never evict blobs that have pending_upload refs.
     var evicted = 0;
     while (currentSize > maxBytes) {
-      final candidates = await _pocket.db.rawQuery('''
+      final candidates = await _ex.rawQuery('''
         SELECT b.hash, b.size FROM lp_blobs b
         WHERE b.hash NOT IN (
           SELECT hash FROM lp_file_refs WHERE state = 'pending_upload'
@@ -534,7 +549,7 @@ class LocalPocketFiles {
         final size = row['size']! as int;
 
         await bs.delete(hash);
-        await _pocket.db.update(
+        await _ex.update(
           'lp_file_refs',
           {'state': 'remote_only'},
           where: 'hash = ? AND state = ?',
