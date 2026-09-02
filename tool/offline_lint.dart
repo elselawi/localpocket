@@ -12,7 +12,7 @@ import 'find_repo_root.dart';
 ///    - `lib/src/platform/native/blob_store.dart` and
 ///      `lib/src/platform/native/backup_store.dart` are the only files allowed
 ///      to import `dart:io` — the designated platform-I/O home (see
-///      `test/core/layering_test.dart`).
+///      `test/kernel/layering_test.dart`).
 /// 2. `lib/` must not contain any `print(` statements.
 /// 3. Layering rules:
 ///    - `lib/src/kernel/` must never import from `lib/src/adapters/pocketbase/`.

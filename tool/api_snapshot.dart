@@ -14,7 +14,7 @@ void main(List<String> args) {
 
   // The single curated public barrel. The auxiliary barrels (typed.dart,
   // sync.dart, pocketbase.dart) were deleted at the Phase 9 barrel switch;
-  // they must stay deleted (see test/core/layering_test.dart).
+  // they must stay deleted (see test/kernel/layering_test.dart).
   final entrypoints = [
     'lib/localpocket.dart',
   ];

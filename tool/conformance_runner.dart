@@ -22,7 +22,15 @@ Future<void> main(List<String> args) async {
       '1',
       'test/conformance/',
       'test/contract/',
-      'test/refactor/',
+      // Structural/boundary pins dissolved from the old test/refactor/ bucket
+      // into their production-code homes under test/kernel/.
+      'test/kernel/query/ir_test.dart',
+      'test/kernel/schema_manifest_test.dart',
+      'test/kernel/execution_context_test.dart',
+      'test/kernel/change_bus/',
+      'test/kernel/tx/transaction_reads_test.dart',
+      'test/kernel/watch/watch_order_test.dart',
+      'test/kernel/schema/schema_transport_test.dart',
       ...args,
     ],
     workingDirectory: root.path,

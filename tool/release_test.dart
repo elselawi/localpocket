@@ -81,7 +81,7 @@ void main() {
             '-j',
             '1',
             'test/release/',
-            'test/web/',
+            'test/platform/web/',
           ]));
 
       final liveSuite = buildReleaseSteps(withReal: true)

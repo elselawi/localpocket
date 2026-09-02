@@ -30,10 +30,13 @@ class WebSyncDriver implements SyncDriver {
   @override
   Future<void> connect({required Uri baseUrl, String? token}) async {
     final tokens = StaticTokenProvider(token ?? '');
-    final sync = _db.attachPocketBaseSync(PocketBaseSyncOptions(
-      baseUrl: baseUrl,
-      tokenProvider: tokens,
-    ));
+    final sync = _db.attachPocketBaseSync(
+      PocketBaseSyncOptions(
+        baseUrl: baseUrl,
+        tokenProvider: tokens,
+        identity: 'playground-account',
+      ),
+    );
     _sync = sync;
     sync.status.listen(_onStatus);
     _status.value = PlaygroundSyncStatus(

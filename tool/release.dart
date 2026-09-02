@@ -248,7 +248,7 @@ List<ReleaseStep> buildReleaseSteps({
           '-j',
           '1',
           'test/release/',
-          'test/web/'
+          'test/platform/web/'
         ],
         retryOnFailure: true,
       ),

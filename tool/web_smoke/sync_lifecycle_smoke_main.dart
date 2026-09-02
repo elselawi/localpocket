@@ -62,6 +62,7 @@ Future<void> main() async {
         PocketBaseSyncOptions(
           baseUrl: Uri.parse('http://127.0.0.1:8125'),
           tokenProvider: _StaticToken('valid-token'),
+          identity: 'smoke-account',
         ),
       );
       final statuses = <SyncStatus>[];

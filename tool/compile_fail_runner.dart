@@ -23,8 +23,8 @@ import 'find_repo_root.dart';
 /// fields at compile time.
 Future<void> main(List<String> args) async {
   final root = findRepoRoot();
-  final corpusDir =
-      Directory('${root.path}${Platform.pathSeparator}test${Platform.pathSeparator}compile_fail');
+  final corpusDir = Directory('${root.path}${Platform.pathSeparator}test'
+      '${Platform.pathSeparator}support${Platform.pathSeparator}compile_fail');
   final scratchDir = Directory(
       '${root.path}${Platform.pathSeparator}.dart_tool${Platform.pathSeparator}compile_fail');
 
