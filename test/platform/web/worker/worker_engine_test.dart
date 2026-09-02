@@ -783,7 +783,7 @@ void main() {
             for (final e in h.sink.byOp(WireOp.contractEvent))
               contract.ContractCodec.decodeEvent(
                   (e['event']! as Map).cast<String, Object?>())
-          ].where((e) => e is contract.AuthRequiredEvent).toList();
+          ].whereType<contract.AuthRequiredEvent>().toList();
       await waitUntil(() async => authEvents().isNotEmpty);
       expect(authEvents().last, isA<contract.AuthRequiredEvent>());
     });
@@ -1055,7 +1055,7 @@ void main() {
             for (final e in h.sink.byOp(WireOp.contractEvent))
               if (contract.ContractCodec.decodeEvent(
                       (e['event']! as Map).cast<String, Object?>())
-                  case contract.ConflictsSnapshot s
+                  case final contract.ConflictsSnapshot s
                   when s.subscription == started.subscription)
                 s,
           ];

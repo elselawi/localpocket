@@ -71,18 +71,22 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     lastResort: 'assets/packages/localpocket/assets/sqlite3.wasm',
   );
 
-  late RemoteRuntimeClient runtime;
+  RemoteRuntimeClient? runtimeRef;
   final webSqlite = WebSqlite.open(
     workers: DedicatedOnlyConnector(workerResolved.url),
     wasmModule: wasmResolved.url,
     handleCustomRequest: (raw) async {
       if (raw != null) {
         final value = raw.dartify();
-        if (value is Map) runtime.handleWorkerEvent(value);
+        // Events cannot arrive before the runtime exists (they ride the
+        // lazily-created event subscription), but an early worker→page
+        // message must not touch an uninitialized variable.
+        if (value is Map) runtimeRef?.handleWorkerEvent(value);
       }
       return null;
     },
   );
+  Future<void> Function()? disposeConnected;
 
   // The worker resolves this database's OPFS directory from the original
   // name (it sees only the fixed in-VFS path `/database`).
@@ -94,45 +98,63 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     if (cipherEnvelope != null) 'fieldCipher': cipherEnvelope,
   };
 
-  final connectResult = await webSqlite.connectToRecommended(
-    options.path,
-    additionalOptions: openArgs.jsify(),
-  );
+  try {
+    final connectResult = await webSqlite.connectToRecommended(
+      options.path,
+      additionalOptions: openArgs.jsify(),
+    );
+    disposeConnected = () => connectResult.database.dispose();
 
-  runtime = RemoteRuntimeClient(
-    transport: (envelope) async {
-      final raw = await connectResult.database.customRequest(envelope.jsify());
-      return raw?.dartify();
-    },
-    requestTimeout: options.bootstrap.requestTimeout,
-  );
+    final runtime = RemoteRuntimeClient(
+      transport: (envelope) async {
+        final raw =
+            await connectResult.database.customRequest(envelope.jsify());
+        return raw?.dartify();
+      },
+      requestTimeout: options.bootstrap.requestTimeout,
+    );
+    runtimeRef = runtime;
 
-  // Typed open handshake: the page sends the OpenRequest with the manifest
-  // fingerprints it compiled; the kernel verifies page/worker schema identity
-  // through the sealed contract before any application command runs. A
-  // divergence fails the open, never surfaces mid-session.
-  await runtime.send(OpenRequest(
-    stores: [for (final s in schemas) s.toJson()],
-    manifestFingerprints: {
-      for (final s in schemas) s.name: SchemaManifest.compile(s).fingerprint,
-    },
-  ));
+    // Typed open handshake: the page sends the OpenRequest with the manifest
+    // fingerprints it compiled; the kernel verifies page/worker schema identity
+    // through the sealed contract before any application command runs. A
+    // divergence fails the open, never surfaces mid-session.
+    await runtime.send(OpenRequest(
+      stores: [for (final s in schemas) s.toJson()],
+      manifestFingerprints: {
+        for (final s in schemas) s.name: SchemaManifest.compile(s).fingerprint,
+      },
+    ));
 
-  // Worker death ends the event stream; later sends fail via the
-  // transport's closed classification.
-  unawaited(connectResult.database.closed.then((_) => runtime.close()));
+    // Worker death ends the event stream; later sends fail via the
+    // transport's closed classification.
+    unawaited(connectResult.database.closed.then((_) => runtime.close()));
 
-  // On close, dispose the worker connection to flush the OPFS file handle
-  // (sqlite3_web `Database.dispose()`); without it committed blob data can be
-  // lost on some browsers. Then revoke fetched blob: URLs — they hold asset
-  // bytes alive in the page for their lifetime, so repeated cycles would
-  // otherwise leak. Plain-path fallbacks are never revoked.
-  return LocalPocket.internal(
-    runtime,
-    onClose: () async {
-      await connectResult.database.dispose();
-      if (workerResolved.fetched) revokeObjectUrl(workerResolved.url);
-      if (wasmResolved.fetched) revokeObjectUrl(wasmResolved.url);
-    },
-  );
+    // On close, dispose the worker connection to flush the OPFS file handle
+    // (sqlite3_web `Database.dispose()`); without it committed blob data can be
+    // lost on some browsers. Then revoke fetched blob: URLs — they hold asset
+    // bytes alive in the page for their lifetime, so repeated cycles would
+    // otherwise leak. Plain-path fallbacks are never revoked.
+    return LocalPocket.internal(
+      runtime,
+      onClose: () async {
+        await connectResult.database.dispose();
+        if (workerResolved.fetched) revokeObjectUrl(workerResolved.url);
+        if (wasmResolved.fetched) revokeObjectUrl(wasmResolved.url);
+      },
+    );
+  } catch (_) {
+    // A failed open must release what it fetched: the blob: URLs pin the
+    // worker JS / wasm bytes in the page for their lifetime, and a spawned
+    // worker connection should be disposed best-effort. Retry loops would
+    // otherwise accumulate both per attempt.
+    if (disposeConnected != null) {
+      try {
+        await disposeConnected();
+      } catch (_) {}
+    }
+    if (workerResolved.fetched) revokeObjectUrl(workerResolved.url);
+    if (wasmResolved.fetched) revokeObjectUrl(wasmResolved.url);
+    rethrow;
+  }
 }

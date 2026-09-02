@@ -61,7 +61,9 @@ void main() {
     });
 
     test('requireList returns the typed value and rejects a non-list', () {
-      const w = WireArgs({'mutations': <Object?>['a', 'b']});
+      const w = WireArgs({
+        'mutations': <Object?>['a', 'b']
+      });
       expect(w.requireList('mutations'), hasLength(2));
       const bad = WireArgs({'mutations': 'not-a-list'});
       expect(

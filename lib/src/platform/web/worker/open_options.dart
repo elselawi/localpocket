@@ -2,37 +2,52 @@
 ///
 /// The JS-bound controller receives `JSAny?`; this operates on the
 /// already-dartified value so parsing is VM-testable. [parseOpenOptions]
-/// swallows malformed options and returns defaults, while [rawOpenOption]
-/// reads a raw key WITHOUT swallowing (for the cipher envelope, whose
-/// malformed value must fail loudly).
+/// applies the strict wire rule — an absent key takes its documented
+/// default, a present wrong-typed value fails loudly with a
+/// [ProtocolEnvelopeException] — so a malformed `stores` list can never
+/// silently open the database with no stores at all. [rawOpenOption] reads a
+/// single raw key without validation (for the cipher envelope, which also
+/// fails loudly on malformed values).
 library;
 
 import '../../../kernel/schema.dart';
+import '../page/protocol.dart';
 import 'worker_engine.dart' show deepStringMap, parseSchema;
 
 /// Parses the dartified `additionalData` map into typed open options.
-/// Malformed input (non-map data, wrong-typed values, schema-parse throws) is
-/// swallowed and yields only well-formed keys; callers default the rest.
+///
+/// Absent keys are omitted (the caller defaults them); present-but-wrong
+/// values throw [ProtocolEnvelopeException] — notably a malformed store
+/// descriptor fails the open instead of dropping every store.
 Map<String, Object?> parseOpenOptions(Object? data) {
   if (data == null) return {};
-  try {
-    if (data is Map) {
-      final stringMap = deepStringMap(data);
-      final result = <String, Object?>{};
-      if (stringMap['stores'] is List) {
-        result['stores'] =
-            (stringMap['stores']! as List).map((s) => parseSchema(s)).toList();
-      }
-      if (stringMap['maxDocBytes'] is int) {
-        result['maxDocBytes'] = stringMap['maxDocBytes'];
-      }
-      if (stringMap['destructiveBackup'] is bool) {
-        result['destructiveBackup'] = stringMap['destructiveBackup'];
-      }
-      return result;
+  if (data is! Map) {
+    throw ProtocolEnvelopeException('Open options must be a map.');
+  }
+  final stringMap = deepStringMap(data);
+  final result = <String, Object?>{};
+  final stores = stringMap['stores'];
+  if (stores != null) {
+    if (stores is! List) {
+      throw ProtocolEnvelopeException('"stores" must be a list.');
     }
-  } catch (_) {}
-  return {};
+    result['stores'] = [for (final s in stores) parseSchema(s)];
+  }
+  final maxDocBytes = stringMap['maxDocBytes'];
+  if (maxDocBytes != null) {
+    if (maxDocBytes is! int) {
+      throw ProtocolEnvelopeException('"maxDocBytes" must be an int.');
+    }
+    result['maxDocBytes'] = maxDocBytes;
+  }
+  final destructiveBackup = stringMap['destructiveBackup'];
+  if (destructiveBackup != null) {
+    if (destructiveBackup is! bool) {
+      throw ProtocolEnvelopeException('"destructiveBackup" must be a bool.');
+    }
+    result['destructiveBackup'] = destructiveBackup;
+  }
+  return result;
 }
 
 /// Reads a single raw option from the dartified `additionalData` WITHOUT

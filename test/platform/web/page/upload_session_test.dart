@@ -212,8 +212,10 @@ void main() {
 
     test('clear removes all sessions', () {
       final registry = FileUploadSessionRegistry();
-      registry.begin(sessionId: 'u1', store: 's', recordId: 'r', expectedSize: 10);
-      registry.begin(sessionId: 'u2', store: 's', recordId: 'r', expectedSize: 10);
+      registry.begin(
+          sessionId: 'u1', store: 's', recordId: 'r', expectedSize: 10);
+      registry.begin(
+          sessionId: 'u2', store: 's', recordId: 'r', expectedSize: 10);
       expect(registry.activeSessionCount, 2);
 
       registry.clear();

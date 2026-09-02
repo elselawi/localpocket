@@ -229,7 +229,8 @@ void main() {
   group('WebBlobStore.open/delete wiring (structural)', () {
     // Mirrors blob_durability_test.dart's convention: since WebBlobStore can't
     // be imported under the VM, pin the error-handling contract on the source.
-    final source = File('lib/src/platform/web/worker/blob_store.dart').readAsStringSync();
+    final source =
+        File('lib/src/platform/web/worker/blob_store.dart').readAsStringSync();
 
     test('open wraps real failures as BlobStorageException, not "not found"',
         () {

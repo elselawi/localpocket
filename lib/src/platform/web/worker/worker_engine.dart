@@ -153,6 +153,11 @@ abstract class WorkerEngineHost {
 
   final Set<WorkerEventSink> _connections = {};
 
+  /// Drops a connection's sink: called by the host when the underlying
+  /// client connection closes, so events stop going to dead connections and
+  /// the registry cannot grow without bound.
+  void removeSink(WorkerEventSink sink) => _connections.remove(sink);
+
   /// Broadcasts every kernel event to the connected sinks; lives for the
   /// whole worker and completes when the kernel's event stream closes.
   // ignore: cancel_subscriptions

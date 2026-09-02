@@ -20,13 +20,21 @@ final class RemoteRuntimeClient implements RuntimeClient {
     required Future<Object?> Function(Map<String, Object?> envelope) transport,
     void Function()? onWorkerClosed,
     Duration? requestTimeout,
-  }) : _sender = WebSender(
-          transport: (wire.WebRequest request) => transport(request.toJson()),
-          onWorkerClosed: onWorkerClosed,
-          requestTimeout: requestTimeout,
-        );
+  }) {
+    _sender = WebSender(
+      transport: (wire.WebRequest request) => transport(request.toJson()),
+      onWorkerClosed: () {
+        // Worker death must end live event and watch streams too — the
+        // runtime close contract ("streams fail afterwards") holds on the
+        // worker-death path, not only on an explicit close().
+        unawaited(close());
+        onWorkerClosed?.call();
+      },
+      requestTimeout: requestTimeout,
+    );
+  }
 
-  final WebSender _sender;
+  late final WebSender _sender;
   final _events = StreamController<Event>.broadcast();
 
   /// Feeds one worker event envelope into the event stream (called by the
@@ -39,6 +47,17 @@ final class RemoteRuntimeClient implements RuntimeClient {
   void handleWorkerEvent(Map<Object?, Object?> event) {
     final map = _stringKeyed(event);
     if (map['op'] != wire.WireOp.contractEvent) return;
+    // Defense-in-depth: a stale worker asset with a request-compatible but
+    // event-incompatible codec must not silently dead every watch/sync
+    // stream while requests keep succeeding — surface a loud protocol error
+    // into the stream instead.
+    final version = map['v'];
+    if (version is! int || version != wire.webProtocolVersion) {
+      _events.addError(wire.ProtocolEnvelopeException(
+          'Event envelope version mismatch: expected ${wire.webProtocolVersion}, '
+          'got $version'));
+      return;
+    }
     final encoded = map['event'];
     if (encoded is! Map) return;
     try {
@@ -68,7 +87,10 @@ final class RemoteRuntimeClient implements RuntimeClient {
         throw wire.ProtocolEnvelopeException(
             'Contract reply has a malformed "error" field.');
       }
-      // Application failure: reconstruct the typed kernel error.
+      // Application failure: reconstruct the typed kernel error (the
+      // contract codec's decodeError — web_sender imports, never exports,
+      // the page protocol's own decodeError, so unqualified resolution is
+      // unambiguous here).
       throw decodeError(_stringKeyed(error));
     }
     final encoded = map['result'];

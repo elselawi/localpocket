@@ -55,9 +55,12 @@ final class LocalPocketDatabaseController extends DatabaseController {
     // each database under `drift_db/<name>`; VACUUM INTO writes the `.bak`
     // there. `backupDbName` carries the original DB name (the in-worker path
     // is the fixed `/database`).
-    final backupDbName =
-        (rawOpenOption(additionalData?.dartify(), 'backupDbName') as String?) ??
-            path;
+    final rawBackupDbName =
+        rawOpenOption(additionalData?.dartify(), 'backupDbName');
+    if (rawBackupDbName != null && rawBackupDbName is! String) {
+      throw ProtocolEnvelopeException('"backupDbName" must be a string.');
+    }
+    final backupDbName = rawBackupDbName as String? ?? path;
     db.backupFileExists =
         (backupPath) => _opfsFileExists(backupDbName, backupPath);
     db.backupFileDeleter =
@@ -77,8 +80,9 @@ final class LocalPocketDatabaseController extends DatabaseController {
       final destructiveBackup = (options['destructiveBackup'] as bool?) ?? true;
 
       // Cipher parsing is intentionally OUTSIDE `parseOpenOptions`, which
-      // swallows malformed options — a malformed cipher envelope must fail
-      // loudly, never be silently dropped.
+      // validates open-option keys individually — the cipher envelope has
+      // its own structure and must fail loudly on malformed values, never
+      // be silently dropped.
       final fieldCipher = parseFieldCipherEnvelope(
           rawOpenOption(additionalData?.dartify(), 'fieldCipher'));
 
@@ -181,10 +185,22 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
           0, WireErrorCode.protocolEnvelope, 'Payload must be a map');
     }
 
-    final reply = await _engine.handleRequest(
-        _connectionSinks.putIfAbsent(
-            connection, () => _ConnectionSink(connection)),
-        dartMap);
+    WorkerEventSink sink;
+    final existing = _connectionSinks[connection];
+    if (existing != null) {
+      sink = existing;
+    } else {
+      sink = _ConnectionSink(connection);
+      _connectionSinks[connection] = sink;
+      // When the owning tab/connection goes away, drop the sink from the
+      // engine's broadcast set so dead connections stop receiving events
+      // and the registries cannot grow without bound.
+      unawaited(connection.closed.then((_) {
+        _connectionSinks.remove(connection);
+        _engine.removeSink(sink);
+      }));
+    }
+    final reply = await _engine.handleRequest(sink, dartMap);
     return _encodeReply(reply);
   }
 
@@ -242,7 +258,11 @@ final class _ConnectionSink implements WorkerEventSink {
 
   @override
   void emit(Map<String, Object?> event) {
-    unawaited(connection.customRequest(event.jsify()));
+    // Delivery is best-effort: a connection that closed mid-flight must not
+    // surface an unhandled async error inside the worker.
+    unawaited(connection
+        .customRequest(event.jsify())
+        .then<void>((_) {}, onError: (_) {}));
   }
 }
 

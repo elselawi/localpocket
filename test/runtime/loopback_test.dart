@@ -288,16 +288,15 @@ void main() {
   group('remote runtime containment', () {
     test('a non-map error field is a protocol error, not a missing result',
         () async {
-      final client = RemoteRuntimeClient(transport: (envelope) async {
-        return {
-          'v': webProtocolVersion,
-          'i': envelope['i'],
-          'r': {
-            'tag': 'health',
-            'error': 'something broke',
-          },
-        };
-      });
+      final client = RemoteRuntimeClient(
+          transport: (envelope) async => {
+                'v': webProtocolVersion,
+                'i': envelope['i'],
+                'r': {
+                  'tag': 'health',
+                  'error': 'something broke',
+                },
+              });
       await expectLater(
         client.send(const HealthRequest()),
         throwsA(isA<ProtocolEnvelopeException>().having(
@@ -307,21 +306,24 @@ void main() {
 
     test('a malformed event is dropped and the stream keeps delivering',
         () async {
-      final client = RemoteRuntimeClient(transport: (envelope) async {
-        return {
-          'v': webProtocolVersion,
-          'i': envelope['i'],
-          'r': {
-            'tag': 'health',
-            'result': {'tag': 'health', 'payload': {}}
-          },
-        };
-      });
+      final client = RemoteRuntimeClient(
+          transport: (envelope) async => {
+                'v': webProtocolVersion,
+                'i': envelope['i'],
+                'r': {
+                  'tag': 'health',
+                  'result': {
+                    'tag': 'health',
+                    'payload': <String, String>{},
+                  }
+                },
+              });
       final received = <Event>[];
       final sub = client.events.listen(received.add);
       addTearDown(sub.cancel);
 
       client.handleWorkerEvent({
+        'v': webProtocolVersion,
         'op': WireOp.contractEvent,
         'event': {
           'tag': 'committedChange',
@@ -329,6 +331,7 @@ void main() {
         },
       });
       client.handleWorkerEvent({
+        'v': webProtocolVersion,
         'op': WireOp.contractEvent,
         'event': {
           'tag': 'committedChange',
@@ -345,6 +348,46 @@ void main() {
       expect(received, hasLength(1),
           reason: 'the malformed event was dropped; the good one arrived');
       expect(received.first, isA<CommittedChange>());
+    });
+
+    test('an event envelope with a wrong protocol version is surfaced loudly',
+        () async {
+      final client = RemoteRuntimeClient(
+          transport: (envelope) async => {
+                'v': webProtocolVersion,
+                'i': envelope['i'],
+                'r': {
+                  'tag': 'health',
+                  'result': {
+                    'tag': 'health',
+                    'payload': <String, String>{},
+                  }
+                },
+              });
+      final errors = <Object>[];
+      final received = <Event>[];
+      final sub = client.events
+          .listen(received.add, onError: errors.add, cancelOnError: false);
+      addTearDown(sub.cancel);
+
+      client.handleWorkerEvent({
+        'v': webProtocolVersion + 1,
+        'op': WireOp.contractEvent,
+        'event': {
+          'tag': 'committedChange',
+          'payload': encodeWireValue({
+            'store': 's',
+            'id': 'i',
+            'origin': 'local',
+            'action': 'create',
+            'changedFields': ['name'],
+          }),
+        },
+      });
+      await _waitFor(() => errors.isNotEmpty);
+      expect(errors.single, isA<ProtocolEnvelopeException>());
+      expect(received, isEmpty,
+          reason: 'a version-skewed event is never decoded');
     });
   });
 }
