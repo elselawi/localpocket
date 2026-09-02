@@ -1,5 +1,19 @@
 ## Unreleased
 
+- **Test suite reorganized to mirror the production tree.** `test/` now has
+  one directory per production layer — `adapters/pocketbase/`, `api/`,
+  `contract/`, `kernel/` (with `change_bus/`, `capabilities/`, `cipher/`,
+  `files/`, `fts/`, `migrate/`, `query/`, `schema/`, `store/`, `sync/`,
+  `tx/`, `watch/` subdirectories matching `lib/src/kernel/`), `platform/web/`
+  (split into `page/` and `worker/`), `runtime/` — plus `e2e/`, `perf/`,
+  `release/`, `conformance/`, and a single `support/` home for shared
+  helpers (`engine_helpers`, `mock_backend`, the sync invariants oracle,
+  fixtures, compile-fail corpus, and compile fixtures). The process-named
+  `core/`, `refactor/`, and `security/` buckets are dissolved; structural
+  pins moved next to the code they pin, and `test/web/` gates moved to
+  `test/platform/web/` (release runner paths updated). Test and group names
+  dropped plan-section and audit-id decorations. No production code changed.
+
 - **Unopinionated PocketBase wire design: every wire name is now
   configurable.** `PocketBaseBackend`/`PocketBaseRawBackend` (and the
   `PocketBaseSyncBackendFactory`) accept a `fieldNames: PbFieldNames(...)`
