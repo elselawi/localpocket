@@ -1,4 +1,3 @@
-import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart' as kernel
     show KernelDatabase;
 import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
@@ -16,7 +15,7 @@ Future<(LocalPocket, kernel.KernelDatabase)> _seedPair() async {
       LocalPocketOptions(path: ':memory:', stores: [Tasks.store]));
   final raw = await kernel.KernelDatabase.open(
     path: ':memory:',
-    stores: [Tasks.store.collectionSchema],
+    stores: [Tasks.store.compiledSchema],
   );
   final tasks = facade.store(Tasks.store);
   final col = raw.collection('tasks');

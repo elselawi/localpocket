@@ -26,6 +26,10 @@ import 'row.dart';
 /// {@endtemplate}
 final class QuerySpec<S extends StoreDef<S>> {
   /// {@macro localpocket.query_spec}
+  ///
+  /// A spec is a value: the read path lowerings snapshot the lists when the
+  /// spec is consumed, so later mutation of the caller's lists can never
+  /// change an in-flight read or a captured watch.
   const QuerySpec({
     this.where = const [],
     this.orderBy = const [],
@@ -108,16 +112,18 @@ final class Cursor<S extends StoreDef<S>> {
 /// {@endtemplate}
 final class Page<S extends StoreDef<S>> {
   Page.internal({
-    required this.items,
+    required List<Row<S>> items,
     required this.hasNext,
     required this.hasPrev,
     required this.nextCursor,
     required this.prevCursor,
     required Future<Page<S>?> Function(Cursor<S> cursor, bool backward)
         continuation,
-  }) : _continuation = continuation;
+  })  : items = List.unmodifiable(items),
+        _continuation = continuation;
 
-  /// The rows of this page, in the requested order.
+  /// The rows of this page, in the requested order. The list is an
+  /// unmodifiable view: a page is a value, not a mutable buffer.
   final List<Row<S>> items;
 
   /// Whether the database observed a row after this window.

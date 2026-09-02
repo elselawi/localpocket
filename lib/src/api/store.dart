@@ -361,15 +361,41 @@ final class Store<S extends StoreDef<S>> {
   }
 
   /// Committed changes to this store: one notification per committed record
-  /// change (the record payloads ride the contract's committed-change
-  /// event).
+  /// change, carrying the record payloads (old/new state, origin, action,
+  /// and touched fields).
   Stream<ChangeNotification> get changes => _runtime.events
       .where((event) => event is CommittedChange)
       .cast<CommittedChange>()
       .where((event) => event.store == name)
       .map((event) => ChangeNotification(
             storeName: event.store,
-            ids: [event.id],
+            id: event.id,
+            origin: event.origin,
+            action: event.action,
+            oldRecord:
+                event.oldRecord == null ? null : Map.of(event.oldRecord!),
+            newRecord:
+                event.newRecord == null ? null : Map.of(event.newRecord!),
+            changedFields: Set.of(event.changedFields),
+          ));
+
+  /// Typed committed record events for this store (plan §6.8): one
+  /// [RecordChange] per committed record change, with immutable typed row
+  /// snapshots decoded against this store's definition. A create carries a
+  /// null `oldRecord`, a purge a null `newRecord`.
+  Stream<RecordChange<S>> get events => _runtime.events
+      .where((event) => event is CommittedChange)
+      .cast<CommittedChange>()
+      .where((event) => event.store == name)
+      .map((event) => RecordChange<S>(
+            id: event.id,
+            origin: event.origin,
+            action: event.action,
+            oldRecord:
+                event.oldRecord == null ? null : Row<S>(def, event.oldRecord!),
+            newRecord:
+                event.newRecord == null ? null : Row<S>(def, event.newRecord!),
+            changedFields: Set.of(event.changedFields),
           ));
 
   // -- internals ------------------------------------------------------------
@@ -494,7 +520,7 @@ final class Store<S extends StoreDef<S>> {
 
   void _validateExtraKey(String key) {
     if (DdlCompiler.reservedColumns.contains(key) ||
-        def.collectionSchema.declaredFieldNames.contains(key)) {
+        def.compiledSchema.declaredFieldNames.contains(key)) {
       throw ValidationException(
         'Key "$key" is declared or reserved and cannot be set as extra.',
         field: key,

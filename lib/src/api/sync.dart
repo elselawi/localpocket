@@ -56,6 +56,10 @@ final class PocketBaseSync {
   final PocketBaseSyncOptions _options;
   bool _started = false;
 
+  /// The options this host was attached with. One database owns one host;
+  /// the attachment compares these when the same database attaches again.
+  PocketBaseSyncOptions get options => _options;
+
   /// Whether [start] has completed and [stop] has not been called since.
   bool get isRunning => _started;
 

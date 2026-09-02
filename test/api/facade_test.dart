@@ -1,4 +1,3 @@
-import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart' as kernel
     show KernelDatabase;
 import 'package:localpocket/localpocket.dart';

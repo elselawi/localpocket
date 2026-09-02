@@ -45,3 +45,13 @@ export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
 // (CollectionSchema, Field, ...) are kernel-internal and not exported.
 export 'src/kernel/schema.dart'
     show IndexSpec, IndexScope, FtsSpec, FtsNormalization, StoreMigration;
+
+// The typed error hierarchy: the public API throws these (Row.get throws
+// FieldNotSelectedError, stale cursors throw StaleCursorError, unsupported
+// schema features throw UnsupportedSchemaFeatureError), so applications must
+// be able to name and catch them from the one import.
+export 'src/kernel/errors.dart';
+
+// The committed-change vocabulary: origins and actions ride the public
+// change/event notifications.
+export 'src/kernel/change_bus.dart' show ChangeAction, ChangeOrigin;

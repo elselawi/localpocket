@@ -52,7 +52,7 @@ final class LocalPocket {
     RuntimeClient Function(CommandHandler handler) createRuntime,
   ) async {
     final schemas = [
-      for (final def in options.stores) def.collectionSchema,
+      for (final def in options.stores) def.compiledSchema,
     ];
     final db = await kernel.KernelDatabase.open(
       path: options.path,
@@ -89,6 +89,9 @@ final class LocalPocket {
       walSupported: result.walSupported,
       hasFts5: result.hasFts5,
       isWeb: result.isWeb,
+      storage: result.storage,
+      durable: result.durable,
+      journal: result.journal,
     );
   }
 
@@ -129,14 +132,22 @@ final class LocalPocket {
       _runSession(action, const TransactionBeginRequest(readOnly: true));
 
   /// Committed changes across every store: one notification per committed
-  /// record change (the record payloads ride the contract's committed-change
-  /// event).
+  /// record change, carrying the record payloads (old/new state, origin,
+  /// action, and touched fields) exactly as the contract's committed-change
+  /// event delivers them on every runtime.
   Stream<ChangeNotification> get changes => _runtime.events
       .where((event) => event is CommittedChange)
       .cast<CommittedChange>()
       .map((event) => ChangeNotification(
             storeName: event.store,
-            ids: [event.id],
+            id: event.id,
+            origin: event.origin,
+            action: event.action,
+            oldRecord:
+                event.oldRecord == null ? null : Map.of(event.oldRecord!),
+            newRecord:
+                event.newRecord == null ? null : Map.of(event.newRecord!),
+            changedFields: Set.of(event.changedFields),
           ));
 
   /// Attaches a PocketBase sync host to this database.
@@ -147,10 +158,29 @@ final class LocalPocket {
   /// crosses only through the sync start and auth-update commands. The same
   /// host behaves identically on native and web — sync start owns realtime,
   /// so there is no separate realtime command on this surface.
+  ///
+  /// One database owns ONE sync host: the first call creates it, later calls
+  /// return the same host (a second independent host would race its own
+  /// start/stop state against the shared runtime). Attaching with different
+  /// options than the existing host's throws a [StateError].
   PocketBaseSync attachPocketBaseSync(PocketBaseSyncOptions options) {
     _ensureOpen();
-    return PocketBaseSync.internal(_runtime, options);
+    final existing = _syncHost;
+    if (existing != null) {
+      if (existing.options.baseUrl != options.baseUrl ||
+          existing.options.identity != options.identity) {
+        throw StateError(
+            'This database already has a PocketBase sync host attached '
+            '(${existing.options.baseUrl} / ${existing.options.identity ?? '<anonymous>'}). '
+            'One database owns one sync host; close it before attaching '
+            'another.');
+      }
+      return existing;
+    }
+    return _syncHost = PocketBaseSync.internal(_runtime, options);
   }
+
+  PocketBaseSync? _syncHost;
 
   /// Runs the database's query planner across its indexes.
   Future<void> analyze([StoreDef<Object?>? store]) =>
@@ -246,6 +276,9 @@ final class LocalPocket {
 
 /// {@template localpocket.engine_capabilities}
 /// What the underlying engine supports, as observed at open time.
+///
+/// Every value is the ACTIVE runtime's honest report (plan Rule 8): on web
+/// the worker's open handshake is authoritative, and the page never guesses.
 /// {@endtemplate}
 final class EngineCapabilities {
   const EngineCapabilities({
@@ -254,6 +287,9 @@ final class EngineCapabilities {
     required this.walSupported,
     required this.hasFts5,
     required this.isWeb,
+    this.storage = 'file',
+    this.durable = true,
+    this.journal = 'unknown',
   });
 
   /// The engine's SQLite version string.
@@ -271,6 +307,20 @@ final class EngineCapabilities {
   /// Whether the kernel runs in a browser worker.
   final bool isWeb;
 
+  /// Where the runtime keeps the database: `'file'` natively, `'opfs'` on
+  /// web.
+  final String storage;
+
+  /// Whether attachment bytes survive a restart. `false` when the blob store
+  /// degrades to volatile memory (e.g. OPFS unavailable and the volatile
+  /// fallback accepted).
+  final bool durable;
+
+  /// The live journal mode reported by the engine (e.g. `'wal'`).
+  final String journal;
+
   @override
-  String toString() => 'EngineCapabilities($sqliteVersion, fts5: $hasFts5)';
+  String toString() =>
+      'EngineCapabilities($sqliteVersion, fts5: $hasFts5, storage: $storage, '
+      'durable: $durable, journal: $journal)';
 }

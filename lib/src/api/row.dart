@@ -49,7 +49,7 @@ final class Row<S extends StoreDef<S>> {
   /// A defensive snapshot of the undeclared keys stored in `extra`, excluding
   /// the declared fields and the system columns.
   Map<String, Object?> get extra {
-    final declared = def.collectionSchema.declaredFieldNames;
+    final declared = def.compiledSchema.declaredFieldNames;
     return Map.unmodifiable(<String, Object?>{
       for (final e in _map.entries)
         if (e.key != 'id' && e.key != 'archived' && !declared.contains(e.key))

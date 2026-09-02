@@ -22,7 +22,7 @@ void main() {
     late LocalPocket db;
 
     setUp(() async {
-      raw = await openPocket(stores: [Tasks.store.collectionSchema]);
+      raw = await openPocket(stores: [Tasks.store.compiledSchema]);
       db = LocalPocket.internal(LocalRuntimeClient(raw.commands));
       addTearDown(() => db.close());
     });

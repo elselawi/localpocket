@@ -40,7 +40,7 @@ void main() {
         if (runtimeName == 'remote') {
           final pipe = _PipeSink();
           harness = await WorkerHarness.open(
-            stores: [Tasks.store.collectionSchema],
+            stores: [Tasks.store.compiledSchema],
             blobStore: MemoryBlobStore(),
             sink: pipe,
           );
@@ -51,7 +51,7 @@ void main() {
           rawDb = harness!.pocket.db;
         } else {
           final raw = await openPocket(
-            stores: [Tasks.store.collectionSchema],
+            stores: [Tasks.store.compiledSchema],
             blobStore: MemoryBlobStore(),
           );
           addTearDown(() => raw.close());

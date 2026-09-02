@@ -32,7 +32,7 @@ void main() {
           final pipe = _PipeSink();
           final harness = await WorkerHarness.open(
             path: path ?? ':memory:',
-            stores: [Tasks.store.collectionSchema],
+            stores: [Tasks.store.compiledSchema],
             sink: pipe,
           );
           addTearDown(harness.close);

@@ -1,5 +1,4 @@
 import 'package:localpocket/src/contract/contract.dart' show CommandHandler;
-import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/runtime/runtime_client.dart';
 import 'package:localpocket/localpocket.dart';
 import 'package:test/test.dart';
