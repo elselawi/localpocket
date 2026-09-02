@@ -1,3 +1,19 @@
+/// The kernel hub: the composition root that owns the engine's services and
+/// the sealed-command dispatcher.
+///
+/// Part-structure posture (an honest statement, not an accident): this
+/// library hosts five parts (`kernel_context`, `read_service`,
+/// `transaction_coordinator`, `file_sessions`, `command_handler`) that
+/// deliberately share the hub's private surface — they are one library by
+/// design. The rule that keeps that implicit surface bounded: every part
+/// communicates through `KernelContext` and the hub's services, and a part
+/// never grows a new command family or a new library-global. New families
+/// are owned by a service the hub composes, so promoting a part to a real
+/// library later stays a mechanical move. The dispatcher itself is one
+/// exhaustive `switch` over the sealed request family, each case a
+/// one-liner delegating to a per-family private method.
+library;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -96,15 +112,13 @@ class TestHooks {
   /// the page transaction.
   void Function(String store, String id)? applyRemoteCrashPoint;
 
-  /// Called right before COMMIT executes (after a successful transaction
-  /// body); throw to simulate a COMMIT failure (OPFS quota, disk I/O,
-  /// corruption) — the whole transaction rolls back and every caller
-  /// observes the thrown error instead of a false success.
+  /// Called right before COMMIT executes (after a successful body); throw
+  /// to simulate a COMMIT failure — every caller observes the thrown error
+  /// instead of a false success.
   void Function()? commitCrashPoint;
 
-  /// Called when a solo transaction body throws, right before the enclosing
-  /// transaction ROLLBACKs; throw to simulate a ROLLBACK failure — the
-  /// caller observes the thrown error instead of a false success.
+  /// Called when a solo transaction body throws, right before ROLLBACK;
+  /// throw to simulate a ROLLBACK failure the caller must observe.
   void Function()? rollbackCrashPoint;
 
   /// Called for every `execute` routed through [LocalPocket.traceExecute]
@@ -167,9 +181,8 @@ class PointReadCache {
     if (_cache.length >= _maxSize) {
       _cache.remove(_cache.keys.first);
     }
-    // Deep copy on the way in as well: a shallow store let a caller's
-    // mutation of a nested map/list leak INTO the cache (the returned doc
-    // aliased the stored nested values).
+    // Deep copy on the way in: a shallow store leaked caller mutations of
+    // nested maps/lists into the cache.
     _cache[id] = value == null ? null : _deepClone(value);
   }
 
@@ -180,10 +193,9 @@ class PointReadCache {
       _cache.clear();
       return;
     }
-    // Invalidation is conservative: when the change set is at least as large
-    // as the cache (e.g. a bulk putAll), clearing the whole cache is cheaper
-    // than removing every id one by one and strictly safe — extra misses
-    // only cost future reads, never correctness.
+    // When the change set is at least as large as the cache (e.g. bulk
+    // putAll), clearing everything is cheaper and strictly safe: extra
+    // misses cost only future reads.
     if (ids.length >= _cache.length) {
       _cache.clear();
       return;
@@ -200,11 +212,9 @@ class PointReadCache {
       _copyValue(map)! as Map<String, Object?>;
 }
 
-/// Deep structural copy for cache isolation: plain maps and Lists are
-/// rebuilt recursively; every other JSON-representable value is immutable in
-/// Dart (String/num/bool/null) and shared by reference. Uint8List values
-/// (blob bytes surfaced through the files API) are copied defensively since
-/// they are mutable.
+/// Deep structural copy for cache isolation: maps and lists are rebuilt
+/// recursively; immutable JSON values are shared. Uint8List (mutable blob
+/// bytes) is copied defensively.
 Object? _copyValue(Object? v) {
   if (v is Map<String, Object?>) {
     return {
@@ -223,13 +233,9 @@ Object? _copyValue(Object? v) {
   return v;
 }
 
-/// The semantic kernel owner.
-///
-/// This is the concrete database implementation that previously rode under
-/// the public name `LocalPocket`. The public name is now a transitional
-/// alias; the final public facade will be a separate class over a
-/// private `RuntimeClient`, and `KernelDatabase` stays the internal
-/// kernel-facing owner constructed identically by native and the web worker.
+/// The semantic kernel owner: the concrete database implementation driven
+/// directly on native and through the worker on web (the public facade is a
+/// separate class over a private `RuntimeClient`).
 ///
 /// Open a database by injecting the platform's [DatabaseFactory], register one
 /// or more [CollectionSchema] objects, and then access data through
@@ -330,10 +336,9 @@ class KernelDatabase with ChangeBusAwareLP {
   /// Whether destructive migrations may create their backup copy.
   final bool destructiveBackup;
 
-  /// The adapter-supplied sync backend factory, or null when this runtime
-  /// has no sync adapter configured (sync start commands fail typed). The
-  /// kernel depends only on the seam in `sync/sync_backend.dart`, never on a
-  /// concrete adapter.
+  /// The adapter-supplied sync backend factory, or null when no sync adapter
+  /// is configured (sync start commands fail typed). Depends only on the
+  /// seam in `sync/sync_backend.dart`.
   final SyncBackendFactory? syncBackendFactory;
 
   /// Optional test-only crash and tracing hooks.
@@ -348,11 +353,9 @@ class KernelDatabase with ChangeBusAwareLP {
   /// Per-field cipher provider, when configured.
   final CryptoProvider? cryptoProvider;
 
-  /// Injectable clock (epoch ms) for persistence bookkeeping: outbox/op-queue
-  /// timestamps, conflict timestamps, last-seen/settlement, compaction cutoffs
-  /// and file bookkeeping. Defaults to the wall clock; inject for deterministic
-  /// tests. The sync engine's [SyncConfig] clock is expected to match (or be
-  /// derived from) this one.
+  /// Injectable clock (epoch ms) for persistence bookkeeping (outbox,
+  /// conflicts, last-seen, compaction cutoffs). Defaults to the wall clock;
+  /// inject for deterministic tests. The sync engine's clock should match.
   final int Function() now;
 
   /// Durable record-state synchronization queue.
@@ -379,13 +382,10 @@ class KernelDatabase with ChangeBusAwareLP {
 
   /// Coalescing window for group commit (default zero = end-of-turn only).
   ///
-  /// When positive, mutations submitted from separate event-loop turns may
-  /// still share one SQLite transaction (one fsync) as long as they arrive
-  /// within [groupCommitWindow] of each other. A read arriving during the
-  /// window flushes the pending group first, preserving read-your-writes and
-  /// FIFO. Callers of the LAST write in a burst observe latency up to the
-  /// window; set it to the maximum fsync latency you are willing to trade
-  /// for batch throughput.
+  /// When positive, mutations from separate turns may share one SQLite
+  /// transaction (one fsync) if they arrive within the window. A read during
+  /// the window flushes the pending group first (read-your-writes). Latency
+  /// of the last write in a burst grows up to the window.
   final Duration groupCommitWindow;
 
   /// Opens or creates a database and registers the supplied collections.
@@ -482,12 +482,9 @@ class KernelDatabase with ChangeBusAwareLP {
       try {
         await db.execute('PRAGMA journal_mode=WAL');
       } catch (_) {}
-      // Auto-checkpointing is DISABLED: with the default 1000 pages the
-      // committing connection checkpoints INLINE, stalling writes for
-      // milliseconds once the WAL crosses ~4 MB (measured p99 5-6 ms).
-      // Instead, `_noteWriteCommitted` schedules non-blocking
-      // `wal_checkpoint(PASSIVE)` off the writer's path after write bursts,
-      // and `runMaintenance`/`walCheckpoint` retain the truncating variant.
+      // Auto-checkpointing disabled: inline checkpoints stall writes (p99
+      // 5-6 ms once the WAL crosses ~4 MB). `_noteWriteCommitted` schedules
+      // non-blocking PASSIVE checkpoints off the writer's path instead.
       await db.execute('PRAGMA wal_autocheckpoint=0');
       await db.execute('PRAGMA mmap_size=67108864');
     }
@@ -513,26 +510,18 @@ class KernelDatabase with ChangeBusAwareLP {
 
   /// Registers [schema], creating or migrating its SQLite table.
   ///
-  /// Before ANY DDL, migration, or mutation, the
-  /// schema is compiled into a complete [SchemaManifest] and validated:
-  ///
-  /// - duplicate store names within one open are rejected;
-  /// - on the worker/web runtime, executable features that cannot cross the
-  ///   worker boundary (resolvers, validator callbacks, migration transforms,
-  ///   document migrations) are rejected — the schema is never silently
-  ///   reduced (the native runtime keeps executing them for now, flagged);
-  /// - a behavior-affecting change at the SAME schema version (manifest
-  ///   fingerprint mismatch against the persisted manifest) is rejected —
-  ///   the application must bump the version and provide a migration.
+  /// Before any DDL the schema is compiled into a [SchemaManifest] and
+  /// validated: duplicate store names are rejected; the worker runtime
+  /// rejects executable features that cannot cross the worker boundary; and
+  /// a behavior change at the SAME version (fingerprint mismatch) is
+  /// rejected — bump the version and provide a migration.
   Future<void> registerStore(CollectionSchema<Object?> schema) async {
-    // Store identity must be unambiguous — duplicates never resolve to
-    // "first table wins, last definition wins".
+    // Store identity must be unambiguous.
     if (_tables.containsKey(schema.name)) {
       throw SchemaRegistrationError(
           'Duplicate store name "${schema.name}" in this open call.');
     }
-    // Compile the complete manifest and reject unrepresentable behavior
-    // before anything is created or changed on disk.
+    // Reject unrepresentable behavior before anything touches disk.
     final manifest = SchemaManifest.compile(schema);
     if (capabilities.platform == PlatformProfile.web &&
         manifest.unsupportedFeatures.isNotEmpty) {
@@ -635,9 +624,8 @@ class KernelDatabase with ChangeBusAwareLP {
     }
   }
 
-  /// Reports whether the destructive-migration backup file at [path] exists,
-  /// delegating to the platform database's file hooks (native `dart:io`, web
-  /// OPFS). Returns false when the platform did not wire an existence hook.
+  /// Whether the destructive-migration backup file at [path] exists, via the
+  /// platform file hooks. Returns false when none is wired.
   Future<bool> backupFileExists(String path) async {
     final d = db;
     if (d is DirectSqliteDatabase && d.backupFileExists != null) {
@@ -647,9 +635,8 @@ class KernelDatabase with ChangeBusAwareLP {
   }
 
   /// Recreates the FTS index when the persisted configuration differs from
-  /// the newly registered schema (tokenizer change, different fields, or new
-  /// normalization rules). The FTS table and its triggers are dropped and
-  /// rebuilt from the live rows, and a ledger row records the rebuild.
+  /// the registered schema (tokenizer, fields, or normalization rules); a
+  /// ledger row records the rebuild.
   Future<void> _rebuildFtsIfConfigChanged(
       CollectionSchema<Object?> schema) async {
     final stored = await db.query('lp_stores',
@@ -695,10 +682,9 @@ class KernelDatabase with ChangeBusAwareLP {
       for (final f in DdlCompiler(capabilities).compile(schema).ftsDdl) {
         await db.execute(f);
       }
-      // NOTE: the fts5 'rebuild' command re-tokenizes RAW content-table text
-      // and would bypass the trigger normalizers entirely. Repopulate
-      // explicitly through the same lp_norm_<store> expressions the triggers
-      // use so the reindexed terms match query-side normalization.
+      // The fts5 'rebuild' command re-tokenizes RAW text and bypasses the
+      // trigger normalizers; repopulate through the same trigger expressions
+      // so reindexed terms match query-side normalization.
       await db.execute("INSERT INTO ${DdlCompiler.quote('${schema.name}_fts')}"
           "(${DdlCompiler.quote('${schema.name}_fts')}) VALUES('delete-all')");
       final fts = schema.fts!;
@@ -719,9 +705,8 @@ class KernelDatabase with ChangeBusAwareLP {
         now: now);
   }
 
-  /// Removes the destructive-migration backup file at [path] if it exists,
-  /// delegating to the platform database's file hooks (native `dart:io`, web
-  /// OPFS). No-op when the platform did not wire a deleter.
+  /// Removes the destructive-migration backup file at [path] via the
+  /// platform file hooks. No-op when none is wired.
   Future<void> deleteBackupFile(String path) async {
     final d = db;
     if (d is DirectSqliteDatabase && d.backupFileDeleter != null) {
@@ -758,9 +743,9 @@ class KernelDatabase with ChangeBusAwareLP {
 
   /// Runs [action] in a serialized, single-writer transaction.
   ///
-  /// All domain, outbox, and sync-state changes performed through the [Tx]
-  /// handle commit atomically. Change notifications are emitted only after a
-  /// successful commit.
+  /// All domain, outbox, and sync-state changes through the [Tx] handle
+  /// commit atomically; notifications are emitted only after a successful
+  /// commit.
   ///
   /// ```dart
   /// await db.transaction((tx) async {
@@ -769,22 +754,13 @@ class KernelDatabase with ChangeBusAwareLP {
   /// });
   /// ```
   ///
-  /// [DurabilityClass.normal] is the default: under WAL it is app-crash-safe
-  /// (no torn files, no lost committed transactions on process death) while
-  /// avoiding a disk flush per commit. Pass [DurabilityClass.full] for
-  /// writes that must survive an OS/power failure (the tail commit of a
-  /// payment, an irreplaceable edit). See the README "Transactions &
-  /// Durability Modes" section for the trade-off table.
+  /// [DurabilityClass.normal] (default) is app-crash-safe under WAL without
+  /// a disk flush per commit; [DurabilityClass.full] survives OS/power loss.
   ///
-  /// Group commit: mutations submitted from the SAME event-loop turn (e.g. a
-  /// `Future.wait` burst or fire-and-forget writes) are coalesced into ONE
-  /// SQLite transaction — one fsync for the whole group — without changing
-  /// observable semantics. Each member's body runs inside a savepoint, so a
-  /// failing member rolls back only itself; its error propagates to that
-  /// caller alone while the rest of the group commits. A mutation submitted
-  /// alone still commits at the end of the current event-loop turn with no
-  /// added wait. Members with different durability classes never share a
-  /// group.
+  /// Group commit: mutations from the same event-loop turn are coalesced
+  /// into one SQLite transaction (one fsync). Each member runs in a
+  /// savepoint, so a failing member rolls back only itself. Members with
+  /// different durability classes never share a group.
   Future<T> transaction<T>(
     Future<T> Function(Tx tx) action, {
     DurabilityClass durability = DurabilityClass.normal,
@@ -844,12 +820,9 @@ class KernelDatabase with ChangeBusAwareLP {
     }
   }
 
-  /// Runs a non-blocking `PRAGMA wal_checkpoint(PASSIVE)` — checkpoints as
-  /// many WAL frames as possible without blocking readers or writers, and
-  /// returns immediately otherwise. With `wal_autocheckpoint=0` this is the
-  /// WAL-bounding knob invoked opportunistically after write bursts (see
-  /// `_noteWriteCommitted`); [walCheckpoint] remains the truncating,
-  /// user-visible variant.
+  /// Runs a non-blocking `PRAGMA wal_checkpoint(PASSIVE)`; with
+  /// `wal_autocheckpoint=0` this is the WAL-bounding knob invoked after
+  /// write bursts (see `_noteWriteCommitted`).
   Future<void> walCheckpointPassive() async {
     if (capabilities.walSupported) {
       await db.execute('PRAGMA wal_checkpoint(PASSIVE)');
@@ -867,24 +840,17 @@ class KernelDatabase with ChangeBusAwareLP {
 
   /// Prunes orphaned or superseded outbox operations.
   ///
-  /// Only outbox rows whose sync row is `clean` (the edit has settled) or that
-  /// have no sync row at all (orphaned) are removed. Ops in every other state —
-  /// `dirty`, `inFlight`, `conflict`, `blocked`, `error`, `quarantine` — are
-  /// always retained: the op is the only record of that pending edit, and
-  /// evicting it would silently lose unsynced local data and leave the sync
-  /// row with a dangling `op_id` (violating the sync-invariants oracle).
-  ///
-  /// [maxEntries] is retained for API compatibility but is no longer enforced:
-  /// bounding the outbox by evicting non-clean ops deletes pending local
-  /// edits, so pruning is strictly clean-only.
+  /// Only outbox rows whose sync row is `clean` (edit settled) or absent
+  /// (orphaned) are removed — every other state is retained because the op
+  /// is the only record of a pending edit, and evicting it would lose
+  /// unsynced data and leave a dangling `op_id`. [maxEntries] is kept for
+  /// API compatibility but not enforced.
   Future<int> pruneOutbox({int maxEntries = 10000}) async {
     var pruned = 0;
     await transaction((tx) async {
       final exec = tx.executor;
-      // Remove outbox entries whose sync row is clean (the edit settled) or
-      // absent (orphaned). Never evict the op of a dirty/inFlight/conflict/
-      // blocked/error/quarantine row: the op is the only record of the
-      // unsynced edit, and removing it would create a dangling op_id.
+      // Never evict the op of a dirty/inFlight/conflict/blocked/error/
+      // quarantine row: it is the only record of the unsynced edit.
       final orphaned = await exec.rawQuery(
         'SELECT o.store, o.record_id FROM lp_outbox o '
         'LEFT JOIN lp_sync_row s ON s.store = o.store AND s.record_id = o.record_id '
@@ -941,9 +907,8 @@ class KernelDatabase with ChangeBusAwareLP {
         final exec = tx.executor;
         for (final r in rows) {
           final id = r['id']! as String;
-          // Revalidate eligibility INSIDE the transaction, immediately before
-          // the delete: a concurrent write between the candidate SELECT and
-          // here (unarchive, unhide, dirty/conflict transition) must prevent a
+          // Revalidate eligibility inside the transaction: a concurrent
+          // write between the candidate SELECT and here must prevent a
           // stale deletion.
           final stillEligible = await exec.rawQuery(
             'SELECT b.id FROM ${DdlCompiler.quote(store)} b '
@@ -998,12 +963,9 @@ class KernelDatabase with ChangeBusAwareLP {
     }
   }
 
-  /// Invalidates watchers after changes made outside this [LocalPocket]
-  /// connection.
-  ///
-  /// Use this when another process, isolate, or database connection changes
-  /// one of the collections. Because affected IDs are unknown, watchers
-  /// conservatively re-check their queries.
+  /// Invalidates watchers after changes made outside this connection
+  /// (another process or isolate). Watchers conservatively re-check their
+  /// queries because affected IDs are unknown.
   void notifyExternalChange(Set<String> stores) {
     for (final s in stores) {
       _tables[s]?.readCache.clear();
@@ -1056,17 +1018,16 @@ class _CommitGroup {
     _barrier = barrier;
     unawaited(context.writeQueue.run(() async {
       await barrier.future;
-      // Member completers already received any per-member error; swallow the
-      // queue-level rethrow so it never becomes an unhandled async error.
+      // Member completers already received any per-member error; swallow
+      // the queue-level rethrow so it never becomes unhandled.
       try {
         await flush();
       } catch (_) {}
     }));
-    // scheduleMicrotask would close the group BEFORE sibling awaits in the
-    // same turn run; Timer(Duration.zero) defers past them, capturing the
-    // whole burst. A positive coalescing window keeps the barrier open even
-    // longer so bursts across turns can join (a read or a
-    // different-durability submission flushes it early).
+    // Timer(Duration.zero) (not scheduleMicrotask) defers past sibling
+    // awaits in the same turn so the whole burst joins the group. A positive
+    // window keeps the barrier open longer; a read or different-durability
+    // submission flushes it early.
     final window = context.groupCommitWindow;
     if (window > Duration.zero) {
       Timer(window, flushEarly);
@@ -1075,10 +1036,9 @@ class _CommitGroup {
     }
   }
 
-  /// Completes the end-of-turn / end-of-window barrier early. Called when a
-  /// read arrives (read-your-writes must not wait out the window) or when a
-  /// different-durability submission needs its own group. Idempotent — the
-  /// window timer and explicit flushes race harmlessly.
+  /// Completes the barrier early (a read arrived — read-your-writes must not
+  /// wait out the window — or a different-durability submission needs its
+  /// own group). Idempotent.
   void flushEarly() {
     if (_barrierDone) return;
     _barrierDone = true;
@@ -1089,11 +1049,8 @@ class _CommitGroup {
   }
 
   /// Runs all joined members inside ONE write transaction. In multi-member
-  /// groups a member whose body throws rolls back to its savepoint and that
-  /// member alone completes with the error; the rest still commit. A SOLO
-  /// member runs directly — identical to the pre-group-commit path, so
-  /// savepoint naming and rollback semantics are unchanged for sequential
-  /// writes.
+  /// groups a failing member rolls back to its savepoint and completes with
+  /// the error alone; the rest commit. A solo member runs directly.
   Future<void> flush() async {
     sealed = true;
     if (members.isEmpty) return;
@@ -1102,8 +1059,8 @@ class _CommitGroup {
       context.perf.groupCommits++;
       context.perf.groupCommitMembers += members.length;
     }
-    // Already inside the WriteQueue slot taken by [reserve] — never re-enter
-    // the queue here (it would deadlock on our own reserved slot).
+    // Already inside the WriteQueue slot taken by [reserve]; re-entering
+    // would deadlock on our own reserved slot.
     final sw = Stopwatch()..start();
     final inMemory = context.database.path == ':memory:';
     final useFull = durability == DurabilityClass.full && !inMemory;
@@ -1113,10 +1070,9 @@ class _CommitGroup {
     }
     final changes = <ChangeSet>[];
     final recordEvents = <RecordChangeEvent>[];
-    // Member outcomes are stashed and surfaced only AFTER the transaction
-    // callback resolves: completing inside the callback would resume the
-    // awaiting caller BEFORE COMMIT executes, letting it observe pre-commit
-    // state (a real bug: the sync engine drained an empty outbox).
+    // Outcomes are surfaced only AFTER the transaction resolves: completing
+    // inside the callback would resume callers BEFORE COMMIT executes, letting
+    // them observe pre-commit state.
     final outcomes = <(_CommitMember, Object?, Object?, StackTrace?)>[];
     try {
       await context.db.transaction((txn) async {
@@ -1166,14 +1122,10 @@ class _CommitGroup {
         context.changeBus.emitEvent(event);
       }
     } catch (e, st) {
-      // The transaction failed at BEGIN/COMMIT/rollback level and every
-      // member's writes are rolled back with it. A member whose own body
-      // already failed keeps that error when it IS the settle failure (the
-      // ordinary rethrow); when the settle failed with a different error (a
-      // COMMIT/ROLLBACK failure after a body threw, or a body that succeeded
-      // before a COMMIT failure), the caller must learn the settle error
-      // rather than a false success. The generic fallback in `finally` below
-      // only covers BEGIN failures that unwound before any member ran.
+      // The transaction failed at BEGIN/COMMIT/rollback level; every
+      // member's writes roll back with it. A member whose body failed keeps
+      // its error only when that error IS the settle failure; otherwise
+      // callers must learn the settle error, not a false success.
       for (final (m, _, err, mst) in outcomes) {
         if (m.completer.isCompleted) continue;
         if (err != null && identical(e, err)) {
@@ -1191,12 +1143,11 @@ class _CommitGroup {
         } catch (_) {}
       }
       context.perf.recordWriteTransaction(sw.elapsedMicroseconds);
-      // WAL auto-checkpointing is disabled; opportunistically bound the WAL
-      // from here (off the writer's critical path — the schedule is deferred
-      // to the next event-loop turn).
+      // Auto-checkpointing is disabled; opportunistically bound the WAL off
+      // the writer's critical path.
       coordinator._noteWriteCommitted();
-      // Safety net: a BEGIN-level failure (e.g. closed handle) unwinds before
-      // any member ran. No caller may hang on an uncompleted completer.
+      // Safety net: a BEGIN-level failure unwinds before any member ran; no
+      // caller may hang on an uncompleted completer.
       for (final member in members) {
         if (!member.completer.isCompleted) {
           member.completer.completeError(StateError('Group commit failed.'));
@@ -1212,9 +1163,6 @@ class _CommitMember {
   final completer = Completer<dynamic>();
 }
 
-/// Internal name for [KernelDatabase]: the concrete kernel database the
-/// runtimes drive — directly on native, through the worker on web. The
-/// PUBLIC name `LocalPocket` is the facade over the typed contract
-/// (`src/api/local_pocket.dart`); this alias is library-internal spelling
-/// sugar for the kernel services and tests, never exported.
+/// Internal name for [KernelDatabase]; the public `LocalPocket` is the
+/// facade over the typed contract. Never exported.
 typedef LocalPocket = KernelDatabase;

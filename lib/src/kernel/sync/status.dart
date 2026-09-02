@@ -3,15 +3,34 @@ library;
 
 /// Lifecycle state of a [SyncEngine].
 enum SyncEngineState {
+  /// Created but not started (or stopped).
   closed,
+
+  /// A start call is initializing the backend.
   opening,
+
+  /// Started but the network is unreachable or disabled.
   offline,
+
+  /// The backend rejected the current token; a fresh one is required.
   authRequired,
+
+  /// Started, connected, and nothing to do.
   idle,
+
+  /// A pull cycle is running.
   pulling,
+
+  /// A push cycle is running.
   pushing,
+
+  /// Waiting out a backoff after a failed cycle.
   backoff,
+
+  /// Cycles are parked by request (manual `syncNow` still works).
   paused,
+
+  /// A full resync (sweep from scratch) is running.
   fullResync,
 }
 
@@ -19,7 +38,6 @@ enum SyncEngineState {
 /// Result of one manual/triggered sync cycle.
 /// {@endtemplate}
 class SyncReport {
-
   /// Creates a sync-cycle report.
   ///
   /// {@macro localpocket.sync_report}
@@ -32,6 +50,7 @@ class SyncReport {
     this.discarded = 0,
     this.hadError = false,
   });
+
   /// Number of records pulled by collection.
   final Map<String, int> pulled;
 
@@ -65,7 +84,6 @@ class SyncReport {
 /// Current synchronization status suitable for a status indicator.
 /// {@endtemplate}
 class SyncStatus {
-
   /// Creates a sync-status snapshot.
   ///
   /// {@macro localpocket.sync_status}
@@ -79,6 +97,7 @@ class SyncStatus {
     this.lastSyncAt,
     this.lastSuccessfulSyncAt,
   });
+
   /// Current engine state.
   final SyncEngineState state;
 

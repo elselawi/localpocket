@@ -1,7 +1,17 @@
 import 'database_adapter.dart';
 
 /// Platform profile. The core never imports `dart:io`; the app tells us which
-enum PlatformProfile { native, web }
+/// platform it runs on.
+///
+/// {@template localpocket.platform_profile}
+/// {@endtemplate}
+enum PlatformProfile {
+  /// Desktop/mobile process using the native SQLite binding.
+  native,
+
+  /// Browser process using the SQLite wasm/worker binding.
+  web,
+}
 
 /// {@template localpocket.sqlite_capabilities}
 /// Probing result of the SQLite engine.
@@ -59,6 +69,7 @@ class SqliteCapabilities {
     PlatformProfile platform = PlatformProfile.native,
     bool hasFts5 = true,
   }) =>
+
       /// {@macro localpocket.sqlite_capabilities}
       SqliteCapabilities(
         sqliteVersion: v,
@@ -93,11 +104,10 @@ class SqliteCapabilities {
         .toList();
     bool hasFts5 = compileOptions.any((o) => o.contains('ENABLE_FTS5'));
     if (!hasFts5) {
-      // Some wasm builds omit the compile-options diagnostics entirely
-      // (`PRAGMA compile_options` returns no rows) even though FTS5 is
-      // compiled in. When the flag is not visible, probe FTS5 directly with a
-      // throwaway virtual table so support is reported truthfully instead of
-      // falsely disabled (which would reject FTS stores on web).
+      // Some wasm builds omit compile-options diagnostics entirely. Probe
+      // FTS5 directly with a throwaway virtual table so support is reported
+      // truthfully instead of falsely disabled (which would reject FTS
+      // stores on web).
       try {
         await db.execute(
             'CREATE VIRTUAL TABLE lp__fts5_probe USING fts5(lp__probe)');

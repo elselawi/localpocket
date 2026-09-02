@@ -27,20 +27,15 @@ import '../files/file_sync.dart';
 /// await engine.stop();
 /// ```
 ///
-/// Cycles are serialized and always pull before pushing so local merges use the
-/// freshest remote base.
-///
-/// - Cycles are serialized (never overlapping).
-/// - Pull-before-push: remote state lands first, so pushes work from the
-///   freshest base.
-/// - Auth loss pauses; connectivity loss parks; everything stays local-first.
+/// Cycles are serialized (never overlapping) and always pull before pushing
+/// so local merges use the freshest remote base. Auth loss pauses;
+/// connectivity loss parks; everything stays local-first.
 /// {@endtemplate}
 class SyncEngine {
   /// Creates a synchronization engine for [pocket] and [backend].
   ///
   /// When [config] is omitted the engine inherits the pocket's injected clock
-  /// ([LocalPocket.now]) so persistence bookkeeping and engine scheduling stay
-  /// on one clock.
+  /// so bookkeeping and scheduling stay on one clock.
   ///
   /// {@macro localpocket.sync_engine}
   SyncEngine({
@@ -132,21 +127,18 @@ class SyncEngine {
   /// them and no DB work outlives the pocket (teardown race).
   Future<void> _fastPathTail = Future.value();
 
-  /// Shared remote-application lane: every transaction that writes remote
-  /// state (pull pages, sweep batches, hidden marks, fast-path applies) is
-  /// serialized through this lane, so remote application is one logical
-  /// stream across cycles, sweeps, and realtime events. Network work stays
-  /// outside the lane.
+  /// Shared remote-application lane: every transaction writing remote state
+  /// (pull pages, sweep batches, hidden marks, fast-path applies) is
+  /// serialized here. Network work stays outside the lane.
   final ApplyLane _applyLane = ApplyLane();
 
   StreamSubscription<ChangeSet>? _changesSub;
   StreamSubscription<BackendHint>? _hintsSub;
   Timer? _syncTimer;
   Timer? _pushTimer;
-  // Page-limit auto-continuation. This MUST be a dedicated timer: the pull's
-  // own applied writes re-arm the (cancellable) debounce timer via
-  // handleLocalWrite, which would otherwise cancel a pending continuation
-  // before it fires.
+  // Page-limit auto-continuation. MUST be a dedicated timer: the pull's own
+  // applied writes re-arm the debounce timer via handleLocalWrite, which
+  // would cancel a pending continuation before it fires.
   Timer? _catchupTimer;
   Timer? _settleTimer;
 
@@ -317,18 +309,15 @@ class SyncEngine {
   }
 
   /// A backend doorbell → debounced pull of that store (+ push). A `changed`
-  /// hint carrying a full record takes the fast-path: applied directly
-  /// when the local row is clean and the event is newer — never advancing the
-  /// cursor; anything else falls back to the REST pull.
+  /// hint carrying a full record takes the fast-path (applied directly when
+  /// the local row is clean and newer — never advancing the cursor);
+  /// anything else falls back to the REST pull.
   @visibleForTesting
   void handleHint(BackendHint hint) {
     if (!_started) return;
-    // A hint for a store this engine does not manage (a realtime event for
-    // another store in the same remote collection, a doorbell from a
-    // misconfigured backend, etc.) must NEVER schedule a cycle: pulling an
-    // unregistered store throws a non-SyncError StateError that aborts the
-    // whole cycle (no push, no sweep) and wedges the engine in `pulling`.
-    // Drop it here — the per-store pull loops iterate only managed stores.
+    // A hint for an unmanaged store must NEVER schedule a cycle: pulling it
+    // throws a non-SyncError StateError that aborts the whole cycle and
+    // wedges the engine in `pulling`. Drop it here.
     if (!pocket.storeNames.contains(hint.store)) return;
     final rec = hint.record;
     if (rec != null && hint.kind == BackendHintKind.changed) {
@@ -396,9 +385,8 @@ class SyncEngine {
   }
 
   /// Immediately continues a store whose pull stopped at the per-pass page
-  /// cap, so a large store drains without waiting for the next sync interval.
-  /// Uses its own timer (not [_pushTimer]) so the debounce re-armed by the
-  /// pull's own applied writes cannot cancel it.
+  /// cap, so a large store drains without waiting for the next interval.
+  /// Uses [_catchupTimer] so the re-armed debounce cannot cancel it.
   void _scheduleCatchup(List<String> stores) {
     _catchupTimer?.cancel();
     _catchupTimer = Timer(Duration.zero, () {
@@ -501,12 +489,11 @@ class SyncEngine {
     final pulled = <String, int>{};
     final swept = <String, int>{};
     var hadError = false;
-    // A push is only safe against a freshly-pulled remote state. If any
-    // required pull fails, the push is deferred to the next fully-pulled
-    // cycle (local edits stay dirty in the outbox).
+    // A push is only safe against freshly-pulled remote state; a failed
+    // pull defers the push to the next fully-pulled cycle.
     var pullFailed = false;
-    // Stores whose pull stopped at the per-pass page cap with a full page:
-    // they are continued immediately (page-limit auto-continuation).
+    // Stores whose pull hit the per-pass page cap with a full page:
+    // continued immediately (page-limit auto-continuation).
     final hitLimitStores = <String>[];
 
     await _transition(SyncEngineState.pulling);
@@ -555,8 +542,8 @@ class SyncEngine {
       try {
         pushReport = await pusher.pushPending();
         if (pushReport.hadError && _lastError == null) {
-          // The pusher records the failure on the sync row; surface it so
-          // SyncStatus.lastError carries the real message.
+          // Surface the sync-row-recorded failure so SyncStatus.lastError
+          // carries the real message.
           final errRows =
               await pocket.db.rawQuery('SELECT last_error FROM lp_sync_row '
                   'WHERE last_error IS NOT NULL '
@@ -588,13 +575,12 @@ class SyncEngine {
     // A stale cycle (from a previous lifecycle) must not mutate the new
     // lifecycle's status or schedule work.
     if (!_isCurrent(generation)) return const SyncReport();
-    // Page-limit exhaustion: keep catching up immediately instead of waiting
-    // for the next sync interval (only when the pull made progress, so a
-    // stuck store cannot busy-loop the engine).
+    // Page-limit exhaustion: catch up immediately (only when the pull made
+    // progress, so a stuck store cannot busy-loop the engine).
     if (hitLimitStores.isNotEmpty) {
       _scheduleCatchup(hitLimitStores);
     }
-    // A completed cycle is a sync heartbeat; a transient failure parks the
+    // A completed cycle is a heartbeat; a transient failure parks the
     // engine in `backoff` until the next error-free cycle.
     final cycleHadError = hadError || pushReport.hadError;
     final now = DateTime.fromMillisecondsSinceEpoch(config.now());

@@ -12,10 +12,8 @@ bool deepEquals(Object? a, Object? b) =>
     const DeepCollectionEquality().equals(a, b);
 
 /// Computes the set of dirty field paths between [base] and [current].
-///
-/// For nested objects (maps), differences are reported with dot-notation
-/// (e.g. `meta.sub`) as well as the root key (`meta`).
-/// Arrays/lists are compared as a whole unless element identity is provided.
+/// Nested map differences are reported with dot-notation (`meta.sub`) as
+/// well as the root key (`meta`); arrays are compared as a whole.
 Set<String> computeDirtyFields(
     Map<String, Object?> base, Map<String, Object?> current) {
   final dirty = <String>{};
@@ -29,8 +27,8 @@ Set<String> computeDirtyFields(
           cVal is Map &&
           bVal.keys.every((k) => k is String) &&
           cVal.keys.every((k) => k is String)) {
-        // Only recurse into String-keyed maps; a non-JSON map (e.g. int keys)
-        // is treated atomically instead of crashing `Map<String, Object?>.from`.
+        // Only recurse into String-keyed maps; a non-JSON map is treated
+        // atomically instead of crashing Map<String, Object?>.from.
         final bMap = Map<String, Object?>.from(bVal);
         final cMap = Map<String, Object?>.from(cVal);
         final subDirty = computeDirtyFields(bMap, cMap);
@@ -43,17 +41,12 @@ Set<String> computeDirtyFields(
   return dirty;
 }
 
-/// Three-way conservative field-by-field merge used when a collection resolver
-/// declines resolution.
-///
-/// Unlike a naive `{...base, ...remote, ...local}` spread (which overwrites
-/// remote-only edits with stale base values), each field is taken from:
-/// - [local] when both sides agree, or when only local changed it, or
-/// - [remote] when only remote changed it, and
-/// - [remote] when both sides changed it differently (the record still
-///   escalates to review).
-///
-/// This never loses a remote-only or local-only change.
+/// Three-way conservative field-by-field merge used when a collection
+/// resolver declines resolution. Unlike a naive
+/// `{...base, ...remote, ...local}` spread (which overwrites remote-only
+/// edits with stale base values), each field keeps its correct side, so no
+/// remote-only or local-only change is ever lost. Both-changed fields take
+/// remote; the record still escalates to review.
 Map<String, Object?> conservativeReviewMerge({
   required Map<String, Object?> base,
   required Map<String, Object?> local,
@@ -210,12 +203,10 @@ class LocalWinsResolver extends ConflictResolver {
 /// `base ∪ (local − base) ∪ (remote − base)` minus deletions from either side.
 /// For list/set fields.
 ///
-/// NOT a true OR-set: elements are compared with ordinary Dart [Set]
-/// equality — numbers by VALUE (2 and 2.0 are the same element), non-primitive
-/// elements (maps/lists) by IDENTITY. A base element missing from either side
-/// is removed even if the other side re-adds an equal value, and two
-/// structurally equal nested objects stay distinct elements. (The merge
-/// engine itself compares with deep equality; this resolver deliberately
+/// NOT a true OR-set: elements use ordinary Dart [Set] equality — numbers
+/// by VALUE (2 == 2.0), maps/lists by IDENTITY. A base element missing from
+/// either side is removed even if the other side re-adds an equal value.
+/// (The merge engine compares with deep equality; this resolver deliberately
 /// does not — see the pinned tests.)
 /// {@endtemplate}
 class SetUnionWithDeletionWinsResolver extends ConflictResolver {
@@ -247,7 +238,7 @@ class SetUnionWithDeletionWinsResolver extends ConflictResolver {
     final resultSet =
         baseSet.union(localAdded).union(remoteAdded).difference(allRemoved);
 
-    // Preserve ordered appearance
+    // Preserve ordered appearance.
     final resultList = <Object?>[];
     for (final item in [...localList, ...remoteList, ...baseList]) {
       if (resultSet.contains(item) && !resultList.contains(item)) {
@@ -439,12 +430,9 @@ class MergePolicy {
   /// Optional whole-record resolver.
   final ConflictResolver? collectionResolver;
 
-  /// Per-field resolver overrides.
-  ///
-  /// Keys may be top-level (`'meta'`) or dotted paths (`'meta.name'`). The
-  /// most specific key wins, and a top-level key also governs its nested
-  /// children — so a policy on `meta` follows into `meta.name` unless a
-  /// dotted override says otherwise.
+  /// Per-field resolver overrides. Keys may be top-level (`'meta'`) or
+  /// dotted paths (`'meta.name'`); the most specific key wins and a
+  /// top-level key governs its nested children unless overridden.
   final Map<String, Object> fieldOverrides;
 
   /// Whether local content edits should unarchive records.
@@ -478,10 +466,10 @@ Object? resolveFieldValue(
     return remoteVal;
   }
   if (resolverOrPolicy is ConflictResolver) {
-    // If a generic resolver was passed for a field, remote wins by default
+    // A generic resolver on a field: remote wins by default.
     return remoteVal;
   }
-  // Package default: remote wins
+  // Package default: remote wins.
   return remoteVal;
 }
 
@@ -605,19 +593,16 @@ class MergeEngine {
     );
 
     // A collection resolver arbitrates CONFLICTS. When only one side diverged
-    // from base there is nothing to arbitrate: the ordinary three-way rules
-    // decide deterministically (r == b -> local; l == b -> remote). Running a
-    // declining resolver on a one-sided change would escalate routine
-    // convergence (e.g. an acceptLocal resolution push) into a conflict loop.
+    // from base the ordinary three-way rules decide deterministically;
+    // running a declining resolver on a one-sided change would escalate
+    // routine convergence (e.g. an acceptLocal push) into a conflict loop.
     final bothChanged = dirtyLocal.isNotEmpty && dirtyRemote.isNotEmpty;
     if (policy?.collectionResolver != null && bothChanged) {
       MergeResult handleCustomResult(MergeResult? customRes) {
         if (customRes == null) {
-          // The resolver declined: fall back to a conservative field-by-field
-          // merge that never loses a remote-only or local-only change (a naive
-          // `{...base, ...remote, ...local}` spread would overwrite remote-only
-          // edits with stale base values). The record still escalates for
-          // review.
+          // The resolver declined: fall back to the conservative merge (a
+          // naive spread would overwrite remote-only edits with stale base
+          // values). Still escalates for review.
           return MergeResult(
             merged: conservativeReviewMerge(
                 base: base, local: local, remote: remote),
@@ -783,19 +768,11 @@ class MergeEngine {
     );
   }
 
-  /// Three-way merge of one field at [path] (a top-level key or a dotted
-  /// nested path).
+  /// Three-way merge of one field at [path] (top-level or dotted nested).
   ///
-  /// The classic rules apply per path:
-  ///   l == r -> l
-  ///   l == b -> r          # only remote changed
-  ///   r == b -> l          # only local changed
-  ///   else   -> recursion into nested String-keyed maps (a nested field
-  ///             follows the most specific `fieldOverrides` entry walking up
-  ///             from its dotted path — a top-level policy follows into its
-  ///             children, a dotted override wins at its exact path), or the
-  ///             most specific override on a non-recursable value, or remote
-  ///             wins.
+  /// Classic rules per path: `l == r -> l`, `l == b -> r`, `r == b -> l`,
+  /// else recurse into nested String-keyed maps (most specific
+  /// `fieldOverrides` entry wins), apply the override, or remote wins.
   static FutureOr<Object?> _mergeFieldValue({
     required String path,
     required Object? b,
@@ -812,9 +789,8 @@ class MergeEngine {
     if (deepEquals(r, b)) return l;
 
     // Both changed. Recurse into nested String-keyed maps FIRST so nested
-    // fields follow the same three-way rules and the most specific override
-    // governs each nested conflict (audit #24). A type change on either side
-    // (or a non-String-keyed map) keeps the value atomic.
+    // fields follow the same rules and the most specific override governs
+    // each nested conflict. A type change keeps the value atomic.
     if (l is Map &&
         r is Map &&
         l.keys.every((k) => k is String) &&

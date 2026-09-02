@@ -76,13 +76,9 @@ abstract class BlobStore {
 
 /// {@template localpocket.blob_missing_error}
 /// Sentinel error signalling that a blob entry is genuinely absent — the
-/// platform-neutral "file not found" condition.
-///
-/// Backends whose native API distinguishes "missing entry" from "storage
-/// failure" (e.g. OPFS, where `getFileHandle` rejects with a `DOMException`
-/// whose name is `'NotFoundError'`) translate that native signal into this
-/// type so [WebBlobStore] (and any other [BlobStore]) can classify it
-/// uniformly and without depending on JS interop types.
+/// platform-neutral "file not found" condition. Backends translate native
+/// not-found signals (e.g. OPFS `NotFoundError`) into this type so callers
+/// can classify it uniformly without JS-interop dependencies.
 /// {@endtemplate}
 class BlobMissingError implements Exception {
   /// Creates a not-found signal for [hash].
@@ -98,15 +94,10 @@ class BlobMissingError implements Exception {
 }
 
 /// {@template localpocket.blob_storage_exception}
-/// A blob-store backend operation failed for a reason other than the blob
-/// being absent — for example an OPFS permission denial, quota-exceeded
-/// error, or read corruption.
-///
-/// Unlike the `Blob not found` [StateError] thrown when a blob is genuinely
-/// missing, this preserves the original platform error in [cause] so callers
-/// (the files API, the file-sync lane) can distinguish "storage is broken"
-/// from "blob is missing" and avoid misleading re-download attempts or
-/// masking the real failure during debugging.
+/// A blob-store operation failed for a reason other than absence (permission
+/// denial, quota, corruption). Unlike the `Blob not found` [StateError], this
+/// preserves the original platform error in [cause] so callers can tell
+/// "storage is broken" from "blob is missing".
 /// {@endtemplate}
 class BlobStorageException implements Exception {
   /// Creates a blob-storage exception wrapping [cause] for [hash].
@@ -125,21 +116,13 @@ class BlobStorageException implements Exception {
   String toString() => 'BlobStorageException($hash): $cause';
 }
 
-/// Backend-neutral view of a blob directory (OPFS on web, a disk dir natively).
+/// Backend-neutral view of a blob directory (OPFS on web, a disk dir
+/// natively). Plain Dart types (not JS-interop handles) keep the store logic
+/// testable under the VM with pure-Dart fakes.
 ///
-/// Exposing blob operations as plain Dart types — rather than raw JS-interop
-/// handles — keeps the store logic testable under the VM: tests inject a
-/// pure-Dart [OpfsDir] fake that throws [BlobMissingError] for absent entries
-/// and a platform-specific error for real failures, exercising the
-/// not-found-vs-failure classification without a browser or OPFS dependency.
-///
-/// Contract for [read] and [remove]:
-/// - Throw [BlobMissingError] when [name] is genuinely absent.
-/// - Throw any other error for a real storage failure (permission, quota,
-///   corruption, ...). Backends whose native API surfaces a "not found"
-///   signal (e.g. OPFS `DOMException` name `'NotFoundError'`) translate it
-///   into [BlobMissingError] before throwing, so callers can classify it
-///   uniformly via [isBlobMissing].
+/// Contract for [read] and [remove]: throw [BlobMissingError] when [name] is
+/// genuinely absent (translate native not-found signals into it), any other
+/// error for a real storage failure — callers classify via [isBlobMissing].
 abstract class OpfsDir {
   /// Opens [name] for reading and returns its full byte content.
   ///
@@ -164,18 +147,8 @@ abstract class OpfsDir {
   Future<List<String>> list();
 }
 
-/// Returns `true` when [error] represents a genuinely absent blob entry —
-/// the platform-neutral "file not found" condition — as opposed to a real
-/// storage failure (permission, quota, corruption, ...).
-///
-/// Recognizes [BlobMissingError], which backends throw (after translating any
-/// native "not found" signal, such as an OPFS `NotFoundError` `DOMException`)
-/// so [WebBlobStore] (and any other [BlobStore]) can classify it uniformly
-/// and without depending on JS-interop types.
-///
-/// Used by `WebBlobStore.open`/`delete` to decide between falling through to
-/// the documented `Blob not found` [StateError] (genuinely missing) and
-/// rethrowing as a typed [BlobStorageException] (real failure).
+/// Whether [error] is a genuinely absent blob (platform-neutral "file not
+/// found") as opposed to a real storage failure.
 bool isBlobMissing(Object error) => error is BlobMissingError;
 
 /// {@template localpocket.stream_validation_result}
@@ -317,11 +290,9 @@ class MemoryBlobStore extends BlobStore {
 }
 
 /// {@template localpocket.encrypting_blob_store}
-/// EncryptingBlobStore decorator.
-///
-/// Encrypts bytes at rest; `put` hashes the **plaintext** stream,
-/// so dedup, refcount, and remote-name logic are untouched.
-/// Decorates a [BlobStore] with encryption at rest.
+/// EncryptingBlobStore decorator: encrypts bytes at rest; `put` hashes the
+/// **plaintext** stream so dedup, refcount, and remote-name logic are
+/// untouched.
 /// {@endtemplate}
 class EncryptingBlobStore extends BlobStore {
   /// Creates an encrypting store from explicit byte transformation callbacks.

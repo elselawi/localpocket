@@ -41,9 +41,15 @@ class SweepState {
 class SyncStore {
   /// {@macro localpocket.sync_store}
   SyncStore(this.pocket, this.scope);
+
+  /// Pocket handle backing `lp_sync_state`.
   final LocalPocket pocket;
+
+  /// Sync identity scope the rows are keyed by.
   final String scope;
 
+  /// Reads the pull cursor for [store], or null when the store was never
+  /// pulled.
   Future<PullCursor?> readCursor(String store) async {
     final rows = await pocket.db.query('lp_sync_state',
         columns: ['cursor_updated', 'cursor_id'],
@@ -57,6 +63,7 @@ class SyncStore {
     return PullCursor(updated, id);
   }
 
+  /// Writes the pull cursor for [store] without touching the sweep columns.
   Future<void> writeCursor(DatabaseExecutor exec, String store,
       {required String updated, required String id}) async {
     // Read-modify-write: never clobber the sweep columns (and vice versa).
@@ -77,12 +84,14 @@ class SyncStore {
     }
   }
 
+  /// Clears the pull cursor for [store] (the next pull starts from scratch).
   Future<void> clearCursor(String store) async {
     await pocket.db.update(
         'lp_sync_state', {'cursor_updated': null, 'cursor_id': null},
         where: 'scope = ? AND store = ?', whereArgs: [scope, store]);
   }
 
+  /// Reads the rotating sweep state for [store] (fresh state when absent).
   Future<SweepState> readSweep(String store) async {
     final rows = await pocket.db.query('lp_sync_state',
         columns: ['sweep_bucket', 'sweep_at'],
@@ -96,6 +105,7 @@ class SyncStore {
     );
   }
 
+  /// Writes the sweep state for [store] without touching the cursor columns.
   Future<void> writeSweep(DatabaseExecutor exec, String store,
       {required int bucket, required int sweepAt}) async {
     // Read-modify-write: never clobber the cursor columns.
@@ -117,21 +127,25 @@ class SyncStore {
 
   // -------------------------------------------------------------- status ---
 
+  /// Number of records with pending local work.
   Future<int> countPending() async =>
       firstIntValue(await pocket.db.rawQuery(
           "SELECT COUNT(*) AS c FROM lp_sync_row WHERE sync_state IN ('dirty','in_flight')")) ??
       0;
 
+  /// Number of records with an open conflict.
   Future<int> countConflicts() async =>
       firstIntValue(await pocket.db.rawQuery(
           "SELECT COUNT(*) AS c FROM lp_sync_row WHERE sync_state = 'conflict'")) ??
       0;
 
+  /// Number of records hidden from the default query scope.
   Future<int> countHidden() async =>
       firstIntValue(await pocket.db.rawQuery(
           "SELECT COUNT(*) AS c FROM lp_sync_row WHERE access_state = 'hidden'")) ??
       0;
 
+  /// All status counters in one query.
   Future<({int pending, int conflicts, int hidden, int blocked})>
       countAllStatus() async {
     final rows = await pocket.db.rawQuery('''

@@ -62,11 +62,10 @@ class NormalizedRemoteRecord {
   bool get isSuccess => error == null;
 }
 
-/// Normalizes a single remote record and precomputes its canonical payload JSON and hash.
-///
-/// Every failure — a typed [MapFailure] or any other parsing/casting error —
-/// is captured into [NormalizedRemoteRecord.error] so one poison record is
-/// quarantined instead of stalling the whole store.
+/// Normalizes a single remote record, precomputing its canonical payload
+/// JSON and hash. Every failure (typed or not) is captured into
+/// [NormalizedRemoteRecord.error] so one poison record is quarantined
+/// instead of stalling the whole store.
 NormalizedRemoteRecord normalizeSingleRemote(
     CollectionSchema<Object?> schema, RemoteRecord remote) {
   try {
@@ -86,8 +85,8 @@ NormalizedRemoteRecord normalizeSingleRemote(
       error: e.message,
     );
   } catch (e) {
-    // Any other failure (TypeError, FormatException, …) is still a per-record
-    // quarantine: a malformed payload must never stall valid records.
+    // Any other failure (TypeError, FormatException, …) is still a
+    // per-record quarantine: it must never stall valid records.
     return NormalizedRemoteRecord(
       remote: remote,
       error: '$e',
@@ -104,20 +103,14 @@ List<NormalizedRemoteRecord> normalizeRemoteBatch(
 
 /// Normalizes a batch of remote records asynchronously.
 ///
-/// Runs inline on the calling isolate and returns exactly what
-/// [normalizeRemoteBatch] returns. [isolateThreshold] is accepted for
-/// interface compatibility and ignored; see the body comment for why the
-/// one-shot isolate offload was deliberately not used.
+/// Runs inline; [isolateThreshold] is accepted for interface compatibility
+/// and ignored (one-shot isolate offload was slower, and Isolate.run is
+/// unsupported by dart2js).
 Future<List<NormalizedRemoteRecord>> normalizeRemoteBatchAsync(
   CollectionSchema<Object?> schema,
   List<RemoteRecord> remotes, {
   int isolateThreshold = 20,
-}) async =>
-    // Keep the async API for source compatibility, but do not cross a one-shot
-    // dart:isolate boundary. Isolate.run is unsupported by dart2js and the
-    // transfer/spawn cost was slower than inline normalization on native pages.
-    // The threshold remains accepted for compatibility with existing callers.
-    normalizeRemoteBatch(schema, remotes);
+}) async => normalizeRemoteBatch(schema, remotes);
 
 /// Normalizes a remote record into the domain document shape.
 Map<String, Object?> normalizeRemote(
@@ -189,11 +182,9 @@ String _remoteKindViolationMessage(
 
 /// Parses a canonical payload JSON string into a map.
 ///
-/// Returns an empty map when [json] is null or empty — a missing base or
-/// payload is a legitimate "nothing yet" state. Non-empty input that fails to
-/// parse, or parses to a non-object, is corruption and raises [MapFailure]: a
-/// corrupt persisted payload must never silently merge as an empty record
-/// ("remote deleted everything").
+/// Null/empty input returns an empty map (a legitimate "nothing yet" state);
+/// non-empty input that fails to parse or is not an object is corruption and
+/// raises [MapFailure] — it must never silently merge as an empty record.
 Map<String, Object?> parsePayloadJson(String? json) {
   if (json == null || json.isEmpty) return const {};
   final Object? decoded;

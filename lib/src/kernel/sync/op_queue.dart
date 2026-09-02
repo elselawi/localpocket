@@ -39,11 +39,8 @@ class OpQueue {
     });
 
   /// Returns ops ready to run, FIFO by seq, skipping blocked ones.
-  ///
-  /// Both `pending` and retryable `failed` ops (whose persisted `next_retry_at`
-  /// deadline has passed) are selected, so a transiently-failed op is never
-  /// lost — it is retried with backoff until it succeeds or the record it
-  /// belongs to is purged.
+  /// Retryable `failed` ops whose `next_retry_at` passed are selected too,
+  /// so a transiently-failed op is retried with backoff, never lost.
   Future<List<OpQueueRow>> drain({String? store, int limit = 25}) async {
     final now = pocket.now();
     final rows = await pocket.db.query('lp_op_queue',
@@ -80,10 +77,8 @@ class OpQueue {
 
   /// Marks [opId] failed and stores [error] for inspection.
   ///
-  /// The op stays retryable: it transitions to `failed` with an incremented
-  /// attempt count and a persisted backoff deadline, and [drain] will select
-  /// it again once the deadline passes. [attempts] is the total attempt count
-  /// (including this failure) and [nextRetryAt] the epoch-ms deadline.
+  /// The op stays retryable: `failed` with a persisted backoff deadline;
+  /// [drain] selects it again once the deadline passes.
   Future<void> markFailed(String opId, String error,
       {int attempts = 1, int nextRetryAt = 0}) => pocket.transaction((tx) async {
       await tx.executor.update(

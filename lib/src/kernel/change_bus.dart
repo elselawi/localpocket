@@ -9,9 +9,8 @@ enum ChangeOrigin {
   /// Ingested from the remote server (puller, realtime push/SSE, sweeper hide).
   remote,
 
-  /// Resolved via 3-way merge, conflict resolution, or server push settlement transformation.
-  /// when checking if a change came from remote server.
-  /// this also means that it did came from remote server.
+  /// Resolved via 3-way merge, conflict resolution, or push settlement
+  /// transformation (remote-derived content written locally).
   resolution,
 }
 
@@ -36,10 +35,9 @@ enum ChangeAction {
   hide,
 }
 
-/// The ONE canonical "parameter not provided" sentinel. Every omitted-value
-/// comparison in the change/event layer must use this single instance so two
-/// different sentinel objects can never be interpreted as two different
-/// concepts — one omitted-value sentinel, everywhere.
+/// The one canonical "parameter not provided" sentinel: every omitted-value
+/// comparison in this layer uses this single instance (an explicit `null` is
+/// therefore a real value, not an omission).
 const Object _sentinelUnset = Object();
 
 /// {@template localpocket.record_change_event}
@@ -210,9 +208,6 @@ class RecordChangeEvent {
 }
 
 /// Extension methods for filtering streams of [RecordChangeEvent].
-///
-/// These helpers make it easier to subscribe to specific origin/action/field
-/// combinations without manually writing repeated predicate logic.
 extension RecordChangeEventStreamExtension on Stream<RecordChangeEvent> {
   /// Filters for local changes.
   Stream<RecordChangeEvent> whereLocal() => where((e) => e.isLocal);
@@ -431,11 +426,10 @@ mixin ChangeBusAwareStore {
         field: field,
       );
 
-  /// Convenience stream for listening to a specific field transition from [from] to [to].
+  /// Convenience stream for a field transition from [from] to [to].
   ///
-  /// Uses the layer's single canonical omitted-value sentinel (see
-  /// [_sentinelUnset]): a call without [from]/[to] matches ANY transition of
-  /// [field], and passing `null` explicitly matches create/purge transitions.
+  /// Omitted [from]/[to] (the [_sentinelUnset] sentinel) matches ANY
+  /// transition; explicit `null` matches create/purge transitions.
   Stream<RecordChangeEvent> onFieldTransition(
     String field, {
     Object? from = _sentinelUnset,

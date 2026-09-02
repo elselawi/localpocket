@@ -12,6 +12,13 @@ final RegExp recordIdPattern = RegExp(r'^[a-z0-9]{15}$');
 /// wall clock at startup and incremented per id, so ids generated in the
 /// same millisecond still sort by creation order (and never collide even
 /// across process restarts within the same tick window).
+///
+/// Ownership: this counter is per-isolate state. Ids are generated on the
+/// write path, which is serialized through the single-writer queue inside
+/// one isolate (the kernel lives in one isolate on every platform, including
+/// the web worker), so monotonic ordering holds for everything that matters.
+/// The 7 random suffix characters remain the collision guard; ordering
+/// across independent isolates is deliberately not guaranteed.
 int _idCounter = DateTime.now().millisecondsSinceEpoch;
 
 /// Generates a lowercase, PocketBase-compatible 15-character record ID.

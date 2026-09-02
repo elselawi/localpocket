@@ -5,13 +5,10 @@ import 'package:collection/collection.dart' show ListEquality;
 
 import 'errors.dart';
 
-/// Reconstructs a schema model from JSON, converting any malformed value
-/// (wrong type, unknown enum string, missing required key, …) into a typed
-/// [StorageError] instead of leaking a raw `TypeError`/`ArgumentError`/
-/// `FormatException`. Schema definitions are persisted in
-/// `lp_stores.definition_json` and cross the web worker boundary, so a value
-/// that fails to parse indicates corruption or a version mismatch — matching
-/// the corrupt-row contract of the `lp_*` row models.
+/// Reconstructs a schema model from JSON, converting any malformed value into
+/// a typed [StorageError] instead of leaking a raw `TypeError`/`FormatException`.
+/// Schema JSON is persisted and crosses the worker boundary, so a parse
+/// failure indicates corruption or a version mismatch.
 T _parseSchemaJson<T>(T Function() build) {
   try {
     return build();
@@ -189,21 +186,27 @@ class Field {
   /// Whether SQLite should enforce the reference as a foreign key.
   final bool enforceFk;
 
-  /// Strict identifier charset for field names: a letter or underscore
-  /// followed by any number of letters, digits, or underscores. Unicode
-  /// letters are allowed (SQLite identifiers may contain them); whitespace,
-  /// quotes, and punctuation are not.
+  /// Strict identifier charset for field names: letter/underscore then
+  /// letters, digits, or underscores (Unicode letters allowed; punctuation
+  /// and whitespace are not).
   static final RegExp _identifierPattern = RegExp(
     r'^[\p{L}_][\p{L}\p{N}_]*$',
     unicode: true,
   );
 
+  /// Engine-owned physical columns: never legal as declared field names
+  /// or extra keys.
+  static const Set<String> reservedColumns = {
+    'id',
+    'archived',
+    'hidden',
+    'extra'
+  };
+
   /// Validates [name] against the strict identifier policy.
   ///
-  /// Every field name is quoted in generated SQL, so SQLite keywords such as
-  /// `order`, `group`, or `select` are legal field names. This policy is
-  /// defense-in-depth: it guarantees that no field name can ever produce a
-  /// broken identifier, even in a context that forgot to quote.
+  /// Field names are quoted in generated SQL (keywords are legal names);
+  /// this is defense-in-depth against unquoted contexts.
   static void validateName(String name) {
     if (!_identifierPattern.hasMatch(name)) {
       throw SchemaRegistrationError(
@@ -213,11 +216,8 @@ class Field {
     }
   }
 
-  /// SQLite affinity for this field.
-  ///
-  /// Encrypted fields always store base64 ciphertext as TEXT: a STRICT
-  /// `INTEGER`/`REAL` column would reject the base64 string, so the storage
-  /// type must be TEXT even for logical int/real fields.
+  /// SQLite affinity for this field. Encrypted fields store base64
+  /// ciphertext as TEXT (a STRICT INTEGER/REAL column would reject it).
   String get sqlType {
     if (encrypted) return 'TEXT';
     return switch (kind) {
@@ -682,8 +682,9 @@ class CollectionSchema<T> {
           ],
           keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
           prefetchFiles: j['prefetchFiles'] == true,
-          attachmentField:
-              j['attachmentField'] is String ? j['attachmentField']! as String : null,
+          attachmentField: j['attachmentField'] is String
+              ? j['attachmentField']! as String
+              : null,
           fts: j['fts'] is Map
               ? FtsSpec.fromJson(j['fts']! as Map<String, Object?>)
               : null,
@@ -728,10 +729,8 @@ class CollectionSchema<T> {
   final List<String> Function(Map<String, Object?> record)? validator;
 
   /// The local attachment field name for this store's files, or `null` for
-  /// the shared default (`attachmentFieldDefault`). This is a metadata label
-  /// on `lp_file_refs` and the file API's default `field:` — the bytes live
-  /// in the blob store locally and in the backend's attachment storage
-  /// remotely; only the sync adapter decides the remote field name.
+  /// the shared default (`attachmentFieldDefault`). A metadata label only;
+  /// the sync adapter decides the remote field name.
   final String? attachmentField;
 
   /// Cached declared-name set. The identity-keyed Expando preserves the const

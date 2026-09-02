@@ -94,10 +94,8 @@ class Puller {
   final FileSyncLane? fileLane;
 
   /// Shared serialization lane for every remote-application transaction in
-  /// this puller (pull pages, sweep fetch batches, hidden marks, and realtime
-  /// fast-path applies). The engine passes its own lane so all remote applies
-  /// across all sync flows form one logical stream; a standalone puller
-  /// defaults to a private lane.
+  /// this puller. The engine passes its own lane so all remote applies form
+  /// one logical stream; a standalone puller defaults to a private lane.
   final ApplyLane applyLane;
 
   /// The initial remote timestamp used when no cursor exists.
@@ -119,9 +117,8 @@ class Puller {
     var quarantined = 0;
     var conflicts = 0;
     var hitPageLimit = false;
-    // PB hard-caps perPage at 500 (above is a 400, absent defaults to 30).
-    // The SAME clamped size must drive both the request and the page-completion
-    // check below, or a maxPage above the cap would prematurely terminate.
+    // PB hard-caps perPage at 500 (above is a 400); the same clamped size
+    // must drive both the request and the page-completion check below.
     final pageSize = config.maxPage.clamp(1, pbMaxPage).toInt();
 
     while (true) {
@@ -155,19 +152,16 @@ class Puller {
             final written = <String>{};
             for (final item in normalizedBatch) {
               final r = item.remote;
-              // Idempotent re-delivery from the rewind window. The cursor
-              // bound is deliberately the skip authority: a record at/below
-              // the cursor was already applied (or deliberately purged — see
-              // the local-final purge contract), so re-deliveries are no-ops.
-              // A record genuinely MISSED by a reordered/mid-walk page is
-              // healed by the anti-entropy sweep's targeted fetch, never by
-              // the pull's rewind window.
+              // Idempotent re-delivery from the rewind window: the cursor
+              // bound is the skip authority (a record at/below it was already
+              // applied or deliberately purged). A record genuinely missed by
+              // a reordered page is healed by the sweep's targeted fetch.
               if (c != null && _tupleLte(r, c)) continue;
               final ApplyResult result;
               if (written.contains(r.id)) {
-                // Duplicate id within this page: the first pass already wrote the
-                // row in this transaction, so re-read (not prefetched) so the
-                // second delivery sees it and takes the update path.
+                // Duplicate id within this page: the first delivery already
+                // wrote the row in this transaction, so re-read rather than
+                // use prefetched state.
                 result = await applyNormalizedRemote(tx, store, item);
               } else {
                 result = await applyNormalizedRemote(tx, store, item,
@@ -177,9 +171,7 @@ class Puller {
                     prefetchedSyncRowChecked: true);
                 written.add(r.id);
               }
-              // Accounting: only records actually written to the domain count as
-              // `applied`; quarantined, conflict-escalated, and no-op deliveries
-              // are reported separately and never inflate the applied count.
+              // Only records written to the domain count as `applied`.
               switch (result) {
                 case ApplyResult.applied:
                   applied++;
@@ -195,8 +187,7 @@ class Puller {
                   break;
               }
             }
-            // The cursor only advances forward: a page that is entirely within the
-            // rewind window must never regress it.
+            // The cursor only advances forward; never regress it.
             final advanced = c == null || !_tupleLte(last, c);
             final nextUpdated = advanced ? last.updated : c.updated;
             final nextId = advanced ? last.id : c.id;
@@ -242,10 +233,10 @@ class Puller {
     return max;
   }
 
-  /// Realtime fast-path: apply a realtime event's
-  /// embedded record directly when the local row is clean and the event is
-  /// newer (or the record is unknown). NEVER advances the cursor — the next
-  /// delta pull re-delivers it idempotently. Returns whether it applied.
+  /// Realtime fast-path: apply a realtime event's embedded record directly
+  /// when the local row is clean and the event is newer (or the record is
+  /// unknown). NEVER advances the cursor — the next delta pull re-delivers
+  /// it idempotently.
   Future<bool> fastPathApply(RemoteRecord remote) async {
     var applied = false;
     await applyLane.run(() => pocket.transaction((tx) async {
@@ -425,9 +416,7 @@ class Puller {
     final remoteHash = item.remoteHash!;
 
     // Security contract: a remote record is only ever written into the table
-    // it claims. A record whose `store` differs from the requested store, or
-    // whose id is not a valid local record id, is quarantined — it must never
-    // be routed into another table or silently written with a malformed id.
+    // it claims; a mismatched store or malformed id is quarantined.
     if (remote.store != store) {
       await _quarantineMapFailure(exec, schema, store, remote,
           'Remote store "${remote.store}" does not match requested store "$store".');
@@ -439,9 +428,9 @@ class Puller {
       return ApplyResult.quarantined;
     }
 
-    // `prefetchedSyncRowChecked` makes the probe authoritative even when the
-    // probe found NO row (null = absent); without it, null would fall through
-    // to a per-record re-read (sync-apply profile: 33% of pull statements).
+    // `prefetchedSyncRowChecked` makes the probe authoritative even when it
+    // found NO row (null = absent); without it, null would trigger a
+    // per-record re-read (~33% of pull statements).
     final sr = prefetchedSyncRowChecked
         ? prefetchedSyncRow
         : await pocket.outbox.readSyncRow(exec, store, remote.id);
@@ -459,13 +448,10 @@ class Puller {
               cryptoProvider: pocket.cryptoProvider);
     }
 
-    // Observe remote file attachments. The reconciliation MUST also run when
-    // the remote attachment list is EMPTY but the record exists locally: a
-    // peer that removed the LAST file leaves the attachment list empty, and
-    // without this call the remote-shrink would never fire and stale local
-    // refs (and their blob refcounts) would persist forever. A brand-new
-    // record (no local row) with no files cannot have refs, so it skips the
-    // probe.
+    // Observe remote file attachments. Must also run when the remote list is
+    // EMPTY but the record exists locally: a peer removing the LAST file
+    // leaves an empty list, and skipping it would leave stale local refs (and
+    // blob refcounts) forever. A brand-new record with no files has no refs.
     if (fileLane != null &&
         (remote.attachments.isNotEmpty || localRow != null)) {
       await fileLane!.observeRemoteFiles(
@@ -557,11 +543,10 @@ class Puller {
         return ApplyResult.skipped;
       }
       if (state == SyncState.conflict) {
-        // A conflict is resolved only by explicit user action. Neither a
-        // converged nor a newly-changed remote payload may silently clear it:
-        // keep the row open and only refresh visibility. The remote watermark
-        // is NOT advanced: the domain still reflects the pre-conflict applied
-        // version (the conflicted remote is captured in lp_conflicts).
+        // A conflict is resolved only by explicit user action; no remote
+        // payload may silently clear it. The watermark is NOT advanced: the
+        // domain still reflects the last applied version (the conflicted
+        // remote is captured in lp_conflicts).
         await _touchSeen(tx, store, remote.id, remote.updated,
             advanceWatermark: false);
         return ApplyResult.skipped;
@@ -607,9 +592,8 @@ class Puller {
         policy: policy,
       );
       if (outcome.needsReview) {
-        // Escalate to lp_conflicts; outbox op is held. The watermark is not
-        // advanced: nothing was applied to the domain (the conflicted remote
-        // is captured in lp_conflicts for resolution).
+        // Escalate to lp_conflicts; outbox op is held and the watermark is
+        // not advanced (nothing was applied to the domain).
         await _recordPullConflict(exec, store, remote, schema, sr, localPayload,
             basePayload, outcome);
         await _touchSeen(tx, store, remote.id, remote.updated,
@@ -689,9 +673,9 @@ class Puller {
       'lp_sync_row',
       {
         'sync_state': SyncState.conflict.name,
-        // The conflicted remote IS the base for resolution. It is recorded in
-        // the sync row's base_* (NOT remote_updated, which stays the last
-        // APPLIED version — the seen-vs-applied watermark separation).
+        // The conflicted remote IS the base for resolution: recorded in the
+        // sync row's base_* (remote_updated stays the last APPLIED version —
+        // seen-vs-applied watermark separation).
         'base_json': canonicalize(remotePayload),
         'base_hash': payloadHash(schema, remotePayload),
         'base_updated': remote.updated,
@@ -724,10 +708,8 @@ class Puller {
       'payload_json': payloadJson,
     });
     final sr = await pocket.outbox.readSyncRow(exec, store, remote.id);
-    // Backoff-gated retry: a quarantined record is re-fetched out-of-band by
-    // the sweeper once `next_retry_at` passes, so a malformed remote never
-    // advances the pull cursor past it forever. A now-valid record is
-    // re-applied; a still-malformed one is re-quarantined with a longer delay.
+    // Backoff-gated retry: the sweeper re-fetches once `next_retry_at`
+    // passes, so a malformed remote never stalls the pull cursor forever.
     final attempt = (sr?.attemptCount ?? 0) + 1;
     final retryAt = _nowMs() + config.delayFor(attempt).inMilliseconds;
     if (sr == null) {
@@ -762,9 +744,8 @@ class Puller {
       required int lastSeen,
       SyncRowState? prefetchedSyncRow,
       bool syncRowChecked = false}) async {
-    // The pull loop already batch-probes sync rows; `syncRowChecked` makes the
-    // probe authoritative and skips the redundant per-record re-read
-    // (sync-apply profile: removes ~33% of pull statements).
+    // The pull loop already batch-probes sync rows; `syncRowChecked` makes
+    // the probe authoritative, skipping a redundant per-record re-read.
     final SyncRowState? sr;
     if (syncRowChecked) {
       sr = prefetchedSyncRow;
@@ -805,16 +786,14 @@ class Puller {
         {
           'last_seen_at': _nowMs(),
           'access_state': 'visible',
-          // The remote watermark (`remote_updated`) must never advance past
-          // what is actually applied. No-op / conflict / escalated paths set
-          // advanceWatermark=false so the row keeps reflecting the last
-          // APPLIED remote version while the cursor tracks what was seen.
+          // The remote watermark must never advance past what is actually
+          // applied; no-op/conflict paths set advanceWatermark=false so the
+          // row keeps the last APPLIED version while the cursor tracks seen.
           if (advanceWatermark) 'remote_updated': remoteUpdated,
         },
         where: 'store = ? AND record_id = ?',
         whereArgs: [store, id]);
-    // A record arriving on the wire is visible; avoid rewriting an already
-    // visible domain row during rewind-window redelivery.
+    // Only flip hidden=0 on rows that need it (rewind-window redelivery).
     final table = pocket.requireTable(store).tableName;
     final flipped = await exec.update(table, {'hidden': 0},
         where: 'id = ? AND hidden <> 0', whereArgs: [id]);

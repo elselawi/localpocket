@@ -51,7 +51,11 @@ class SyncConfig {
 
   /// Anti-entropy: 36 buckets by first id char; buckets per sweep cycle.
   final int sweepBucketCount;
+
+  /// Buckets visited per sweep cycle.
   final int bucketsPerSweep;
+
+  /// Idle time between anti-entropy sweeps.
   final Duration sweepInterval;
 
   /// Local write → push debounce.
@@ -68,7 +72,11 @@ class SyncConfig {
 
   /// Retry backoff: delay(n) = min(base * 2^(n-1), cap) * jitter.
   final Duration backoffBase;
+
+  /// Upper bound of the exponential backoff delay.
   final Duration backoffCap;
+
+  /// Attempts after which an op dead-letters.
   final int maxAttempts;
 
   /// Jitter source, 0.5..1.5 (default uniform). Inject for determinism.

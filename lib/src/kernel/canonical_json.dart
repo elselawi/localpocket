@@ -52,22 +52,14 @@ int utf8ByteLength(StringBuffer out) => utf8BytesOf(out.toString());
 /// the same JSON value:
 ///
 /// - Integral finite values print as full decimal integers (never `N.0`),
-///   matching Go's `encoding/json` and JS number formatting in the range
-///   where they print the full decimal expansion (`|v| < 1e21`). The old
-///   `< 1e15` guard leaked `1000000000000000.0`-style output for larger
-///   integral reals; the server echoes those as `1000000000000000`, so the
-///   payload hash mismatched and every push took the "server transformed
-///   payload" path (a pointless rewrite + change event).
-/// - Non-integral finite values keep the shortest round-trip form, which is
-///   byte-identical to `jsonEncode`. A shortest form never ends in `.0` for
-///   a non-integral value, so stripping the suffix only affects integral
-///   doubles.
-/// - `-0.0` folds to `0`.
-/// - NaN/±Infinity are preserved verbatim (existing behavior).
+///   matching Go/JS full-decimal output up to 1e21. The old `< 1e15` guard
+///   leaked `N.0` for larger reals, mismatched the server's echo, and sent
+///   every push down the "server transformed payload" path.
+/// - Non-integral values keep the shortest round-trip form (never ends in
+///   `.0`). `-0.0` folds to `0`; NaN/±Infinity are preserved verbatim.
 ///
-/// For integral magnitudes at/above 1e21 `toString()` emits exponent form
-/// (`1e+21`), which matches the exponent form Go/JS servers echo there too.
-/// Note this never uses `round()`: beyond int64 it silently clamps.
+/// Above 1e21 `toString()` emits exponent form, matching Go/JS. Never uses
+/// `round()`: beyond int64 it silently clamps.
 String _canonicalDouble(double value) {
   if (!value.isFinite) return value.toString();
   var s = value.toString();
@@ -125,11 +117,9 @@ int writeCanonicalValue(StringBuffer out, Object? value) {
     return bytes + 1;
   }
   if (value is Map) {
-    // Keys are stringified and sorted lexicographically. Lookups must use the
-    // ORIGINAL key (a non-String key never matches its `toString()` form), and
-    // two distinct keys that stringify identically (e.g. `1` vs `'1'`) cannot
-    // be represented losslessly in JSON — fail loudly rather than silently
-    // dropping a value or emitting a duplicate key.
+    // Keys are stringified and sorted lexicographically. Lookups use the
+    // ORIGINAL key (a non-String key never matches its toString() form);
+    // colliding keys cannot be lossless in JSON — fail loudly.
     final entries = <(String, Object)>[];
     for (final original in value.keys) {
       final s = original.toString();

@@ -18,6 +18,7 @@ const int queryIrVersion = 1;
 
 /// Mints and validates keyset cursor tokens for one query shape.
 final class KeysetCursorCodec {
+  /// Creates a codec bound to one store/schema/sort/shape identity.
   const KeysetCursorCodec({
     required this.store,
     required this.schemaVersion,
@@ -69,9 +70,8 @@ final class KeysetCursorCodec {
     List<String> sort;
     List<Object?> values;
     try {
-      final m =
-          jsonDecode(utf8.decode(base64Url.decode(cursor)))
-              as Map<String, Object?>;
+      final m = jsonDecode(utf8.decode(base64Url.decode(cursor)))
+          as Map<String, Object?>;
       storeName = m['store'];
       schemaVer = m['schemaVer'];
       shape = m['shape'];
@@ -101,7 +101,11 @@ final class KeysetCursorCodec {
     // come from a hand-crafted cursor and would leak an untyped binding
     // error.
     for (final v in values) {
-      if (v != null && v is! bool && v is! int && v is! double && v is! String) {
+      if (v != null &&
+          v is! bool &&
+          v is! int &&
+          v is! double &&
+          v is! String) {
         throw StaleCursorError('Malformed cursor.');
       }
     }

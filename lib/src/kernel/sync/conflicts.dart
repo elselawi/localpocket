@@ -10,10 +10,9 @@ import '../../kernel/row_models.dart';
 import 'merge.dart';
 import 'sync_tables.dart';
 
-/// Marker key inside a conflict's `remote_json` when the remote side of the
-/// conflict is a deletion: the record no longer exists remotely, so there is
-/// no remote document to store. The local row and its outbox op are retained
-/// until the app resolves the conflict.
+/// Marker key inside a conflict's `remote_json` when the remote side is a
+/// deletion: no remote document exists to store. The local row and outbox op
+/// are retained until the app resolves the conflict.
 const String remoteDeletedKey = '__lp_deleted__';
 
 /// {@template localpocket.conflict_record}
@@ -218,10 +217,9 @@ class Conflicts {
         return;
       }
 
-      // The resolution base is the conflicted remote version, recorded in the
-      // sync row's base_updated at conflict time (seen-vs-applied separation:
-      // remote_updated stays the last APPLIED version). Fall back to
-      // remote_updated for rows created by older code.
+      // The resolution base is the conflicted remote version recorded in
+      // base_updated at conflict time (remote_updated stays the last APPLIED
+      // version); fall back to remote_updated for pre-manifest rows.
       final srRow = await exec.query(
         'lp_sync_row',
         where: 'store = ? AND record_id = ?',
@@ -243,8 +241,7 @@ class Conflicts {
       );
 
       // 2. Update domain row. The resolution id ALWAYS wins: a caller-supplied
-      // `id` inside [merged] must never rename the record or leak into the
-      // pushed payload.
+      // `id` must never rename the record or leak into the pushed payload.
       final mergedWithId = <String, Object?>{...merged, 'id': id};
       final isArchived = mergedWithId['archived'] == true;
       final dbRow = encodeDbRow(schema,

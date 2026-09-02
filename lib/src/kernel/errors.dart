@@ -21,6 +21,8 @@ sealed class LocalPocketError implements Exception {
 class ValidationException extends LocalPocketError {
   /// {@macro localpocket.validation_exception}
   ValidationException(super.message, {this.field});
+
+  /// Field the validation rejected, when known.
   final String? field;
 }
 
@@ -31,27 +33,49 @@ class UniqueConstraintException extends LocalPocketError {
   /// {@macro localpocket.unique_constraint_exception}
   UniqueConstraintException({required this.field, this.value, String? message})
       : super(message ?? 'Unique constraint violated on "$field".');
+
+  /// Column whose unique index rejected the write.
   final String field;
+
+  /// Value that collided with an existing row.
   final Object? value;
 }
 
+/// {@template localpocket.not_null_constraint_exception}
+/// A SQLite NOT NULL constraint was violated.
+/// {@endtemplate}
 class NotNullConstraintException extends LocalPocketError {
+  /// {@macro localpocket.not_null_constraint_exception}
   NotNullConstraintException({required this.field, String? message})
       : super(message ?? 'NOT NULL constraint violated on "$field".');
+
+  /// Column that required a value.
   final String field;
 }
 
+/// {@template localpocket.check_constraint_exception}
+/// A SQLite CHECK constraint was violated.
+/// {@endtemplate}
 class CheckConstraintException extends LocalPocketError {
+  /// {@macro localpocket.check_constraint_exception}
   CheckConstraintException([String? message])
       : super(message ?? 'CHECK constraint violated.');
 }
 
+/// {@template localpocket.primary_key_constraint_exception}
+/// A SQLite PRIMARY KEY constraint was violated.
+/// {@endtemplate}
 class PrimaryKeyConstraintException extends LocalPocketError {
+  /// {@macro localpocket.primary_key_constraint_exception}
   PrimaryKeyConstraintException([String? message])
       : super(message ?? 'PRIMARY KEY constraint violated.');
 }
 
+/// {@template localpocket.foreign_key_constraint_exception}
+/// A SQLite FOREIGN KEY constraint was violated.
+/// {@endtemplate}
 class ForeignKeyConstraintException extends LocalPocketError {
+  /// {@macro localpocket.foreign_key_constraint_exception}
   ForeignKeyConstraintException([String? message])
       : super(message ?? 'FOREIGN KEY constraint violated.');
 }

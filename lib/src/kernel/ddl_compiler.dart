@@ -46,14 +46,6 @@ class DdlCompiler {
   /// SQLite capabilities used to select compatible DDL features.
   final SqliteCapabilities capabilities;
 
-  /// Columns managed internally by LocalPocket.
-  static const Set<String> reservedColumns = {
-    'id',
-    'archived',
-    'hidden',
-    'extra'
-  };
-
   /// Quotes a SQLite identifier.
   static String quote(String id) => '"${id.replaceAll('"', '""')}"';
 
@@ -73,7 +65,7 @@ class DdlCompiler {
 
     for (final f in schema.fields) {
       Field.validateName(f.name);
-      if (reservedColumns.contains(f.name)) {
+      if (Field.reservedColumns.contains(f.name)) {
         throw SchemaRegistrationError(
             'Field "${f.name}" is a reserved column name (id/archived/hidden/extra).');
       }
@@ -101,7 +93,8 @@ class DdlCompiler {
     // engine schemas; every other explicit column must be a declared field.
     for (final ix in schema.indexes) {
       for (final column in ix.columns) {
-        if (!names.contains(column) && !reservedColumns.contains(column)) {
+        if (!names.contains(column) &&
+            !Field.reservedColumns.contains(column)) {
           throw SchemaRegistrationError(
               'Index column "$column" is not a declared field of store "${schema.name}".');
         }

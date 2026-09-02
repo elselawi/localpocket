@@ -1,16 +1,10 @@
 /// Part of `local_pocket.dart` — bounded file upload sessions and download
 /// flow-control state for the command handler.
 ///
-/// Upload sessions bound the kernel's worst-case in-memory buffering during a
-/// chunked attachment upload: per-file and aggregate quotas, a per-chunk size
-/// limit, and a sliding idle TTL — every limit constructor-injectable so
-/// tests and embedders can tune the memory envelope. No catalog row exists
-/// until the finish request commits, so an interrupted upload leaves no
-/// durable state.
-///
-/// Download state tracks the outstanding (un-credited) bytes of each open
-/// file stream so the kernel can pause the source stream when the caller's
-/// credit window fills — a consumer never receives a whole buffered file.
+/// Uploads bound worst-case in-memory buffering (per-file, aggregate, chunk,
+/// and sliding-TTL limits, all injectable); no durable state exists until the
+/// finish request commits. Downloads track un-credited bytes so the source
+/// stream pauses when the caller's credit window fills.
 part of 'local_pocket.dart';
 
 /// Maximum chunk size for bounded file uploads (256 KiB).
@@ -39,6 +33,7 @@ const int defaultFileDownloadWindowBytes = 1048576;
 
 /// An active bounded-chunk upload session.
 class FileUploadSession {
+  /// Creates an upload session record.
   FileUploadSession({
     required this.sessionId,
     required this.store,

@@ -1,10 +1,8 @@
 /// Part of `local_pocket.dart` — the kernel command handler.
 ///
 /// One exhaustive dispatcher from typed contract requests to named results,
-/// implemented directly over the kernel services (mutation, read, transaction
-/// coordination, maintenance). Because the request hierarchy is sealed, the
-/// compiler rejects this switch the moment a new command variant is added
-/// without a corresponding case — no wildcard, no silent omission.
+/// over the kernel services. The request hierarchy is sealed, so the
+/// compiler rejects the switch the moment a new variant lacks a case.
 part of 'local_pocket.dart';
 
 /// Marker used to unwind a held transaction/savepoint body on rollback.
@@ -12,10 +10,9 @@ class _RollbackSignal implements Exception {
   const _RollbackSignal();
 }
 
-/// Minimal runtime-owned token source. The caller remains responsible for
-/// refresh; the current bearer value is replaced through the auth-update
-/// command and is never persisted or logged. The adapter's factory bridges
-/// this onto its own credential type.
+/// Minimal runtime-owned token source; the caller refreshes via the
+/// auth-update command. The value is never persisted or logged, and no
+/// identity is fabricated (sync start requires an explicit one).
 final class _KernelTokenSource implements SyncTokenSource {
   _KernelTokenSource(this._value);
   String? _value;
@@ -26,7 +23,7 @@ final class _KernelTokenSource implements SyncTokenSource {
   Future<String> currentToken() async => _value ?? '';
 
   @override
-  String get identity => 'kernel';
+  String? get identity => null;
 }
 
 /// A held-open interactive transaction.
@@ -58,10 +55,8 @@ class _SavepointSession {
 class KernelCommandHandler implements CommandHandler {
   /// Internal: constructed by [KernelDatabase].
   KernelCommandHandler(this.context) {
-    // Committed changes feed the event stream with the record's old/new
-    // payloads; nothing is emitted before the causing transaction has
-    // committed (the change bus guarantees this). One envelope per affected
-    // record: record-event streams and change notifications derive from it.
+    // One envelope per affected record; the change bus guarantees nothing
+    // is emitted before the causing transaction committed.
     _changeSub = context.changeBus.events.listen((event) {
       _events.add(CommittedChange(
         store: event.store,
@@ -388,13 +383,13 @@ class KernelCommandHandler implements CommandHandler {
     if (session != null) {
       final tx = _sessionExecutor(session);
       final sessionHandle = _requireSession(session);
-    return Collection.internal(
-      context.database,
-      table,
-      context: ExecutionContext.transaction(
-          executor: tx, readOnly: sessionHandle.tx?.readOnly ?? false),
-      tx: sessionHandle.tx,
-    );
+      return Collection.internal(
+        context.database,
+        table,
+        context: ExecutionContext.transaction(
+            executor: tx, readOnly: sessionHandle.tx?.readOnly ?? false),
+        tx: sessionHandle.tx,
+      );
     }
     return Collection.internal(context.database, table,
         context: context.executionContext);
@@ -487,10 +482,9 @@ class KernelCommandHandler implements CommandHandler {
 
   // -- reads ----------------------------------------------------------------
 
-  /// Compiles one read into the kernel's versioned query IR (plan Rule 3:
-  /// commands carry meaning; Rule 6: only the kernel lowers it). The IR is
-  /// bound to the store's manifest fingerprint, so an IR compiled against
-  /// one schema revision is never lowered against another.
+  /// Compiles one read into the kernel's versioned query IR, bound to the
+  /// store's manifest fingerprint so an IR compiled against one schema
+  /// revision is never lowered against another.
   QueryIR _ir(String store, QuerySpecData spec) => QueryIR.compile(
         store: store,
         spec: spec,
@@ -571,22 +565,22 @@ class KernelCommandHandler implements CommandHandler {
     return _withSession(
       session,
       () async {
-          if (ir.spec.cursor != null) {
-            final page = ir.spec.backward
-                ? await _query(ir, session).keysetBefore(ir.spec.cursor!)
-                : await _query(ir, session).keysetAfter(ir.spec.cursor!);
-            return page;
-          }
-          return _query(ir, session).fetch();
-        },
-        (Page page) => QueryRowsResult(
-          items: page.items,
-          hasNext: page.hasNext,
-          hasPrev: page.hasPrev,
-          nextCursor: page.nextCursor,
-          prevCursor: page.prevCursor,
-        ),
-      );
+        if (ir.spec.cursor != null) {
+          final page = ir.spec.backward
+              ? await _query(ir, session).keysetBefore(ir.spec.cursor!)
+              : await _query(ir, session).keysetAfter(ir.spec.cursor!);
+          return page;
+        }
+        return _query(ir, session).fetch();
+      },
+      (Page page) => QueryRowsResult(
+        items: page.items,
+        hasNext: page.hasNext,
+        hasPrev: page.hasPrev,
+        nextCursor: page.nextCursor,
+        prevCursor: page.prevCursor,
+      ),
+    );
   }
 
   Future<Result> _search(String store, SearchSpecData spec, String? session) =>
@@ -611,10 +605,9 @@ class KernelCommandHandler implements CommandHandler {
   // -- interactive transactions ----------------------------------------------
 
   Future<Result> _begin(bool readOnly, TransactionDurability durability) {
-    // One interactive session at a time. Reads and writes share the write
-    // queue, so a second held-open session could never begin — its begin
-    // would block forever behind the first. This restores, at the kernel
-    // level, the old worker's single-session rule for both runtimes.
+    // One interactive session at a time: reads and writes share the write
+    // queue, so a second held-open session would block forever behind the
+    // first.
     if (_sessions.isNotEmpty) {
       throw StateError(
           'A transaction session is already active on this database.');
@@ -750,8 +743,6 @@ class KernelCommandHandler implements CommandHandler {
     final sub = builder.watch().listen((List<Map<String, Object?>> rows) {
       _events.add(WatchSnapshot(subscription: id, items: rows));
     });
-    // The subscription is owned by the watch registry and cancelled on
-    // watch_cancel or handler close.
     // ignore: cancel_subscriptions
     _watches[id] = sub;
     return Future.value(WatchStartedResult(subscription: id));
@@ -764,10 +755,9 @@ class KernelCommandHandler implements CommandHandler {
 
   // -- files -------------------------------------------------------------------
 
-  /// Starts the periodic upload-session expiry sweep on the first upload so
-  /// abandoned sessions are reclaimed even if the caller never sends another
-  /// message. The registry already sweeps lazily; this timer covers the
-  /// fully-wedged caller that sends nothing further at all.
+  /// Starts the periodic upload-session expiry sweep on the first upload;
+  /// this timer covers a caller that wedges and never sends another message
+  /// (the registry alone only sweeps lazily).
   void _ensureUploadExpirySweeper() {
     if (_uploadExpiryTimer != null) return;
     final ttl = _fileUploads.sessionTtl;
@@ -812,9 +802,8 @@ class KernelCommandHandler implements CommandHandler {
   Future<Result> _fileFinish(String session) async {
     final upload = _fileUploads.takeForFinish(session);
 
-    // Reassemble the byte stream from the bounded chunks. The registry
-    // enforced the aggregate quota and TTL, so the chunks are already
-    // bounded; each chunk is yielded in place (no second full-file copy).
+    // Reassemble from the bounded chunks in place (no second full-file
+    // copy); the registry enforced the aggregate quota and TTL.
     Stream<List<int>> stream() async* {
       for (final chunk in upload.chunks) {
         yield chunk;
@@ -840,10 +829,8 @@ class KernelCommandHandler implements CommandHandler {
   }
 
   /// Opens a download stream under the credit window: chunks flow as events
-  /// until the caller has granted enough credit, and the source subscription
-  /// pauses while the outstanding (un-credited) bytes fill the window. The
-  /// stream ends with a terminal event; a failed stream ends with the error
-  /// carried on it.
+  /// until un-credited bytes fill the window, then the source pauses. Ends
+  /// with a terminal event, carrying any stream error.
   Future<Result> _fileOpen(
     String store,
     String recordId,
@@ -907,9 +894,8 @@ class KernelCommandHandler implements CommandHandler {
     return const OkResult();
   }
 
-  /// Closes an in-progress download stream (plan Phase 8 Files: an abandoned
-  /// download is an explicit close, never a window that starves silently).
-  /// Idempotent: an unknown or already-finished stream answers Ok.
+  /// Closes an in-progress download stream (an abandoned download is an
+  /// explicit close, never a silently starving window). Idempotent.
   Future<Result> _fileClose(String stream) async {
     final download = _fileDownloads.remove(stream);
     if (download != null) {
@@ -933,11 +919,9 @@ class KernelCommandHandler implements CommandHandler {
 
   // -- sync -------------------------------------------------------------------
 
-  /// Starts the sync engine and its realtime connection: sync start OWNS
-  /// realtime, there is no separate realtime command. A running engine is
-  /// stopped first, so a restart cannot double-drive the outbox. The backend
-  /// is built through the adapter factory the runtime was constructed with —
-  /// the kernel never names a concrete adapter.
+  /// Starts the sync engine and its realtime connection (sync start OWNS
+  /// realtime; there is no separate realtime command). A running engine is
+  /// stopped first so a restart cannot double-drive the outbox.
   Future<Result> _syncStart(
     String baseUrl,
     String? scopeId,
@@ -951,7 +935,17 @@ class KernelCommandHandler implements CommandHandler {
       throw StateError('No sync backend is configured for this runtime.');
     }
     await _stopSync();
-    final identity = scopeId ?? 'web-sync';
+    // The sync scope must be caller-supplied: a shared default would
+    // collapse all accounts of one database file into a single scope,
+    // bleeding cursors and watermarks across users.
+    final identity = scopeId;
+    if (identity == null || identity.isEmpty) {
+      throw ValidationException(
+          'syncStart requires a stable per-account identity '
+          '(PocketBaseSyncOptions.identity): without one, every account on '
+          'the same server would share one sync scope and bleed cursors and '
+          'watermarks across users.');
+    }
     final tokenSource = _KernelTokenSource(token);
     final backend = await factory.create(
       baseUrl: Uri.parse(baseUrl),
@@ -1001,10 +995,8 @@ class KernelCommandHandler implements CommandHandler {
   }
 
   /// Stops the active sync engine, releasing adapter state through the
-  /// factory that created the backend, and clearing the token bridge and
-  /// cached status. Shared by `syncStop` and handler close — one
-  /// implementation, so sync teardown cannot drift between the command and
-  /// shutdown.
+  /// creating factory and clearing the token bridge and cached status.
+  /// Shared by `syncStop` and handler close so teardown cannot drift.
   Future<void> _stopSync() async {
     final engine = _syncEngine;
     _syncEngine = null;
@@ -1109,10 +1101,9 @@ class KernelCommandHandler implements CommandHandler {
 }
 
 /// Lowers a serializable predicate tree into the builder's in-memory
-/// predicate algebra. The switch is exhaustive over the sealed wire tree; the
-/// two contract operators the tree compiler does not spell directly (`neq`,
-/// `isNotNull`) lower to negations of their positive forms, which match the
-/// same rows (`field <> v` is NULL-excluding exactly like `NOT (field = v)`).
+/// predicate algebra, exhaustive over the sealed wire tree. `neq` and
+/// `isNotNull` lower to negations, which match the same rows
+/// (`field <> v` is NULL-excluding exactly like `NOT (field = v)`).
 PredicateNode predicateNode(PredicateSpecData node) => switch (node) {
       LeafSpecData(:final condition) => _predicateLeaf(condition),
       NotSpecData(:final child) => NotPredicate(predicateNode(child)),

@@ -134,6 +134,7 @@ final class SchemaManifest {
   /// Canonical JSON encoding for wire/persistence use.
   String get encodedJson => canonicalize(toJson());
 
+  /// Serializes the manifest into its wire/persisted form.
   Map<String, Object?> toJson() => {
         'formatVersion': formatVersion,
         'store': store,

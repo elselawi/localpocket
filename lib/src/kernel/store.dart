@@ -26,8 +26,7 @@ enum MutationAction {
   /// Creates a record when absent, or replaces it when present.
   createOrUpdate,
 
-  /// Creates a record when absent, or merges the given fields into it when
-  /// present (unspecified fields are preserved).
+  /// Creates when absent, else merges the given fields in (others kept).
   createOrUpdateMerge,
 
   /// Inserts a new record.
@@ -43,58 +42,12 @@ enum MutationAction {
   restore,
 }
 
-/// {@template localpocket.page}
-/// The result of a paginated query.
-///
-/// Cursors are bidirectional: [nextCursor] continues forward (keyset-after
-/// the window's last row) and [prevCursor] continues backward (keyset-before
-/// the window's first row). When both are non-null they carry the same
-/// payload — the direction is chosen by the consume call. Use [nextCursor]
-/// with [QueryBuilder.keysetAfter] and [prevCursor] with
-/// [QueryBuilder.keysetBefore]. When [hasNext] is false, [nextCursor] is
-/// normally `null`; when [hasPrev] is false, [prevCursor] is `null`.
-/// {@endtemplate}
-class Page {
-  /// Creates a query page.
-  ///
-  /// {@macro localpocket.page}
-  const Page({
-    required this.items,
-    required this.hasNext,
-    this.nextCursor,
-    this.prevCursor,
-    this.hasPrev = false,
-  });
-
-  /// Records in this page, in the requested order.
-  final List<Map<String, Object?>> items;
-
-  /// Cursor for the next keyset page, or `null` when this is the last page.
-  final String? nextCursor;
-
-  /// Cursor for the previous keyset page, or `null` when nothing was
-  /// observed before this window (the first page, or a backward page whose
-  /// continuation found no earlier rows).
-  final String? prevCursor;
-
-  /// Whether the database observed a row after this window when the page was
-  /// built: exact via the limit+1 check on forward fetches, and via the
-  /// one-row forward probe on backward fetches.
-  final bool hasNext;
-
-  /// Whether rows were observed before this window. Exact for pages fetched
-  /// backward; for forward continuations it is a mint-time fact (the
-  /// consumed cursor's anchor row existed when that cursor was minted).
-  final bool hasPrev;
-}
-
 /// {@template localpocket.collection}
 /// Typed CRUD access to one store.
 ///
 /// Records are plain `Map<String, Object?>`: declared fields map to typed
-/// columns, undeclared keys round-trip losslessly through `extra`, and
-/// `archived` is a boolean. Mutations are atomic with their outbox intent
-/// (the local-first invariant).
+/// columns, undeclared keys round-trip through `extra`, `archived` is a
+/// boolean, and mutations are atomic with their outbox intent.
 /// {@endtemplate}
 class Collection with ChangeBusAwareStore {
   /// Internal constructor used by [LocalPocket.collection] and [Tx.collection].
@@ -111,10 +64,9 @@ class Collection with ChangeBusAwareStore {
   final LocalPocket _pocket;
   final StoreTable _table;
 
-  /// The explicit execution context this collection's operations run
-  /// through: the root context for outer-database handles, the transaction
-  /// context for stores obtained from a [Tx] (plan Rule 5 — the outer
-  /// executor can never be selected by an accidental fallback).
+  /// Operations run through this context: root for outer handles, the
+  /// transaction context for stores from a [Tx] (never fall back to the
+  /// outer executor).
   final ExecutionContext _context;
   final Tx? _tx;
 
@@ -157,12 +109,8 @@ class Collection with ChangeBusAwareStore {
   }
 
   /// Creates a record, or merges [record]'s fields into the existing record
-  /// with the same ID without clearing unspecified fields.
-  ///
-  /// Unlike [put] (which replaces the whole record) and [patch] (which throws
-  /// when the record is missing), [upsert] only touches the fields present in
-  /// [record] and creates the record when it doesn't exist. If `record['id']`
-  /// is omitted, a PocketBase-compatible ID is generated.
+  /// without clearing unspecified fields (unlike [put], which replaces).
+  /// If `record['id']` is omitted, a PocketBase-compatible ID is generated.
   ///
   /// ```dart
   /// await users.upsert({'id': userId, 'lastSeenAt': now}); // keeps other fields
@@ -176,14 +124,10 @@ class Collection with ChangeBusAwareStore {
         durability: durability);
   }
 
-  /// Atomically inserts or updates a list of records.
+  /// Atomically inserts or updates a list of records in one transaction.
   ///
-  /// The whole batch commits as a single transaction. Existence and
-  /// sync/outbox state are resolved with chunked `IN (...)` probes instead of
-  /// one query per record, and one coalesced `ChangeSet` is emitted on commit
-  /// (transaction-scoped state map). Within the batch,
-  /// duplicate ids are applied sequentially (last write wins) with the same
-  /// semantics as repeated `put` calls.
+  /// One coalesced `ChangeSet` is emitted on commit; duplicate ids apply
+  /// sequentially (last write wins), matching repeated `put` calls.
   Future<void> putAll(List<Map<String, Object?>> records,
       {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return _putAll(records);
@@ -193,10 +137,8 @@ class Collection with ChangeBusAwareStore {
 
   /// Atomically inserts or merges a list of records.
   ///
-  /// Each record follows [upsert] semantics (create when absent, merge only
-  /// the listed fields when present) and the whole batch commits as a single
-  /// transaction, mirroring [putAll]'s batch behavior (last-write-wins on
-  /// duplicate ids, all-or-nothing rollback).
+  /// Each record follows [upsert] semantics; the batch commits as one
+  /// transaction, mirroring [putAll] (last-write-wins on duplicate ids).
   Future<void> upsertAll(List<Map<String, Object?>> records,
       {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) {
@@ -232,13 +174,9 @@ class Collection with ChangeBusAwareStore {
   /// });
   /// ```
   ///
-  /// Semantically equivalent to awaiting [patch] for every entry, but the
-  /// whole batch commits as one durability boundary: one fsync (FULL), one
-  /// post-commit [ChangeSet], and one coalesced record-event stream. Each
-  /// entry follows the exact same path as an individual [patch] — including
-  /// the dirty-row fast path and outbox bookkeeping. Throws on the first
-  /// failure ([RecordNotFoundException] or validation); earlier entries in
-  /// the batch are rolled back with it.
+  /// Equivalent to awaiting [patch] per entry, but one durability boundary:
+  /// one post-commit [ChangeSet] and one coalesced event stream. Throws on
+  /// the first failure; earlier entries roll back with it.
   Future<void> patchAll(Map<String, Map<String, Object?>> patches,
       {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return _patchAll(patches);
@@ -258,10 +196,8 @@ class Collection with ChangeBusAwareStore {
   /// Soft-deletes a record by setting `archived` to `true`.
   ///
   /// Archived records are excluded from default queries but remain available
-  /// with `query().includeArchived()`. One exception: a record that was never
-  /// pushed to the remote is dropped entirely on archive — there is no remote
-  /// delete to record — unless the store's schema sets
-  /// `keepUnsyncedArchives`.
+  /// with `query().includeArchived()`. A never-pushed record is dropped
+  /// entirely (no remote delete exists) unless `keepUnsyncedArchives` is set.
   Future<void> archive(String id,
       {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return _mutate(MutationAction.archive, id: id);
@@ -314,11 +250,9 @@ class Collection with ChangeBusAwareStore {
     _ensureWritable();
     final exec = _ex;
 
-    // Fast path: when the row is already dirty, its earliest
-    // base is captured and the outbox payload holds the full desired state, so
-    // we can patch without reading the domain row or re-serializing a base.
-    // Sync-row and outbox state come from ONE LEFT JOIN round-trip
-    // (outbox/edit profile: was two round-trips per patch).
+    // Fast path for dirty rows: the outbox payload already holds the full
+    // desired state, so patch without re-reading the domain row. Sync-row
+    // and outbox state come from one LEFT JOIN round-trip.
     final joined = await exec.rawQuery(
         'SELECT s.*, '
         'o.store AS o_store, o.record_id AS o_record_id, o.kind AS o_kind, '
@@ -378,10 +312,9 @@ class Collection with ChangeBusAwareStore {
         coalesceChanges: coalesceChanges);
   }
 
-  /// Dirty-row patch fast path: reuses the outbox payload
-  /// as the existing desired state, issues a targeted domain UPDATE, and lets
-  /// the tested `applyLocalMutation` handle outbox/sync-row bookkeeping
-  /// (earliest-base preservation, dirty-field union, op-kind transitions).
+  /// Dirty-row patch fast path: reuses the outbox payload as the existing
+  /// state, issues a targeted UPDATE, and delegates bookkeeping to
+  /// `applyLocalMutation`.
   Future<void> _patchDirtyFast(
       String id, Map<String, Object?> changes, SyncRowState sr, OutboxOp op,
       {bool coalesceChanges = false}) async {
@@ -397,8 +330,7 @@ class Collection with ChangeBusAwareStore {
       return _fallbackPatch(id, changes,
           sr: sr, op: op, coalesceChanges: coalesceChanges);
     }
-    // A payload that names a different record is corruption: treating it as
-    // the desired state would drop the real record's fields. Fall back to the
+    // A payload naming a different record is corruption; fall back to the
     // authoritative domain row.
     final payloadId = currentPayload['id'];
     if (payloadId != null && payloadId != id) {
@@ -412,20 +344,17 @@ class Collection with ChangeBusAwareStore {
     final payloadBytes =
         canonicalizePayloadInto(payloadBuffer, _schema, merged);
     final payloadJson = payloadBuffer.toString();
-    // Validators see the logical form without the synthetic `id` key (same as
-    // the normal `_mutate` path); the payload is already validated by size.
+    // Validators see the logical form without the synthetic `id` key.
     _validate(id, {...merged}..remove('id'),
         precomputedPayload: payloadJson, precomputedPayloadBytes: payloadBytes);
 
     final dirtyFields =
         _dirtyFields(currentPayload, merged, MutationAction.update);
 
-    // Targeted single-field UPDATE (drift-gap P1): when exactly ONE declared
-    // field changed and nothing else moved, write only that column — plus
-    // `hidden=0`, which [encodeDbRow] always emits — instead of re-encoding
-    // every column and the whole `extra` JSON blob. The statement shape is
-    // canonicalized (single field + hidden vs full row) so the prepared
-    // statement cache stays hot.
+    // Targeted single-field UPDATE: when exactly one declared field changed,
+    // write only that column plus `hidden=0` instead of re-encoding every
+    // column and `extra`. Statement shape stays canonical so the
+    // prepared-statement cache stays hot.
     Map<String, Object?> row;
     if (dirtyFields.length == 1 &&
         _schema.declaredFieldNames.contains(dirtyFields.single)) {
@@ -499,15 +428,12 @@ class Collection with ChangeBusAwareStore {
     String recordId;
     Map<String, Object?>? existingRow = existing;
     Map<String, Object?> logical;
-    // Populated when the combined probe below ran (plain put/update without
-    // prefetched state): reuses its sync-row and outbox results so the later
-    // per-table reads are skipped entirely.
+    // Populated by the combined probe below; skips later per-table reads.
     SyncRowState? probedSr;
     OutboxOp? probedOp;
 
-    // Without prefetched state, fetch the domain row, sync row, and outbox op
-    // in ONE three-way LEFT JOIN (putAll and the patch fallback supply
-    // prefetched state and keep their existing read shapes).
+    // Without prefetched state, fetch domain row + sync row + outbox op in
+    // one three-way LEFT JOIN.
     Future<Map<String, Object?>?> probeExisting(String recordId) async {
       if (existingRow != null ||
           prefetchedSyncRow != null ||
@@ -553,8 +479,7 @@ class Collection with ChangeBusAwareStore {
         logical = _logicalFromRecord(record, recordId);
         action = MutationAction.create;
       } else {
-        // Upsert: merge only the listed fields onto the existing state so
-        // unspecified fields are preserved.
+        // Merge only the listed fields; unspecified fields are preserved.
         logical = {...existingRow!};
         for (final e in record.entries) {
           if (e.key == 'id') continue;
@@ -573,9 +498,8 @@ class Collection with ChangeBusAwareStore {
       logical = {...existingRow!, 'archived': action == MutationAction.archive};
     }
 
-    // Single canonical serialization per put: reused by validation
-    // (maxDocBytes — measured from the same buffer, no UTF-8 re-encode), the
-    // outbox payload, and — on first dirt — the base snapshot hash.
+    // One canonical serialization per put, reused for validation, the outbox
+    // payload, and the base snapshot hash.
     final payloadBuffer = StringBuffer();
     final payloadBytes = canonicalizePayloadInto(
         payloadBuffer, _schema, logical,
@@ -585,9 +509,8 @@ class Collection with ChangeBusAwareStore {
     _validate(recordId, logical,
         precomputedPayload: payloadJson, precomputedPayloadBytes: payloadBytes);
 
-    // A fresh create cannot have existing sync/outbox rows (id is the PK), so
-    // skip the reads on the hot create path. putAll and the combined probe
-    // supply prefetched state to skip the per-record reads entirely.
+    // A fresh create cannot have sync/outbox rows (id is the PK): skip the
+    // reads. putAll and the combined probe supply prefetched state.
     final sr = existingRow == null
         ? null
         : (prefetchedSyncRow ??
@@ -605,8 +528,7 @@ class Collection with ChangeBusAwareStore {
           'Record $name/$recordId is in conflict; resolve it before editing.');
     }
 
-    // Base is captured once, on the first dirt of a previously-clean row
-    // ("earliest base").
+    // Base captured once, on the first dirt of a clean row ("earliest base").
     final firstDirt =
         existingRow != null && (sr == null || sr.syncState == SyncState.clean);
     BaseSnapshot? base;
@@ -630,10 +552,8 @@ class Collection with ChangeBusAwareStore {
 
     final dirtyFields = _dirtyFields(existingRow, logical, action);
 
-    // Targeted single-field UPDATE on the update path (same shape as the
-    // dirty-patch fast path): when exactly ONE declared field changed and
-    // nothing else moved, write only that column plus `hidden=0` (which
-    // [encodeDbRow] always emits) instead of re-encoding every column.
+    // Same single-field UPDATE fast path as the dirty-patch path: one
+    // changed declared field writes only that column plus `hidden=0`.
     Map<String, Object?> writeRow;
     if (existingRow != null &&
         dirtyFields.length == 1 &&
@@ -727,15 +647,12 @@ class Collection with ChangeBusAwareStore {
     final exec = _tx!.executor;
     final tableName = _table.tableName;
 
-    // Resolve and validate ids up front so the chunked probes only ever see
-    // well-formed keys. When EVERY id is freshly generated (no explicit id
-    // anywhere in the batch), the ids are unique and previously unseen by
-    // construction — the time-prefixed monotonic counter plus a random suffix
-    // — so the existence probe and duplicate detection are skipped entirely
-    // (measured ~14% of bulk-insert time on 100K rows). A generated id can
-    // only collide with a stored row if the system clock regresses across a
-    // restart (then the INSERT raises the normal constraint error instead of
-    // silently updating).
+    // Resolve and validate ids up front. With no explicit id in the batch,
+    // generated ids are unique and unseen by construction (time-prefixed
+    // monotonic counter + random suffix), so the existence probe and
+    // duplicate detection are skipped (~14% of 100K bulk-insert time). A
+    // generated id can only collide if the clock regresses across a restart;
+    // the INSERT then raises the normal constraint error.
     final resolved = <(String, Map<String, Object?>)>[];
     var allGenerated = true;
     for (final record in records) {
@@ -750,10 +667,8 @@ class Collection with ChangeBusAwareStore {
       resolved.add((rid, record));
     }
 
-    // Duplicate ids must follow sequential put() semantics (last write wins
-    // with the first write's base preserved) — fall back to the per-record
-    // path when a batch repeats an id. Generated ids are unique, so this
-    // check is skipped for fully-generated batches.
+    // Duplicate ids must keep sequential put() semantics (last write wins,
+    // first write's base preserved): fall back to the per-record path.
     var hasDuplicates = false;
     if (!allGenerated) {
       final counts = <String, int>{};
@@ -763,18 +678,12 @@ class Collection with ChangeBusAwareStore {
       hasDuplicates = counts.values.any((c) => c > 1);
     }
 
-    // Fast attempt WITHOUT any existence probe: the common all-create batch
-    // pays zero probing (measured ~14% of 100K bulk-insert time). A
-    // constraint failure (an id already exists) makes the fast path delete
-    // exactly the rows it inserted and throw [_BatchInsertConflict]; the
-    // fallback below then probes and applies per-record updates with any
-    // pre-existing rows intact.
-    //
-    // The fast path is only sound for full-replace `putAll`. `upsertAll`
-    // records are partial (they may merge into existing rows and legitimately
-    // omit required fields), so they must always go through the existence
-    // probe + per-record merge path below — otherwise the bulk INSERT would
-    // fail on a required field the existing row already satisfies.
+    // Fast attempt with no existence probe: an all-create batch pays zero
+    // probing; on a constraint failure the fast path deletes exactly the rows
+    // it inserted and throws [_BatchInsertConflict] so the fallback below can
+    // probe and apply per-record updates. Only sound for full-replace putAll:
+    // upsertAll records are partial and may merge into existing rows, so they
+    // always take the probe + per-record merge path.
     if (action == MutationAction.createOrUpdate && !hasDuplicates) {
       try {
         await _putAllBatchCreate(exec, resolved);
@@ -785,9 +694,8 @@ class Collection with ChangeBusAwareStore {
       }
     }
 
-    // Existence probe (reached only for duplicate-id batches or after a
-    // fast-attempt conflict): full rows for every id in the batch so the
-    // update path can merge onto the existing state.
+    // Existence probe (duplicate-id batches or fast-attempt conflict): full
+    // rows for every id so the update path can merge onto existing state.
     const probePage = 2000;
     final existingById = <String, Map<String, Object?>>{};
     for (var start = 0; start < resolved.length; start += probePage) {
@@ -804,8 +712,7 @@ class Collection with ChangeBusAwareStore {
       }
     }
 
-    // Chunked sync/outbox state resolution for rows that already exist
-    // — skipped entirely on the pure-create fast path.
+    // Chunked sync/outbox state resolution for pre-existing rows.
     final srById = <String, SyncRowState>{};
     final opById = <String, OutboxOp>{};
     final existingIds = existingById.keys.toList();
@@ -826,9 +733,8 @@ class Collection with ChangeBusAwareStore {
       }
     }
 
-    // Apply in order. Duplicate ids fall back to the (correct) re-reading path
-    // so sequential put() semantics are preserved; unique ids use the
-    // prefetched state and emit no per-record ChangeSet.
+    // Apply in order; duplicate ids re-read so sequential put() semantics
+    // hold, unique ids use prefetched state.
     final writtenIds = <String>{};
     for (final (rid, record) in resolved) {
       final existing = existingById[rid];
@@ -851,12 +757,9 @@ class Collection with ChangeBusAwareStore {
   /// Batch fast path for all-create `putAll`: inserts
   /// domain/outbox/sync rows inside the current transaction.
   ///
-  /// On a [DirectSqliteDatabase] (no test execution hook attached) this uses
-  /// multi-row VALUES chunks: N records per `INSERT` per table, so the
-  /// per-record cost of statement-cache lookups, SQL-string building, and
-  /// statement dispatch collapses to ~3 dispatches per 250 records. Any
-  /// constraint backstop failure on a chunk falls back to per-record inserts
-  /// so errors stay attributed and translated exactly as before.
+  /// On a [DirectSqliteDatabase] (no test hooks) uses multi-row VALUES
+  /// chunks (~3 statement dispatches per chunk); constraint failures fall
+  /// back to per-record inserts so errors stay attributed.
   Future<void> _putAllBatchCreate(DatabaseExecutor exec,
       List<(String, Map<String, Object?>)> records) async {
     final db = _ex;
@@ -875,9 +778,8 @@ class Collection with ChangeBusAwareStore {
         inserted++;
       }
     } on SqliteException {
-      // A record conflicted (its id already existed). Remove exactly the
-      // records this loop fully inserted (the conflicting record cleaned its
-      // own partial writes) and signal the probe + per-record fallback.
+      // A record conflicted: remove exactly the fully-inserted records and
+      // signal the probe + per-record fallback.
       final ids = [for (var i = 0; i < inserted; i++) records[i].$1];
       await _deleteFastInserted(exec, ids);
       throw _BatchInsertConflict();
@@ -903,9 +805,8 @@ class Collection with ChangeBusAwareStore {
     final now = _pocket.now();
     final db = _ex as DirectSqliteDatabase;
 
-    // Column order matches encodeDbRow exactly (id, declared fields in
-    // schema order, extra, archived, hidden) — the shared
-    // outboxColumns/syncRowColumns constants own the bookkeeping order.
+    // Column order matches encodeDbRow exactly (id, declared fields, extra,
+    // archived, hidden); outboxColumns/syncRowColumns own bookkeeping order.
     final domainCols = <String>[
       'id',
       for (final f in schema.fields) f.name,
@@ -925,9 +826,8 @@ class Collection with ChangeBusAwareStore {
     const chunkSize = 500;
     // Reused across records: clearing is far cheaper than 100K allocations.
     final payloadBuffer = StringBuffer();
-    // The id-stripping copy (`_logicalFromRecord`) exists so custom
-    // validators and record events never observe the synthetic `id` key.
-    // When neither can observe anything, pass the caller's map directly.
+    // The id-stripping copy keeps the synthetic `id` key away from validators
+    // and record events; when neither observes it, pass the map directly.
     final wantsEvents = _tx?.wantsRecordEvents ?? false;
     final copyLogical = _schema.validator != null || wantsEvents;
     final allLogicals = wantsEvents ? <(String, Map<String, Object?>)>[] : null;
@@ -948,8 +848,7 @@ class Collection with ChangeBusAwareStore {
         _validate(rid, logical,
             precomputedPayload: payloadJson,
             precomputedPayloadBytes: payloadBytes);
-        // Map-free domain encoding: appends the row values in exactly
-        // [domainCols] order (same shape encodeDbRow would produce).
+        // Map-free domain encoding in [domainCols] order.
         appendDomainValues(domainVals, schema,
             id: rid,
             logical: logical,
@@ -994,10 +893,9 @@ class Collection with ChangeBusAwareStore {
                 '$syncSqlPrefix${valuesTemplate(syncRowColumns.length, chunkLen)}')
             .execute(syncVals);
       } on SqliteException {
-        // Remove exactly what this attempt inserted: all prior chunks (every
-        // table) plus this chunk's tables that landed before the failure. The
-        // failing table's rows — the pre-existing conflict — stay intact for
-        // the fallback update path.
+        // Remove exactly what this attempt inserted (prior chunks plus the
+        // tables that landed before the failure); the conflicting pre-existing
+        // rows stay intact for the fallback update path.
         final priorIds = [for (var i = 0; i < start; i++) records[i].$1];
         await _deleteFastInserted(exec, priorIds);
         if (domainDone || outboxDone) {
@@ -1031,13 +929,15 @@ class Collection with ChangeBusAwareStore {
     }
   }
 
-  /// Per-record create insert: builds payload, row, and bookkeeping values,
-  /// then inserts domain/outbox/sync rows. On a constraint failure it removes
-  /// only the rows THIS record inserted (the failing table's row — a
-  /// pre-existing conflict — stays) and rethrows, so the batch caller can
-  /// unwind and fall back to the probe + per-record update path.
-  Future<Map<String, Object?>> _batchCreateInsertOne(DatabaseExecutor exec,
-      DatabaseExecutor db, String rid, Map<String, Object?> record, int now) async {
+  /// Per-record create insert. On a constraint failure it removes only the
+  /// rows this record inserted and rethrows so the batch caller can fall
+  /// back to the probe + per-record path.
+  Future<Map<String, Object?>> _batchCreateInsertOne(
+      DatabaseExecutor exec,
+      DatabaseExecutor db,
+      String rid,
+      Map<String, Object?> record,
+      int now) async {
     final schema = _schema;
     final logical = _logicalFromRecord(record, rid);
     final payloadBuffer = StringBuffer();
@@ -1115,9 +1015,8 @@ class Collection with ChangeBusAwareStore {
     return logical;
   }
 
-  /// Removes the given ids' rows from all three write-path tables — used to
-  /// unwind the bulk-create fast path when a later record conflicts. Only
-  /// ids the fast path itself inserted are ever passed here.
+  /// Removes the given ids' rows from all three write-path tables to unwind
+  /// the bulk-create fast path; only fast-path-inserted ids are passed.
   Future<void> _deleteFastInserted(
       DatabaseExecutor exec, List<String> ids) async {
     if (ids.isEmpty) return;
@@ -1166,10 +1065,9 @@ class Collection with ChangeBusAwareStore {
         cipher: _pocket.fieldCipher, cryptoProvider: _pocket.cryptoProvider);
   }
 
-  /// One three-way LEFT JOIN returning the domain row, its sync row, and its
-  /// outbox op — three point reads collapsed into one round trip on the
-  /// put/update hot path. Every `lp_sync_row`/`lp_outbox` column is aliased
-  /// so a user field named like a bookkeeping column can never collide.
+  /// One three-way LEFT JOIN returning the domain row, sync row, and outbox
+  /// op — three point reads collapsed into one round trip. Every bookkeeping
+  /// column is aliased so a user field can never collide.
   Future<(Map<String, Object?>?, SyncRowState?, OutboxOp?)> _probeRowWithSync(
       String id) async {
     final rows = await _ex.rawQuery(
@@ -1235,15 +1133,11 @@ class Collection with ChangeBusAwareStore {
     return (logical, sr, op);
   }
 
-  /// Returns a record by ID and applies any pending lazy document migrations.
+  /// Returns a record by ID, applying any pending lazy document migrations,
+  /// or `null` when absent.
   ///
-  /// Returns `null` when no local record has the requested [id].
-  ///
-  /// For schemas above version 1, a single LEFT JOIN against `lp_sync_row`
-  /// returns the domain row AND the sync-row `schema_ver` in one SQL
-  /// round-trip. Version-1 schemas can never have a pending lazy migration,
-  /// so the join is skipped entirely — point reads are a plain indexed
-  /// `SELECT * WHERE id = ?`, the same shape as a bare SQLite read.
+  /// For schemas above version 1 a LEFT JOIN against `lp_sync_row` also
+  /// fetches `schema_ver` in one round-trip; version-1 schemas skip the join.
   Future<Map<String, Object?>?> get(String id) async {
     // Outside an explicit Tx, point reads can check the LRU read cache.
     if (_tx == null && _table.readCache.containsKey(id)) {
@@ -1303,8 +1197,8 @@ class Collection with ChangeBusAwareStore {
     if (msgs.isNotEmpty) {
       throw ValidationException(msgs.join('; '));
     }
-    // The UTF-8 measurement is an upper bound (each non-ASCII code unit
-    // counted as 4 bytes) computed without a second serialization pass.
+    // Upper-bound UTF-8 measurement (non-ASCII counted as 4 bytes), no
+    // second serialization pass.
     final bytes = precomputedPayloadBytes ??
         utf8
             .encode(precomputedPayload ?? canonicalPayload(_schema, logical))
@@ -1336,8 +1230,7 @@ class Collection with ChangeBusAwareStore {
   /// Starts a fluent query against this collection.
   ///
   /// Example: `tasks.query().where('done', eq: false).limit(20).fetch()`.
-  QueryBuilder query() =>
-      QueryBuilder.internal(_pocket, _table, executor: _ex);
+  QueryBuilder query() => QueryBuilder.internal(_pocket, _table, executor: _ex);
 
   /// Starts a full-text search on the collection's configured FTS fields.
   ///
@@ -1350,8 +1243,7 @@ class Collection with ChangeBusAwareStore {
       OneWatcher(_pocket, _table, id).startStream();
 }
 
-/// Signals that the bulk-create fast path hit a constraint conflict (an id in
-/// the batch already exists) and `putAll` should fall back to the probe +
-/// per-record update path. The fast path already removed exactly the rows it
-/// inserted, so pre-existing rows are intact when the fallback probes.
+/// The bulk-create fast path hit a constraint conflict (an id in the batch
+/// already exists); its rows were removed, so `putAll` falls back to the
+/// probe + per-record update path.
 class _BatchInsertConflict implements Exception {}

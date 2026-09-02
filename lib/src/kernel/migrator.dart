@@ -66,11 +66,8 @@ class Migrator {
         where: 'store = ?', whereArgs: [schema.name]);
   }
 
-  /// Appends a row to the migration ledger.
-  ///
-  /// [now] is the injectable epoch-ms clock ([LocalPocket.now]); both call
-  /// sites pass it so deterministic-clock tests see exact `applied_at`
-  /// values. Defaults to the wall clock for standalone callers.
+  /// Appends a row to the migration ledger. [now] defaults to the wall
+  /// clock; call sites pass the injectable clock for deterministic tests.
   static Future<void> recordMigration(
     Database db, {
     required String name,
@@ -187,25 +184,20 @@ class Migrator {
   /// backup → create new → copy (chunked, transformed) → verify counts →
   /// drop old → rename → recreate indexes/FTS → verify.
   ///
-  /// The rebuild is RESUMABLE. Before the backup it writes a ledger marker
-  /// (`lp_meta['migration:<store>:<ver>:state'] = 'rebuilding'`) and only flips
-  /// it to `done` after the final verification. A crash in between leaves the
-  /// marker `rebuilding` plus a stale `.bak` and/or a half-built
-  /// `<store>__new_<ver>` table; the next `open()` re-runs this migration and
-  /// the marker distinguishes that interrupted state (cleared and restarted
-  /// below) from a COMPLETED run (`done`), whose backup is a pre-migration
-  /// safety net that is never overwritten. Two resume shapes are handled:
+  /// RESUMABLE: a ledger marker (`lp_meta['migration:<store>:<ver>:state']`)
+  /// is written before the backup and flipped to `done` only after final
+  /// verification, so the next `open()` can distinguish an interrupted run
+  /// (stale `.bak` and/or half-built `__new_` table: cleared and restarted)
+  /// from a COMPLETED run, whose backup is a safety net that is never
+  /// overwritten. Two resume shapes:
   ///
-  /// - A crash before the destructive `DROP` (old table still present):
-  ///   clear the stale `.bak`/`__new_` artifacts and restart the rebuild.
-  /// - A crash between the `DROP` and the `RENAME` (old table gone, `__new_`
-  ///   holds every row): finish the rename in place and skip straight to the
-  ///   index/FTS/verify tail — restarting would need the dropped source table.
+  /// - Crash before the `DROP` (old table present): clear stale artifacts
+  ///   and restart.
+  /// - Crash between `DROP` and `RENAME` (`__new_` holds every row): finish
+  ///   the rename in place — restarting would need the dropped source table.
   ///
-  /// Raw SQLite failures (e.g. a concurrent writer holding the write lock)
-  /// surface as a typed [DestructiveMigrationRefusedError] instead of leaking
-  /// `SqliteException`, with the marker left `rebuilding` so the next open
-  /// resumes.
+  /// Raw SQLite failures surface as a typed [DestructiveMigrationRefusedError]
+  /// with the marker left `rebuilding` so the next open resumes.
   static Future<void> _rebuildStore(LocalPocket pocket,
       CollectionSchema<Object?> schema, StoreMigration m) async {
     final db = pocket.db;
@@ -226,10 +218,8 @@ class Migrator {
       final state = await _kvGet(db, markerKey);
       final hasBackup = await pocket.backupFileExists(backupFile);
       if (state == 'done' && hasBackup) {
-        // A previous run COMPLETED the rebuild (the `done` marker is written
-        // only after the final verification) and its backup still exists.
-        // That backup is the pre-migration safety net and is never
-        // overwritten: refuse loudly instead of destroying it.
+        // A previous run COMPLETED the rebuild; its backup is the pre-
+        // migration safety net and is never overwritten: refuse loudly.
         throw DestructiveMigrationRefusedError(
             'Destructive migration for "${schema.name}" to v${m.toVersion} '
             'already completed in a previous run; refusing to overwrite its '
@@ -237,10 +227,9 @@ class Migrator {
             'rebuild.');
       }
 
-      // Resume-in-place: a crash between the destructive DROP (step 5) and
-      // the RENAME (step 6) leaves the old table missing with `__new_`
-      // holding every row. Finish the rename; the completed backup is kept as
-      // the safety net (it is a complete pre-migration snapshot).
+      // Resume-in-place: a crash between DROP and RENAME leaves the old
+      // table missing with `__new_` holding every row — finish the rename;
+      // the completed backup stays as the safety net.
       final newExists = await _tableExists(db, newTable);
       final oldExists = await _tableExists(db, oldTable);
       if (newExists && !oldExists) {
@@ -329,9 +318,8 @@ class Migrator {
     } on DestructiveMigrationRefusedError {
       rethrow;
     } on SqliteException catch (e) {
-      // A concurrent writer (busy) or any other raw SQLite failure surfaces as
-      // a typed refusal instead of leaking SqliteException. The marker stays
-      // `rebuilding`, so the next open clears the artifacts and restarts.
+      // Raw SQLite failure (e.g. a busy concurrent writer) surfaces as a
+      // typed refusal; the marker stays `rebuilding` for the next open.
       throw DestructiveMigrationRefusedError(
           'Destructive migration for "${schema.name}" failed: $e');
     }
@@ -372,9 +360,8 @@ class Migrator {
       throw StateError('Post-rebuild verification of "${schema.name}" failed.');
     }
 
-    // Only now is the rebuild durable: mark it complete so a future re-run
-    // (e.g. a crash between here and the schema_ver bump) treats the backup
-    // as the completed safety net instead of an interrupted run's artifact.
+    // Only now is the rebuild durable: a future re-run treats the backup
+    // as the completed safety net, not an interrupted run's artifact.
     await _kvSet(db, markerKey, 'done');
   }
 
@@ -387,10 +374,7 @@ class Migrator {
   }
 
   /// Computes the `VACUUM INTO` backup path for a destructive migration.
-  ///
-  /// With a bare relative DB path (`dirname == '.'`) the backup lands in the
-  /// current directory next to the database; otherwise it is joined into the
-  /// database's directory.
+  /// A bare relative DB path puts the backup in the current directory.
   @visibleForTesting
   static String backupPath(String dbPath, String store, int toVersion) {
     final dir = p.dirname(dbPath);
@@ -407,12 +391,9 @@ class Migrator {
     return null;
   }
 
-  /// Validates a single transformed value against [f]'s kind, required, and
-  /// enum rules — the same rules the normal write path enforces via
-  /// [fieldKindViolation] — so a transform cannot write data the CRUD path
-  /// would reject, silently corrupting the store relative to its own schema.
-  /// Throws a typed [ValidationException] naming the offending field and value
-  /// (the migration aborts cleanly, leaving the ledger untouched).
+  /// Validates a single transformed value against [f]'s kind/required/enum
+  /// rules — the same rules the normal write path enforces — so a transform
+  /// cannot write data the CRUD path would reject.
   static void _validateTransformValue(Field f, Object? v) {
     if (f.required && v == null) {
       throw ValidationException('Field "${f.name}" is required.',

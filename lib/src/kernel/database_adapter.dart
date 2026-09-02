@@ -53,10 +53,19 @@ abstract class DatabaseExecutor {
 
 /// Conflict resolution algorithm for inserts/updates.
 enum ConflictAlgorithm {
+  /// Abort the statement on conflict (SQLite default).
   rollback,
+
+  /// Abort the statement without unwinding prior changes.
   abort,
+
+  /// Fail the statement and report the error.
   fail,
+
+  /// Skip rows that would violate a constraint.
   ignore,
+
+  /// Replace conflicting rows.
   replace,
 }
 
@@ -68,7 +77,7 @@ abstract class Database extends DatabaseExecutor {
   /// Closes the database connection.
   Future<void> close();
 
-  /// Runs [action] inside a database transaction.
+  /// Returns a cached prepared statement for [sql].
   CommonPreparedStatement getPreparedStatement(String sql);
 
   /// Runs [action] inside a database transaction.
@@ -131,6 +140,8 @@ class DirectSqliteDatabase implements Database {
   /// Hook for tracing queries (e.g. TestHooks / profilers).
   void Function(String sql, List<Object?> params)? onQuery;
 
+  /// The wrapped sqlite3 connection, for platform code that must bypass the
+  /// adapter (e.g. backup probes).
   CommonDatabase get rawDb => _db;
 
   @override
@@ -154,9 +165,7 @@ class DirectSqliteDatabase implements Database {
   CommonPreparedStatement getPreparedStatement(String sql) {
     var stmt = _statementCache.remove(sql);
     if (stmt != null) {
-      // Promote to the most-recently-used tail so a hot statement is never
-      // evicted for being inserted early (true LRU on the insertion-ordered
-      // map).
+      // Promote to the most-recently-used tail (true LRU).
       _statementCache[sql] = stmt;
       return stmt;
     }
@@ -304,9 +313,8 @@ class DirectSqliteDatabase implements Database {
       function: (args) => function(args.isEmpty ? null : args.first),
       argumentCount: const AllowedArgumentCount(1),
       deterministic: deterministic,
-      // MUST be false: SQLITE_DIRECTONLY functions cannot be called from
-      // trigger bodies, and the FTS write-side normalizer runs exclusively
-      // inside generated triggers.
+      // MUST be false: DIRECTONLY functions cannot run in trigger bodies,
+      // and the FTS write-side normalizer runs only inside triggers.
       directOnly: false,
     );
   }

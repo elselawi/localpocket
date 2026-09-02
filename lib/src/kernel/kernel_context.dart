@@ -1,12 +1,6 @@
-/// Part of `local_pocket.dart` — the kernel context.
-///
-/// The shared dependency set every kernel service receives (destination:
-/// `src/kernel/kernel_context.dart`). `KernelContext` carries the database
-/// executor, the compiled store tables, the clock, capabilities, the change
-/// publisher, and the outbox/op-queue/file ports. Services depend on THIS —
-/// never on the concrete database facade. Native and the web worker construct
-/// it identically through `KernelDatabase.open`; the worker supplies its
-/// WASM/OPFS adapters below the same ports.
+/// Part of `local_pocket.dart` — the kernel context: the shared dependency
+/// set every kernel service receives. Services depend on this, never on the
+/// concrete facade; native and web construct it identically.
 part of 'local_pocket.dart';
 
 /// The shared dependency set every kernel service receives.

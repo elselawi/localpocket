@@ -1,14 +1,8 @@
 /// Engine-side predicate tree: the lowering target of the typed condition
-/// algebra (`&`/`|`/`~`).
-///
-/// The typed layer turns each `Cond` tree into [PredicateNode] values; the
-/// query builder compiles one tree into **one self-contained, fully
-/// parameterized WHERE fragment**. Because the fragment is parenthesized at
-/// every composite boundary, it composes safely with the scope flags
-/// (`archived = 0 AND hidden = 0`), the other AND clauses, and the keyset
-/// cursor predicate — nothing can leak a top-level `AND`/`OR` into the
-/// surrounding WHERE assembly. No user input is ever interpolated: values
-/// travel as bound arguments, and LIKE patterns are escaped here.
+/// algebra (`&`/`|`/`~`). Each tree compiles to one self-contained, fully
+/// parameterized WHERE fragment, parenthesized at every composite boundary
+/// so nothing leaks into the surrounding WHERE assembly. Values travel as
+/// bound arguments; LIKE patterns are escaped here.
 library;
 
 import 'package:localpocket/src/kernel/ddl_compiler.dart';
@@ -94,14 +88,9 @@ String escapeLikePattern(String value) =>
     value.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_');
 
 /// Compiles [node] into one self-contained WHERE fragment and its bound
-/// arguments.
-///
-/// The fragment is safe to drop into the builder's top-level AND chain: at
-/// the top level a conjunction stays unparenthesized (matching the raw
-/// `where(...)` clause-for-clause output byte for byte), while anything
-/// nested inside another composite is wrapped so precedence is explicit.
-/// Every OR arm is its own parenthesized group, matching the raw
-/// `orWhere` lowering.
+/// arguments. Top-level conjunctions stay unparenthesized (byte-identical to
+/// the raw `where(...)` output); nested composites are wrapped; every OR arm
+/// is its own parenthesized group.
 (String, List<Object?>) compilePredicateTree(PredicateNode node) {
   _checkStructure(node);
   return _compile(node, topLevel: true);
@@ -176,9 +165,8 @@ void _checkStructure(PredicateNode node) {
     case LeafPredicate():
       return _compileLeaf(node, topLevel: topLevel);
     case NotPredicate():
-      // The child compiles at the top level. Disjunction children already
-      // carry their own parens (and NOT is prefix-bound), so only the
-      // remaining shapes get exactly one wrapping pair:
+      // Disjunction children already carry their own parens (and NOT is
+      // prefix-bound), so only the remaining shapes get one wrapping pair:
       // `NOT (a = ? AND b = ?)`, `NOT ((a) OR (b))`, `NOT NOT (a = ?)`.
       final (sql, args) = _compile(node.child, topLevel: true);
       return switch (node.child) {
@@ -261,9 +249,8 @@ void _checkStructure(PredicateNode node) {
         'Unknown predicate operator.',
       );
   }
-  // A range predicate embeds its own AND — it must be wrapped whenever it
-  // is not the whole top-level clause, or the inner AND would leak into the
-  // surrounding AND/OR chain.
+  // A range predicate embeds its own AND — wrap it unless it is the whole
+  // top-level clause, or the inner AND would leak into the outer chain.
   final needsParens = forceParens || (leaf.operator == 'between' && !topLevel);
   return (needsParens ? '($sql)' : sql, args);
 }

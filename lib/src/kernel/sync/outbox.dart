@@ -91,23 +91,22 @@ class Outbox {
   ///
   /// {@macro localpocket.outbox}
   Outbox.internal(this.pocket);
+
+  /// Pocket handle backing `lp_outbox` and `lp_sync_row`.
   final LocalPocket pocket;
   final Random _rng = Random.secure();
 
   /// Generates a unique operation ID for durable outbox effects.
   ///
-  /// Four 32-bit draws from the secure RNG (128 bits total, same entropy as
-  /// the old 32 single-digit draws) formatted as 32 lowercase hex characters.
-  /// One draw per hex digit cost ~32x more secure-RNG round trips — this
-  /// matters in bulk (100K ops ≈ 170 ms of op-id generation alone).
+  /// Four 32-bit secure-RNG draws (128 bits) as 32 hex chars; one draw per
+  /// digit cost ~32x more RNG round trips, which matters in bulk.
   String generateOpId() {
     final rng = _rng;
     const hex = '0123456789abcdef';
     final out = StringBuffer();
     for (var i = 0; i < 4; i++) {
-      // Literal 2^32: `1 << 32` constant-folds to 0 under dart2js (JS 32-bit
-      // shifts / 64-bit constant folding), which makes Random.nextInt throw
-      // RangeError on every web worker local write.
+      // Literal 2^32: `1 << 32` constant-folds to 0 under dart2js (32-bit
+      // shifts), making Random.nextInt throw RangeError on web.
       final v = rng.nextInt(4294967296);
       out
         ..write(hex[(v >> 28) & 0xf])
@@ -124,6 +123,7 @@ class Outbox {
 
   // ------------------------------------------------------------ read helpers --
 
+  /// Reads the outbox op for a record, or null when none is queued.
   Future<OutboxOp?> readOp(
       DatabaseExecutor exec, String store, String id) async {
     final rows = await exec.query('lp_outbox',
@@ -131,6 +131,8 @@ class Outbox {
     return rows.isEmpty ? null : OutboxOp.fromRow(rows.first);
   }
 
+  /// Reads the sync row for a record, or null when the record was never
+  /// synced.
   Future<SyncRowState?> readSyncRow(
       DatabaseExecutor exec, String store, String id) async {
     final rows = await exec.query('lp_sync_row',
@@ -170,10 +172,9 @@ class Outbox {
     }
     final clearError = syncRow != null && syncRow.syncState == SyncState.error;
 
-    // The outbox payload always carries the (client-generated) id so that
-    // settle-time hash comparisons against `decodeDbRow` (which includes the
-    // id) and against `normalizeRemote` (which injects the id) are consistent
-    // — otherwise a fresh create could never be ACKed clean.
+    // The outbox payload always carries the (client-generated) id so
+    // settle-time hash comparisons against decodeDbRow and normalizeRemote
+    // are consistent — otherwise a fresh create could never be ACKed clean.
     final payloadJson = precomputedPayload ??
         canonicalPayload(schema, {...logical, if (id.isNotEmpty) 'id': id});
 
@@ -236,28 +237,30 @@ class Outbox {
 
     final now = pocket.now();
     final opId = outboxOp?.opId ?? generateOpId();
-    // Earliest base wins across coalescing. The base JSON
-    // snapshot lives on the sync row; base_updated/base_hash are mirrored on
-    // the outbox row for the pusher.
+    // Earliest base wins across coalescing. The base JSON lives on the sync
+    // row; base_updated/base_hash are mirrored on the outbox for the pusher.
     final baseUpdated = outboxOp?.baseUpdated ?? base?.baseUpdated;
     final baseHash = outboxOp?.baseHash ?? base?.baseHash ?? '';
     final baseJson = syncRow?.baseJson ?? base?.baseJson;
+    // Base tuple invariant: a base version implies the full base snapshot
+    // (json + hash). A partially-written or corrupted row fails typed here
+    // — merging against an invalid base would produce wrong pushes and
+    // wrong conflict decisions.
+    if (baseUpdated != null && baseJson == null) {
+      throw StorageError('Outbox base snapshot for $store/$id is inconsistent: '
+          'base_updated "$baseUpdated" without base_json.');
+    }
     final mergedDirty =
         <String>{...?outboxOp?.dirtyFields, ...dirtyFields}.toList()..sort();
     final createdAt = outboxOp?.createdAt ?? now;
 
     final dirtyFieldsJson = jsonEncode(mergedDirty);
     final prevRev = syncRow?.localRev ?? 0;
-    // Single-statement writes on the (store, record_id) primary key. On the
-    // update path only the columns a local mutation can actually change are
-    // SET (`kind`, `payload_json`, `dirty_fields`, `updated_at`):
-    // `base_updated`, `base_hash`, `created_at`, `op_id`, and
-    // `depends_on_op` are immutable once the op exists, so skipping them
-    // saves bind work and WAL bytes without changing any stored value.
-    // Row existence is known from the prefetched state and all writes
-    // serialize through the single-writer queue, so plain INSERT/UPDATE
-    // replaces ON CONFLICT DO UPDATE (no conflict-resolution machinery) and
-    // values bind directly (no intermediate row maps).
+    // Single-statement writes on the (store, record_id) PK. On the update
+    // path only mutable columns are SET (base_*, created_at, op_id,
+    // depends_on_op are immutable). Row existence is known from prefetched
+    // state and writes serialize through the single-writer queue, so plain
+    // INSERT/UPDATE replaces ON CONFLICT DO UPDATE.
     const outboxCols = outboxColumns;
     if (outboxOp == null) {
       final outboxInsert =
@@ -286,12 +289,10 @@ class Outbox {
     }
 
     const syncCols = syncRowColumns;
-    // On the update path, SET only the columns this mutation changes.
-    // `base_*` are immutable once captured (present on every dirty row), so
-    // they are only written on the first dirt (no existing op); the
-    // error-clear reset columns are written only when clearing an error.
-    // `remote_updated`, `last_seen_at`, and `access_state` are preserved
-    // from the existing row by omission.
+    // SET only the columns this mutation changes: base_* only on first
+    // dirt (no existing op), the error-reset columns only when clearing an
+    // error; remote_updated/last_seen_at/access_state are preserved by
+    // omission.
     final syncSetCols = <String>[
       'sync_state',
       'dirty_fields',
@@ -384,8 +385,7 @@ class Outbox {
         [...args, limit * 4 + 16]);
     if (rows.isEmpty) return const [];
 
-    // Set-based dependency resolution: one query per dependency
-    // table for all candidates instead of two COUNT(*) queries per candidate.
+    // Set-based dependency resolution instead of per-candidate COUNT(*).
     final ops = [for (final r in rows) OutboxOp.fromRow(r)];
     final depIds = {
       for (final op in ops)
@@ -402,15 +402,12 @@ class Outbox {
     return result;
   }
 
-  /// Unconditional acknowledgment: removes the op from the outbox and marks
-  /// the sync row clean WITHOUT verifying the current payload still matches
-  /// what was pushed.
+  /// Unconditional acknowledgment: removes the op and marks the sync row
+  /// clean WITHOUT verifying the payload still matches what was pushed.
   ///
-  /// UNSAFE for production settlement — a local edit made during the push
-  /// would be marked clean and lost. It has NO production callers and exists
-  /// only as a test helper; production settlement MUST go through
-  /// [settlePush] / [settlePushBatch], which detect newer edits and keep the
-  /// row dirty. Dependents are released implicitly (drain re-checks).
+  /// UNSAFE for production — an edit made during the push would be marked
+  /// clean and lost. Test helper only; production settlement MUST go through
+  /// [settlePush] / [settlePushBatch].
   Future<void> ack(String store, String id, {String? serverUpdated}) =>
       pocket.transaction((tx) async {
         final exec = tx.executor;
@@ -473,11 +470,8 @@ class Outbox {
       ]);
 
   /// Settles multiple successful pushes under one local durability boundary.
-  ///
-  /// Each item is compared with the current local payload. An edit made while
-  /// the network request was in flight remains dirty and keeps its outbox row.
-  /// Each item still performs the same current-payload hash comparison, so an
-  /// edit made while its HTTP request was in flight remains dirty.
+  /// Each item is hash-compared with the current local payload; an edit made
+  /// while its request was in flight remains dirty and keeps its outbox row.
   Future<void> settlePushBatch(List<PushSettlement> settlements) {
     if (settlements.isEmpty) return Future<void>.value();
     return pocket.transaction((tx) async {
@@ -498,12 +492,10 @@ class Outbox {
     final nowMs = pocket.now();
 
     if (settlement.mergedLogical != null) {
-      // Guard: only write the stale merge result if the row was NOT edited
-      // again while the request was in flight. `settlement.op.payloadJson`
-      // is the outbox payload captured at push time; a newer local edit
-      // rewrites the outbox payload, so a difference means the merge is stale
-      // and must not overwrite the newer edit. The newer edit then keeps the
-      // row dirty and is pushed on the next cycle (with the advanced base).
+      // Guard: only write the merge result if the row was NOT edited again
+      // in flight. A newer local edit rewrites the outbox payload, so a
+      // difference means the merge is stale and must not overwrite it; the
+      // newer edit stays dirty for the next cycle.
       final currentOutbox = await exec.query('lp_outbox',
           where: 'store = ? AND record_id = ?',
           whereArgs: [store, id],
@@ -572,9 +564,8 @@ class Outbox {
       await _markClean(exec, store, id, settlement.serverUpdated, nowMs);
       tx.addChange(ChangeSet(store, {id}));
     } else if (currentHash == settlement.pushedPayloadHash) {
-      // The server transformed the payload (normalized/renamed fields). Adopt
-      // its content locally so the row mirrors the server (server field
-      // preservation) and stays clean — the next pull would otherwise skip a
+      // The server transformed the payload (normalized/renamed fields):
+      // adopt its content locally, or the next pull would skip a
       // same-`updated` re-delivery and the transform would be lost forever.
       final serverLogical = _decodeServerData(settlement.serverDataJson);
       final dbRow = encodeDbRow(
@@ -660,9 +651,8 @@ class Outbox {
         },
         where: 'store = ? AND record_id = ?',
         whereArgs: [store, id]);
-    // The domain `hidden` column mirrors access_state: a confirmed push means
-    // the server holds the record, so the row is visible again (a sweep may
-    // have hidden it before the push, e.g. a pending create).
+    // The domain `hidden` column mirrors access_state: a confirmed push
+    // means the server holds the record, so the row is visible again.
     await exec.update(pocket.requireTable(store).tableName, {'hidden': 0},
         where: 'id = ?', whereArgs: [id]);
   }
@@ -801,6 +791,7 @@ class Outbox {
             where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
       });
 
+  /// Number of rows currently in `lp_outbox`.
   Future<int> outboxCount() async =>
       firstIntValue(
           await pocket.db.rawQuery('SELECT COUNT(*) AS c FROM lp_outbox')) ??

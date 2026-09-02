@@ -54,9 +54,8 @@ class Sweeper {
 
   static const String _alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
-  /// Effective bucket count: the id alphabet is fixed at 36, so a configured
-  /// count above that is clamped (a larger count could not be addressed), and
-  /// a non-positive count is treated as 1 (no division by zero).
+  /// Effective bucket count: clamped to the 36-char id alphabet; a
+  /// non-positive configured count is treated as 1.
   int get _bucketCount {
     final c = config.sweepBucketCount;
     if (c > _alphabet.length) return _alphabet.length;
@@ -82,9 +81,8 @@ class Sweeper {
           continue;
         }
         var bucket = st.bucket;
-        // Forced sweeps (auth/identity change, explicit visibility invalidation)
-        // are immediate FULL scans; the normal due path
-        // advances only `bucketsPerSweep` buckets per cycle.
+        // Forced sweeps (auth/identity change) are immediate FULL scans; the
+        // normal due path advances only `bucketsPerSweep` buckets per cycle.
         final perCycle = force ? _bucketCount : config.bucketsPerSweep;
         for (var i = 0; i < perCycle; i++) {
           bucket = (bucket + 1) % _bucketCount;
@@ -99,8 +97,8 @@ class Sweeper {
       }
     }
     if (firstError != null) {
-      // Re-throw the original error after the other stores have swept. Do not
-      // cast here: callers may throw any Dart object, not only Error/Exception.
+      // Re-throw the original error after the other stores swept (no cast:
+      // callers may throw any Dart object).
       throw firstError;
     }
     return reports;
@@ -174,10 +172,9 @@ class Sweeper {
       hidden += toHide.length;
     }
 
-    // Optional purge of long-hidden rows. Only rows with no pending local
-    // work are safe to purge: a hidden row that is dirty, in-flight, in
-    // conflict, errored, or quarantined holds local edits or recovery payloads
-    // that must never be silently destroyed.
+    // Optional purge of long-hidden rows. Only clean rows are safe: dirty,
+    // in-flight, conflicted, errored, or quarantined rows hold local edits
+    // or recovery payloads that must never be silently destroyed.
     if (config.purgeHiddenAfter != null) {
       final purgeCutoff =
           config.now() - config.purgeHiddenAfter!.inMilliseconds;
@@ -193,11 +190,8 @@ class Sweeper {
     }
 
     // Quarantined records are retried out-of-band: the pull cursor advances
-    // past a malformed record (so the store never stalls), so a dedicated
-    // re-fetch is required. Re-fetch quarantined rows in this bucket whose
-    // backoff deadline has passed; a now-valid record is re-applied (clearing
-    // quarantine) and a still-malformed one is re-quarantined with a longer
-    // backoff by `fetchBatch` -> `applyNormalizedRemote`.
+    // past a malformed record, so a dedicated re-fetch of rows whose backoff
+    // deadline passed is required (fetchBatch re-applies or re-quarantines).
     final retryCutoff = config.now();
     final quarantined = await pocket.db.rawQuery(
         'SELECT record_id FROM lp_sync_row '

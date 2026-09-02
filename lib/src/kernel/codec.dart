@@ -176,11 +176,8 @@ List<Map<String, Object?>> encodeDbRows(
 
 /// Encodes a batch of logical records asynchronously.
 ///
-/// Runs inline on the calling isolate and returns exactly what [encodeDbRows]
-/// returns. [isolateThreshold] is accepted for interface compatibility and
-/// ignored: the [FieldCipher] has no isolate offload today, so this async
-/// wrapper exists for call-site ergonomics and as a hook for a future
-/// offload (see `FieldCipher.encryptAsync`).
+/// Runs inline (no isolate offload exists); [isolateThreshold] is accepted
+/// for interface compatibility and ignored.
 Future<List<Map<String, Object?>>> encodeDbRowsAsync(
   CollectionSchema<Object?> schema,
   List<Map<String, Object?>> logicalRecords, {
@@ -239,13 +236,10 @@ List<Map<String, Object?>> decodeDbRows(
         ),
     ];
 
-/// Projection-aware batch decode: only the requested
-/// [columns] are unpacked; all other declared fields and `extra` are left
-/// untouched. `id` is always present (it is needed for keyset cursors);
-/// `archived` is included only when requested. Callers must ensure every
-/// requested column is a declared field (`schema.declaredFieldNames`) or one
-/// of the synthetic `id`/`archived` keys — otherwise [decodeDbRows] should be
-/// used so undeclared `extra` keys are merged as today.
+/// Projection-aware batch decode: only the requested [columns] are unpacked.
+/// `id` is always present (needed for keyset cursors); `archived` only when
+/// requested. Every requested column must be declared or `id`/`archived` —
+/// otherwise use [decodeDbRows] so `extra` keys merge.
 List<Map<String, Object?>> decodeDbRowsProjected(
   CollectionSchema<Object?> schema,
   List<Map<String, Object?>> dbRows, {
@@ -253,9 +247,8 @@ List<Map<String, Object?>> decodeDbRowsProjected(
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
 }) {
-  // Resolve the field for each requested column ONCE per page instead of
-  // once per cell — range/top-K/pagination pages decode hundreds of rows
-  // per call, and each lookup was a schema hash-map probe.
+  // Resolve the field for each requested column once per page, not per
+  // cell — pages decode hundreds of rows per call.
   final resolved = <(String, Field?)>[];
   var wantArchived = false;
   for (final name in columns) {
@@ -321,14 +314,10 @@ Future<List<Map<String, Object?>>> decodeDbRowsAsync(
       cryptoProvider: cryptoProvider,
     );
 
-/// Decodes a single stored value (plaintext typed column or base64 ciphertext)
-/// into its logical form for [f]. [store] is the owning store name, used to
-/// resolve a per-field [CryptoProvider] cipher; [recordId] is the owning row's
-/// id and is bound into the AAD of encrypted values.
-///
-/// This is the single source of the "stored value → logical value" coercion
-/// rules, shared by the full [decodeDbRow] and projection-aware
-/// [_decodeDbRowProjectedResolved] paths so they cannot drift.
+/// Decodes a single stored value (plaintext typed column or base64
+/// ciphertext) into its logical form for [f]. [recordId] is bound into the
+/// AAD of encrypted values. Single source of the stored→logical coercion
+/// rules, shared by both decode paths.
 Object? _decodeStoredValue(
   Field f,
   Object? stored, {
@@ -435,12 +424,9 @@ Map<String, Object?> buildPayload(
   return data;
 }
 
-/// Writes the canonical JSON payload of [logical] directly into [out] —
-/// byte-identical to `canonicalizeInto(out, buildPayload(schema, logical,
-/// idOverride: idOverride))` — without building the intermediate payload
-/// map. Mirrors [buildPayload]'s field selection exactly; all keys are
-/// strings, so no toString-collision can occur. Returns the exact UTF-8 byte
-/// length written.
+/// Writes the canonical JSON payload of [logical] directly into [out],
+/// byte-identical to canonicalizing [buildPayload], without the intermediate
+/// map. Returns the exact UTF-8 byte length written.
 int canonicalizePayloadInto(
   StringBuffer out,
   CollectionSchema<Object?> schema,

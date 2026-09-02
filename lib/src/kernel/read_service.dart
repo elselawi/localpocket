@@ -6,6 +6,45 @@
 /// semantics.
 part of 'local_pocket.dart';
 
+/// {@template localpocket.page}
+/// The result of a paginated query.
+///
+/// Cursors are bidirectional and carry the same payload: [Page.nextCursor]
+/// continues forward ([QueryBuilder.keysetAfter]) and [Page.prevCursor] backward
+/// ([QueryBuilder.keysetBefore]). They are `null` when there is no adjacent
+/// page ([Page.hasNext]/[Page.hasPrev] false).
+/// {@endtemplate}
+class Page {
+  /// Creates a query page.
+  ///
+  /// {@macro localpocket.page}
+  const Page({
+    required this.items,
+    required this.hasNext,
+    this.nextCursor,
+    this.prevCursor,
+    this.hasPrev = false,
+  });
+
+  /// Records in this page, in the requested order.
+  final List<Map<String, Object?>> items;
+
+  /// Cursor for the next keyset page, or `null` when this is the last page.
+  final String? nextCursor;
+
+  /// Cursor for the previous keyset page, or `null` when no row precedes
+  /// this window.
+  final String? prevCursor;
+
+  /// Whether a row was observed after this window (limit+1 check forward,
+  /// one-row probe on backward fetches).
+  final bool hasNext;
+
+  /// Whether a row was observed before this window: exact for backward
+  /// fetches, a mint-time fact for forward continuations.
+  final bool hasPrev;
+}
+
 /// The kernel read owner: query execution and result shaping.
 class ReadService {
   /// Internal: constructed by [KernelDatabase].

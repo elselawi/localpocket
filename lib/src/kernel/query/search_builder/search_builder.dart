@@ -78,8 +78,8 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
 
   /// The execution context's executor. Always provided on the runtime path:
   /// a transaction-scoped [Collection] passes its TRANSACTION executor and
-  /// can never fall back to the outer database (plan Rule 5). Only the
-  /// compile-only constructor (which cannot execute) leaves it null.
+  /// never falls back to the outer database. Only the compile-only
+  /// constructor leaves it null.
   final DatabaseExecutor? _executor;
 
   /// Structural pin for tests: the executor this search will run through.
@@ -147,10 +147,9 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
   bool get includeHiddenFlag => _includeHidden;
 
   (String, List<Object?>) _compile({int? limitOverride}) {
-    // Query-side parity: the term passes through the same normalization the
-    // write-side triggers applied, so declared equivalences (e.g. Arabic alef
-    // forms) match regardless of which form is searched. The normalized term
-    // rides in plan args — no UDF needed at query time.
+    // Query-side parity: apply the same normalization the write-side triggers
+    // did, so declared equivalences match regardless of which form is
+    // searched. The normalized term rides in plan args — no UDF needed.
     final normalizedTerm = _schema.fts!.normalize.normalize(_term);
     _validateSearchTerm(normalizedTerm);
     if (_schema.fts!.fuzzy) {
@@ -234,10 +233,8 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
   ///     .fetch();
   /// ```
   ///
-  /// An empty or whitespace-only term is a valid no-op that returns no
-  /// results. Terms that FTS5 rejects (malformed expressions, unbalanced
-  /// quotes, bare operators) throw a typed [ValidationException] instead of a
-  /// raw SQLite error.
+  /// An empty term is a valid no-op; terms FTS5 rejects throw a typed
+  /// [ValidationException] instead of a raw SQLite error.
   Future<List<SearchResult>> fetch() async {
     if (_term.trim().isEmpty) return const [];
     final pocket = _pocket;
@@ -246,9 +243,8 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
     }
     final (sql, args) = _compile();
     try {
-      // Hook and perf bookkeeping is preserved on every execution path —
-      // the root-context search is behaviorally identical to a
-      // `traceQuery` round-trip (same observer callbacks, same counters).
+      // Hook and perf bookkeeping preserved on every execution path,
+      // behaviorally identical to a `traceQuery` round-trip.
       final pocket = _pocket!;
       pocket.testHooks?.onQuery?.call(sql);
       pocket.perf.recordQuery();

@@ -9,10 +9,12 @@ import 'database_adapter.dart';
 /// context — root or transaction — carries its own executor, and a store
 /// obtained from a transaction permanently carries that context (plan Rule 5).
 final class ExecutionContext {
+  /// Creates the root (outer-database) context.
   const ExecutionContext.root(this.executor)
       : kind = ExecutionContextKind.root,
         readOnly = false;
 
+  /// Creates a context bound to a transaction's executor.
   const ExecutionContext.transaction({
     required this.executor,
     required this.readOnly,
@@ -40,4 +42,10 @@ final class ExecutionContext {
 }
 
 /// The two context kinds.
-enum ExecutionContextKind { root, transaction }
+enum ExecutionContextKind {
+  /// Operations on the outer database executor.
+  root,
+
+  /// Operations bound to a transaction's executor.
+  transaction,
+}

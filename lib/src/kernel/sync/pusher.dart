@@ -17,6 +17,7 @@ import 'sync_config.dart';
 import 'sync_store.dart';
 import 'sync_tables.dart';
 
+/// Result of one push cycle: per-outcome counters.
 class PushReport {
   /// Creates a push result with zero counts by default.
   const PushReport({
@@ -89,8 +90,8 @@ class Pusher {
 
   /// Pushes pending outbox operations to the remote backend.
   Future<PushReport> pushPending() async {
-    // `now` comes from config so persisted backoff deadlines (written in the
-    // same clock) compare consistently even under an injected test clock.
+    // `now` comes from config so backoff deadlines compare consistently
+    // under an injected test clock.
     final ops =
         await pocket.outbox.drain(limit: config.maxBatch, now: config.now());
     if (ops.isEmpty) return const PushReport();
@@ -142,9 +143,9 @@ class Pusher {
       onAuthError();
       return const PushReport(hadError: true);
     } on ForbiddenError {
-      // A forbidden push is RECOVERABLE (permissions may be restored): keep
-      // the op, park the row in `blocked`, and requeue on permission recovery
-      // — never dead-letter a local edit over a transient 403.
+      // A forbidden push is RECOVERABLE (permissions may return): keep the
+      // op, park in `blocked`, requeue later — never dead-letter a local
+      // edit over a transient 403.
       await pocket.outbox.markBlocked(
           store: op.store, id: op.recordId, error: 'forbidden_push');
       return const PushReport(blocked: 1);
@@ -156,8 +157,8 @@ class Pusher {
       return _retry(op, sr, e);
     } on NotFoundError {
       // The update's target vanished remotely: apply the collection's
-      // missing-remote policy (recreate is single-shot per flow so an
-      // oscillating backend can never loop).
+      // missing-remote policy (recreate is single-shot, so an oscillating
+      // backend cannot loop).
       return _handleMissingRemote(op, sr, allowRecreate: !recreateInProgress);
     } on SyncError catch (e) {
       return _retry(op, sr, e);
@@ -205,17 +206,15 @@ class Pusher {
       _handlePushExceptions(op, sr, () async {
         final fetched = await backend.getRecord(op.recordId);
         if (fetched == null) {
-          // The record no longer exists remotely (a vanished target): apply the
-          // collection's missing-remote policy.
+          // Vanished target: apply the collection's missing-remote policy.
           return _handleMissingRemote(op, sr);
         }
         _assertFetchedMatches(op, fetched);
         if (fetched.updated == op.baseUpdated) {
-          // No concurrent change: a version-checked PATCH. The base version is
-          // sent so a backend that enforces optimistic concurrency can reject
-          // the write if the remote moved between the GET and the PATCH — the
-          // pusher then re-merges against the fresh version instead of losing
-          // the concurrent edit.
+          // No concurrent change: a version-checked PATCH. The base version
+          // is sent so an OCC-enforcing backend can reject the write if the
+          // remote moved between GET and PATCH; the pusher then re-merges
+          // instead of losing the concurrent edit.
           return _handlePushExceptions(op, sr, () async {
             try {
               final rec = await backend.updateRecord(
@@ -225,9 +224,8 @@ class Pusher {
               await _settle(op, rec);
               return const PushReport(pushed: 1);
             } on RemoteVersionConflict {
-              // The remote moved while the PATCH was in flight: re-fetch and
-              // re-merge against the CURRENT version, then retry — never
-              // overwrite blindly.
+              // The remote moved mid-PATCH: re-fetch and re-merge against the
+              // CURRENT version — never overwrite blindly.
               final fresh = await backend.getRecord(op.recordId);
               if (fresh == null) {
                 return _handleMissingRemote(op, sr);
@@ -255,9 +253,8 @@ class Pusher {
       return const PushReport(pushed: 1);
     }
 
-    // A corrupt persisted base/payload is local row corruption: dead-letter
-    // it (retrying cannot repair the row) instead of merging as an empty
-    // record.
+    // A corrupt persisted base/payload is local corruption: dead-letter it
+    // (retrying cannot repair it) instead of merging as an empty record.
     final Map<String, Object?> basePayload;
     final Map<String, Object?> localPayload;
     try {
@@ -272,14 +269,14 @@ class Pusher {
     if (outcome == null) {
       return const PushReport(conflicted: 1);
     }
-    // The schema-aware payload builder strips a literal `archived: false`
-    // (the wire convention omits the key for live records — same as the
-    // create path), while the raw merged map keeps it for the LOCAL write.
+    // The schema-aware builder strips a literal `archived: false` (live
+    // records omit the key on the wire); the raw merged map keeps it for
+    // the LOCAL write.
     final mergedJson = canonicalPayload(schema, outcome.merged);
     return _handlePushExceptions(op, sr, () async {
-      // Version-check the write against the version the merge was based on: a
-      // backend enforcing OCC rejects it (and the next cycle re-merges) if the
-      // remote moved again between the re-fetch and the PATCH.
+      // Version-check against the version the merge was based on: an
+      // OCC-enforcing backend rejects it (and the next cycle re-merges) if
+      // the remote moved again between re-fetch and PATCH.
       final rec = await backend.updateRecord(
           id: op.recordId, dataJson: mergedJson, baseUpdated: fetched.updated);
       await _settle(op, rec,
@@ -316,9 +313,8 @@ class Pusher {
         pocket.perf.pushPreflightRequests++;
         fetched = await backend.getRecord(op.recordId);
       } on NotFoundError {
-        // Not on the server yet. For an update this is a vanished target:
-        // apply the collection's missing-remote policy. For a create it is
-        // the expected state — fall through to send it.
+        // Not on the server yet: for an update a vanished target (apply the
+        // missing-remote policy); for a create the expected state — send it.
         if (op.baseUpdated != null) {
           final r = await _handleMissingRemote(op, sr);
           pushed += r.pushed;
@@ -355,11 +351,9 @@ class Pusher {
           pushed++;
           continue;
         }
-        // Concurrent create-vs-update or update: merge. The schema-aware
-        // payload builder strips a literal `archived: false` (live records
-        // omit the key on the wire) while keeping it in the merged logical
-        // for the local write. A corrupt persisted base/payload is dead-
-        // lettered: retrying cannot repair local row corruption.
+        // Concurrent change: merge. The schema-aware builder strips a literal
+        // `archived: false` on the wire; a corrupt base/payload is
+        // dead-lettered (retrying cannot repair local row corruption).
         final Map<String, Object?> basePayload;
         final Map<String, Object?> localPayload;
         try {
@@ -404,9 +398,8 @@ class Pusher {
     }
 
     if (toSend.isNotEmpty) {
-      // Clamp each request to the negotiated maximum: the backend advertises
-      // its ceiling via capabilities.maxBatch, so a config that requests more
-      // must never exceed it (a server may reject oversized batches).
+      // Clamp to the backend-advertised ceiling; a server may reject
+      // oversized batches.
       final chunkSize = _batchLimit();
       for (var i = 0; i < toSend.length; i += chunkSize) {
         final end =
@@ -437,9 +430,8 @@ class Pusher {
         discarded: discarded);
   }
 
-  /// Maximum operations per remote batch request: min of the configured limit
-  /// and the backend's advertised capability (a non-positive capability means
-  /// "no explicit ceiling", so the configured limit applies).
+  /// Maximum ops per remote batch request: min of the configured limit and
+  /// the backend's advertised capability (non-positive = no ceiling).
   int _batchLimit() {
     var cap = backend.capabilities.maxBatch;
     if (cap <= 0) cap = config.maxBatch;
@@ -492,12 +484,9 @@ class Pusher {
       final results = await backend.pushBatch(toSend);
       final byOpId = {for (final op in toSend) op.opId: op};
       // Exact-response validation: every returned opId must be known and
-      // unique. Missing ops are tolerated — a partial response settles the
-      // named ops and leaves the rest pending for the next cycle (this is
-      // the explicitly defined partial-response protocol; see the
-      // SyncBackend.pushBatch contract). Validate the whole response before
-      // any settlement side effect so a malformed response cannot partially
-      // apply.
+      // unique. Missing ops are tolerated (the defined partial-response
+      // protocol — see SyncBackend.pushBatch). Validate the whole response
+      // before any settlement so a malformed response cannot partially apply.
       final returnedIds = <String>{};
       for (final r in results) {
         if (!returnedIds.add(r.opId)) {
@@ -540,10 +529,9 @@ class Pusher {
       // SyncReport counts match what actually happened.
       return _binarySplit(toSend, mergedByOpId, outboxPayloadByOpId);
     } on RemoteVersionConflict {
-      // One or more ops were based on a version that moved after the preflight
-      // GETs but before the batch landed. Re-run each op through the
-      // per-record optimistic-concurrency path (re-fetch, re-merge,
-      // version-checked write) so no concurrent remote edit is lost.
+      // Ops were based on a version that moved between preflight GETs and
+      // batch landing: re-run each through the per-record OCC path so no
+      // concurrent remote edit is lost.
       var pushed = 0;
       var dead = 0;
       var conflicted = 0;
@@ -595,8 +583,8 @@ class Pusher {
       onAuthError();
       return const PushReport(hadError: true);
     } on SyncError catch (e) {
-      // Transient batch failure: retry each op with backoff, honoring a
-      // ServerBusyError's Retry-After when the batch endpoint was throttled.
+      // Transient batch failure: retry each op with backoff (honoring a
+      // ServerBusyError's Retry-After).
       final retryError = e is ServerBusyError ? e : TransientNetworkError();
       for (final op in toSend) {
         final sr = await pocket.outbox.readSyncRow(pocket.db, op.store, op.id);
@@ -633,10 +621,9 @@ class Pusher {
       try {
         final results = await backend.pushBatch(half);
         final byOpId = {for (final op in half) op.opId: op};
-        // Same exact-response validation as the main batch path: every
-        // returned opId must be known and unique. A ProtocolError here is
-        // caught below as a SyncError, leaving this half pending (retry
-        // later) instead of crashing the cycle with an untyped StateError.
+        // Same exact-response validation as the main batch path; a
+        // ProtocolError is caught below as a SyncError, leaving this half
+        // pending instead of crashing the cycle.
         final returnedIds = <String>{};
         for (final r in results) {
           if (!returnedIds.add(r.opId)) {
@@ -675,8 +662,8 @@ class Pusher {
         dead += sub.deadLettered;
         hadError = hadError || sub.hadError;
       } on SyncError {
-        // Transient: leave this half pending (retry later) and keep trying
-        // the other half — one flaky half must not block the healthy one.
+        // Transient: leave this half pending; one flaky half must not block
+        // the healthy one.
         hadError = true;
         continue;
       }
@@ -705,8 +692,7 @@ class Pusher {
     final storedJson =
         serverDataJson ?? canonicalPayload(schema, serverLogical);
     // The settlement op carries the live (pre-request) outbox payload so
-    // settlement can detect a newer edit and refuse to overwrite it with a
-    // stale merge.
+    // settlement can detect a newer edit and refuse a stale overwrite.
     await pocket.outbox.settlePushBatch([
       PushSettlement(
         op: op,
@@ -718,9 +704,8 @@ class Pusher {
     ]);
   }
 
-  /// A targeted GET that answers a DIFFERENT record than requested is a
-  /// backend contract violation: surface it loudly (the op is retained, never
-  /// acked or dead-lettered) instead of writing against the wrong record.
+  /// A GET answering a different record than requested is a backend contract
+  /// violation: surface it loudly instead of writing the wrong record.
   void _assertFetchedMatches(OutboxOp op, RemoteRecord fetched) {
     if (fetched.id != op.recordId) {
       throw MapFailure('record id "${fetched.id}" does not match requested '
@@ -766,9 +751,8 @@ class Pusher {
   /// Applies the collection's [MissingRemotePolicy] when an update's target no
   /// longer exists remotely (a remote deletion raced a local offline edit).
   ///
-  /// [allowRecreate] is false on the re-entrant path (a recreated create hit
-  /// the delete/update race again), so an oscillating backend can never loop:
-  /// the second miss dead-letters instead.
+  /// [allowRecreate] is false on the re-entrant path so an oscillating
+  /// backend can never loop; the second miss dead-letters.
   Future<PushReport> _handleMissingRemote(
     OutboxOp op,
     SyncRowState sr, {
@@ -778,8 +762,8 @@ class Pusher {
         pocket.requireTable(op.store).schema.conflictPolicy.missingRemote;
     switch (policy) {
       case MissingRemotePolicy.conflict:
-        // Corrupt persisted base/payload: dead-letter (local corruption) —
-        // never escalate a bogus delete-vs-edit conflict from an empty base.
+        // Corrupt base/payload: dead-letter — never escalate a bogus
+        // delete-vs-edit conflict from an empty base.
         final Map<String, Object?> basePayload;
         final Map<String, Object?> localPayload;
         try {
@@ -807,11 +791,8 @@ class Pusher {
   }
 
   /// Escalates a push whose target vanished remotely into a delete-vs-edit
-  /// conflict: the remote side is recorded as a tombstone so the conflicts UI
-  /// offers acceptLocal (recreate) / acceptRemote (discard).
-  ///
-  /// [basePayload] and [localPayload] are parsed (and corruption-checked) by
-  /// the caller.
+  /// conflict: the remote side is a tombstone so the UI offers acceptLocal
+  /// (recreate) / acceptRemote (discard). Payloads are caller-parsed.
   Future<void> _escalateDeleteConflict(OutboxOp op, SyncRowState sr,
       {required Map<String, Object?> basePayload,
       required Map<String, Object?> localPayload}) async {

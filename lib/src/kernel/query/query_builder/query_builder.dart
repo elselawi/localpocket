@@ -53,7 +53,6 @@ class OrderClause {
 /// interpolated into SQL; values travel as bound parameters.
 /// {@endtemplate}
 class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
-  /// Internal: constructed by [Collection].
   /// Internal constructor used by [Collection.query].
   ///
   /// {@macro localpocket.query_builder}
@@ -142,10 +141,9 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   final List<WhereClause> _where;
   final List<WhereClause> _orGroups;
 
-  /// Structured mirror of [_where]/[_orGroups] recorded at DSL call time:
-  /// one [PredicateNode] per `where`/`orWhere`/`wherePredicate` call, in call
-  /// order. Consumed by the web facade's spec lowering while the page-side
-  /// compiled-plan transport exists; never used for compilation itself.
+  /// Structured mirror of [_where]/[_orGroups]: one [PredicateNode] per DSL
+  /// call, in call order. Consumed by the web facade's spec lowering; never
+  /// used for compilation itself.
   final List<PredicateNode> _structuredFilters;
   final List<OrderClause> _order;
   final int? _limit;
@@ -220,15 +218,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         field: field);
   }
 
-  /// Adds one or more predicates for [field].
-  ///
-  /// Values are bound as SQL parameters. Multiple supplied operators are
+  /// Adds one or more predicates for [field], bound as SQL parameters and
   /// combined with `AND`.
   ///
-  /// [between] is INCLUSIVE on both ends (`>= start AND <= end`), matching
-  /// SQL `BETWEEN` and most query DSLs. Records whose value equals `end` ARE
-  /// matched. For a half-open `[start, end)` window, use `gte:`/`lt:`
-  /// explicitly.
+  /// [between] is INCLUSIVE on both ends (SQL `BETWEEN`); for a half-open
+  /// `[start, end)` window use `gte:`/`lt:` explicitly.
   @override
   QueryBuilder where(
     String field, {
@@ -282,9 +276,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     }
     final copy = _copyWith();
     copy._where.addAll(clauses);
-    // Structured mirror for the web spec lowering: one node per supplied
-    // operator, in the same order the clauses were added. Operators the tree
-    // compiler does not spell (`neq`, `isNotNull`) capture as negations.
+    // Structured mirror: one node per supplied operator, in clause order.
+    // `neq`/`isNotNull` capture as negations.
     copy._structuredFilters.addAll([
       if (eq != null) LeafPredicate(field, 'eq', [eq]),
       if (neq != null) NotPredicate(LeafPredicate(field, 'eq', [neq])),
@@ -338,14 +331,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     return copy;
   }
 
-  /// Adds one predicate-tree clause, e.g. the typed layer's `&`/`|`/`~`
-  /// algebra lowered to [PredicateNode] values.
-  ///
-  /// The tree compiles into **one** self-contained WHERE clause: composites
-  /// are parenthesized at every boundary, so the fragment composes safely
-  /// with the scope flags, the other AND clauses, and the keyset predicate.
-  /// Every field is validated (unknown and encrypted fields throw) and every
-  /// value travels as a bound parameter — LIKE needles are escaped here.
+  /// Adds one predicate-tree clause (the typed layer's `&`/`|`/`~` algebra
+  /// lowered to [PredicateNode] values). The tree compiles into one
+  /// self-contained WHERE clause that composes safely with scope flags, other
+  /// AND clauses, and the keyset predicate. Fields are validated; values are
+  /// bound (LIKE needles escaped here).
   ///
   /// ```dart
   /// builder.wherePredicate(AnyPredicate([
@@ -386,9 +376,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   }
 
   /// Restricts the maximum number of records returned by [fetch].
-  ///
-  /// A limit is required unless [all] is selected. Use modest limits for UI
-  /// screens and keyset pagination for large collections.
+  /// A limit is required unless [all] is selected.
   @override
   QueryBuilder limit(int n) {
     if (n < 0) {
@@ -397,11 +385,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     return _copyWith(limit: n);
   }
 
-  /// Explicitly opt out of a limit.
-  /// Removes the mandatory result limit.
-  ///
-  /// Use with care for large collections because all matching rows are
-  /// materialized in memory.
+  /// Removes the mandatory result limit. Use with care for large
+  /// collections: all matching rows are materialized in memory.
   @override
   QueryBuilder all() => _copyWith(all: true);
 
@@ -494,15 +479,9 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
 
   // ------------------------------------------------------------- compiling --
 
-  /// Bounded cache of compiled SQL templates keyed by query shape:
-  /// avoids re-quoting columns and re-joining fragments
-  /// on the hot path. Values are the SQL without the LIMIT clause — the limit
-  /// is appended dynamically because it varies per call. The key is built from
-  /// shape components (store, scope, where/or fragments, columns, order), so
-  /// argument values never pollute the cache.
-  /// Insertion-ordered cache with true LRU semantics (promote-on-hit): the
-  /// most recently used template is moved to the tail on every hit, so a hot
-  /// query is never evicted just because it was inserted early.
+  /// Bounded LRU cache (promote-on-hit) of compiled SQL templates keyed by
+  /// query shape — the SQL without the LIMIT clause, which varies per call.
+  /// Keys use shape components only, so argument values never pollute it.
   static final Map<String, String> _sqlTemplateCache = {};
 
   static String _cachedSqlTemplate(String key, String Function() build) {
@@ -593,10 +572,9 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
 
   String get _selectColumns {
     if (_select == null) return '*';
-    // Projection of undeclared overflow keys falls back to full decoding:
-    // SELECT * so the undeclared keys (stored in the extra JSON column) can be
-    // unpacked by the full decoder. Referencing a nonexistent SQL column
-    // would otherwise surface a raw "no such column" error.
+    // Undeclared overflow keys live in `extra`; SELECT * lets the full
+    // decoder unpack them (a nonexistent SQL column would surface a raw
+    // "no such column" error).
     if (!_allProjectedDeclared()) return '*';
     final cols = <String>[..._select!];
     for (final o in _effectiveOrder) {
@@ -605,11 +583,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     return cols.map(DdlCompiler.quote).join(', ');
   }
 
-  /// The cursor codec for this builder's current shape. Built per call: the
-  /// builder is mutable, so the shape fingerprint must be read at mint/decode
-  /// time. Minting and validation itself lives in the kernel-owned
-  /// `KeysetCursorCodec` (`query/cursor.dart`) — one codec for every runtime
-  /// and every execution path.
+  /// The cursor codec for this builder's current shape, built per call (the
+  /// builder is mutable). Minting/validation lives in `KeysetCursorCodec`.
   KeysetCursorCodec get _cursorCodec => KeysetCursorCodec(
         store: _schema.name,
         schemaVersion: _schema.version,
@@ -620,11 +595,10 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   List<Object?> _decodeCursor(String cursor) =>
       _cursorCodec.decode(cursor, backward: _backward);
 
-  /// Fingerprint of every query-shape component that a keyset cursor is only
-  /// valid for: scope flags, WHERE/OR predicates (structure *and* bound
-  /// values) and projection. A cursor produced by a differently-shaped query
-  /// must be rejected with [StaleCursorError] instead of silently returning a
-  /// wrong page.
+  /// Fingerprint of every query-shape component a cursor is valid for: scope
+  /// flags, predicates (structure *and* bound values), and projection. A
+  /// differently-shaped cursor must throw [StaleCursorError], not silently
+  /// return a wrong page.
   String get _shapeFingerprint => jsonEncode({
         'a': _includeArchived,
         'h': _includeHidden,
@@ -637,15 +611,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
 
   /// Compiles the keyset predicate for [values] under [order].
   ///
-  /// Row-value fast path: when every sort column has the same direction —
-  /// and that direction is ASC — and no cursor value is NULL, `(a, b) > (?, ?)`
-  /// is exactly equivalent to the OR-chain below (verified on SQLite 3.53.4)
-  /// and reads as one compact predicate. The fast path is deliberately NOT
-  /// taken for uniform-DESC orders: `(a, b) < (?, ?)` evaluates to NULL for
-  /// rows whose sort value is NULL, so a nullable column's trailing NULL
-  /// group (which sorts LAST under DESC and must be kept) would be silently
-  /// dropped; those queries use the NULL-aware OR-chain. Mixed directions
-  /// and NULL cursor values always use the OR-chain.
+  /// Row-value fast path: uniform ASC order with no NULL cursor value uses
+  /// `(a, b) > (?, ?)`, equivalent to the OR-chain (verified on SQLite
+  /// 3.53.4). Uniform-DESC is deliberately NOT taken: the row-value compare
+  /// evaluates to NULL for NULL sort values and would drop the trailing NULL
+  /// group; those use the NULL-aware OR-chain, as do mixed directions.
   (String, List<Object?>) _keysetPredicate(
       List<OrderClause> order, List<Object?> values) {
     // Row-value fast path: uniform ASC directions with no NULL cursor value.
@@ -659,12 +629,10 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
       return ('($cols) $op ($ph)', values);
     }
 
-    // Null-aware OR-chain. SQLite sorts NULLs FIRST in ASC and LAST in DESC.
-    // For a NULL cursor value in an ASC column, all non-NULL values still
-    // follow, so the comparison becomes `IS NOT NULL`; for a NULL cursor value
-    // in a DESC column, nothing follows, so that alternative is dropped.
-    // Equality with a NULL cursor value becomes `IS NULL` so the chain can
-    // continue within the NULL group.
+    // Null-aware OR-chain. SQLite sorts NULLs FIRST in ASC, LAST in DESC:
+    // a NULL cursor value in ASC means all non-NULL values still follow
+    // (`IS NOT NULL`); in DESC nothing follows; equality with a NULL cursor
+    // value becomes `IS NULL` so the chain can continue within the group.
     final clauses = <String>[];
     final args = <Object?>[];
     for (var i = 0; i < order.length; i++) {
@@ -677,9 +645,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
         if (j == i) {
           if (v == null) {
             if (order[j].desc) {
-              // DESC: NULLs sort last, so nothing follows this row — but the
-              // chain may still continue within the NULL group via the next
-              // position (`$col IS NULL AND ...`).
+              // DESC: NULLs sort last, so nothing follows this row (the
+              // chain may still continue within the NULL group).
               viable = false;
               break;
             }
@@ -687,8 +654,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
           } else {
             final op = order[j].desc ? '<' : '>';
             if (order[j].desc) {
-              // DESC: NULLs sort after every non-NULL value, so the trailing
-              // NULL group must be kept: `col < ?` alone would drop it.
+              // DESC: NULLs sort after every non-NULL value; `col < ?` alone
+              // would drop the trailing NULL group.
               parts.add('($col $op ? OR $col IS NULL)');
             } else {
               parts.add('$col $op ?');
@@ -741,17 +708,15 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
       throw StateError('A compile-only QueryBuilder cannot execute fetch().');
     }
     final rows = await _runQuery(sql, args);
-    // Page facts are kernel-owned (plan Rule 6): the window is the first
-    // `limit` rows and the overflow bit answers `hasNext` exactly.
+    // Page facts are kernel-owned: the window is the first `limit` rows and
+    // the overflow bit answers `hasNext` exactly.
     final (window: pageRows, :overflow) = takeWindow(rows, limit);
     var hasNext = overflow;
     var hasPrev = _cursor != null;
 
-    // In-process, projection-aware decode: one-shot
-    // Isolate.run per page was measured 1.8–5.6× slower than in-process at
-    // every page size, so fetch() never spawns a per-page isolate. When a
-    // select() only touches declared columns, only those columns (plus the
-    // sort keys the keyset cursor needs) are unpacked.
+    // In-process, projection-aware decode: per-page Isolate.run was measured
+    // 1.8–5.6× slower at every page size, so fetch() never spawns an isolate.
+    // Declared-only projections unpack just those columns plus sort keys.
     final List<Map<String, Object?>> decoded;
     if (_select != null && _allProjectedDeclared()) {
       decoded = decodeDbRowsProjected(
@@ -892,10 +857,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
 
   /// Returns the distinct values of [field] matching the current filters.
   ///
-  /// Ordering is honoured only for order clauses on [field] itself; ordering
-  /// by another column (or the implicit `id` tiebreaker) would make DISTINCT
-  /// meaningless, so those clauses are dropped. Distinct results are otherwise
-  /// unordered, so callers should not rely on a stable order.
+  /// Ordering is honoured only for order clauses on [field] itself (others
+  /// would make DISTINCT meaningless); results are otherwise unordered.
   Future<List<Object?>> distinct(String field) async {
     _checkQueryable(field);
     final copy = _copyWith(
@@ -914,8 +877,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   }
 
   /// Whether [field] can be aggregated numerically. Only declared numeric
-  /// kinds (int/real/bool/date) qualify: text and JSON fields would either
-  /// coerce silently (SUM→0.0) or leak a raw cast error (MIN/MAX→String).
+  /// kinds qualify: text/JSON would coerce silently or leak raw cast errors.
   bool _isNumericField(String field) {
     final f = _schema.fieldByName(field);
     if (f == null) return false;
@@ -976,12 +938,9 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   /// Compiled SQL + args, for tests and goldens.
   (String, List<Object?>) debugCompile() => _compile();
 
-  /// Compiles a typed plan for the web transport.
-  ///
-  /// The plan contains only compiler-owned SQL and bound arguments. It is not
-  /// an arbitrary raw-SQL escape hatch. [backward] flips the ORDER BY and
-  /// seeds the keyset predicate from the cursor's first-row (`pv`) tuple for
-  /// backward (previous-page) walks.
+  /// Compiles a typed plan for the web transport: only compiler-owned SQL
+  /// and bound arguments, never a raw-SQL escape hatch. [backward] flips the
+  /// ORDER BY and seeds the keyset predicate from the cursor's `pv` tuple.
   QueryPlan compilePlan(
       {int? limitOverride, String? cursor, bool backward = false}) {
     final query = cursor == null && !backward
@@ -1052,9 +1011,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
 
   QueryPlan _plan(String operation, String sql, List<Object?> args,
       {int? limit, List<String>? projection}) {
-    // Projection-aware decode columns mirror the native fetch path: only
-    // declared projected columns plus the keyset sort columns are unpacked.
-    // Projections touching undeclared extra keys keep full decode (SELECT *).
+    // Projection-aware decode columns mirror the native fetch path;
+    // projections touching undeclared extra keys keep full decode.
     final List<String>? decodeColumns;
     if (operation == 'query' && _select != null && _allProjectedDeclared()) {
       decodeColumns = <String>[
@@ -1081,10 +1039,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   }
 
   /// Creates the next bidirectional keyset cursor from the window's boundary
-  /// rows returned by the compiled-query worker path. [rowLast] is the last
-  /// row of the window in the query's declared order, [rowFirst] the first.
-  /// The payload carries both tuples, so the same string serves
-  /// [keysetAfter] and [keysetBefore].
+  /// rows (worker path). The payload carries both tuples, so the same string
+  /// serves [keysetAfter] and [keysetBefore].
   String cursorForCompiledRow(
           Map<String, Object?> rowLast, Map<String, Object?> rowFirst) =>
       _makeCursor(rowLast, rowFirst);

@@ -3,14 +3,64 @@ library;
 
 import '../../kernel/row_models.dart';
 
-enum SyncState { clean, dirty, inFlight, conflict, error, quarantine, blocked }
+/// Lifecycle state of one synced record's local replica.
+enum SyncState {
+  /// Matches the last confirmed remote state; nothing pending locally.
+  clean,
 
-enum AccessState { visible, hidden }
+  /// Local fields changed and not yet pushed.
+  dirty,
 
-enum OutboxKind { upsert, archive, restore }
+  /// A push for the record is currently running.
+  inFlight,
 
-enum OpQueueKind { fileUpload, fileRemove }
+  /// A push/pull conflict was escalated to `lp_conflicts`.
+  conflict,
 
+  /// The last sync step failed terminally (dead-lettered).
+  error,
+
+  /// A pulled payload could not be decoded or validated.
+  quarantine,
+
+  /// The record is blocked on an unresolved dependency op.
+  blocked,
+}
+
+/// Whether a record participates in the default query scope.
+enum AccessState {
+  /// Returned by normal reads and queries.
+  visible,
+
+  /// Excluded from normal reads (e.g. the remote deleted it).
+  hidden,
+}
+
+/// What an `lp_outbox` op does to the remote record.
+enum OutboxKind {
+  /// Create or update the remote record.
+  upsert,
+
+  /// Archive the remote record.
+  archive,
+
+  /// Restore a previously archived remote record.
+  restore,
+}
+
+/// What an `lp_op_queue` entry does for file bookkeeping.
+enum OpQueueKind {
+  /// Upload the referenced blob to the remote.
+  fileUpload,
+
+  /// Remove the referenced blob from the remote.
+  fileRemove,
+}
+
+/// DDL executed on every open that provisions the sync-layer tables
+/// (`lp_sync_row`, `lp_outbox`, `lp_op_queue`, `lp_conflicts`,
+/// `lp_dead_letter`, `lp_sync_state`, and the blob/file-ref tables) plus
+/// their indexes.
 const List<String> syncSystemDdl = [
   '''CREATE TABLE IF NOT EXISTS lp_sync_row (
   store         TEXT NOT NULL,
@@ -31,12 +81,9 @@ const List<String> syncSystemDdl = [
   schema_ver    INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (store, record_id)
 )''',
-  'CREATE INDEX IF NOT EXISTS ix_syncrow_dirty ON lp_sync_row (next_retry_at) '
-      "WHERE sync_state IN ('dirty','in_flight','conflict')",
-  'CREATE INDEX IF NOT EXISTS ix_syncrow_attention ON lp_sync_row (store, sync_state) '
-      "WHERE sync_state IN ('conflict','error','quarantine','blocked')",
-  'CREATE INDEX IF NOT EXISTS ix_syncrow_hidden ON lp_sync_row (store, record_id) '
-      "WHERE access_state = 'hidden'",
+  "CREATE INDEX IF NOT EXISTS ix_syncrow_dirty ON lp_sync_row (next_retry_at) WHERE sync_state IN ('dirty','in_flight','conflict')",
+  "CREATE INDEX IF NOT EXISTS ix_syncrow_attention ON lp_sync_row (store, sync_state) WHERE sync_state IN ('conflict','error','quarantine','blocked')",
+  "CREATE INDEX IF NOT EXISTS ix_syncrow_hidden ON lp_sync_row (store, record_id) WHERE access_state = 'hidden'",
   '''CREATE TABLE IF NOT EXISTS lp_outbox (
   store      TEXT NOT NULL,
   record_id  TEXT NOT NULL,
@@ -386,7 +433,11 @@ String quotedColumnList(List<String> columns) =>
 /// `?, ?, …` placeholders for [count] columns.
 String placeholders(int count) => List.filled(count, '?').join(', ');
 
+/// {@template localpocket.sync_row_state}
+/// Decoded row of `lp_sync_row` — the sync bookkeeping for one record.
+/// {@endtemplate}
 class SyncRowState {
+  /// {@macro localpocket.sync_row_state}
   const SyncRowState({
     required this.store,
     required this.recordId,
@@ -406,6 +457,7 @@ class SyncRowState {
     this.schemaVer = 1,
   });
 
+  /// Parses a row of `lp_sync_row`; corrupt rows raise a typed [StorageError].
   factory SyncRowState.fromRow(Map<String, Object?> row) => parseRowModel(
       'lp_sync_row',
       () => SyncRowState(
@@ -427,25 +479,61 @@ class SyncRowState {
             lastError: row['last_error'] as String?,
             schemaVer: (row['schema_ver'] as int?) ?? 1,
           ));
+
+  /// Store name the row belongs to.
   final String store;
+
+  /// Record id the row tracks.
   final String recordId;
+
+  /// Remote `updated` timestamp of the last applied change.
   final String? remoteUpdated;
+
+  /// Epoch-ms timestamp the record was last seen remotely.
   final int? lastSeenAt;
+
+  /// Remote `updated` of the local base version (null if never remote).
   final String? baseUpdated;
+
+  /// Hash of the base payload.
   final String? baseHash;
+
+  /// Canonical JSON of the base payload.
   final String? baseJson;
+
+  /// Current lifecycle state.
   final SyncState syncState;
+
+  /// Fields changed locally and not yet pushed.
   final List<String> dirtyFields;
+
+  /// Monotonic local revision counter.
   final int localRev;
+
+  /// Query-scope visibility.
   final AccessState accessState;
+
+  /// Outbox op mirroring the pending work, if any.
   final String? opId;
+
+  /// Push attempts since the last success.
   final int attemptCount;
+
+  /// Epoch-ms deadline of the current backoff.
   final int nextRetryAt;
+
+  /// Description of the most recent failure.
   final String? lastError;
+
+  /// Store schema version the row was written under.
   final int schemaVer;
 }
 
+/// {@template localpocket.outbox_op}
+/// Decoded row of `lp_outbox` — one pending (or settled) remote mutation.
+/// {@endtemplate}
 class OutboxOp {
+  /// {@macro localpocket.outbox_op}
   const OutboxOp({
     required this.store,
     required this.recordId,
@@ -460,6 +548,7 @@ class OutboxOp {
     this.dependsOnOp,
   });
 
+  /// Parses a row of `lp_outbox`; corrupt rows raise a typed [StorageError].
   factory OutboxOp.fromRow(Map<String, Object?> row) => parseRowModel(
       'lp_outbox',
       () => OutboxOp(
@@ -475,20 +564,46 @@ class OutboxOp {
             updatedAt: row['updated_at']! as int,
             dependsOnOp: row['depends_on_op'] as String?,
           ));
+
+  /// Store the op applies to.
   final String store;
+
+  /// Record the op applies to.
   final String recordId;
+
+  /// What the op does remotely.
   final OutboxKind kind;
+
+  /// Canonical JSON payload of the full record.
   final String payloadJson;
+
+  /// Remote `updated` the op was prepared against (null for creates).
   final String? baseUpdated;
+
+  /// Hash of the base payload at enqueue time.
   final String baseHash;
+
+  /// Fields changed by the mutation.
   final List<String> dirtyFields;
+
+  /// Globally unique op id.
   final String opId;
+
+  /// Epoch-ms creation stamp.
   final int createdAt;
+
+  /// Epoch-ms last-update stamp.
   final int updatedAt;
+
+  /// Op that must settle first (e.g. the record's create op).
   final String? dependsOnOp;
 }
 
+/// {@template localpocket.op_queue_row}
+/// Decoded row of `lp_op_queue` — one queued file-bookkeeping operation.
+/// {@endtemplate}
 class OpQueueRow {
+  /// {@macro localpocket.op_queue_row}
   const OpQueueRow({
     required this.seq,
     required this.opId,
@@ -504,6 +619,7 @@ class OpQueueRow {
     this.dependsOnOp,
   });
 
+  /// Parses a row of `lp_op_queue`; corrupt rows raise a typed [StorageError].
   factory OpQueueRow.fromRow(Map<String, Object?> row) => parseRowModel(
       'lp_op_queue',
       () => OpQueueRow(
@@ -520,17 +636,41 @@ class OpQueueRow {
             dependsOnOp: row['depends_on_op'] as String?,
             createdAt: row['created_at']! as int,
           ));
+
+  /// Queue sequence number (drain order within a retry deadline).
   final int seq;
+
+  /// Globally unique op id.
   final String opId;
+
+  /// Store the op applies to.
   final String store;
+
+  /// Record the op applies to.
   final String recordId;
+
+  /// What the op does for file bookkeeping.
   final OpQueueKind kind;
+
+  /// Canonical JSON payload describing the op.
   final String payloadJson;
+
+  /// Queue state (`pending` or a terminal state).
   final String state;
+
+  /// Attempts since the last success.
   final int attemptCount;
+
+  /// Epoch-ms deadline of the current backoff.
   final int nextRetryAt;
+
+  /// Description of the most recent failure.
   final String? lastError;
+
+  /// Op that must settle first.
   final String? dependsOnOp;
+
+  /// Epoch-ms creation stamp.
   final int createdAt;
 }
 

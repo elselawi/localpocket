@@ -2,7 +2,6 @@
 /// and PocketBase-compatible timestamp helpers.
 library;
 
-
 /// PocketBase's hard per-page ceiling: a list `perPage` above this is
 /// rejected with a 400 (and an absent `perPage` defaults to 30). The engine
 /// clamps every page size to this so a configured `maxPage` above the cap
@@ -114,9 +113,8 @@ class BatchFailedError extends SyncError {
 
 /// {@template localpocket.remote_version_conflict}
 /// A write was rejected because the record's remote version moved since the
-/// client's optimistic-concurrency read (the GET before a PATCH, or the batch
-/// preflight GET). The pusher re-fetches, re-merges against [current] and
-/// retries instead of blindly overwriting the concurrent edit.
+/// client's optimistic-concurrency read. The pusher re-fetches, re-merges
+/// against [current], and retries instead of overwriting the concurrent edit.
 /// {@endtemplate}
 class RemoteVersionConflict extends SyncError {
   /// {@macro localpocket.remote_version_conflict}
@@ -288,7 +286,16 @@ class PushResult {
 }
 
 /// Kind of event signaled by a backend realtime hint.
-enum BackendHintKind { changed, deleted, authChanged }
+enum BackendHintKind {
+  /// A record changed remotely (fast path / pull).
+  changed,
+
+  /// A record was deleted remotely (pull; the local copy is hidden).
+  deleted,
+
+  /// The auth token was rejected; the caller must provide a fresh one.
+  authChanged,
+}
 
 /// {@template localpocket.backend_hint}
 /// Backend event hint that triggers pull or fast-path processing.
@@ -321,10 +328,9 @@ final RegExp _pbTimestampRe =
 
 /// Parses a PocketBase UTC timestamp (`YYYY-MM-DD HH:MM:SS.mmmZ`).
 ///
-/// The regex is anchored, so trailing garbage, extra text, timezone suffixes
-/// and missing zero padding are all rejected. Out-of-range months/days/times
-/// are rejected too (rather than silently normalized by `DateTime.utc`).
-/// Every failure raises a typed [ProtocolError].
+/// Anchored regex, so trailing garbage and missing padding are rejected, as
+/// are out-of-range values (not silently normalized by `DateTime.utc`).
+/// Failure raises a typed [ProtocolError].
 DateTime pbTimestampToDateTime(String s) {
   final m = _pbTimestampRe.firstMatch(s);
   if (m == null) throw ProtocolError('Bad timestamp "$s"');
@@ -398,10 +404,8 @@ abstract class SyncBackend {
 
   /// Creates a remote record with the client-supplied ID.
   ///
-  /// The client may retry this call after a lost response. Implementations
-  /// MUST treat the client-supplied [id] as an idempotency key: a retry with
-  /// the same [id] either creates the record once or fails with
-  /// [DuplicateIdError] when it already exists — never a second copy.
+  /// Safe to retry after a lost response: [id] is an idempotency key — a
+  /// retry creates once or fails with [DuplicateIdError], never a second copy.
   Future<RemoteRecord> createRecord({
     required String id,
     required String store,
@@ -410,18 +414,11 @@ abstract class SyncBackend {
 
   /// Updates a remote record after the pusher's concurrency check.
   ///
-  /// [baseUpdated] is the remote version the write is based on (captured by
-  /// the pusher's GET). A backend that enforces optimistic concurrency may
-  /// reject the write with [RemoteVersionConflict] when the remote moved past
-  /// that version; backends without conditional writes (e.g. PocketBase) may
-  /// ignore it.
-  ///
-  /// Retry contract: the client may retry this call after a lost response.
-  /// [dataJson] is the FULL desired record state (never a diff), so
-  /// re-applying it while the remote record still matches [baseUpdated] is
-  /// idempotent. Implementations SHOULD reject the write with
-  /// [RemoteVersionConflict] when the remote moved past [baseUpdated] so the
-  /// pusher re-merges instead of overwriting a concurrent edit.
+  /// [baseUpdated] is the remote version the write is based on; an OCC-enforcing
+  /// backend may reject with [RemoteVersionConflict] when the remote moved
+  /// past it. Safe to retry after a lost response: [dataJson] is the FULL
+  /// desired state (never a diff), so re-applying against the same version
+  /// is idempotent.
   Future<RemoteRecord> updateRecord({
     required String id,
     required String dataJson,
@@ -489,20 +486,13 @@ abstract class SyncBackend {
   /// fails as a unit.
   ///
   /// Idempotency contract (REQUIRED — the binary-split retry depends on it):
-  /// implementations MUST treat ([scopeId], [PushOp.opId]) as an idempotency
-  /// key. A network failure after the server committed a batch but before the
-  /// client received the response must be safe: retrying the same [opId]
-  /// returns the original result (or an equivalent no-op success) and never
-  /// applies the mutation twice or fabricates a conflict.
+  /// ([scopeId], [PushOp.opId]) is an idempotency key; retrying after a lost
+  /// response returns the original result and never applies twice.
   ///
-  /// Response contract:
-  /// - Every returned [PushResult.opId] MUST reference an op in [ops] and be
-  ///   unique. Violations raise [ProtocolError]; the engine retries the batch
-  ///   per-op with backoff (nothing is settled or dead-lettered).
-  /// - Partial responses ARE allowed and explicitly defined: the engine
-  ///   settles exactly the ops the response names and leaves the unnamed ops
-  ///   pending for the next cycle. Returning a subset therefore declares that
-  ///   only the named ops were processed.
+  /// Response contract: every [PushResult.opId] MUST reference an op in
+  /// [ops] and be unique (violations raise [ProtocolError]). Partial
+  /// responses are allowed: the engine settles exactly the named ops and
+  /// leaves the rest pending.
   Future<List<PushResult>> pushBatch(List<PushOp> ops);
 
   /// Realtime doorbell; may be an empty stream (polling fallback).
@@ -515,8 +505,89 @@ abstract interface class SyncTokenSource {
   /// The current bearer value (empty when the caller has none).
   Future<String> currentToken();
 
-  /// Identity used for sync-scoped bookkeeping.
-  String get identity;
+  /// Identity used for sync-scoped bookkeeping, or `null` when the source
+  /// cannot expose one. Backends deriving their sync scope from it MUST fail
+  /// loudly on null — never share one scope across accounts.
+  String? get identity;
+}
+
+/// The sync-boundary token vocabulary.
+///
+/// {@template localpocket.token}
+/// A bearer token with an optional expiry. [expiresAt] may be null when the
+/// token has no server-declared lifetime.
+/// {@endtemplate}
+class Token {
+  /// Creates a bearer token value with optional lifetime metadata.
+  ///
+  /// {@macro localpocket.token}
+  Token(this.value, {this.expiresAt, DateTime? issuedAt})
+      : issuedAt = issuedAt ?? DateTime.now();
+
+  /// Bearer token value.
+  final String value;
+
+  /// Expiration time, when known.
+  final DateTime? expiresAt;
+
+  /// When the token was issued (defaults to now); used to compute the
+  /// remaining-fraction for proactive refresh.
+  final DateTime issuedAt;
+
+  /// Whether the token has passed its expiration time.
+  bool get isExpired => expiresAt != null && DateTime.now().isAfter(expiresAt!);
+
+  /// 1.0 (fresh) → 0.0 (expired). Used for the 75 % proactive refresh rule.
+  double get remainingFraction {
+    final exp = expiresAt;
+    if (exp == null) return 1.0;
+    final total = exp.difference(issuedAt).inMilliseconds;
+    if (total <= 0) return 0.0;
+    final left = exp.difference(DateTime.now()).inMilliseconds;
+    return (left < 0 ? 0.0 : left / total).clamp(0.0, 1.0);
+  }
+
+  /// Refresh when 75 % of the token lifetime has elapsed.
+  bool get needsProactiveRefresh => remainingFraction < 0.25;
+}
+
+/// Supplies and refreshes authentication tokens for a synchronization
+/// backend. This is the vocabulary of the sync boundary — concrete backends
+/// implement it; the facade consumes it; the runtime owns the bridging
+/// onto [SyncTokenSource].
+///
+/// Implementations normally delegate to platform-secure storage and the
+/// application's auth service:
+///
+/// ```dart
+/// class MyTokens implements TokenProvider {
+///   @override
+///   Future<Token> currentToken() => secureStorage.readToken();
+///
+///   @override
+///   Future<Token> refreshToken(Token current) => authApi.refresh(current);
+///
+///   @override
+///   String get identity => 'user-123';
+/// }
+/// ```
+///
+/// Tokens are never persisted by LocalPocket in SQLite, logs, or outbox
+/// payloads.
+abstract class TokenProvider {
+  /// The currently stored token (may be expired; the caller refreshes).
+  Future<Token> currentToken();
+
+  /// Exchange [current] (expired or near-expiry) for a fresh token.
+  Future<Token> refreshToken(Token current);
+
+  /// The stable identity the token belongs to (used for the sync scope id).
+  ///
+  /// Must be stable across refreshes and account switches — token values
+  /// rotate, so return a stable account id (e.g. `'user-123'`), never a
+  /// token fingerprint. Defaults to `null`; sync start then fails instead
+  /// of sharing one scope across all accounts.
+  String? get identity => null;
 }
 
 /// Builds a [SyncBackend] for the runtime's sync start command and releases

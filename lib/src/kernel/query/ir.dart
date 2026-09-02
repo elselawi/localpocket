@@ -6,6 +6,14 @@
 /// against and stamped with the IR format version. Only the kernel compiles
 /// the IR further (into SQL, cursors, and page facts); nothing outside the
 /// kernel may interpret it.
+///
+/// Coupling note (an honest statement of posture): the kernel and the wire
+/// contract are deliberately ONE core-vocabulary layer. [QueryIR] carries the
+/// wire's `QuerySpecData` as its payload rather than mirroring it into
+/// kernel-own field structs — the `queryIrVersion` stamp and the schema
+/// fingerprint guard the lowering, but the IR payload cannot evolve
+/// independently of the wire format. Kernel enums therefore cross into the
+/// contract and vice versa; this is a documented trade-off, not an accident.
 library;
 
 import '../../contract/contract.dart';
@@ -33,7 +41,8 @@ final class QueryIR {
       throw ArgumentError.value(store, 'store', 'must not be empty');
     }
     if (spec.limit != null && spec.limit! < 0) {
-      throw ArgumentError.value(spec.limit, 'spec.limit', 'must not be negative');
+      throw ArgumentError.value(
+          spec.limit, 'spec.limit', 'must not be negative');
     }
     return QueryIR._(
       store: store,
@@ -57,7 +66,6 @@ final class QueryIR {
   final String schemaFingerprint;
 
   @override
-  String toString() =>
-      'QueryIR(v$version, $store, limit: ${spec.limit}, '
+  String toString() => 'QueryIR(v$version, $store, limit: ${spec.limit}, '
       'backward: ${spec.backward})';
 }

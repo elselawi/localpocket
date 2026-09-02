@@ -39,12 +39,9 @@ class Tx {
   /// The database executor scoped to this transaction.
   DatabaseExecutor get executor => _executor;
 
-  /// The explicit execution context for this transaction.
-  ///
-  /// Every operation legal inside a transaction routes through this context:
-  /// the transaction executor — never the outer database executor. Queries
-  /// and searches created from this handle (`tx.collection(...).query()`,
-  /// `.search()`) carry this context with them.
+  /// The explicit execution context for this transaction: the transaction
+  /// executor, never the outer database. Queries and searches created from
+  /// this handle carry it with them.
   ExecutionContext get context => ExecutionContext.transaction(
         executor: _executor,
         readOnly: readOnly,
@@ -78,10 +75,9 @@ class Tx {
     _recordEvents.add(event);
   }
 
-  /// Whether any record-event listener is currently attached. Mutation paths
-  /// consult this BEFORE building [RecordChangeEvent] objects (old/new maps,
-  /// changed-field sets) so an unwatched bulk write allocates nothing for
-  /// notifications.
+  /// Whether any record-event listener is attached. Mutation paths consult
+  /// this BEFORE building [RecordChangeEvent] objects so an unwatched bulk
+  /// write allocates nothing for notifications.
   bool get wantsRecordEvents => _pocket.changeBus.hasEventListeners;
 
   /// Scoped collection access bound to this transaction. The returned
@@ -107,8 +103,8 @@ class Tx {
     Future<T> Function(Tx tx) action,
   ) async {
     await _executor.execute('SAVEPOINT $name');
-    // Rolled-back savepoint work must not leak post-commit notifications or
-    // rows-written accounting: snapshot both before running the nested body.
+    // Rolled-back savepoint work must not leak notifications or rows-written
+    // accounting: snapshot both before the nested body.
     final changeCountBefore = _changes.length;
     final eventCountBefore = _recordEvents.length;
     final rowsBefore = _pocket.perf.rowsWritten;
@@ -127,8 +123,8 @@ class Tx {
         await _executor.execute('ROLLBACK TO $name');
         await _executor.execute('RELEASE $name');
       } catch (_) {}
-      // Drop any ChangeSet and RecordChangeEvent buffered by the rolled-back savepoint and revert
-      // the rows-written counter to its pre-savepoint value.
+      // Drop buffered ChangeSets/RecordChangeEvents from the rolled-back
+      // savepoint and revert the rows-written counter.
       if (_changes.length > changeCountBefore) {
         _changes.removeRange(changeCountBefore, _changes.length);
       }

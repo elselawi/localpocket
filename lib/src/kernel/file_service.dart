@@ -106,17 +106,9 @@ class LocalPocketFiles {
     return bs;
   }
 
-  /// Whether the configured blob store persists bytes durably across
-  /// process/worker restarts.
-  ///
-  /// `false` when no [BlobStore] is configured or when blobs are held only in
-  /// volatile memory — for example on web when OPFS is unavailable and
-  /// [WebBlobStore] degrades to its in-memory fallback. In that case SQLite
-  /// metadata survives but the attachment bytes vanish on reload, so
-  /// attachments are effectively ephemeral.
-  ///
-  /// Apps that care about durability should check this before attaching files
-  /// (or rely on [attach]'s refusal unless `allowVolatileBlobs` is set).
+  /// Whether the configured blob store persists bytes across restarts.
+  /// `false` when no [BlobStore] is configured or the store is volatile
+  /// (SQLite metadata survives, but attachment bytes vanish on reload).
   Future<bool> get isBlobStorageDurable async {
     final bs = blobStore;
     if (bs == null) return false;
@@ -155,18 +147,14 @@ class LocalPocketFiles {
 
   /// Attaches a file to a record.
   ///
-  /// The input stream is hashed and stored before a durable file-reference and
-  /// upload operation are created. The record-first dependency ensures the
-  /// owning record is synchronized before its attachment.
-  ///
-  /// Streams bytes into BlobStore, records `lp_blobs` and `lp_file_refs` (pending_upload),
-  /// and enqueues a `file_upload` op in `lp_op_queue`.
+  /// The input stream is hashed and stored in the BlobStore, then a durable
+  /// file ref (`pending_upload`) and a `file_upload` op are created; the op
+  /// depends on the record's create op so the record syncs first.
   ///
   /// Throws a [StateError] before any bytes are stored when the blob store is
   /// volatile ([isBlobStorageDurable] is `false`) unless [allowVolatileBlobs]
-  /// is `true`. A volatile store keeps the bytes only in memory — they
-  /// disappear on restart even though the file reference survives — so this
-  /// guard makes the loss an explicit choice instead of a silent surprise.
+  /// is `true` — volatile bytes vanish on restart, so the loss must be an
+  /// explicit choice.
   Future<FileRef> attach({
     required String store,
     required String recordId,
@@ -288,8 +276,7 @@ class LocalPocketFiles {
 
   /// Opens a byte stream for a local file reference.
   ///
-  /// If the reference is `remote_only`, synchronize or download it before
-  /// opening. The returned stream is suitable for incremental consumption:
+  /// The returned stream is suitable for incremental consumption:
   ///
   /// ```dart
   /// final stream = await db.files.open(
@@ -302,7 +289,8 @@ class LocalPocketFiles {
   /// }
   /// ```
   ///
-  /// If `remote_only`, the caller must download it first via sync or direct pull.
+  /// Throws for `remote_only` refs; download them via sync or a direct pull
+  /// first.
   Future<Stream<List<int>>> open({
     required String store,
     required String recordId,
@@ -355,9 +343,8 @@ class LocalPocketFiles {
       final now = _pocket.now();
 
       if (ref.state == 'pending_upload' && ref.remoteName == null) {
-        // Was never uploaded remotely -> vanish immediately: drop the ref,
-        // release the blob, and neutralize the pending upload op so a later
-        // file-lane drain can never upload it.
+        // Never uploaded remotely -> vanish immediately: drop the ref,
+        // release the blob, and neutralize the pending upload op.
         await exec.delete('lp_file_refs',
             where: 'ref_id = ?', whereArgs: [ref.refId]);
         await exec.execute(
@@ -400,13 +387,10 @@ class LocalPocketFiles {
 
   /// Garbage collection.
   ///
-  /// - Temp files in BlobStore > [tmpGrace] -> delete.
+  /// - Temp files in BlobStore older than [tmpGrace] -> delete.
   /// - Orphaned file refs whose record disappeared -> clean up.
-  /// - Orphaned blobs (on disk, NO `lp_blobs` row — crash between `attach`'s
-  ///   blob write and the metadata transaction) older than [blobGrace], aged
-  ///   by the stored file's mtime -> delete from disk.
-  /// - Blobs with `refcount == 0` and `last_access <= cutoff` -> delete from
-  ///   BlobStore and SQLite.
+  /// - Orphaned blobs (no `lp_blobs` row) older than [blobGrace] -> delete.
+  /// - Blobs with `refcount == 0` and `last_access <= cutoff` -> delete.
   Future<int> gc({
     Duration blobGrace = const Duration(days: 7),
     Duration tmpGrace = const Duration(hours: 24),
@@ -453,11 +437,10 @@ class LocalPocketFiles {
       }
     });
 
-    // 3. Reconcile disk against metadata (orphan healing): delete blobs that
-    // exist in the BlobStore with NO `lp_blobs` metadata row (left behind by a
-    // crash between `attach`'s `bs.put` and the metadata transaction). Only
-    // orphans older than the grace cutoff are collected so an in-flight attach
-    // is never raced.
+    // 3. Orphan healing: delete BlobStore blobs with NO `lp_blobs` metadata
+    // row (a crash between `attach`'s put and the metadata transaction).
+    // Only orphans past the grace cutoff are collected, never an in-flight
+    // attach.
     if (bs != null) {
       try {
         final onDisk = await bs.listHashes();
@@ -482,8 +465,8 @@ class LocalPocketFiles {
           for (final hash in onDisk) {
             if (known.contains(hash)) continue;
             try {
-              // Age by the store's own mtime so a blob written moments before
-              // a crash survives at least one grace period.
+              // Age by the store's own mtime so a blob written moments
+              // before a crash survives one grace period.
               final mtime = await bs.modifiedAt(hash);
               if (mtime == null || mtime > cutoff) continue;
               await bs.delete(hash);

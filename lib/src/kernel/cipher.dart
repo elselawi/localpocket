@@ -77,12 +77,8 @@ abstract class FieldCipher {
 
   /// Encrypts [plaintext] asynchronously.
   ///
-  /// Runs inline on the calling isolate and returns exactly what [encrypt]
-  /// returns. [isolateThresholdBytes] is accepted for interface compatibility
-  /// and deliberately ignored: the async shape exists for call-site
-  /// ergonomics and as a hook for a future isolate offload, which is not
-  /// implemented today (one-shot isolates are unavailable under dart2js, so
-  /// [AesGcmFieldCipher] keeps this inline everywhere).
+  /// Runs inline; [isolateThresholdBytes] is accepted for interface
+  /// compatibility and ignored (no isolate offload exists today).
   Future<List<int>> encryptAsync(
     List<int> plaintext, {
     List<int> aad = const [],
@@ -90,11 +86,7 @@ abstract class FieldCipher {
   }) async =>
       encrypt(plaintext, aad: aad);
 
-  /// Decrypts [ciphertext] asynchronously.
-  ///
-  /// Runs inline on the calling isolate and returns exactly what [decrypt]
-  /// returns. [isolateThresholdBytes] is accepted for interface compatibility
-  /// and deliberately ignored; see [encryptAsync] for the rationale.
+  /// Decrypts [ciphertext] asynchronously; runs inline (see [encryptAsync]).
   Future<List<int>> decryptAsync(
     List<int> ciphertext, {
     List<int> aad = const [],
@@ -102,13 +94,9 @@ abstract class FieldCipher {
   }) async =>
       decrypt(ciphertext, aad: aad);
 
-  /// Encrypts a batch of plaintexts asynchronously.
-  ///
-  /// Runs inline on the calling isolate, applying [encrypt] to each element
-  /// with the same [aad]. A failure in any element surfaces as an error on the
-  /// returned future (never a synchronous throw). [isolateThreshold] is
-  /// accepted for interface compatibility and deliberately ignored; see
-  /// [encryptAsync] for the rationale.
+  /// Encrypts a batch of plaintexts asynchronously, applying [encrypt] to
+  /// each element with the same [aad]. Failures surface on the returned
+  /// future, never as a synchronous throw.
   Future<List<List<int>>> batchEncrypt(
     List<List<int>> plaintexts, {
     List<int> aad = const [],
@@ -116,13 +104,9 @@ abstract class FieldCipher {
   }) async =>
       [for (final plaintext in plaintexts) encrypt(plaintext, aad: aad)];
 
-  /// Decrypts a batch of ciphertexts asynchronously.
-  ///
-  /// Runs inline on the calling isolate, applying [decrypt] to each element
-  /// with the same [aad]. A failure in any element surfaces as an error on the
-  /// returned future (never a synchronous throw). [isolateThreshold] is
-  /// accepted for interface compatibility and deliberately ignored; see
-  /// [encryptAsync] for the rationale.
+  /// Decrypts a batch of ciphertexts asynchronously, applying [decrypt] to
+  /// each element with the same [aad]. Failures surface on the returned
+  /// future, never as a synchronous throw.
   Future<List<List<int>>> batchDecrypt(
     List<List<int>> ciphertexts, {
     List<int> aad = const [],
@@ -156,27 +140,19 @@ class SingleKeyCryptoProvider implements CryptoProvider {
 /// {@template localpocket.aes_gcm_field_cipher}
 /// Standard AES-256-GCM field cipher with a fresh 12-byte random IV per value.
 ///
-/// Encrypts through `package:cryptography`'s audited pure-Dart AES-256-GCM
-/// engine ([DartAesGcm]) on every platform. The engine is constructed
-/// DIRECTLY — never through `Cryptography.instance`/`AesGcm.with*Bits()`:
-/// those factories resolve the platform cryptography instance, and the
-/// browser resolution probes `window.isSecureContext`, which crashes inside
-/// a dedicated worker (the only web consumer of this class — the worker owns
-/// the database engine). Web Crypto is unusable here regardless: it has no
-/// synchronous API and this codec is synchronous.
-///
-/// Output is the versioned v1 format documented at the top of this library:
-/// `0x01 ‖ nonce(12) ‖ ciphertext ‖ tag(16)`. The codec binds each value to
-/// `store \x00 field \x00 recordId` via [fieldAad].
+/// Uses [DartAesGcm] constructed DIRECTLY — never `Cryptography.instance`:
+/// its browser resolution probes `window.isSecureContext`, which crashes in
+/// a dedicated worker (the web consumer of this class). Output is the
+/// versioned v1 format documented at the top of this library:
+/// `0x01 ‖ nonce(12) ‖ ciphertext ‖ tag(16)`, AAD-bound via [fieldAad].
 /// {@endtemplate}
 class AesGcmFieldCipher extends FieldCipher {
   /// {@macro localpocket.aes_gcm_field_cipher}
   AesGcmFieldCipher(List<int> keyBytes, {Random? random})
       : _key = _validatedKey(keyBytes),
         _random = random ?? Random.secure(),
-        // 32-byte key, 12-byte nonce: identical engine to the package's
-        // `AesGcm.with256bits()` path without touching Cryptography.instance
-        // (see the class doc for why that matters in web workers).
+        // Same engine as AesGcm.with256bits() without touching
+        // Cryptography.instance (see the class doc).
         _engine = DartAesGcm(secretKeyLength: 32, nonceLength: 12),
         _secretKey = SecretKeyData(_validatedKey(keyBytes),
             overwriteWhenDestroyed: true);
