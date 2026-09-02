@@ -30,6 +30,7 @@ void main() {
             'api_snapshot',
             'snapshot_clean',
             'api_contract_gate',
+            'api_inventory',
             'raw_api_gate',
             'dependency_bounds',
             'docs_examples',

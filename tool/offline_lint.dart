@@ -6,22 +6,24 @@ import 'find_repo_root.dart';
 ///
 /// Rules:
 /// 1. `dart:io` leaking into web-compatible libraries.
-///    - `lib/localpocket.dart`, `lib/typed.dart`, and everything under
-///      `lib/src/kernel/`, `lib/src/kernel/sync/`, and `lib/src/typed/` must never
-///      import `dart:io` or `package:http`.
-///    - `native_blob_store.dart` and `native_backup_file.dart` are the only
-///      files allowed to import `dart:io` — the designated platform-I/O home
-///      in the files layer (see `test/core/layering_test.dart`).
+///    - `lib/localpocket.dart` and everything under `lib/src/kernel/` (including
+///      `lib/src/kernel/sync/` and `lib/src/kernel/files/`) must never import
+///      `dart:io` or `package:http`.
+///    - `lib/src/platform/native/blob_store.dart` and
+///      `lib/src/platform/native/backup_store.dart` are the only files allowed
+///      to import `dart:io` — the designated platform-I/O home (see
+///      `test/core/layering_test.dart`).
 /// 2. `lib/` must not contain any `print(` statements.
 /// 3. Layering rules:
-///    - `lib/src/kernel/` must never import from `lib/src/kernel/sync/`, `lib/src/adapters/pocketbase/`, or `lib/src/files/`.
-///    - `lib/src/kernel/sync/` must never import from `lib/src/adapters/pocketbase/`.
-///    - `lib/src/typed/` (and `lib/typed.dart`) must never import from
-///      `lib/src/adapters/pocketbase/` or `package:localpocket/pocketbase.dart` — the
-///      typed layer imports only the public core surface.
+///    - `lib/src/kernel/` must never import from `lib/src/adapters/pocketbase/`.
+///    - `lib/src/kernel/sync/` and `lib/src/kernel/files/` must never import
+///      from `lib/src/adapters/pocketbase/`.
 ///    - `lib/localpocket.dart` is the composition root: it may EXPORT the
-///      pocketbase barrel (the single-import requirement) but must never
+///      pocketbase surface (the single-import requirement) but must never
 ///      IMPORT pocketbase internals.
+/// 4. No web SDK imports (`dart:html`, `dart:js`, `dart:js_interop`,
+///    `package:web`) outside `lib/src/platform/` — the browser-page and worker
+///    concerns live only in the platform layer.
 void main(List<String> args) {
   final root = findRepoRoot();
   final libDir = Directory(p.join(root.path, 'lib'));
@@ -69,19 +71,24 @@ void main(List<String> args) {
         }
       }
 
-      // Layering: core/sync/files/typed cannot import pocketbase
+      // Layering: kernel (incl. sync/files) cannot import pocketbase
       if (relPath.startsWith('lib/src/kernel/') ||
-          relPath.startsWith('lib/src/kernel/sync/') ||
-          relPath.startsWith('lib/src/files/') ||
-          relPath.startsWith('lib/src/typed/') ||
-          relPath == 'lib/localpocket.dart' ||
-          relPath == 'lib/typed.dart' ||
-          relPath == 'lib/sync.dart') {
+          relPath == 'lib/localpocket.dart') {
         if (RegExp(r'''^\s*import\s+['"][^'"]*pocketbase/''').hasMatch(line) ||
             RegExp(r'''^\s*import\s+['"]package:localpocket/pocketbase\.dart['"]''')
                 .hasMatch(line)) {
           violations.add(
-              '$relPath:$lineNum: Layering violation: cannot import pocketbase from core/sync/files/typed.');
+              '$relPath:$lineNum: Layering violation: cannot import pocketbase from the kernel or the barrel.');
+        }
+      }
+
+      // Web SDK imports belong to the platform layer only.
+      if (RegExp(
+              r'''^\s*import\s+['"](dart:html|dart:js|dart:js_interop|dart:web_sql|package:web/)''')
+          .hasMatch(line)) {
+        if (!relPath.startsWith('lib/src/platform/')) {
+          violations.add(
+              '$relPath:$lineNum: Layering violation: web SDK imports are only allowed under lib/src/platform/.');
         }
       }
     }

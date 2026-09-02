@@ -12,11 +12,11 @@ void main(List<String> args) {
   final snapshotPath = p.join(root.path, 'tool', 'api_snapshot.txt');
   final update = args.contains('--update');
 
+  // The single curated public barrel. The auxiliary barrels (typed.dart,
+  // sync.dart, pocketbase.dart) were deleted at the Phase 9 barrel switch;
+  // they must stay deleted (see test/core/layering_test.dart).
   final entrypoints = [
     'lib/localpocket.dart',
-    'lib/pocketbase.dart',
-    'lib/sync.dart',
-    'lib/typed.dart'
   ];
   final buffer = StringBuffer();
   buffer.writeln('# LocalPocket Public API Snapshot');

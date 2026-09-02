@@ -169,6 +169,11 @@ List<ReleaseStep> buildReleaseSteps({
         argv: ['run', 'tool/api_contract_gate.dart', '--base=HEAD'],
       ),
       const ReleaseStep(
+        id: 'api_inventory',
+        label: 'Public API inventory gate (plan 14.1)',
+        argv: ['run', 'tool/api_surface_scanner.dart'],
+      ),
+      const ReleaseStep(
         id: 'raw_api_gate',
         label: 'Raw record-map API growth gate',
         argv: ['run', 'tool/raw_api_gate.dart'],
