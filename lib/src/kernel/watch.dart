@@ -97,7 +97,9 @@ class OneWatcher extends CoalescedWatcher<Map<String, Object?>?> {
 
   @override
   Future<Map<String, Object?>?> fetchSnapshot() async {
-    final rows = await pocket.db
+    // Watchers are root-scoped: the snapshot read runs through the explicit
+    // root execution context (plan Rule 5 — no direct outer-db access).
+    final rows = await pocket.kernel.executionContext.executor
         .query(_table.tableName, where: 'id = ?', whereArgs: [id], limit: 1);
     if (rows.isEmpty) return null;
     return decodeDbRow(

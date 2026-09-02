@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../../kernel/canonical_json.dart';
 import '../../kernel/change_bus.dart';
 import '../../kernel/codec.dart';
+import '../../kernel/database_adapter.dart';
 import '../../kernel/local_pocket.dart';
 import '../../kernel/row_models.dart';
 import 'merge.dart';
@@ -101,9 +102,13 @@ class Conflicts {
 
   final LocalPocket _pocket;
 
+  /// The explicit execution context executor (root context — conflict reads
+  /// always run on the outer database).
+  DatabaseExecutor get _ex => _pocket.kernel.executionContext.executor;
+
   /// Lists all currently open / unresolved conflicts in the database.
   Future<List<ConflictRecord>> listOpen({String? store}) async {
-    final rows = await _pocket.db.query(
+    final rows = await _ex.query(
       'lp_conflicts',
       where: store != null
           ? 'store = ? AND resolved_json IS NULL'
@@ -116,7 +121,7 @@ class Conflicts {
 
   /// Returns a specific conflict record for [store] and [id], or null if none.
   Future<ConflictRecord?> get(String store, String id) async {
-    final rows = await _pocket.db.query(
+    final rows = await _ex.query(
       'lp_conflicts',
       where: 'store = ? AND record_id = ?',
       whereArgs: [store, id],

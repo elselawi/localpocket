@@ -5,12 +5,12 @@ import 'database_adapter.dart';
 /// Every operation that can run inside a transaction receives one. A context
 /// is either the ROOT context (operations on the outer database executor) or a
 /// TRANSACTION context (operations bound to the transaction's executor). The
-/// outer executor can never be selected by an accidental fallback: a
-/// transaction context always carries its own executor.
+/// outer executor can never be selected by an accidental fallback: every
+/// context — root or transaction — carries its own executor, and a store
+/// obtained from a transaction permanently carries that context (plan Rule 5).
 final class ExecutionContext {
-  const ExecutionContext.root()
+  const ExecutionContext.root(this.executor)
       : kind = ExecutionContextKind.root,
-        executor = null,
         readOnly = false;
 
   const ExecutionContext.transaction({
@@ -21,9 +21,10 @@ final class ExecutionContext {
   /// The kind of this context.
   final ExecutionContextKind kind;
 
-  /// The executor this context's operations run through. Null only for the
-  /// root context (the service then uses the outer database executor).
-  final DatabaseExecutor? executor;
+  /// The executor this context's operations run through. Never null: a root
+  /// context carries the outer database executor, a transaction context the
+  /// transaction's executor.
+  final DatabaseExecutor executor;
 
   /// Whether mutations are rejected in this context.
   final bool readOnly;
@@ -34,9 +35,8 @@ final class ExecutionContext {
   /// Whether this context is bound to a transaction.
   bool get isTransaction => kind == ExecutionContextKind.transaction;
 
-  /// The executor to run queries through: the transaction executor when
-  /// bound, otherwise null (the caller falls back to the outer database).
-  DatabaseExecutor? get queryExecutor => executor;
+  /// The executor to run queries through.
+  DatabaseExecutor get queryExecutor => executor;
 }
 
 /// The two context kinds.

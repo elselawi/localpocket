@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:collection/collection.dart' show ListEquality;
 import 'package:meta/meta.dart';
 import 'database_adapter.dart';
+import 'execution_context.dart';
 import 'database_factory.dart';
 
 import 'capabilities.dart';
@@ -24,6 +25,7 @@ import 'system_tables.dart';
 import 'transaction.dart';
 import 'watch.dart';
 import 'write_queue.dart';
+import 'query/ir.dart';
 import 'query/query_builder/query_builder.dart';
 import 'query/query_builder/predicate_tree.dart';
 import 'query/search_builder/search_builder.dart';
@@ -33,6 +35,7 @@ import 'sync/outbox.dart';
 import 'sync/conflicts.dart';
 import 'sync/sync_tables.dart';
 import 'sync/sync_backend.dart' show SyncBackendFactory, SyncTokenSource;
+import 'files/attachment_field.dart';
 import 'files/blob_store.dart';
 import 'file_service.dart';
 import '../contract/contract.dart';
@@ -735,6 +738,9 @@ class KernelDatabase with ChangeBusAwareLP {
     return t;
   }
 
+  /// Returns the registered table for [name], or `null` when it is unknown.
+  StoreTable? tableOrNull(String name) => _tables[name];
+
   /// Names of all registered collections.
   ///
   /// This is useful when a sync engine must iterate every registered store.
@@ -746,7 +752,8 @@ class KernelDatabase with ChangeBusAwareLP {
   /// Inside a transaction, use `tx.collection(name)` instead.
   Collection collection(String name) {
     _guardOutsideTx();
-    return Collection.internal(this, requireTable(name));
+    return Collection.internal(this, requireTable(name),
+        context: kernel.executionContext);
   }
 
   /// Runs [action] in a serialized, single-writer transaction.
@@ -1205,9 +1212,9 @@ class _CommitMember {
   final completer = Completer<dynamic>();
 }
 
-/// Transitional alias: the public name `LocalPocket` previously referred to
-/// the concrete class above (and still does on the web via a separate
-/// facade). The final public facade becomes a distinct class over a
-/// private `RuntimeClient`; at that point this alias dies with the raw
-/// surface. All legacy raw/typed clients and tests keep compiling through it.
+/// Internal name for [KernelDatabase]: the concrete kernel database the
+/// runtimes drive — directly on native, through the worker on web. The
+/// PUBLIC name `LocalPocket` is the facade over the typed contract
+/// (`src/api/local_pocket.dart`); this alias is library-internal spelling
+/// sugar for the kernel services and tests, never exported.
 typedef LocalPocket = KernelDatabase;

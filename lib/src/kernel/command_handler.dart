@@ -130,7 +130,7 @@ class KernelCommandHandler implements CommandHandler {
           ),
         CountRequest(:final store, :final spec, :final session) => _withSession(
             session,
-            () => _query(store, spec, session).count(),
+            () => _query(_ir(store, spec), session).count(),
             CountResult.new,
           ),
         CountDistinctRequest(
@@ -141,7 +141,7 @@ class KernelCommandHandler implements CommandHandler {
         ) =>
           _withSession(
             session,
-            () => _query(store, spec, session).countDistinct(field),
+            () => _query(_ir(store, spec), session).countDistinct(field),
             CountResult.new,
           ),
         DistinctRequest(
@@ -152,12 +152,12 @@ class KernelCommandHandler implements CommandHandler {
         ) =>
           _withSession(
             session,
-            () => _query(store, spec, session).distinct(field),
+            () => _query(_ir(store, spec), session).distinct(field),
             DistinctResult.new,
           ),
         IdsRequest(:final store, :final spec, :final session) => _withSession(
             session,
-            () => _query(store, spec, session).ids(),
+            () => _query(_ir(store, spec), session).ids(),
             IdsResult.new,
           ),
         AggregateRequest(
@@ -170,17 +170,17 @@ class KernelCommandHandler implements CommandHandler {
           _withSession(
             session,
             () => switch (fn) {
-              AggregateFn.sum => _query(store, spec, session).sum(field),
-              AggregateFn.avg => _query(store, spec, session).avg(field),
-              AggregateFn.min => _query(store, spec, session).min(field),
-              AggregateFn.max => _query(store, spec, session).max(field),
+              AggregateFn.sum => _query(_ir(store, spec), session).sum(field),
+              AggregateFn.avg => _query(_ir(store, spec), session).avg(field),
+              AggregateFn.min => _query(_ir(store, spec), session).min(field),
+              AggregateFn.max => _query(_ir(store, spec), session).max(field),
             },
             AggregateResult.new,
           ),
         ExplainRequest(:final store, :final spec, :final session) =>
           _withSession(
             session,
-            () => _query(store, spec, session).explain(),
+            () => _query(_ir(store, spec), session).explain(),
             ExplainResult.new,
           ),
         SearchRequest(:final store, :final spec, :final session) => _search(
@@ -284,6 +284,7 @@ class KernelCommandHandler implements CommandHandler {
             stream,
             bytes,
           ),
+        FileCloseRequest(:final stream) => _fileClose(stream),
         FileRemoveRequest(
           :final store,
           :final recordId,
@@ -386,14 +387,17 @@ class KernelCommandHandler implements CommandHandler {
     final table = context.database.requireTable(store);
     if (session != null) {
       final tx = _sessionExecutor(session);
-      return Collection.internal(
-        context.database,
-        table,
-        exec: tx,
-        tx: _requireSession(session).tx,
-      );
+      final sessionHandle = _requireSession(session);
+    return Collection.internal(
+      context.database,
+      table,
+      context: ExecutionContext.transaction(
+          executor: tx, readOnly: sessionHandle.tx?.readOnly ?? false),
+      tx: sessionHandle.tx,
+    );
     }
-    return Collection.internal(context.database, table);
+    return Collection.internal(context.database, table,
+        context: context.executionContext);
   }
 
   Future<Result> _mutate(String store, Mutation mutation, String? session) =>
@@ -483,7 +487,20 @@ class KernelCommandHandler implements CommandHandler {
 
   // -- reads ----------------------------------------------------------------
 
-  QueryBuilder _query(String store, QuerySpecData spec, String? session) {
+  /// Compiles one read into the kernel's versioned query IR (plan Rule 3:
+  /// commands carry meaning; Rule 6: only the kernel lowers it). The IR is
+  /// bound to the store's manifest fingerprint, so an IR compiled against
+  /// one schema revision is never lowered against another.
+  QueryIR _ir(String store, QuerySpecData spec) => QueryIR.compile(
+        store: store,
+        spec: spec,
+        schemaFingerprint:
+            context.database.requireTable(store).manifest.fingerprint,
+      );
+
+  QueryBuilder _query(QueryIR ir, String? session) {
+    final store = ir.store;
+    final spec = ir.spec;
     var builder = _collection(store, session: session).query();
     for (final c in spec.where) {
       builder = _applyCondition(builder, c);
@@ -549,17 +566,18 @@ class KernelCommandHandler implements CommandHandler {
     }
   }
 
-  Future<Result> _page(String store, QuerySpecData spec, String? session) =>
-      _withSession(
-        session,
-        () async {
-          if (spec.cursor != null) {
-            final page = spec.backward
-                ? await _query(store, spec, session).keysetBefore(spec.cursor!)
-                : await _query(store, spec, session).keysetAfter(spec.cursor!);
+  Future<Result> _page(String store, QuerySpecData spec, String? session) {
+    final ir = _ir(store, spec);
+    return _withSession(
+      session,
+      () async {
+          if (ir.spec.cursor != null) {
+            final page = ir.spec.backward
+                ? await _query(ir, session).keysetBefore(ir.spec.cursor!)
+                : await _query(ir, session).keysetAfter(ir.spec.cursor!);
             return page;
           }
-          return _query(store, spec, session).fetch();
+          return _query(ir, session).fetch();
         },
         (Page page) => QueryRowsResult(
           items: page.items,
@@ -569,6 +587,7 @@ class KernelCommandHandler implements CommandHandler {
           prevCursor: page.prevCursor,
         ),
       );
+  }
 
   Future<Result> _search(String store, SearchSpecData spec, String? session) =>
       _withSession(
@@ -724,7 +743,7 @@ class KernelCommandHandler implements CommandHandler {
 
   Future<Result> _watch(String store, QuerySpecData spec) {
     final id = 'w${++_counter}';
-    final builder = _query(store, spec, null);
+    final builder = _query(_ir(store, spec), null);
     // The subscription is owned by the watch registry and cancelled on
     // watch_cancel or handler close.
     // ignore: cancel_subscriptions
@@ -884,6 +903,17 @@ class KernelCommandHandler implements CommandHandler {
     if (download.outstanding < 0) download.outstanding = 0;
     if (download.outstanding < defaultFileDownloadWindowBytes) {
       download.subscription.resume();
+    }
+    return const OkResult();
+  }
+
+  /// Closes an in-progress download stream (plan Phase 8 Files: an abandoned
+  /// download is an explicit close, never a window that starves silently).
+  /// Idempotent: an unknown or already-finished stream answers Ok.
+  Future<Result> _fileClose(String stream) async {
+    final download = _fileDownloads.remove(stream);
+    if (download != null) {
+      await download.subscription.cancel();
     }
     return const OkResult();
   }

@@ -12,11 +12,10 @@ import '../../support/helpers.dart';
 
 /// Structural pins:
 ///
-/// 1. The outer-executor fallback is GONE for transaction reads: query and
-///    search builders created from a `Tx` carry the transaction's executor
-///    (`debugExecutor != null`); builders created from the root context carry
-///    null and use the outer database. A transaction context can never select
-///    the outer executor by accident.
+/// 1. The outer-executor fallback is GONE: every execution context carries
+///    its own executor — root contexts the outer database, transaction
+///    contexts the transaction's executor (`debugExecutor != null`). A
+///    transaction context can never select the outer executor by accident.
 /// 2. `KernelContext` is the shared dependency set: native (and, by the same
 ///    construction, the web worker) services receive the context, not the
 ///    concrete facade.
@@ -24,11 +23,11 @@ import '../../support/helpers.dart';
 ///    is behaviorally identical to a put through the collection.
 void main() {
   group('ExecutionContext', () {
-    test('root context has no executor and is not read-only', () {
-      const root = ExecutionContext.root();
+    test('root context carries the outer executor and is not read-only', () {
+      final root = ExecutionContext.root(_FakeExec());
       expect(root.isRoot, isTrue);
       expect(root.isTransaction, isFalse);
-      expect(root.executor, isNull);
+      expect(root.executor, isNotNull);
       expect(root.readOnly, isFalse);
     });
 
@@ -58,8 +57,8 @@ void main() {
 
       expect(fromTx!.debugExecutor, isNotNull,
           reason: 'transaction query must be bound to the tx executor');
-      expect(fromRoot.debugExecutor, isNull,
-          reason: 'root-context query uses the outer database');
+      expect(identical(fromRoot.debugExecutor, db.db), isTrue,
+          reason: 'root-context query carries the outer database executor');
     });
 
     test('search builder from Tx carries the tx executor', () async {
@@ -76,7 +75,7 @@ void main() {
       fromRoot = ftsDb.collection('widgets').search('apple');
 
       expect(fromTx!.debugExecutor, isNotNull);
-      expect(fromRoot.debugExecutor, isNull);
+      expect(identical(fromRoot.debugExecutor, ftsDb.db), isTrue);
     });
 
     test('tx query executor survives builder chaining', () async {

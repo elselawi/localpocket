@@ -7,14 +7,14 @@ import '../../support/helpers.dart';
 /// Transaction query/search
 /// reads must never execute through the outer database executor.
 ///
-/// The structural fix (an explicit ExecutionContext routing) lands in
-/// Until the structural fix these tests pin the OBSERVABLE behavior the fix must
-/// preserve: reads-your-writes inside the transaction, and full visibility
-/// reversal after a savepoint rollback, for BOTH the query builder and the
-/// search builder created from a `Tx` (today both are constructed from the
-/// outer pocket — `store.dart` `query()`/`search()` drop the tx executor —
-/// which is the defect Phase 2 removes; on the single-connection runtime the
-/// data visibility happens to be correct, which is what these tests pin).
+/// The structural fix has landed: an explicit ExecutionContext routes every
+/// read (plan Rule 5). A store obtained from a `Tx` permanently carries the
+/// transaction context — `store.dart` query()/search() receive the tx
+/// executor through it, and the root/`_exec ?? _pocket.db` fallback no longer
+/// exists anywhere in the kernel. These tests continue to pin the OBSERVABLE
+/// behavior that fix must preserve: reads-your-writes inside the transaction,
+/// and full visibility reversal after a savepoint rollback, for BOTH the
+/// query builder and the search builder created from a `Tx`.
 void main() {
   group('reads inside a transaction', () {
     test('query built from Tx reads its own uncommitted writes', () async {

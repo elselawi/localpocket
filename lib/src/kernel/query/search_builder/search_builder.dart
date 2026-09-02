@@ -76,10 +76,10 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
   final LocalPocket? _pocket;
   final CollectionSchema<Object?> _schema;
 
-  /// The execution context's executor. Non-null only when created from a
-  /// transaction-scoped [Collection] — the search then runs through the
-  /// TRANSACTION executor and can never fall back to the outer database
-  ///.
+  /// The execution context's executor. Always provided on the runtime path:
+  /// a transaction-scoped [Collection] passes its TRANSACTION executor and
+  /// can never fall back to the outer database (plan Rule 5). Only the
+  /// compile-only constructor (which cannot execute) leaves it null.
   final DatabaseExecutor? _executor;
 
   /// Structural pin for tests: the executor this search will run through.
@@ -246,10 +246,13 @@ class SearchBuilder implements SearchFilterDsl<SearchBuilder> {
     }
     final (sql, args) = _compile();
     try {
-      final executor = _executor;
-      final rows = executor == null
-          ? await pocket.traceQuery(sql, args)
-          : await executor.rawQuery(sql, args);
+      // Hook and perf bookkeeping is preserved on every execution path —
+      // the root-context search is behaviorally identical to a
+      // `traceQuery` round-trip (same observer callbacks, same counters).
+      final pocket = _pocket!;
+      pocket.testHooks?.onQuery?.call(sql);
+      pocket.perf.recordQuery();
+      final rows = await _executor!.rawQuery(sql, args);
       return [
         for (final r in rows)
           SearchResult(

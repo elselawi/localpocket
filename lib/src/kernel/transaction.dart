@@ -84,10 +84,13 @@ class Tx {
   /// notifications.
   bool get wantsRecordEvents => _pocket.changeBus.hasEventListeners;
 
-  /// Scoped collection access bound to this transaction.
-  Collection collection(String name) =>
-      Collection.internal(_pocket, _pocket.requireTable(name),
-          exec: _executor, tx: this);
+  /// Scoped collection access bound to this transaction. The returned
+  /// collection permanently carries this transaction's execution context.
+  Collection collection(String name) => Collection.internal(
+      _pocket, _pocket.requireTable(name),
+      context: ExecutionContext.transaction(
+          executor: _executor, readOnly: readOnly),
+      tx: this);
 
   /// Nested transaction = SAVEPOINT.
   /// `SAVEPOINT` / `ROLLBACK TO` / `RELEASE` explicitly.

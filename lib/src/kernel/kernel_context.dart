@@ -36,6 +36,11 @@ final class KernelContext {
   /// The SQLite database executor (platform-supplied port).
   final Database db;
 
+  /// The root execution context: every outer-database operation runs through
+  /// this explicit context — there is no executor fallback anywhere in the
+  /// kernel (plan Rule 5).
+  late final ExecutionContext executionContext = ExecutionContext.root(db);
+
   /// Capabilities detected for the active SQLite connection.
   final SqliteCapabilities capabilities;
 

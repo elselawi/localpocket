@@ -7,6 +7,7 @@ import 'package:sqlite3/common.dart' show SqliteException;
 import 'database_adapter.dart';
 
 import 'change_bus.dart';
+import 'execution_context.dart';
 import 'codec.dart';
 import 'errors.dart';
 import 'hashing.dart';
@@ -102,17 +103,22 @@ class Collection with ChangeBusAwareStore {
   Collection.internal(
     this._pocket,
     this._table, {
-    DatabaseExecutor? exec,
+    required ExecutionContext context,
     Tx? tx,
-  })  : _exec = exec,
+  })  : _context = context,
         _tx = tx;
 
   final LocalPocket _pocket;
   final StoreTable _table;
-  final DatabaseExecutor? _exec;
+
+  /// The explicit execution context this collection's operations run
+  /// through: the root context for outer-database handles, the transaction
+  /// context for stores obtained from a [Tx] (plan Rule 5 — the outer
+  /// executor can never be selected by an accidental fallback).
+  final ExecutionContext _context;
   final Tx? _tx;
 
-  DatabaseExecutor get _ex => _exec ?? _pocket.db;
+  DatabaseExecutor get _ex => _context.executor;
   CollectionSchema<Object?> get _schema => _table.schema;
 
   /// The schema name used to access this collection.
@@ -853,7 +859,7 @@ class Collection with ChangeBusAwareStore {
   /// so errors stay attributed and translated exactly as before.
   Future<void> _putAllBatchCreate(DatabaseExecutor exec,
       List<(String, Map<String, Object?>)> records) async {
-    final db = _pocket.db;
+    final db = _ex;
     if (db is DirectSqliteDatabase && _pocket.testHooks?.onExecute == null) {
       await _putAllBatchCreateDirect(exec, records);
       return;
@@ -895,7 +901,7 @@ class Collection with ChangeBusAwareStore {
       List<(String, Map<String, Object?>)> records) async {
     final schema = _schema;
     final now = _pocket.now();
-    final db = _pocket.db as DirectSqliteDatabase;
+    final db = _ex as DirectSqliteDatabase;
 
     // Column order matches encodeDbRow exactly (id, declared fields in
     // schema order, extra, archived, hidden) — the shared
@@ -1031,7 +1037,7 @@ class Collection with ChangeBusAwareStore {
   /// pre-existing conflict — stays) and rethrows, so the batch caller can
   /// unwind and fall back to the probe + per-record update path.
   Future<Map<String, Object?>> _batchCreateInsertOne(DatabaseExecutor exec,
-      Database db, String rid, Map<String, Object?> record, int now) async {
+      DatabaseExecutor db, String rid, Map<String, Object?> record, int now) async {
     final schema = _schema;
     final logical = _logicalFromRecord(record, rid);
     final payloadBuffer = StringBuffer();
@@ -1331,13 +1337,13 @@ class Collection with ChangeBusAwareStore {
   ///
   /// Example: `tasks.query().where('done', eq: false).limit(20).fetch()`.
   QueryBuilder query() =>
-      QueryBuilder.internal(_pocket, _table, executor: _exec);
+      QueryBuilder.internal(_pocket, _table, executor: _ex);
 
   /// Starts a full-text search on the collection's configured FTS fields.
   ///
   /// The schema must define [FtsSpec] and the SQLite engine must provide FTS5.
   SearchBuilder search(String term) =>
-      SearchBuilder.internal(_pocket, _schema, term, executor: _exec);
+      SearchBuilder.internal(_pocket, _schema, term, executor: _ex);
 
   /// Watches the record at [id], re-emitting only when that record changes.
   Stream<Map<String, Object?>?> watchOne(String id) =>
