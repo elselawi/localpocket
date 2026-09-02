@@ -1,7 +1,8 @@
 /// Auth lifecycle: single-flight refresh over an app-supplied [TokenProvider],
 /// proactive refresh at 75 % consumed, 401 → refresh once → pause. Tokens
-/// never touch SQLite, logs, or outbox payloads — only the `Authorization`
-/// header and the realtime subscribe POST body.
+/// never touch SQLite, logs, or outbox payloads — they travel only in the
+/// `Authorization` header of HTTP requests, including realtime connect and
+/// subscribe.
 library;
 
 import '../../kernel/sync/sync_backend.dart';

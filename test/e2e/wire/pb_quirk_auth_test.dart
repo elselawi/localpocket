@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:localpocket/src/adapters/pocketbase/auth.dart';
 import 'package:localpocket/src/adapters/pocketbase/transport.dart';
 import 'package:localpocket/src/kernel/sync/status.dart';
 import 'package:localpocket/src/kernel/sync/sync_backend.dart';

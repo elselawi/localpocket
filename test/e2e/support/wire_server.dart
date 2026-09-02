@@ -11,7 +11,6 @@ library;
 
 import 'dart:convert';
 
-import 'package:localpocket/src/adapters/pocketbase/auth.dart';
 import 'package:localpocket/src/adapters/pocketbase/backend.dart';
 import 'package:localpocket/src/adapters/pocketbase/transport.dart';
 import 'package:localpocket/src/kernel/cipher.dart';

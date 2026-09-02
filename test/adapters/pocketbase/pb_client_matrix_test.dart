@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:localpocket/src/adapters/pocketbase/backend.dart';
+import 'package:localpocket/src/adapters/pocketbase/transport.dart';
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:test/test.dart';
@@ -168,7 +170,8 @@ void main() {
       final recs = await b.listChanges('widgets');
       expect(recs[0].attachments, ['ok.png'],
           reason: 'non-string attachments entries are filtered out');
-      expect(recs[1].attachments, isEmpty, reason: 'missing attachments -> empty');
+      expect(recs[1].attachments, isEmpty,
+          reason: 'missing attachments -> empty');
     });
 
     test('getRecord 404 is NotFoundError, 200 parses', () async {
@@ -350,6 +353,27 @@ void main() {
         b.downloadFile(recordId: 'r', filename: 'f.png'),
         throwsA(isA<NotFoundError>()),
       );
+    });
+
+    test('downloadFile releases the response stream on error statuses',
+        () async {
+      final cancelled = Completer<void>();
+      final controller = StreamController<List<int>>(
+        onCancel: () async {
+          if (!cancelled.isCompleted) cancelled.complete();
+        },
+      );
+      final fake = FakeTransport()
+        ..streamResponse(
+            StreamedHttpResponse(403, const {}, controller.stream));
+      final b = backendWith(fake);
+      await expectLater(
+        b.downloadFile(recordId: 'r', filename: 'f.png'),
+        throwsA(isA<ForbiddenError>()),
+      );
+      await cancelled.future.timeout(const Duration(seconds: 5),
+          onTimeout: () => fail('error-path response stream was not released'));
+      await controller.close();
     });
 
     test('downloadFile propagates an openStream failure', () async {
@@ -592,6 +616,14 @@ void main() {
       scalar.sendStatus(200, '42');
       final b3 = backendWith(scalar);
       await expectLater(b3.pushBatch(twoOps()), throwsA(isA<ProtocolError>()));
+
+      // A proxy/captive-portal error page can arrive as a 200 with a
+      // non-JSON body; that must surface as a typed protocol error so the
+      // engine can settle/split/retry the batch instead of crashing the cycle.
+      final notJson = FakeTransport();
+      notJson.sendStatus(200, '<html>gateway error</html>');
+      final b4 = backendWith(notJson);
+      await expectLater(b4.pushBatch(twoOps()), throwsA(isA<ProtocolError>()));
     });
 
     test('endpoint status matrix for pushBatch', () async {

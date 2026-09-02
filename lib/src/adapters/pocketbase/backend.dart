@@ -196,9 +196,18 @@ abstract base class PBBackend implements SyncBackend {
   }
 
   /// Stops realtime and closes the HTTP transport.
+  ///
+  /// Realtime is shut down before the transport: the SSE session loop must
+  /// observe a live transport (or its own stop) rather than racing a closed
+  /// one. The sequencing runs internally, so fire-and-forget callers keep
+  /// their contract.
   void close() {
-    unawaited(stopRealtime());
+    unawaited(_closeOrdered());
     if (!_hints.isClosed) unawaited(_hints.close());
+  }
+
+  Future<void> _closeOrdered() async {
+    await stopRealtime();
     transport.close();
   }
 
@@ -438,6 +447,8 @@ class PocketBaseSyncBackendFactory implements SyncBackendFactory {
   @override
   Future<void> dispose(SyncBackend backend) async {
     if (backend is PocketBaseRawBackend) {
+      // close() sequences realtime-before-transport internally; awaiting the
+      // realtime stop here keeps dispose deterministic for the factory.
       await backend.stopRealtime();
       backend.close();
     }

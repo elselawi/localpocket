@@ -1,12 +1,15 @@
 /// Realtime: the SSE connection to PocketBase.
 ///
 /// Wire shape: `GET /api/realtime` → `PB_CONNECT:<clientId>` handshake →
-/// `POST /api/realtime {clientId, subscriptions}` (token in header AND body)
-/// → `event:data` frames `{record, action}` with the full embedded record.
+/// `POST /api/realtime {clientId, subscriptions}` (token in the
+/// `Authorization` header only) → `event:data` frames `{record, action}` with
+/// the full embedded record.
 ///
 /// Missed events are never replayed after a gap (live-verified), so every
 /// (re)connect reports a gap and the engine re-pulls all stores. Reconnects
-/// use capped exponential backoff + jitter, reset to base on success.
+/// use capped exponential backoff + jitter, reset to base on success. A 401
+/// on connect or subscribe refreshes the token once and retries before the
+/// failure counts against backoff (mirroring the request path).
 library;
 
 import 'dart:async';
@@ -151,16 +154,41 @@ class PbRealtime {
     }
   }
 
-  static double _defaultJitter(int attempt) => 0.5 + Random().nextDouble();
-
-  Future<void> _connectOnce() async {
-    final token = await client.authToken();
+  Future<StreamedHttpResponse> _openRealtime(Token token) {
     final req = HttpRequest(
       method: 'GET',
       url: client.baseUrl.resolve('/api/realtime'),
       headers: {'Authorization': 'Bearer ${token.value}'},
     );
-    final res = await client.transport.openStream(req);
+    return client.transport.openStream(req);
+  }
+
+  Future<HttpResponse> _sendSubscribe(String clientId, Token token) =>
+      client.transport.send(HttpRequest(
+        method: 'POST',
+        url: client.baseUrl.resolve('/api/realtime'),
+        headers: {
+          'Authorization': 'Bearer ${token.value}',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'clientId': clientId,
+          'subscriptions': collectionNames,
+        }),
+      ));
+
+  static double _defaultJitter(int attempt) => 0.5 + Random().nextDouble();
+
+  Future<void> _connectOnce() async {
+    var token = await client.authToken();
+    var res = await _openRealtime(token);
+    if (res.status == 401) {
+      // The server revoked a token that may still be far from expiry: the
+      // request path refreshes once on 401 and retries; realtime recovers
+      // the same way instead of reconnecting forever with the stale token.
+      token = await client.auth.refreshNow();
+      res = await _openRealtime(token);
+    }
     if (res.status != 200) {
       throw HttpTransportException('realtime connect status ${res.status}');
     }
@@ -235,19 +263,13 @@ class PbRealtime {
   Future<void> _handleFrame(_SseFrame frame, Token token) async {
     final clientId = frame.clientId;
     if (clientId != null) {
-      // Handshake: subscribe, token in header AND body.
-      final sub = await client.transport.send(HttpRequest(
-        method: 'POST',
-        url: client.baseUrl.resolve('/api/realtime'),
-        headers: {
-          'Authorization': 'Bearer ${token.value}',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'clientId': clientId,
-          'subscriptions': collectionNames,
-        }),
-      ));
+      // Handshake: subscribe, bearer token in the Authorization header.
+      var sub = await _sendSubscribe(clientId, token);
+      if (sub.status == 401) {
+        // Revoked token: refresh once and retry before the session counts as
+        // failed (mirrors the request path).
+        sub = await _sendSubscribe(clientId, await client.auth.refreshNow());
+      }
       if (sub.status != 204 && sub.status != 200) {
         throw HttpTransportException('realtime subscribe status ${sub.status}');
       }

@@ -184,12 +184,20 @@ class PbClient {
   }) async {
     final query = <String, String>{if (thumb != null) 'thumb': thumb};
     final base = baseUrl.resolve(
-        '/api/files/data/${Uri.encodeComponent(recordId)}/${Uri.encodeComponent(filename)}');
+        '/api/files/${fieldNames.collection}/${Uri.encodeComponent(recordId)}/${Uri.encodeComponent(filename)}');
     final uri = query.isEmpty ? base : base.replace(queryParameters: query);
     final response =
         await _openStreamAuth(HttpRequest(method: 'GET', url: uri));
-    _expectStatus(
-        HttpResponse(response.status, response.headers, ''), [200], uri);
+    if (response.status != 200) {
+      // Release the un-consumed body so the transport can reuse the socket.
+      try {
+        await response.stream
+            .listen((_) {})
+            .cancel()
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
+      throw _mapError(HttpResponse(response.status, response.headers, ''), uri);
+    }
     return response.stream;
   }
 
@@ -220,7 +228,12 @@ class PbClient {
     // Live-verified: PB batch responds with a top-level array of
     // `{body, status}`, one per request in order. The older
     // `{data:{results:[...]}}` envelope is also accepted for compatibility.
-    final decoded = jsonDecode(res.body);
+    Object? decoded;
+    try {
+      decoded = jsonDecode(res.body);
+    } on FormatException catch (e) {
+      throw ProtocolError('Batch response is not valid JSON: ${e.message}');
+    }
     List<Object?> results;
     if (decoded is List) {
       results = decoded;

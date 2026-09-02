@@ -133,11 +133,14 @@ void main() {
         reason: 'no events after stop — the subscription was released');
 
     // close() is safe and releases the transport exactly once per call.
+    // The release is sequenced after the realtime stop, so flush the
+    // microtask queue before asserting.
     await controller.close();
     await sub.cancel();
     final closeCalls = fake.closeCalls;
     backend.close();
     backend.close();
+    await Future<void>.delayed(Duration.zero);
     expect(fake.closeCalls, closeCalls + 2,
         reason: 'each close() releases the transport');
   });
@@ -158,6 +161,8 @@ void main() {
     expect((await backend.getRecord('x'))!.id, 'x');
     backend.close();
     backend.close();
+    // The transport release is sequenced after the realtime stop.
+    await Future<void>.delayed(Duration.zero);
     expect(fake.closeCalls, 2);
   });
 }

@@ -82,6 +82,11 @@ void main() {
     test('subscribe 401/403/500 never closes the gap and reconnects', () async {
       for (final status in [401, 403, 500]) {
         final fake = FakeTransport();
+        // A 401 costs one refresh-retry inside the session before the
+        // session counts as failed; 403/500 fail immediately.
+        if (status == 401) {
+          fake.sendStatus(status, '{"message":"x"}');
+        }
         fake.sendStatus(status, '{"message":"x"}');
         final events = <PbRealtimeEvent>[];
         final gaps = <int>[];
@@ -111,35 +116,61 @@ void main() {
       }
     });
 
-    test('subscribe 401 then success: gap closes once, token per attempt',
+    test('subscribe 401 refreshes once and the session recovers in place',
         () async {
       final fake = FakeTransport();
-      final first = StreamController<List<int>>();
-      final second = StreamController<List<int>>();
-      fake.streamResponse(StreamedHttpResponse(200, const {}, first.stream));
-      fake.streamResponse(StreamedHttpResponse(200, const {}, second.stream));
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
       fake.sendStatus(401, '{"message":"unauthorized"}'); // first subscribe
-      fake.sendStatus(204); // second subscribe succeeds
+      fake.sendStatus(204); // refresh-retry succeeds
 
       final events = <PbRealtimeEvent>[];
       final gaps = <int>[];
+      final auth = AuthManager(TestTokenProvider());
       final client = _CountingClient(
         transport: fake,
         baseUrl: Uri.parse('https://pb.test'),
-        auth: AuthManager(TestTokenProvider()),
+        auth: auth,
       );
       final rt = PbRealtime(
         client: client,
         collectionNames: const ['data'],
-        backoffBase: const Duration(milliseconds: 20),
         jitter: (_) => 1.0,
         onGapClosed: () => gaps.add(1),
         onEvent: events.add,
       );
       await rt.start();
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+      controller.add(utf8.encode(handshake + eventFrame('r1')));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
 
-      // Attempt 1: handshake arrives, the subscribe POST answers 401.
+      // The revoked token was refreshed and the subscribe retried inside the
+      // same session — no reconnect, no lost gap signal.
+      expect(auth.refreshCount, 1, reason: 'exactly one refresh on 401');
+      expect(rt.connectCount, 1,
+          reason: 'the session recovers in place, without reconnecting');
+      expect(client.authTokenCalls, 1,
+          reason: 'no extra token fetch for the refresh-retry');
+      expect(gaps, hasLength(1), reason: 'the gap closes on the handshake');
+      expect(events.single.record.id, 'r1');
+      await controller.close();
+      await rt.stop();
+    });
+
+    test('subscribe 401 that survives the refresh-retry reconnects', () async {
+      final fake = FakeTransport();
+      final first = StreamController<List<int>>();
+      fake.streamResponse(StreamedHttpResponse(200, const {}, first.stream));
+      fake.sendStatus(401, '{"message":"unauthorized"}'); // first subscribe
+      fake.sendStatus(401, '{"message":"unauthorized"}'); // refresh-retry
+
+      final events = <PbRealtimeEvent>[];
+      final gaps = <int>[];
+      final rt = realtime(fake,
+          onEvent: events.add,
+          onGapClosed: () => gaps.add(1),
+          backoffBase: const Duration(milliseconds: 20));
+      await rt.start();
       first.add(utf8.encode(handshake + eventFrame('r1')));
       await Future<void>.delayed(const Duration(milliseconds: 80));
       expect(gaps, isEmpty,
@@ -147,37 +178,39 @@ void main() {
       expect(events, isEmpty,
           reason: 'no events are trusted from a failed session');
 
-      // The session ended and the loop reconnected: two attempts, exactly one
-      // token fetch per attempt — never a session-scoped capture reused
-      // across reconnects.
-      expect(rt.connectCount, 2, reason: 'the failed session reconnects');
-      expect(client.authTokenCalls, 2,
-          reason: 'one fresh token per connect attempt');
-
-      // Attempt 2: fresh token, subscribe succeeds, gap closes exactly once.
-      second.add(utf8.encode(handshake + eventFrame('r2')));
+      // The loop reconnected after the failed session.
       await Future<void>.delayed(const Duration(milliseconds: 60));
-      expect(gaps, hasLength(1),
-          reason: 'the gap closes exactly once, on the successful handshake');
-      expect(events.single.record.id, 'r2');
+      expect(rt.connectCount, greaterThanOrEqualTo(2));
       await first.close();
-      await second.close();
       await rt.stop();
     });
 
-    test('connect 401 is retried until a 200 arrives', () async {
+    test('connect 401 refreshes once and retries before counting a failure',
+        () async {
       final fake = FakeTransport();
-      fake.streamStatus(401);
-      fake.streamStatus(401);
+      fake.streamStatus(401); // first connect: revoked token
+      final auth = AuthManager(TestTokenProvider());
       final events = <PbRealtimeEvent>[];
-      final rt = realtime(fake,
-          onEvent: events.add, backoffBase: const Duration(milliseconds: 20));
+      final client = PbClient(
+        transport: fake,
+        baseUrl: Uri.parse('https://pb.test'),
+        auth: auth,
+      );
+      final rt = PbRealtime(
+        client: client,
+        collectionNames: const ['data'],
+        jitter: (_) => 1.0,
+        onGapClosed: () {},
+        onEvent: events.add,
+      );
       final controller = StreamController<List<int>>();
       fake.streamResponse(
           StreamedHttpResponse(200, const {}, controller.stream));
       await rt.start();
       await Future<void>.delayed(const Duration(milliseconds: 200));
-      expect(rt.connectCount, 1, reason: 'retried the 401s, then connected');
+      expect(auth.refreshCount, 1,
+          reason: 'a 401 connect refreshes once before the attempt fails');
+      expect(rt.connectCount, 1, reason: 'the refresh-retry connects');
       controller.add(utf8.encode(handshake + eventFrame('r1')));
       await controller.close();
       await Future<void>.delayed(const Duration(milliseconds: 40));
@@ -549,6 +582,70 @@ void main() {
           reason: 'a successful connect resets the backoff to the base');
       expect(recorded.skip(2).every((attempt) => attempt == 0), isTrue,
           reason: 'the backoff never grows again after a success');
+      await rt.stop();
+    });
+  });
+
+  group('realtime frame-tail diagnostics and record validation', () {
+    test('a throwing gap-close callback is recorded, never silently dropped',
+        () async {
+      final fake = FakeTransport();
+      fake.sendStatus(204, '{"message":"x"}');
+      final events = <PbRealtimeEvent>[];
+      final rt = realtime(fake,
+          onEvent: events.add,
+          onGapClosed: () => throw StateError('gap bookkeeping broke'));
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      await rt.start();
+      controller.add(utf8.encode(handshake + eventFrame('r1')));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(rt.lastUnexpectedError, isA<StateError>(),
+          reason: 'the unexpected callback failure is observable');
+      expect(rt.lastUnexpectedTrace, isNotNull);
+      expect(rt.connectCount, 1,
+          reason: 'a bookkeeping failure does not tear down the session');
+
+      // The tail survives: a well-formed frame behind it still delivers.
+      controller.add(utf8.encode(eventFrame('r2')));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(events.map((e) => e.record.id), ['r1', 'r2'],
+          reason: 'the session and the stream stay healthy');
+
+      await controller.close();
+      await rt.stop();
+    });
+
+    test('a realtime record without id/updated is dropped, never normalized',
+        () async {
+      final fake = FakeTransport();
+      fake.sendStatus(204, '{"message":"x"}');
+      final events = <PbRealtimeEvent>[];
+      final rt = realtime(fake, onEvent: events.add);
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      await rt.start();
+      final missingId = eventFrame('ignored', record: {
+        'store': 'widgets',
+        'updated': '2026-08-15 10:00:00.000Z',
+        'data': {'name': 'n'},
+      });
+      final missingUpdated = eventFrame('ignored', record: {
+        'id': 'r9',
+        'store': 'widgets',
+        'data': {'name': 'n'},
+      });
+      controller.add(utf8.encode(handshake + missingId + missingUpdated));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(events, isEmpty,
+          reason: 'malformed records never reach the fast path');
+      expect(rt.lastUnexpectedError, isNull,
+          reason: 'a dropped malformed event is expected handling, not an '
+              'unexpected failure');
+      await controller.close();
       await rt.stop();
     });
   });

@@ -70,6 +70,15 @@ void main() {
     expect(req.fields['${names.attachmentsField}-'], '["b.bin"]');
   });
 
+  test('file download URLs use the configured collection', () async {
+    final t = FakeTransport()..streamData(200, utf8.encode('bytes'));
+    final c = client(t);
+    final stream = await c.downloadFile(recordId: 'r1', filename: 'a.png');
+    await stream.drain<void>();
+    expect(t.streams.single.url.path, '/api/files/app_data/r1/a.png',
+        reason: 'downloads must not hardcode the default collection name');
+  });
+
   test('record parsing reads the configured field names', () async {
     final t = FakeTransport()
       ..sendStatus(
