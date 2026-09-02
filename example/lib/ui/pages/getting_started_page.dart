@@ -90,9 +90,11 @@ final class Tasks extends StoreDef<Tasks> {
 
   static const _openCode = '''
 final db = await LocalPocket.open(
-  path: ':memory:',          // or a real file path
-  stores: [Tasks.store.collectionSchema, ...],
-  fieldCipher: myCipher,     // optional: encrypt sensitive fields
+  LocalPocketOptions(
+    path: ':memory:',          // or a real file path
+    stores: [Tasks.store],
+    encryption: EncryptionConfig.aesGcm256(key: myKey), // optional
+  ),
 );
 final tasks = db.store(Tasks.store);
 ''';

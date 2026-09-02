@@ -1,5 +1,68 @@
 ## Unreleased
 
+- **Unopinionated PocketBase wire design: every wire name is now
+  configurable.** `PocketBaseBackend`/`PocketBaseRawBackend` (and the
+  `PocketBaseSyncBackendFactory`) accept a `fieldNames: PbFieldNames(...)`
+  configuration — collection (`data`), store field (`store`), JSON data
+  field (`data`), and attachment file field (`imgs`). Record URLs, batch
+  item URLs, filters, request bodies, multipart modifiers
+  (`attachmentsField+`/`-`), realtime record parsing, and the realtime
+  subscription all derive from it; the kernel never sees any of these
+  names. The realtime collection now defaults to `fieldNames.collection`
+  (`realtimeCollection` remains as an explicit override).
+
+- **Per-store attachment field: `StoreDef.attachmentField`.** A store can
+  declare the local name of its attachment field (`null` = the shared
+  `imgs` default). `store.files.attach/list/open` default to it, the kernel
+  file APIs resolve it per store, and pull-side remote-only refs land under
+  it — so two stores no longer have to share one attachment label.
+  (The bytes' locations are unchanged: local blob store ↔ PocketBase file
+  storage; this names the metadata grouping and the adapter's remote field
+  mapping input.) Declaring it is a schema manifest change (same-version
+  reopen of an older database will be rejected — bump the store version).
+
+- **Phase 0–10 completion pass: every deferred gap from the final refactoring
+  plan is closed.** Highlights:
+  - **Phase 2** — the outer-executor fallback is gone: every kernel operation
+    runs through an explicit `ExecutionContext` (root contexts carry the
+    outer database executor; transaction contexts permanently carry their
+    transaction's executor). Query, search, watch, file, and conflict paths
+    no longer reach for `_pocket.db`.
+  - **Phase 6** — the kernel owns a versioned query IR (`query/ir.dart`),
+    a shared keyset cursor codec (`query/cursor.dart`, cursors now stamped
+    with IR and compiler versions and rejected across both), and one shared
+    result shaper (`query/result_shaper.dart`) used by the live builder and
+    the compiled runner alike.
+  - **Phase 8** — the PocketBase attachment field is de-leaked from the
+    kernel (`RemoteRecord.attachments`; one named `attachmentFieldDefault`
+    constant; per-backend `attachmentFieldFor` override; the `imgs+`/
+    `imgs-` wire literals live only in the adapter); facade uploads stream
+    in bounded chunks without buffering whole files when the source declares
+    its length; abandoned downloads close through the new typed
+    `fileClose` command instead of starving their credit window.
+  - **Phase 9** — the compile-fail corpus is rebuilt (`test/compile_fail/`
+    with `tool/compile_fail_runner.dart` and a gate-tagged suite), the
+    conformance runner exists as a named tool, and the public API surface is
+    additionally guarded by an analyzer-comparable inventory gate
+    (`tool/api_surface_scanner.dart` → `tool/api_inventory.txt`, wired into
+    the release runner as `api_inventory`).
+  - **Phase 10** — `verifyRegisteredSchema` is deleted; the kernel-internal
+    compiled schema is an `@internal` seam, so no public signature carries
+    `CollectionSchema`.
+  - **Public API completeness** — the typed error hierarchy
+    (`LocalPocketError` and friends) and the change vocabulary
+    (`ChangeOrigin`/`ChangeAction`) are exported from the barrel;
+    `ChangeNotification` carries the full committed envelope (origin, action,
+    touched fields, old/new records) and `Store<S>.events` delivers typed
+    `RecordChange<S>` snapshots; `EngineCapabilities` reports `storage`,
+    `durable`, and `journal`; `attachPocketBaseSync` guarantees one host per
+    database; `Page.items` is unmodifiable.
+  - **Web protocol** — the browser page sends the typed `OpenRequest` with
+    the manifest fingerprints it compiled (worker-side verification before
+    any command), response/request-id correlation is enforced on the page,
+    and the open implementations live in the platform layer — the api layer
+    imports no web SDK at all (layering rules R5/R6 + offline lint).
+
 - **Sync on native and web with one wiring: `attachPocketBaseSync` +
   `PocketBaseSyncEngine` (a `PocketBaseSyncHost`).** The typed layer no
   longer pins the native engine: `TypedPocket` opens through the same

@@ -214,7 +214,7 @@ Future<void> main() async {
     // database.
     final rawDb = await kernel.KernelDatabase.open(
       path: ':memory:',
-      stores: [BenchmarkWidgets.store.collectionSchema],
+      stores: [BenchmarkWidgets.store.compiledSchema],
     );
     await seed100kRaw(rawDb);
     final rawCol = rawDb.collection('widgets');
@@ -274,7 +274,7 @@ Future<void> main() async {
     // database so it can drive `outbox.ack` and inspect `lp_outbox`.
     final rawDb = await kernel.KernelDatabase.open(
       path: ':memory:',
-      stores: [BenchmarkWidgets.store.collectionSchema],
+      stores: [BenchmarkWidgets.store.compiledSchema],
     );
     final rawCol = rawDb.collection('widgets');
     final id = generateRecordId();
@@ -557,7 +557,7 @@ Future<void> main() async {
     const count = 10000;
     final rawDb = await kernel.KernelDatabase.open(
       path: ':memory:',
-      stores: [BenchmarkWidgets.store.collectionSchema],
+      stores: [BenchmarkWidgets.store.compiledSchema],
     );
     final typedDb = await LocalPocket.open(LocalPocketOptions(
       path: ':memory:',
