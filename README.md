@@ -146,7 +146,7 @@ Future<void> main() async {
 - Enums are stored as strings. Unmapped values use `Enum.name`; the optional `wire` map pins stable alternatives such as `in_progress`.
 - **`schema.date` vs `schema.dateTime`** — Both store the same epoch-**milliseconds** integer in an `INTEGER` column; only the boundary codec differs. `schema.date` is a pass-through adapter typed as `int?` (raw epoch ms, no conversion — you manage timezones) and supports numeric aggregates. `schema.dateTime` is typed as `DateTime?` and is **UTC-pinned in both directions**: local inputs are converted to UTC before storage and decoded values always have `isUtc == true`. The two adapters share the same column and are interchangeable on the wire. Prefer `schema.dateTime` for timestamps; use `schema.date` when you already hold epoch-ms integers or want `sum`/`min`/`max` over a date column.
 - **`schema.integer` vs `schema.real`** — `schema.integer` is typed `int?` and stored as `INTEGER`; `schema.real` is typed `num?` (not `double` — Dart `int` values are accepted) and stored as `REAL`. Both support `.req()`, comparison operators, and numeric aggregates. Use `schema.integer` for counts/ids/whole numbers and `schema.real` for fractional measurements and percentages.
-- **`schema.ref`** — Stores a **record id** (`String?`) pointing at a record in another collection. There is no `.req()` (always optional) and no join/fetch API: read the id and fetch the target row from its own store.
+- **`schema.ref`** — Stores a **record id** (`String?`) pointing at a record in another store. There is no `.req()` (always optional) and no join/fetch API: read the id and fetch the target row from its own store.
 - `enforceFk: true` adds a SQLite `REFERENCES` constraint on the column; ref fields not covered by a declared index are auto-indexed for lookups.
 
 ---
@@ -971,7 +971,7 @@ pushed / dead-lettered / discarded counts).
 LocalPocket uses a deterministic **3-way merge engine**: each edit resolves
 against the shared pre-edit base, `base → (local, remote)`. Precedence:
 field-level overrides on the schema's `ConflictPolicy`, then a
-collection-level resolver, then the default (`RemoteWinsResolver`, which
+store-level resolver, then the default (`RemoteWinsResolver`, which
 preserves non-overlapping edits from both sides automatically). Built-in
 resolvers cover the common shapes — `LocalWinsResolver`, `CounterResolver`,
 `SetUnionWithDeletionWinsResolver`, `AppendOnlyListResolver`,

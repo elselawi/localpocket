@@ -1,7 +1,7 @@
 /// 3-way merge engine, dirty-diff, and conflict resolvers.
 ///
 /// Detection is mechanical; resolution is policy.
-/// Precedence: field-level > collection-level > package default (RemoteWins).
+/// Precedence: field-level > store-level > package default (RemoteWins).
 library;
 
 import 'dart:async';
@@ -882,7 +882,7 @@ class MergeEngine {
 ///   else   -> resolver(collection, key).resolve(l, r, b)   # both changed
 /// ```
 ///
-/// Precedence: field-level override > collection-level resolver > package default (RemoteWins).
+/// Precedence: field-level override > store-level resolver > package default (RemoteWins).
 FutureOr<MergeResult> merge3WayAsync({
   required Map<String, Object?> base,
   required Map<String, Object?> local,

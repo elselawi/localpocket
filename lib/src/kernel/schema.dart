@@ -47,7 +47,7 @@ enum FieldKind {
   /// A JSON array.
   jsonList,
 
-  /// A reference to another collection.
+  /// A reference to another store.
   ref,
 }
 

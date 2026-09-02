@@ -711,7 +711,7 @@ final class RefField<S> extends FieldDef<S, String?>
     this.enforceFk = false,
   }) : super(required: false);
 
-  /// The referenced collection name.
+  /// The referenced store name.
   final String to;
 
   /// Whether SQLite should enforce the reference as a foreign key.
