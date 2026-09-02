@@ -110,7 +110,8 @@ Future<List<NormalizedRemoteRecord>> normalizeRemoteBatchAsync(
   CollectionSchema<Object?> schema,
   List<RemoteRecord> remotes, {
   int isolateThreshold = 20,
-}) async => normalizeRemoteBatch(schema, remotes);
+}) async =>
+    normalizeRemoteBatch(schema, remotes);
 
 /// Normalizes a remote record into the domain document shape.
 Map<String, Object?> normalizeRemote(

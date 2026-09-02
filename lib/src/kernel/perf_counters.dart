@@ -19,6 +19,7 @@ class PerfCounters {
 
   /// Number of traced SQL statements.
   int statements = 0;
+
   /// Number of traced queries.
   int queries = 0;
 
@@ -30,6 +31,7 @@ class PerfCounters {
 
   /// Current write-queue depth.
   int currentQueueDepth = 0;
+
   /// Number of query-watch refreshes.
   int watchRefreshes = 0;
 

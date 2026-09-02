@@ -196,8 +196,9 @@ class FileSyncLane {
         },
       );
       // Adopt returned filename
-      remoteFilename =
-          updatedRec.attachments.isNotEmpty ? updatedRec.attachments.last : name;
+      remoteFilename = updatedRec.attachments.isNotEmpty
+          ? updatedRec.attachments.last
+          : name;
     }
 
     await pocket.transaction((tx) async {

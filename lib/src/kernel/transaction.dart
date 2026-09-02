@@ -84,8 +84,8 @@ class Tx {
   /// collection permanently carries this transaction's execution context.
   Collection collection(String name) => Collection.internal(
       _pocket, _pocket.requireTable(name),
-      context: ExecutionContext.transaction(
-          executor: _executor, readOnly: readOnly),
+      context:
+          ExecutionContext.transaction(executor: _executor, readOnly: readOnly),
       tx: this);
 
   /// Nested transaction = SAVEPOINT.

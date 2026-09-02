@@ -3,6 +3,12 @@
 /// concrete facade; native and web construct it identically.
 part of 'local_pocket.dart';
 
+/// How long an interactive transaction session may sit without any
+/// session-scoped command before the kernel force-rolls it back. Reads and
+/// writes share the write queue, so an abandoned session would otherwise
+/// hold the sole queue slot forever and wedge the whole database.
+const Duration defaultTxSessionTtl = Duration(minutes: 5);
+
 /// The shared dependency set every kernel service receives.
 final class KernelContext {
   /// Internal: constructed by [KernelDatabase].
@@ -16,6 +22,7 @@ final class KernelContext {
     required this.destructiveBackup,
     required this.now,
     required this.groupCommitWindow,
+    this.txSessionTtl = defaultTxSessionTtl,
     this.testHooks,
     this.blobStore,
     this.fieldCipher,
@@ -67,6 +74,11 @@ final class KernelContext {
 
   /// Coalescing window for group commit (zero = end-of-turn only).
   final Duration groupCommitWindow;
+
+  /// Idle deadline for interactive transaction sessions (see
+  /// [defaultTxSessionTtl]); a session silent longer than this is
+  /// force-rolled back so the write queue can never wedge permanently.
+  final Duration txSessionTtl;
 
   /// The compiled per-store tables (schema registry).
   Map<String, StoreTable> get tables => database.tablesForKernel;

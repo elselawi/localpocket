@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:localpocket/src/kernel/errors.dart' show StorageError;
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:localpocket/src/kernel/sync/sync_tables.dart';
@@ -122,6 +123,31 @@ void main() {
       await pocket.collection('widgets').patch(id, {'qty': 5});
       final op = await pocket.outbox.readOp(pocket.db, 'widgets', id);
       expect(jsonDecode(op!.payloadJson)['qty'], 5);
+    });
+
+    test('base_updated without base_json fails typed instead of merging',
+        () async {
+      final id = generateRecordId();
+      await pocket
+          .collection('widgets')
+          .put(record(id: id, name: 'good', qty: 1));
+      await pocket.outbox.ack('widgets', id, serverUpdated: t0);
+      await pocket.collection('widgets').patch(id, {'qty': 2});
+      // Structurally corrupt base state: the base version survives but its
+      // snapshot json is gone. Merging against it would produce wrong pushes
+      // and wrong conflict decisions.
+      await pocket.db.execute(
+          'UPDATE lp_sync_row SET base_json = NULL WHERE record_id = ?', [id]);
+
+      await expectLater(
+        pocket.collection('widgets').patch(id, {'qty': 3}),
+        throwsA(isA<StorageError>()
+            .having((e) => e.message, 'message', contains('widgets/$id'))),
+      );
+      // The typed failure is durable-state corruption surfacing, not a lost
+      // write: the domain row still holds the last good value.
+      final local = await pocket.collection('widgets').get(id);
+      expect(local!['qty'], 2);
     });
   });
 }

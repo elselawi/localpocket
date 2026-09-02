@@ -9,11 +9,11 @@ import 'sync_tables.dart';
 /// as file uploads and removals.
 /// {@endtemplate}
 class OpQueue {
-
   /// Internal: constructed by [LocalPocket].
   ///
   /// {@macro localpocket.op_queue}
   OpQueue.internal(this.pocket);
+
   /// Database owning this queue.
   final LocalPocket pocket;
   final Random _rng = Random.secure();
@@ -25,18 +25,19 @@ class OpQueue {
     required OpQueueKind kind,
     required Map<String, Object?> payload,
     String? dependsOnOp,
-  }) => pocket.transaction((tx) async {
-      await tx.executor.insert('lp_op_queue', {
-        'op_id': _newOpId(),
-        'store': store,
-        'record_id': recordId,
-        'kind': kind.name,
-        'payload_json': jsonEncode(payload),
-        'state': 'pending',
-        'depends_on_op': dependsOnOp,
-        'created_at': pocket.now(),
+  }) =>
+      pocket.transaction((tx) async {
+        await tx.executor.insert('lp_op_queue', {
+          'op_id': _newOpId(),
+          'store': store,
+          'record_id': recordId,
+          'kind': kind.name,
+          'payload_json': jsonEncode(payload),
+          'state': 'pending',
+          'depends_on_op': dependsOnOp,
+          'created_at': pocket.now(),
+        });
       });
-    });
 
   /// Returns ops ready to run, FIFO by seq, skipping blocked ones.
   /// Retryable `failed` ops whose `next_retry_at` passed are selected too,
@@ -71,27 +72,28 @@ class OpQueue {
 
   /// Marks [opId] completed and releases dependents.
   Future<void> markDone(String opId) => pocket.transaction((tx) async {
-      await tx.executor.update('lp_op_queue', {'state': 'done'},
-          where: 'op_id = ?', whereArgs: [opId]);
-    });
+        await tx.executor.update('lp_op_queue', {'state': 'done'},
+            where: 'op_id = ?', whereArgs: [opId]);
+      });
 
   /// Marks [opId] failed and stores [error] for inspection.
   ///
   /// The op stays retryable: `failed` with a persisted backoff deadline;
   /// [drain] selects it again once the deadline passes.
   Future<void> markFailed(String opId, String error,
-      {int attempts = 1, int nextRetryAt = 0}) => pocket.transaction((tx) async {
-      await tx.executor.update(
-          'lp_op_queue',
-          {
-            'state': 'failed',
-            'attempt_count': attempts,
-            'next_retry_at': nextRetryAt,
-            'last_error': error,
-          },
-          where: 'op_id = ?',
-          whereArgs: [opId]);
-    });
+          {int attempts = 1, int nextRetryAt = 0}) =>
+      pocket.transaction((tx) async {
+        await tx.executor.update(
+            'lp_op_queue',
+            {
+              'state': 'failed',
+              'attempt_count': attempts,
+              'next_retry_at': nextRetryAt,
+              'last_error': error,
+            },
+            where: 'op_id = ?',
+            whereArgs: [opId]);
+      });
 
   String _newOpId() {
     final rng = _rng;

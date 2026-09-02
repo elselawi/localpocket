@@ -266,6 +266,7 @@ class KernelDatabase with ChangeBusAwareLP {
     this.fieldCipher,
     this.cryptoProvider,
     this.groupCommitWindow = Duration.zero,
+    this.txSessionTtl = defaultTxSessionTtl,
     this.syncBackendFactory,
   }) : perf = PerfCounters() {
     writeQueue = WriteQueue(onQueueDepthChanged: perf.queueChanged);
@@ -283,6 +284,7 @@ class KernelDatabase with ChangeBusAwareLP {
       fieldCipher: fieldCipher,
       cryptoProvider: cryptoProvider,
       groupCommitWindow: groupCommitWindow,
+      txSessionTtl: txSessionTtl,
     );
     _transactions = TransactionCoordinator(kernel);
     mutations = MutationService(kernel);
@@ -388,6 +390,10 @@ class KernelDatabase with ChangeBusAwareLP {
   /// of the last write in a burst grows up to the window.
   final Duration groupCommitWindow;
 
+  /// Idle deadline for interactive transaction sessions (see
+  /// [defaultTxSessionTtl]); forwarded to [KernelContext].
+  final Duration txSessionTtl;
+
   /// Opens or creates a database and registers the supplied collections.
   ///
   /// [factory] is intentionally required so the application can choose the
@@ -427,6 +433,7 @@ class KernelDatabase with ChangeBusAwareLP {
     String? workerAssetPath,
     int Function()? now,
     Duration groupCommitWindow = Duration.zero,
+    Duration txSessionTtl = defaultTxSessionTtl,
     SyncBackendFactory? syncBackendFactory,
   }) async {
     if (encrypted && platform == PlatformProfile.web) {
@@ -460,6 +467,7 @@ class KernelDatabase with ChangeBusAwareLP {
         fieldCipher: fieldCipher,
         cryptoProvider: cryptoProvider,
         groupCommitWindow: groupCommitWindow,
+        txSessionTtl: txSessionTtl,
         syncBackendFactory: syncBackendFactory,
       );
       await _recordCoreMigration(db, pocket.now);

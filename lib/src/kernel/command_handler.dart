@@ -38,6 +38,10 @@ class _TxSession {
   bool rollback = false;
   Tx? tx;
   late final Future<void> future;
+
+  /// Last time a session-scoped command touched this session; the idle
+  /// sweeper force-rolls the session back when this goes stale.
+  DateTime lastActivity = DateTime.now();
 }
 
 /// A held-open savepoint within a transaction.
@@ -76,6 +80,7 @@ class KernelCommandHandler implements CommandHandler {
   final _events = StreamController<Event>.broadcast();
   late final StreamSubscription<RecordChangeEvent> _changeSub;
   final _sessions = <String, _TxSession>{};
+  Timer? _txSweepTimer;
   final _watches = <String, StreamSubscription<dynamic>>{};
   final _fileUploads = FileUploadSessionRegistry();
   Timer? _uploadExpiryTimer;
@@ -500,10 +505,19 @@ class KernelCommandHandler implements CommandHandler {
       builder = _applyCondition(builder, c);
     }
     for (final group in spec.orGroups) {
-      builder = builder.orWhere([
-        for (final c in group)
-          if (c.op == QueryConditionOp.eq) {c.field: c.value},
-      ]);
+      // Only eq members have a lowering here: dropping a non-eq member would
+      // silently widen the group (the filtered-query-becomes-unfiltered
+      // class), so an unsupported shape is rejected instead.
+      final lowered = <Map<String, Object?>>[];
+      for (final c in group) {
+        if (c.op != QueryConditionOp.eq) {
+          throw ValidationException(
+              'orGroups only supports eq members; got "${c.op.name}" on '
+              'field "${c.field}".');
+        }
+        lowered.add({c.field: c.value});
+      }
+      builder = builder.orWhere(lowered);
     }
     // A structured predicate tree is the authoritative filter when present;
     // it compiles through the same builder path as the flat conditions.
@@ -528,6 +542,10 @@ class KernelCommandHandler implements CommandHandler {
   QueryBuilder _applyCondition(QueryBuilder builder, QueryConditionData c) {
     switch (c.op) {
       case QueryConditionOp.eq:
+        // eq(null) has IS NULL semantics (same as the predicate-tree path);
+        // passing the null through would add no clause and unfilter the
+        // query.
+        if (c.value == null) return builder.where(c.field, isNull: true);
         return builder.where(c.field, eq: c.value);
       case QueryConditionOp.neq:
         return builder.where(c.field, neq: c.value);
@@ -615,6 +633,7 @@ class KernelCommandHandler implements CommandHandler {
     final id = 'tx${++_counter}';
     final session = _TxSession(id, readOnly);
     _sessions[id] = session;
+    _ensureTxSweeper();
     final db = context.database;
     Future<void> run(Tx tx) async {
       session.tx = tx;
@@ -1054,7 +1073,42 @@ class KernelCommandHandler implements CommandHandler {
     if (!session.ready.isCompleted) {
       throw StateError('Transaction session "$sessionId" is not ready yet.');
     }
+    session.lastActivity = DateTime.now();
     return session;
+  }
+
+  /// Starts the periodic transaction-session sweep on the first session; a
+  /// session abandoned past [KernelContext.txSessionTtl] (transport drop,
+  /// wedged caller) is force-rolled back so it cannot hold the write-queue
+  /// slot forever.
+  void _ensureTxSweeper() {
+    if (_txSweepTimer != null) return;
+    final ttl = context.txSessionTtl;
+    if (ttl <= Duration.zero) return;
+    final period = Duration(microseconds: ttl.inMicroseconds ~/ 4);
+    _txSweepTimer = Timer.periodic(period, (_) {
+      if (_sessions.isEmpty) {
+        _txSweepTimer?.cancel();
+        _txSweepTimer = null;
+        return;
+      }
+      final now = DateTime.now();
+      for (final session in _sessions.values.toList()) {
+        if (now.difference(session.lastActivity) > ttl) {
+          for (final sp in session.savepoints.reversed) {
+            if (!sp.release.isCompleted) sp.release.complete();
+          }
+          session.rollback = true;
+          if (!session.release.isCompleted) session.release.complete();
+          _sessions.remove(session.id);
+          // Nobody will ever await the transaction body after abandonment;
+          // contain the intentional rollback signal (and any rollback-time
+          // failure — there is no session channel left to report to).
+          unawaited(session.future
+              .then((_) {}, onError: (Object _, StackTrace __) {}));
+        }
+      }
+    });
   }
 
   DatabaseExecutor _sessionExecutor(String sessionId) {
@@ -1089,6 +1143,8 @@ class KernelCommandHandler implements CommandHandler {
     _watches.clear();
     _uploadExpiryTimer?.cancel();
     _uploadExpiryTimer = null;
+    _txSweepTimer?.cancel();
+    _txSweepTimer = null;
     _fileUploads.clear();
     for (final download in _fileDownloads.values) {
       unawaited(download.subscription.cancel());
@@ -1131,15 +1187,24 @@ PredicateNode _predicateLeaf(QueryConditionData condition) {
       }
       return NotPredicate(LeafPredicate(field, 'eq', <Object?>[value]));
     case QueryConditionOp.gt:
-      return LeafPredicate(field, 'gt', <Object?>[condition.value]);
     case QueryConditionOp.gte:
-      return LeafPredicate(field, 'gte', <Object?>[condition.value]);
     case QueryConditionOp.lt:
-      return LeafPredicate(field, 'lt', <Object?>[condition.value]);
     case QueryConditionOp.lte:
-      return LeafPredicate(field, 'lte', <Object?>[condition.value]);
+      // A null bound compiles to SQL that never matches; reject instead of
+      // silently emptying the result set.
+      if (condition.value == null) {
+        throw ValidationException(
+            '"${condition.op.name}" does not accept null — use isNull().');
+      }
+      return LeafPredicate(
+          field, condition.op.name, <Object?>[condition.value]);
     case QueryConditionOp.inValues:
-      return LeafPredicate(field, 'inValues', condition.values ?? const []);
+      final values = condition.values ?? const [];
+      if (values.contains(null)) {
+        throw ValidationException(
+            'inValues does not accept null — use isNull().');
+      }
+      return LeafPredicate(field, 'inValues', values);
     case QueryConditionOp.between:
       final v = condition.values ?? const [];
       if (v.length != 2) {

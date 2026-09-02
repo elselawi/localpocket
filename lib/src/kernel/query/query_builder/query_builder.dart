@@ -223,6 +223,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   ///
   /// [between] is INCLUSIVE on both ends (SQL `BETWEEN`); for a half-open
   /// `[start, end)` window use `gte:`/`lt:` explicitly.
+  ///
+  /// A `null` comparison argument is treated as "operator absent" — the
+  /// named-parameter form cannot distinguish an explicit `eq: null` from an
+  /// omitted one, so callers that mean SQL NULL must spell `isNull: true`.
+  /// Command lowering routes `eq(null)` there before reaching this builder.
   @override
   QueryBuilder where(
     String field, {
@@ -678,8 +683,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     return ('(${clauses.join(' OR ')})', args);
   }
 
-  String _makeCursor(
-          Map<String, Object?> lastFullRow, Map<String, Object?> firstFullRow) =>
+  String _makeCursor(Map<String, Object?> lastFullRow,
+          Map<String, Object?> firstFullRow) =>
       _cursorCodec.encode(
         forward: [for (final o in _effectiveOrder) lastFullRow[o.field]],
         backward: [for (final o in _effectiveOrder) firstFullRow[o.field]],
