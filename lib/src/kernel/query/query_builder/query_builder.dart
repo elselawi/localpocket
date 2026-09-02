@@ -8,13 +8,14 @@ import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/hashing.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:localpocket/src/kernel/query_plan.dart';
+import 'package:localpocket/src/kernel/query/cursor.dart';
 import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
+import 'package:localpocket/src/kernel/query/result_shaper.dart';
 import 'package:localpocket/src/kernel/query/query_builder/query_dsl.dart';
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/kernel/sql_utils.dart';
 import 'package:localpocket/src/kernel/store.dart';
 import 'package:localpocket/src/kernel/watch.dart';
-import 'package:collection/collection.dart';
 import 'package:meta/meta.dart';
 
 /// {@template localpocket.where_clause}
@@ -45,12 +46,6 @@ class OrderClause {
 
   /// Whether to sort in descending order.
   final bool desc;
-}
-
-class _CursorData {
-  const _CursorData(this.values);
-
-  final List<Object?> values;
 }
 
 /// {@template localpocket.query_builder}
@@ -549,8 +544,8 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
       args.addAll(c.args);
     }
     if (_cursor != null) {
-      final data = _decodeCursor(_cursor!);
-      final (ks, ksArgs) = _keysetPredicate(_consumeOrder, data.values);
+      final values = _decodeCursor(_cursor!);
+      final (ks, ksArgs) = _keysetPredicate(_consumeOrder, values);
       where.add(ks);
       args.addAll(ksArgs);
     }
@@ -610,51 +605,20 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     return cols.map(DdlCompiler.quote).join(', ');
   }
 
-  _CursorData _decodeCursor(String cursor) {
-    Object? storeName;
-    Object? schemaVer;
-    Object? shape;
-    List<String> sort;
-    List<Object?> values;
-    try {
-      final m = jsonDecode(utf8.decode(base64Url.decode(cursor)))
-          as Map<String, Object?>;
-      storeName = m['store'];
-      schemaVer = m['schemaVer'];
-      shape = m['shape'];
-      sort = List<String>.from(m['sort'] as List? ?? const []);
-      // Forward consumption continues from the window's last row (`values`);
-      // backward consumption continues from its first row (`pv`). Both tuples
-      // are minted over the same forward sort signature.
-      final raw = _backward ? m['pv'] : m['values'];
-      values = List<Object?>.from(raw as List? ?? const []);
-    } catch (_) {
-      // Any malformed cursor (bad base64, invalid UTF-8/JSON, wrong field
-      // types) is a stale cursor, never a FormatException/TypeError.
-      throw StaleCursorError('Malformed cursor.');
-    }
-    final expectedSort = _sortSignature;
-    if (storeName != _schema.name ||
-        schemaVer != _schema.version ||
-        shape != _shapeFingerprint ||
-        !const ListEquality<String>().equals(sort, expectedSort) ||
-        values.length != expectedSort.length) {
-      throw StaleCursorError(
-          'Cursor does not match this query shape (store/schema/sort/filters).');
-    }
-    // Values must be scalars; anything else (maps, lists, ...) could only
-    // come from a hand-crafted cursor and would leak an untyped binding error.
-    for (final v in values) {
-      if (v != null &&
-          v is! bool &&
-          v is! int &&
-          v is! double &&
-          v is! String) {
-        throw StaleCursorError('Malformed cursor.');
-      }
-    }
-    return _CursorData(values);
-  }
+  /// The cursor codec for this builder's current shape. Built per call: the
+  /// builder is mutable, so the shape fingerprint must be read at mint/decode
+  /// time. Minting and validation itself lives in the kernel-owned
+  /// `KeysetCursorCodec` (`query/cursor.dart`) — one codec for every runtime
+  /// and every execution path.
+  KeysetCursorCodec get _cursorCodec => KeysetCursorCodec(
+        store: _schema.name,
+        schemaVersion: _schema.version,
+        sortSignature: _sortSignature,
+        shapeFingerprint: _shapeFingerprint,
+      );
+
+  List<Object?> _decodeCursor(String cursor) =>
+      _cursorCodec.decode(cursor, backward: _backward);
 
   /// Fingerprint of every query-shape component that a keyset cursor is only
   /// valid for: scope flags, WHERE/OR predicates (structure *and* bound
@@ -748,18 +712,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   }
 
   String _makeCursor(
-      Map<String, Object?> lastFullRow, Map<String, Object?> firstFullRow) {
-    final order = _effectiveOrder;
-    final payload = {
-      'store': _schema.name,
-      'schemaVer': _schema.version,
-      'sort': _sortSignature,
-      'shape': _shapeFingerprint,
-      'values': [for (final o in order) lastFullRow[o.field]],
-      'pv': [for (final o in order) firstFullRow[o.field]],
-    };
-    return base64UrlEncode(utf8.encode(jsonEncode(payload)));
-  }
+          Map<String, Object?> lastFullRow, Map<String, Object?> firstFullRow) =>
+      _cursorCodec.encode(
+        forward: [for (final o in _effectiveOrder) lastFullRow[o.field]],
+        backward: [for (final o in _effectiveOrder) firstFullRow[o.field]],
+      );
 
   // -------------------------------------------------------------- execution --
 
@@ -784,9 +741,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
       throw StateError('A compile-only QueryBuilder cannot execute fetch().');
     }
     final rows = await _runQuery(sql, args);
-    var hasNext = limit != null && rows.length > limit;
+    // Page facts are kernel-owned (plan Rule 6): the window is the first
+    // `limit` rows and the overflow bit answers `hasNext` exactly.
+    final (window: pageRows, :overflow) = takeWindow(rows, limit);
+    var hasNext = overflow;
     var hasPrev = _cursor != null;
-    final pageRows = limit == null ? rows : rows.take(limit).toList();
 
     // In-process, projection-aware decode: one-shot
     // Isolate.run per page was measured 1.8–5.6× slower than in-process at
@@ -828,17 +787,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
       hasPrev = hasPrev && decoded.isNotEmpty;
     }
 
-    final items = <Map<String, Object?>>[];
-    for (final full in decoded) {
-      if (_select != null) {
-        items.add({
-          for (final k in _select!)
-            if (full.containsKey(k)) k: full[k]
-        });
-      } else {
-        items.add(full);
-      }
-    }
+    final items = _select != null ? projectRows(decoded, _select!) : decoded;
     String? nextCursor;
     String? prevCursor;
     if (decoded.isNotEmpty) {

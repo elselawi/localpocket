@@ -1,5 +1,6 @@
 import 'codec.dart';
 import 'local_pocket.dart';
+import 'query/result_shaper.dart';
 import 'query_plan.dart';
 import 'sql_utils.dart';
 
@@ -31,8 +32,10 @@ Future<Map<String, Object?>> executeCompiledQuery(
 
   switch (plan.operation) {
     case 'query':
-      final hasNext = pageLimit != null && rows.length > pageLimit;
-      final pageRows = pageLimit == null ? rows : rows.take(pageLimit).toList();
+      // Page facts are kernel-owned (plan Rule 6): the window is the first
+      // `pageLimit` rows and the overflow bit answers `hasNext` exactly.
+      final (window: pageRows, :overflow) = takeWindow(rows, pageLimit);
+      final hasNext = overflow;
       final schema = pocket.requireTable(plan.store).schema;
       final columns = plan.decodeColumns;
       final decoded = columns != null
@@ -44,15 +47,8 @@ Future<Map<String, Object?>> executeCompiledQuery(
               cipher: pocket.fieldCipher,
               cryptoProvider: pocket.cryptoProvider);
       final projection = plan.projection;
-      final projected = projection == null
-          ? decoded
-          : [
-              for (final row in decoded)
-                {
-                  for (final k in projection)
-                    if (row.containsKey(k)) k: row[k]
-                }
-            ];
+      final projected =
+          projection == null ? decoded : projectRows(decoded, projection);
       return {
         'items': projected,
         // Both boundary rows ride the envelope whenever the window is
