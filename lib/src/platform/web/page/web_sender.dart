@@ -104,6 +104,14 @@ class WebSender {
       dartMap,
       expectedVersion: webProtocolVersion,
     );
+    // Correlation check: a reply whose request id does not match the
+    // in-flight request can never be trusted — deliver it as a typed
+    // protocol failure instead of decoding it against the wrong call.
+    if (resp.requestId != req.requestId) {
+      throw ProtocolEnvelopeException(
+          'Response id ${resp.requestId} does not match request id '
+          '${req.requestId}.');
+    }
     if (resp.isError) {
       throw decodeError(resp.error!);
     }

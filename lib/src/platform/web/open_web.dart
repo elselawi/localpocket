@@ -3,14 +3,16 @@ import 'dart:js_interop';
 
 import 'package:sqlite3_web/sqlite3_web.dart';
 
-import '../runtime/remote_runtime_client.dart';
-import '../platform/web/page/assets.dart';
-import '../platform/web/crypto.dart';
-import '../platform/web/page/connector.dart';
-import '../platform/web/page/open_core.dart';
-import '../platform/web/page/lifecycle.dart';
-import 'local_pocket.dart';
-import 'options.dart';
+import '../../api/local_pocket.dart';
+import '../../api/options.dart';
+import '../../contract/contract.dart';
+import '../../kernel/schema_manifest.dart';
+import '../../runtime/remote_runtime_client.dart';
+import 'crypto.dart';
+import 'page/assets.dart';
+import 'page/connector.dart';
+import 'page/lifecycle.dart';
+import 'page/open_core.dart';
 
 /// Opens the facade on the web: the kernel runs in the dedicated database
 /// worker and the page holds only the typed contract client.
@@ -20,11 +22,15 @@ import 'options.dart';
 /// any store is used and every later command is one contract envelope over
 /// the worker transport. No SQL is compiled or executed on the page, and no
 /// kernel is opened in-process.
+///
+/// Web open implementation — selected by the conditional export in
+/// `lib/src/api/open_platform.dart`; the api layer never imports platform
+/// code or the web SDK directly.
 Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   validateWebOpenConfig(path: options.path, encrypted: false);
 
   final schemas = [
-    for (final def in options.stores) def.collectionSchema,
+    for (final def in options.stores) def.compiledSchema,
   ];
 
   // Field-level encryption: the configured cipher is serialized into the
@@ -93,6 +99,19 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     },
     requestTimeout: options.bootstrap.requestTimeout,
   );
+
+  // Typed open handshake (plan Phase 3 item 10): the page sends the typed
+  // OpenRequest carrying the manifest fingerprints it compiled from the same
+  // store definitions; the worker's kernel verifies page/worker schema
+  // identity through the sealed contract before any application command
+  // runs. A divergence fails the open with a typed error — it can never
+  // surface later as a mid-session mismatch.
+  await runtime.send(OpenRequest(
+    stores: [for (final s in schemas) s.toJson()],
+    manifestFingerprints: {
+      for (final s in schemas) s.name: SchemaManifest.compile(s).fingerprint,
+    },
+  ));
 
   // Worker death ends the event stream; later sends fail through the
   // transport's own closed classification.

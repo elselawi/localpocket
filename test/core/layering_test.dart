@@ -166,6 +166,50 @@ void main() {
       }
     }
   });
+
+  test('the api layer never imports web SDKs or the web platform (R5)', () {
+    // Plan §5.1: the public API layer imports no dart:io, dart:js_interop,
+    // package:web, or platform implementation files. The browser specifics
+    // live under lib/src/platform/web/ and are reached ONLY through the
+    // conditional export in lib/src/api/open_platform.dart.
+    final api = _filesUnder('lib/src/api');
+    for (final f in api) {
+      final imports = _imports(f);
+      for (final i in imports) {
+        final isWebSdk = i.startsWith('dart:js') ||
+            i.startsWith('dart:html') ||
+            i.startsWith('package:web/');
+        expect(isWebSdk, isFalse,
+            reason: '$f must not import "$i" (api -> web SDK)');
+        expect(i.contains('platform/web'), isFalse,
+            reason: '$f must not import "$i" (api -> platform/web)');
+      }
+    }
+  });
+
+  test('the platform open dispatch is pinned to the conditional export (R6)',
+      () {
+    // The single sanctioned api -> platform reference is the conditional
+    // export that chooses the open implementation. Pin it so the dispatch
+    // point cannot move or multiply.
+    final dispatch = File('lib/src/api/open_platform.dart').readAsStringSync();
+    expect(dispatch.contains("export '../platform/native/open_native.dart'"),
+        isTrue,
+        reason: 'open_platform.dart must conditionally export the native opener');
+    expect(dispatch.contains("if (dart.library.js_interop) '../platform/web/open_web.dart'"),
+        isTrue,
+        reason: 'open_platform.dart must conditionally export the web opener');
+    // And no other api file imports or exports the platform open
+    // implementations (doc mentions are fine; references are not).
+    final refPattern = RegExp(
+        r"""^\s*(import|export)\s+'[^']*(open_native|open_web)\.dart'""",
+        multiLine: true);
+    for (final f in _filesUnder('lib/src/api')) {
+      if (f == 'lib/src/api/open_platform.dart') continue;
+      expect(refPattern.allMatches(File(f).readAsStringSync()), isEmpty,
+          reason: '$f must not reference the platform open implementations');
+    }
+  });
 }
 
 Iterable<String> _filesUnder(String dir) => Directory(dir)

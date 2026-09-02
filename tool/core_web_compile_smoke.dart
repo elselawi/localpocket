@@ -81,7 +81,7 @@ void main() {
   // Touch a representative slice so tree-shaking retains the symbols.
   final id = generateRecordId();
   final hash = sha256Hex('smoke-$id');
-  final schema = _SmokeNotes.store.collectionSchema;
+  final schema = _SmokeNotes.store.compiledSchema;
   final ts = formatPbTimestamp(DateTime.utc(2026, 8, 15, 10, 0, 0, 123));
   final parsed = pbTimestampToDateTime(ts);
 

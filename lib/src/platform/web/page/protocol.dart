@@ -30,8 +30,9 @@ class WireOp {
 
   /// The typed contract envelope: the request travels exactly as the contract
   /// codec encodes it and the kernel answers through the same command handler
-  /// the direct runtime uses. Coexists with the string-op registry until every
-  /// family routes through it; the two envelopes share one kernel.
+  /// the direct runtime uses. Every application operation crosses as one of
+  /// these; the only other op is `open`, kept for worker-side re-registration
+  /// of additional stores.
   static const String contractRequest = 'contract_request';
 
   /// Committed facts and watch snapshots, contract-event encoded.
