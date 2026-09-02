@@ -1,22 +1,17 @@
 /// Pure-Dart core of the facade's request/response loop over the worker
 /// transport (`Database.customRequest`).
 ///
-/// Everything here is wire-Dart (no `dart:js_interop`, no `dart:io`), so it
-/// is unit-testable on the VM with an injectable transport. The JS-bound
-/// facade (`facade.dart`) supplies the transport (which calls
-/// `customRequest(...).jsify()`/`.dartify()`) and the worker-closed callback
-/// (which tears down worker-owned streams); this class owns the envelope
-/// construction, error classification, and closed-state bookkeeping so the
-/// facade itself stays a thin adapter.
+/// Everything here is wire-Dart (no `dart:js_interop`), so it is VM-testable
+/// with an injectable transport. The JS-bound facade supplies the transport
+/// and the worker-closed callback; this class owns envelope construction,
+/// error classification, and closed-state bookkeeping.
 library;
 
 import 'protocol.dart';
 
 /// True when a transport error message indicates the worker process has
-/// closed, matching every marker the upstream transport can surface.
-///
-/// The facade maps such errors to [DatabaseWorkerClosedException] (and marks
-/// the worker closed) rather than leaking a raw transport error.
+/// closed (any marker the upstream transport can surface). The facade maps
+/// such errors to [DatabaseWorkerClosedException] instead of leaking them.
 bool isWorkerClosedMessage(String message) =>
     message.contains('Channel to database worker is closed') ||
     message.contains('worker is closed') ||
@@ -27,16 +22,13 @@ bool isWorkerClosedMessage(String message) =>
 /// decodes the [WebResponse].
 ///
 /// - A send after close fails immediately with [DatabaseWorkerClosedException].
-/// - A transport error whose message matches [isWorkerClosedMessage] marks the
-///   sender closed (invoking [onWorkerClosed] once) and is rethrown as a typed
-///   [DatabaseWorkerClosedException].
-/// - When [requestTimeout] is configured, a transport call that does not
-///   complete in time fails the request with a typed
-///   [DatabaseWorkerTimeoutException]; the sender stays usable and open.
-/// - A null transport result and a non-map transport result are both rejected
-///   with [ProtocolEnvelopeException].
-/// - A response carrying an error is decoded through [decodeError] so wire
-///   errors surface as their closest typed local exception.
+/// - A worker-closed transport error marks the sender closed (invoking
+///   [onWorkerClosed] once) and rethrows as [DatabaseWorkerClosedException].
+/// - With [requestTimeout] set, a stalled transport call fails with a typed
+///   [DatabaseWorkerTimeoutException]; the sender stays usable.
+/// - A null or non-map transport result is rejected as
+///   [ProtocolEnvelopeException]; an error response is decoded through
+///   [decodeError] to its closest typed local exception.
 /// {@endtemplate}
 class WebSender {
   /// {@macro localpocket.web_sender}
@@ -50,10 +42,9 @@ class WebSender {
   final Future<Object?> Function(WebRequest request) _transport;
   final void Function()? _onWorkerClosed;
 
-  /// Optional per-request timeout. A request that exceeds it fails with a
-  /// typed [DatabaseWorkerTimeoutException]; the sender remains open and the
-  /// next request proceeds normally (the wedged response is abandoned). A null
-  /// value disables the timeout entirely.
+  /// Optional per-request timeout; a request exceeding it fails with a typed
+  /// [DatabaseWorkerTimeoutException] while the sender stays open (the wedged
+  /// response is abandoned). `null` disables the timeout.
   final Duration? requestTimeout;
 
   /// Monotonic id shared by watch registrations and request envelopes.
@@ -64,6 +55,8 @@ class WebSender {
   /// Whether the sender (and therefore the facade) is closed.
   bool get isClosed => _closed;
 
+  /// Sends one op request to the worker and returns its decoded response;
+  /// throws typed exceptions when closed or timed out.
   Future<Object?> send(String op,
       [Map<String, Object?> args = const {}]) async {
     if (_closed) {
@@ -104,9 +97,8 @@ class WebSender {
       dartMap,
       expectedVersion: webProtocolVersion,
     );
-    // Correlation check: a reply whose request id does not match the
-    // in-flight request can never be trusted — deliver it as a typed
-    // protocol failure instead of decoding it against the wrong call.
+    // A mismatched reply id can never be trusted; fail typed instead of
+    // decoding it against the wrong call.
     if (resp.requestId != req.requestId) {
       throw ProtocolEnvelopeException(
           'Response id ${resp.requestId} does not match request id '
@@ -141,9 +133,8 @@ class WebSender {
     _onWorkerClosed?.call();
   }
 
-  /// Marks the sender closed WITHOUT the worker-closed callback — used by the
-  /// facade's own graceful close path, which tears down page resources
-  /// itself.
+  /// Marks the sender closed WITHOUT the worker-closed callback — the
+  /// facade's graceful close tears down page resources itself.
   void markClosedLocal() {
     _closed = true;
   }

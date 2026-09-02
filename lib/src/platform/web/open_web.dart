@@ -5,6 +5,8 @@ import 'package:sqlite3_web/sqlite3_web.dart';
 
 import '../../api/local_pocket.dart';
 import '../../api/options.dart';
+import '../../adapters/pocketbase/backend.dart'
+    show PocketBaseSyncBackendFactory;
 import '../../contract/contract.dart';
 import '../../kernel/schema_manifest.dart';
 import '../../runtime/remote_runtime_client.dart';
@@ -12,41 +14,46 @@ import 'crypto.dart';
 import 'page/assets.dart';
 import 'page/connector.dart';
 import 'page/lifecycle.dart';
+import 'page/object_urls.dart';
 import 'page/open_core.dart';
 
 /// Opens the facade on the web: the kernel runs in the dedicated database
-/// worker and the page holds only the typed contract client.
+/// worker and the page holds only the typed contract client. The worker boots
+/// the kernel from the serialized open options, so the manifest handshake
+/// happens before any store is used and every later command is one contract
+/// envelope. No SQL is compiled or executed on the page.
 ///
-/// The worker boots the kernel from the serialized open options (stores,
-/// document limit, field cipher), so the manifest handshake happens before
-/// any store is used and every later command is one contract envelope over
-/// the worker transport. No SQL is compiled or executed on the page, and no
-/// kernel is opened in-process.
-///
-/// Web open implementation — selected by the conditional export in
-/// `lib/src/api/open_platform.dart`; the api layer never imports platform
-/// code or the web SDK directly.
+/// Selected by the conditional export in `lib/src/api/open_platform.dart`;
+/// the api layer never imports platform code or the web SDK directly.
 Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   validateWebOpenConfig(path: options.path, encrypted: false);
+
+  // The worker boot configures the sync backend factory itself (code cannot
+  // cross the worker boundary) — a different caller-configured factory would
+  // be silently ignored, so fail the open typed instead.
+  if (options.syncBackendFactory != null &&
+      options.syncBackendFactory is! PocketBaseSyncBackendFactory) {
+    throw ValidationException(
+        'syncBackendFactory cannot cross the web worker boundary: the worker '
+        'configures the PocketBase factory itself. Omit the option on web, or '
+        'run the sync attachment on a native runtime for custom backends.');
+  }
 
   final schemas = [
     for (final def in options.stores) def.compiledSchema,
   ];
 
-  // Field-level encryption: the configured cipher is serialized into the
-  // open options so the worker reconstructs an AesGcmFieldCipher with the
-  // same key. The key crosses postMessage into the same-origin trusted
-  // worker; an unserializable configuration throws a typed error here,
-  // never silently degrades.
+  // The cipher is serialized into the open options so the worker reconstructs
+  // an AesGcmFieldCipher with the same key (crosses postMessage into the
+  // same-origin trusted worker); unserializable configs throw typed here.
   final cipherEnvelope = buildFieldCipherEnvelope(
     stores: schemas,
     fieldCipher: options.encryption?.fieldCipher,
   );
 
-  // Worker asset: primary path, falling back to the plain root asset when
-  // running from a dev/test harness where the package asset 404s. Wasm
-  // asset: primary path, then the root `assets/sqlite3.wasm`, then the
-  // packaged path as a final plain-path fallback.
+  // Worker asset falls back to the plain root asset for dev/test harnesses
+  // where the package asset 404s; wasm falls back to the root asset, then
+  // the packaged plain path.
   final workerResolved = await resolveAssetAsBlobUrl(
     load: loadAssetAsBlobUrl,
     primary: options.bootstrap.workerAssetPath ??
@@ -100,12 +107,10 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     requestTimeout: options.bootstrap.requestTimeout,
   );
 
-  // Typed open handshake (plan Phase 3 item 10): the page sends the typed
-  // OpenRequest carrying the manifest fingerprints it compiled from the same
-  // store definitions; the worker's kernel verifies page/worker schema
-  // identity through the sealed contract before any application command
-  // runs. A divergence fails the open with a typed error — it can never
-  // surface later as a mid-session mismatch.
+  // Typed open handshake: the page sends the OpenRequest with the manifest
+  // fingerprints it compiled; the kernel verifies page/worker schema identity
+  // through the sealed contract before any application command runs. A
+  // divergence fails the open, never surfaces mid-session.
   await runtime.send(OpenRequest(
     stores: [for (final s in schemas) s.toJson()],
     manifestFingerprints: {
@@ -113,16 +118,21 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     },
   ));
 
-  // Worker death ends the event stream; later sends fail through the
-  // transport's own closed classification.
+  // Worker death ends the event stream; later sends fail via the
+  // transport's closed classification.
   unawaited(connectResult.database.closed.then((_) => runtime.close()));
 
-  // On close, dispose the worker connection so the OPFS file handle is
-  // flushed (sqlite3_web `Database.dispose()`). Without this, committed blob
-  // data can be lost on some browsers when the page tears down after the
-  // kernel close command.
+  // On close, dispose the worker connection to flush the OPFS file handle
+  // (sqlite3_web `Database.dispose()`); without it committed blob data can be
+  // lost on some browsers. Then revoke fetched blob: URLs — they hold asset
+  // bytes alive in the page for their lifetime, so repeated cycles would
+  // otherwise leak. Plain-path fallbacks are never revoked.
   return LocalPocket.internal(
     runtime,
-    onClose: () => connectResult.database.dispose(),
+    onClose: () async {
+      await connectResult.database.dispose();
+      if (workerResolved.fetched) revokeObjectUrl(workerResolved.url);
+      if (wasmResolved.fetched) revokeObjectUrl(wasmResolved.url);
+    },
   );
 }

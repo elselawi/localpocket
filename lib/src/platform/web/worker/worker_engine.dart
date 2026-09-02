@@ -1,33 +1,22 @@
 /// The engine worker's request-execution core: a small typed-envelope loop.
 ///
-/// The worker parses the wire envelope, dispatches it (the `open` handshake
-/// or one typed contract request through the kernel's own command handler),
-/// and replies; every kernel event broadcasts as a `contract_event`
-/// envelope. This library is pure Dart (no `dart:js_interop`, no `dart:io`)
-/// so it is unit-testable on the VM with a real in-memory engine, which the
-/// browser smokes under `tool/web_smoke` cannot provide (`dart test` vs
-/// Playwright).
+/// The worker parses the wire envelope, dispatches it (the `open` handshake or
+/// one typed contract request through the kernel's own command handler), and
+/// replies; every kernel event broadcasts as a `contract_event` envelope. Pure
+/// Dart (no `dart:js_interop`, no `dart:io`) so it is unit-testable on the VM
+/// with a real in-memory engine, which the browser smokes cannot provide.
 ///
-/// The JS boundary stays in `controller.dart`: `LocalPocketWorkerDatabase`
-/// converts the incoming `JSAny` payload to a Dart map, calls
-/// [WorkerEngine.handleRequest], and converts the resulting [WorkerReply]
-/// back to `JSAny`. Worker→client events (committed facts, watch snapshots,
-/// conflict snapshots, file chunks, sync status, auth required) flow through
-/// [WorkerEventSink], which the controller adapts to
-/// `ClientConnection.customRequest`.
+/// The JS boundary stays in `controller.dart`, which converts the incoming
+/// `JSAny` payload to a Dart map, calls [WorkerEngine.handleRequest], and
+/// converts the resulting [WorkerReply] back to `JSAny`; worker→client events
+/// flow through [WorkerEventSink].
 ///
-/// ## File organization
-///
-/// - `worker_engine.dart` (this file) — the [WorkerEngineHost] base plus
-///   [WorkerEngine], the public entry point with the envelope parse, dispatch
-///   table, and per-op routing.
+/// - `worker_engine.dart` — [WorkerEngineHost] base plus [WorkerEngine]
+///   (envelope parse, dispatch table, per-op routing).
 /// - `worker_engine_crud.dart` — store registration (`open`).
-///
-/// Everything else travels as typed contract requests: reads, writes,
-/// transaction sessions, watches, maintenance, capabilities, conflicts,
-/// files, sync, auth, and close are answered by the kernel command handler —
-/// the same handler the direct runtime calls, with no worker-side
-/// reinterpretation and no worker-owned feature state.
+/// - Everything else travels as typed contract requests answered by the
+///   kernel command handler: no worker-side reinterpretation and no
+///   worker-owned feature state.
 library;
 
 import 'dart:async';
@@ -45,11 +34,9 @@ import 'wire_args.dart';
 
 part 'worker_engine_crud.dart';
 
-/// Sink for worker→client events.
-///
-/// The engine never references `ClientConnection` (a JS-interop type); the
-/// worker adapter (`controller.dart`) supplies a sink that forwards each event
-/// to the owning connection, and VM tests supply a recording sink.
+/// Sink for worker→client events. The engine never references
+/// `ClientConnection` (a JS-interop type): the controller supplies a sink
+/// that forwards each event to the owning connection; VM tests record instead.
 abstract interface class WorkerEventSink {
   /// Delivers a structured-clone-safe event envelope to the client.
   void emit(Map<String, Object?> event);
@@ -107,9 +94,8 @@ final class WorkerError extends WorkerReply {
 
 /// Parses a raw schema map into a typed [CollectionSchema].
 ///
-/// Shared by the worker open path (`controller.dart`), the `open` wire
-/// handler, and the web option parser (`open_options.dart`) so all use one
-/// VM-testable parser.
+/// One VM-testable parser shared by the worker open path (`controller.dart`),
+/// the `open` wire handler, and the web option parser (`open_options.dart`).
 CollectionSchema<Object?> parseSchema(Object? raw) {
   if (raw is! Map) {
     throw FormatException('Schema must be a map: $raw');
@@ -120,8 +106,7 @@ CollectionSchema<Object?> parseSchema(Object? raw) {
 
 /// Recursively stringifies map keys (and nested map keys) so an arbitrary
 /// wire map can be indexed by String regardless of the JS-interop key type.
-///
-/// Shared by [parseSchema] and the web option parser (`open_options.dart`).
+/// Shared by [parseSchema] and the web option parser.
 Map<String, Object?> deepStringMap(Map<Object?, Object?> raw) {
   final out = <String, Object?>{};
   raw.forEach((k, v) {
@@ -139,15 +124,13 @@ Map<String, Object?> deepStringMap(Map<Object?, Object?> raw) {
 }
 
 /// {@template localpocket.worker_engine_host}
-/// Shared engine state (library-internal base).
+/// Shared engine state (library-internal base): the real [LocalPocket]
+/// engine, the connected event sinks, and the contract-event broadcast
+/// subscription. Every feature surface (sync, files, conflicts, transactions,
+/// watches) is kernel-owned; the worker holds no feature state of its own.
 ///
-/// Holds the real [LocalPocket] engine, the set of connected event sinks,
-/// and the contract-event broadcast subscription. Every feature surface
-/// (sync, files, conflicts, transactions, watches) is kernel-owned: the
-/// worker holds no feature state of its own.
-///
-/// [WorkerEngine] extends this class; the `open` handshake lives in the
-/// `worker_engine_crud.dart` part (`on WorkerEngineHost`, same library).
+/// [WorkerEngine] extends this; the `open` handshake lives in the
+/// `worker_engine_crud.dart` part.
 /// {@endtemplate}
 abstract class WorkerEngineHost {
   /// Creates a worker engine host backed by [pocket].
@@ -170,24 +153,19 @@ abstract class WorkerEngineHost {
 
   final Set<WorkerEventSink> _connections = {};
 
-  /// Broadcasts every kernel event to the connected sinks. The subscription
-  /// lives for the whole worker and completes when the kernel's event stream
-  /// closes (the kernel close).
+  /// Broadcasts every kernel event to the connected sinks; lives for the
+  /// whole worker and completes when the kernel's event stream closes.
   // ignore: cancel_subscriptions
   StreamSubscription<contract.Event>? _contractEventSubscription;
 
   // --------------------------------------------------- typed contract wire --
 
   /// Answers one typed contract request through the kernel's own command
-  /// handler — the same handler the direct runtime calls. There is no
-  /// worker-side reinterpretation: payloads, results, and errors travel in
-  /// the contract codec's wire form, so a remote send cannot drift from a
-  /// native one.
-  ///
-  /// Application failures are returned inside the reply as a contract-encoded
-  /// error so the caller reconstructs the typed kernel error; envelope-level
-  /// failures (a malformed request payload) throw and fall through to the
-  /// transport error framing.
+  /// handler; payloads, results, and errors travel in the contract codec's
+  /// wire form so a remote send cannot drift from a native one. Application
+  /// failures return inside the reply as a contract-encoded error (the caller
+  /// reconstructs the typed kernel error); envelope-level failures throw to
+  /// the transport error framing.
   Future<Object?> _handleContract(WorkerEventSink sink, WebRequest req) async {
     final raw = req.args['request'];
     if (raw is! Map) {
@@ -207,12 +185,11 @@ abstract class WorkerEngineHost {
 /// {@template localpocket.worker_engine}
 /// The engine worker's small envelope loop.
 ///
-/// Parse the wire envelope → dispatch (`open` handshake or one typed
-/// contract request through the kernel's own command handler) → reply, and
-/// broadcast every kernel event as a `contract_event` envelope. There is no
-/// worker-side reinterpretation, no worker-owned feature state, and no
-/// worker-owned close: closing the runtime is the kernel's `CloseRequest`,
-/// identical on the direct, loopback, and remote paths.
+/// Parse the wire envelope → dispatch (`open` or one typed contract request)
+/// → reply, and broadcast every kernel event as a `contract_event` envelope.
+/// No worker-side reinterpretation, feature state, or close: closing the
+/// runtime is the kernel's `CloseRequest` on the direct, loopback, and remote
+/// paths alike.
 /// {@endtemplate}
 final class WorkerEngine extends WorkerEngineHost with WorkerCrudHandlers {
   /// Creates a worker request-execution engine.
@@ -225,13 +202,10 @@ final class WorkerEngine extends WorkerEngineHost with WorkerCrudHandlers {
   });
 
   /// Handles one request envelope (the decoded wire payload) and returns the
-  /// reply to encode on the wire.
-  ///
-  /// Envelope parsing, protocol-version checking, and typed error
-  /// categorization all happen here so VM tests exercise the exact same path
-  /// the browser worker runs. [sink] is registered for contract-event
-  /// broadcast (idempotent per connection) and receives watcher/sync/conflicts
-  /// events.
+  /// reply to encode on the wire. Parsing, protocol-version checks, and typed
+  /// error categorization happen here so VM tests exercise the exact browser
+  /// path. [sink] is registered for contract-event broadcast (idempotent per
+  /// connection) and receives watcher/sync/conflicts events.
   Future<WorkerReply> handleRequest(
     WorkerEventSink sink,
     Map<String, Object?> payload,

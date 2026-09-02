@@ -1,9 +1,8 @@
 import 'package:sqlite3_web/sqlite3_web.dart';
 
 /// {@template localpocket.dedicated_only_connector}
-/// A connector that only spawns dedicated workers, returning null for shared workers.
-///
-/// This enforces the single-engine-instance-per-tab architecture.
+/// A connector that only spawns dedicated workers (null for shared workers),
+/// enforcing the single-engine-instance-per-tab architecture.
 /// {@endtemplate}
 final class DedicatedOnlyConnector implements WorkerConnector {
   /// Creates a connector that spawns workers from [workerUrl].
@@ -18,7 +17,6 @@ final class DedicatedOnlyConnector implements WorkerConnector {
   WorkerHandle? spawnDedicatedWorker() =>
       WorkerConnector.defaultWorkers(workerUrl).spawnDedicatedWorker();
 
-  // Dedicated worker architecture does not use shared workers.
   @override
   WorkerHandle? spawnSharedWorker() => null;
 }

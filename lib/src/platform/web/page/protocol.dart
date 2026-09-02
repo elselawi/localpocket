@@ -1,26 +1,19 @@
 /// Wire protocol between the web facade (main thread) and the engine worker.
 ///
-/// Only public-API envelopes cross this boundary. SQL never crosses it.
-/// Values are structured-clone-safe Dart values; the transport layer converts
-/// them to and from JSAny.
-///
-/// Every envelope carries the integer [webProtocolVersion]. A mismatch must
-/// fail open with a typed [ProtocolMismatchException], never a generic error.
+/// Only public-API envelopes cross this boundary; SQL never does. Values are
+/// structured-clone-safe Dart values. Every envelope carries the integer
+/// [webProtocolVersion]; a mismatch must fail with a typed exception.
 library;
 
-// Wire constants and envelope fields are documented by their protocol
-// comments above; documenting every individual constant would add noise.
+// Envelope fields are documented above; per-constant docs would add noise.
 // ignore_for_file: public_member_api_docs
 
 import '../../../kernel/errors.dart';
 import '../../../kernel/sync/sync_backend.dart';
 
-/// Protocol version for every envelope. Bump on any incompatible change.
-/// v2: all reads are compiled query plans (`compiled_query`); descriptor-based
-/// query operations were removed.
-/// v3: the compiled-query response envelope renames `hasMore` to `hasNext`
-/// (bidirectional pagination — the flag is direction-explicit) and adds
-/// `firstRow` alongside `lastRow` for backward cursor minting.
+/// Protocol version for every envelope. Bump on incompatible changes.
+/// v2: all reads are compiled query plans. v3: response `hasMore` → `hasNext`
+/// (direction-explicit pagination) plus `firstRow` for backward cursor minting.
 const int webProtocolVersion = 3;
 
 /// Names of supported operations. Unknown operations are rejected with a
@@ -28,11 +21,9 @@ const int webProtocolVersion = 3;
 class WireOp {
   static const String open = 'open';
 
-  /// The typed contract envelope: the request travels exactly as the contract
-  /// codec encodes it and the kernel answers through the same command handler
-  /// the direct runtime uses. Every application operation crosses as one of
-  /// these; the only other op is `open`, kept for worker-side re-registration
-  /// of additional stores.
+  /// Typed contract envelope: requests travel as the contract codec encodes
+  /// them, and the kernel answers through the same handler the direct runtime
+  /// uses. The only other op is `open` (worker-side store re-registration).
   static const String contractRequest = 'contract_request';
 
   /// Committed facts and watch snapshots, contract-event encoded.
@@ -92,8 +83,8 @@ String stableWireErrorType(Object error) {
     if (error is RecordNotFoundException) return 'RecordNotFoundException';
     if (error is SchemaTooNewError) return 'SchemaTooNewError';
     if (error is FtsUnavailableError) return 'FtsUnavailableError';
-    // UnsupportedSchemaFeatureError is a SchemaRegistrationError subtype, so
-    // this must be checked FIRST or it is never reached.
+    // Checked before SchemaRegistrationError: it is a subtype of it, so
+    // this must come first to be reachable.
     if (error is UnsupportedSchemaFeatureError) {
       return 'UnsupportedSchemaFeatureError';
     }
@@ -162,8 +153,8 @@ class WebRequest {
         'a': args,
       };
 
-  /// Parses a wire-safe Dart map into a request. Throws
-  /// [ProtocolEnvelopeException] on any malformed field — never a cast error.
+  /// Parses a wire-safe Dart map; throws [ProtocolEnvelopeException] on any
+  /// malformed field — never a cast error.
   static WebRequest fromJson(Map<String, Object?> json) {
     final version = json['v'];
     final requestId = json['i'];
@@ -226,10 +217,8 @@ class WebResponse {
         if (isError) 'e': error!.toJson() else 'r': result,
       };
 
-  /// Parses a wire-safe Dart map into a response. Throws
-  /// [ProtocolEnvelopeException] on any malformed field. When supplied,
-  /// [expectedVersion] is checked here so every response path enforces the
-  /// protocol version, not only the worker request path.
+  /// Parses a wire-safe Dart map, checking [expectedVersion] here so every
+  /// response path enforces the protocol version, not just the worker path.
   static WebResponse fromJson(Map<String, Object?> json,
       {int? expectedVersion}) {
     final version = json['v'];
@@ -328,11 +317,9 @@ final class DatabaseWorkerClosedException implements Exception {
 }
 
 /// {@template localpocket.database_worker_timeout_exception}
-/// A request to the worker did not complete within the sender's configured
-/// per-request timeout.
+/// A request to the worker did not complete within the per-request timeout.
 ///
-/// The sender stays usable: the worker may still eventually respond, but that
-/// response is abandoned and the caller has already failed.
+/// The sender stays usable; a late response is abandoned.
 /// {@endtemplate}
 final class DatabaseWorkerTimeoutException implements Exception {
   /// {@macro localpocket.database_worker_timeout_exception}

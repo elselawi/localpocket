@@ -16,7 +16,8 @@ import '../../../kernel/errors.dart';
 import '../../../kernel/local_pocket.dart';
 import '../../../kernel/schema.dart';
 import 'blob_store.dart';
-import '../../../adapters/pocketbase/backend.dart' show PocketBaseSyncBackendFactory;
+import '../../../adapters/pocketbase/backend.dart'
+    show PocketBaseSyncBackendFactory;
 import '../crypto.dart';
 import 'open_options.dart';
 import '../page/protocol.dart';
@@ -50,11 +51,10 @@ final class LocalPocketDatabaseController extends DatabaseController {
     final db = DirectSqliteDatabase(rawDb);
     var handedToPocket = false;
 
-    // Wire the destructive-migration backup file hooks to OPFS. sqlite3_web
-    // persists each database under `drift_db/<name>` in OPFS; VACUUM INTO
-    // writes the `.bak` next to the database in that same directory. The
-    // `backupDbName` option carries the original DB name from the facade (the
-    // in-worker path here is the fixed `/database`).
+    // Wire destructive-migration backup hooks to OPFS. sqlite3_web persists
+    // each database under `drift_db/<name>`; VACUUM INTO writes the `.bak`
+    // there. `backupDbName` carries the original DB name (the in-worker path
+    // is the fixed `/database`).
     final backupDbName =
         (rawOpenOption(additionalData?.dartify(), 'backupDbName') as String?) ??
             path;
@@ -70,36 +70,31 @@ final class LocalPocketDatabaseController extends DatabaseController {
       if (mode.toString().toLowerCase() != 'truncate') {
         throw StateError('journal_mode read-back was $mode, expected truncate');
       }
-      // Parse options from additionalData (pure-Dart parser in
-      // `open_options.dart`).
+      // Parse options (pure-Dart parser in `open_options.dart`).
       final options = parseOpenOptions(additionalData?.dartify());
       final stores = (options['stores'] as List<CollectionSchema>?) ?? [];
       final maxDocBytes = (options['maxDocBytes'] as int?) ?? 1900000;
       final destructiveBackup = (options['destructiveBackup'] as bool?) ?? true;
 
-      // Field cipher bridge: reconstruct the engine cipher from the serialized
-      // envelope. Parsing is intentionally OUTSIDE `parseOpenOptions`, which
+      // Cipher parsing is intentionally OUTSIDE `parseOpenOptions`, which
       // swallows malformed options — a malformed cipher envelope must fail
       // loudly, never be silently dropped.
       final fieldCipher = parseFieldCipherEnvelope(
           rawOpenOption(additionalData?.dartify(), 'fieldCipher'));
 
-      // Reject encrypted stores opened without a cipher at open time. A web
-      // open must never silently produce stores that cannot be written.
+      // A web open must never silently produce stores that cannot be written.
       if (hasEncryptedFieldsWithoutCipher(stores, fieldCipher)) {
         throw ValidationException(
             'Store declares encrypted fields but no fieldCipher was provided.');
       }
 
       // Worker-owned blob store backs LocalPocket.files + the sync file lane.
-      // OPFS access uses @JS('navigator') (no window dependency), so it is
-      // safe inside this dedicated worker; it degrades to an in-memory store
-      // when OPFS is unavailable.
+      // @JS('navigator') OPFS access is safe in a dedicated worker (no window
+      // dependency); degrades to an in-memory store when OPFS is unavailable.
       final blobStore = WebBlobStore();
 
-      // Boot the LocalPocket engine around this DirectSqliteDatabase. The
-      // PocketBase backend factory lets the kernel's sync start command build
-      // its engine backend without the runtime importing the adapter.
+      // The PocketBase backend factory lets the kernel's sync start command
+      // build its backend without importing the adapter here.
       final pocket = await LocalPocket.open(
         path: path,
         database: db,
@@ -131,12 +126,11 @@ final class LocalPocketDatabaseController extends DatabaseController {
 /// The worker database wrapping [CommonDatabase] and hosting the full
 /// [LocalPocket] engine.
 ///
-/// This class is the thin JS boundary over the pure-Dart [WorkerEngine]:
-/// it converts the incoming `JSAny` payload to a Dart map, forwards worker
-/// events to the owning [ClientConnection], and converts the engine's
-/// [WorkerReply] back into a wire [WebResponse]. All request handling lives
-/// in `worker_engine.dart` so it is unit-testable on the VM against a real
-/// in-memory engine.
+/// Thin JS boundary over the pure-Dart [WorkerEngine]: converts the incoming
+/// `JSAny` payload to a Dart map, forwards worker events to the owning
+/// [ClientConnection], and encodes the engine's [WorkerReply] as a wire
+/// [WebResponse]. All request handling lives in `worker_engine.dart` so it
+/// is unit-testable on the VM.
 /// {@endtemplate}
 final class LocalPocketWorkerDatabase extends WorkerDatabase {
   /// Creates a worker database around an initialized [LocalPocket] engine.
@@ -163,10 +157,9 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   final WorkerEngine _engine;
 
-  /// One event sink per client connection. The engine broadcasts worker
-  /// events to every registered sink and keys the set on sink identity, so
-  /// each connection must register exactly once — a fresh sink per request
-  /// would grow the set on every call and deliver every event N times.
+  /// One sink per connection, keyed on sink identity, so each connection
+  /// registers exactly once — a fresh sink per request would grow the set
+  /// and deliver every event N times.
   final Map<ClientConnection, WorkerEventSink> _connectionSinks = {};
 
   @override
@@ -199,11 +192,10 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     try {
       final d = payload.dartify();
       if (d is Map) {
-        // Recursively stringify ALL map keys (nested maps and lists of maps
-        // included). dartify() preserves JS object key types as Object?, so
-        // without this the worker's `Map<String, Object?>` casts (e.g. the
-        // `mutations` list in mutate_batch) throw on dart2js. Mirrors the
-        // deepStringMap used by parseSchema/open_options.
+        // Recursively stringify ALL map keys: dartify() preserves JS key
+        // types as Object?, so without this the worker's Map<String, Object?>
+        // casts (e.g. `mutations` in mutate_batch) throw on dart2js. Mirrors
+        // the deepStringMap used by parseSchema/open_options.
         return deepStringMap(d);
       }
     } catch (_) {}

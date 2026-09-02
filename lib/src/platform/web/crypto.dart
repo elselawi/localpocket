@@ -1,16 +1,11 @@
 /// Web cipher bridge: serializes the field cipher across the worker boundary.
 ///
 /// Only the pure-Dart [AesGcmFieldCipher] can cross postMessage — its whole
-/// state is the 32-byte AES-256 key. The key DOES cross postMessage into the
-/// worker: the boundary is same-origin trusted (the worker asset is fetched
-/// from the same origin as the app). App-supplied [CryptoProvider] instances
-/// are abstract interface objects with no serializable form, so a non-null
-/// provider is rejected loudly rather than silently ignored. Any other
-/// [FieldCipher] implementation is likewise web-unsupported.
-///
-/// This library is pure Dart (no `dart:js_interop`, no `dart:io`) so the
-/// envelope build/parse logic is testable on the VM and compiles for both
-/// dart2js and dart2wasm.
+/// state is the 32-byte AES-256 key, and the key DOES cross (the worker asset
+/// is same-origin trusted). App-supplied [CryptoProvider] instances have no
+/// serializable form, so a non-null provider is rejected loudly rather than
+/// silently ignored; any other [FieldCipher] is likewise web-unsupported.
+/// Pure Dart (no `dart:js_interop`), so testable on the VM.
 library;
 
 import 'dart:typed_data';
@@ -23,11 +18,10 @@ const String cipherEnvelopeTypeAesGcm = 'aes-gcm';
 
 /// {@template localpocket.web_cipher_unsupported_error}
 /// Thrown when a cipher configuration cannot be honored on the web platform.
-///
 /// A `fieldCipher` / `cryptoProvider` argument that cannot be honored must
-/// never be silently ignored: the web open fails loudly instead. This is a
-/// web-only typed error (like the protocol exceptions in `protocol.dart`),
-/// not part of the native [LocalPocketError] hierarchy.
+/// never be silently ignored: the web open fails loudly. Web-only typed error
+/// (like the protocol exceptions in `protocol.dart`), not native
+/// [LocalPocketError] hierarchy.
 /// {@endtemplate}
 final class WebCipherUnsupportedError implements Exception {
   /// Creates an error for an unsupported web cipher configuration.
@@ -43,16 +37,11 @@ final class WebCipherUnsupportedError implements Exception {
 }
 
 /// Builds the serializable `fieldCipher` envelope for `openArgs`, or throws a
-/// typed [WebCipherUnsupportedError] when the requested cipher configuration
-/// cannot cross the worker boundary.
-///
-/// Rules (never silently ignore an argument):
-/// - A non-null [cryptoProvider] is web-unsupported: it is an abstract
-///   app-supplied interface with no serializable form.
-/// - [fieldCipher] must be an [AesGcmFieldCipher] — the only serializable
-///   implementation. Any other [FieldCipher] is web-unsupported.
-/// - If neither is supplied but [stores] declare `encrypted` fields, opening
-///   would silently produce stores that cannot be written; that is rejected.
+/// typed [WebCipherUnsupportedError] when the configuration cannot cross the
+/// worker boundary (never silently ignore an argument):
+/// - non-null [cryptoProvider]: web-unsupported (no serializable form);
+/// - [fieldCipher] must be [AesGcmFieldCipher], the only serializable form;
+/// - no cipher with encrypted [stores] would produce unwritable stores.
 ///
 /// Returns `null` when no cipher is configured (and none is required).
 Map<String, Object?>? buildFieldCipherEnvelope({

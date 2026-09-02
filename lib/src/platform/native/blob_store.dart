@@ -64,10 +64,9 @@ class NativeBlobStore extends BlobStore {
       final targetPath = _blobPath(computedHash);
       final targetFile = File(targetPath);
 
-      // Atomic publish: rename into destination. On platforms where rename
-      // cannot overwrite an existing file (Windows), a concurrent put that
-      // published the same hash first makes the loser's rename fail; that is
-      // a dedup win, not an error.
+      // Atomic publish via rename. On platforms where rename cannot overwrite
+      // an existing file (Windows), a concurrent put that published the same
+      // hash first makes the loser's rename fail — a dedup win, not an error.
       if (targetFile.existsSync()) {
         // Dedup: already exists, remove tmp file
         tmpFile.deleteSync();
@@ -178,8 +177,8 @@ class NativeBlobStore extends BlobStore {
         await for (final file in shard.list()) {
           if (file is File) {
             final name = p.basename(file.path);
-            // Malformed/non-hash files in a shard are ignored, never returned
-            // as (or confused with) real blob identities.
+            // Ignore malformed/non-hash files in a shard: never return them
+            // as (or confuse them with) real blob identities.
             if (BlobStore.validHashPattern.hasMatch(name)) hashes.add(name);
           }
         }

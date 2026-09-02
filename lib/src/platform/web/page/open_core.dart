@@ -1,10 +1,8 @@
 /// Pure-Dart decision logic for the web `LocalPocket.open()` bootstrap: asset
 /// fallback resolution, persistence probing, and capability reconciliation.
-///
-/// The browser-facing mechanics (fetching assets, `navigator.storage.persist`,
-/// spawning the worker) stay in the JS-bound facade; everything testable here
-/// is wire-Dart so it can be unit-tested on the VM with injectable loaders and
-/// snapshots.
+/// Browser-facing mechanics (fetching assets, `navigator.storage.persist`,
+/// spawning the worker) stay in the JS-bound facade; everything here is
+/// wire-Dart and VM-testable with injectable loaders and snapshots.
 library;
 
 import 'dart:async';
@@ -16,24 +14,22 @@ import 'web_storage_capabilities.dart';
 /// An asset resolved to a URL by [resolveAssetAsBlobUrl].
 /// {@endtemplate}
 class ResolvedAsset {
-
   /// {@macro localpocket.resolved_asset}
   const ResolvedAsset({required this.url, required this.fetched});
+
   /// The URL to use (a blob URL when a fetch succeeded, otherwise the
   /// [lastResort] plain path).
   final String url;
 
-  /// Whether [url] was produced by a successful fetch (and should therefore
-  /// be revoked when the facade closes). `false` for the plain-path fallback.
+  /// Whether [url] came from a successful fetch (revoke on close). `false`
+  /// for the plain-path fallback.
   final bool fetched;
 }
 
 /// Resolves an asset path to a URL, trying [primary] then each [fallbacks]
-/// entry in order through [load] (e.g. `loadAssetAsBlobUrl`), finally falling
-/// back to the packaged [lastResort] plain path when every fetch failed.
-///
-/// The returned [ResolvedAsset] records whether the URL came from a successful
-/// fetch so the caller only revokes (and only registers) real blob URLs.
+/// entry through [load], finally falling back to the packaged [lastResort]
+/// plain path when every fetch failed. The returned [ResolvedAsset] records
+/// whether the URL is a real blob URL (only those get revoked).
 Future<ResolvedAsset> resolveAssetAsBlobUrl({
   required Future<String> Function(String path, String mimeType) load,
   required String primary,
@@ -53,16 +49,12 @@ Future<ResolvedAsset> resolveAssetAsBlobUrl({
 
 /// Probes the browser's persistent-storage promise, treating an unanswered
 /// prompt (timeout) or any error as "not persistent" rather than hanging the
-/// caller forever.
+/// caller. [persist] is injectable for VM testing; production passes
+/// `navigator.storage.persist()`.
 ///
-/// [persist] is injectable so the timeout/error fallback is testable on the
-/// VM; the production facade passes `navigator.storage.persist()`.
-///
-/// The result is driven by callbacks on the [persist] future (not by awaiting
-/// it in the function body) so the timeout timer can resolve the returned
-/// future even when [persist] never completes; errors are folded to `false`.
-/// A failing [persist] future is always caught here and never surfaces as an
-/// unhandled error.
+/// Callbacks drive the result (not an `await`) so the timeout timer can
+/// resolve the future even when [persist] never completes; errors fold to
+/// `false` and never surface as unhandled.
 Future<bool> requestPersistenceWithFallback(
   Future<bool> Function() persist, {
   Duration timeout = const Duration(seconds: 10),
@@ -95,12 +87,10 @@ Future<bool> requestPersistenceWithFallback(
 }
 
 /// Reconciles the facade's hard-coded capability snapshot against the live
-/// capability map reported by the worker.
-///
-/// Live values override the initial snapshot; missing (or wrong-typed) keys
-/// fall back to the snapshot. A null remote (or a malformed one) keeps the
-/// snapshot untouched. This function never throws: open() must not fail just
-/// because capability discovery glitched.
+/// capability map reported by the worker: live values override, missing or
+/// wrong-typed keys fall back to the snapshot, and a null/malformed remote
+/// leaves it untouched. Never throws — open() must not fail on a capability
+/// discovery glitch.
 ({SqliteCapabilities capabilities, WebStorageCapabilities storage})
     reconcileOpenCapabilities({
   required SqliteCapabilities capabilities,

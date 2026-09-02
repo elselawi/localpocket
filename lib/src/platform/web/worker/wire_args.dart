@@ -5,16 +5,11 @@ import '../page/protocol.dart';
 /// {@template localpocket.wire_args}
 /// Validated, typed access to a wire request's arguments.
 ///
-/// The outer envelope ([WebRequest.fromJson]) validates the envelope shape,
-/// but operation arguments vary per operation. Historically handlers read
-/// arguments with direct casts (`req.args['store'] as String`), which leak
-/// `TypeError`/cast errors when a caller sends a malformed value and make
-/// dart2js diagnostics unpredictable.
-///
-/// These helpers centralize argument validation so a malformed operation
-/// argument always surfaces as a stable [ProtocolEnvelopeException] (a typed
-/// protocol error), never a raw cast error. The worker's `_stableErrorType`
-/// maps `ProtocolEnvelopeException` to a fixed, minification-stable category.
+/// The outer envelope validates shape, but per-operation arguments vary.
+/// Direct casts historically leaked `TypeError`/cast errors (unpredictable
+/// dart2js diagnostics); these helpers surface a malformed argument as a
+/// stable [ProtocolEnvelopeException] instead — a typed protocol error that
+/// maps to a fixed, minification-stable category.
 /// {@endtemplate}
 final class WireArgs {
   /// Creates a validated view over wire arguments.

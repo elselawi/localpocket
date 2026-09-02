@@ -1,11 +1,10 @@
 /// Part of `worker_engine.dart` — store registration over the wire.
 ///
 /// The `open` handler registers additional stores and verifies the
-/// page-computed schema manifest fingerprint. Collection CRUD has no
-/// dedicated handlers: reads and mutations travel as typed contract
-/// requests (`contract_request`) and the kernel command handler answers
-/// them directly. The mutation action vocabulary shared with
-/// `tx_mutate_batch` lives in `WorkerEngineHost._applyMutation` (main file).
+/// page-computed manifest fingerprint. Collection CRUD has no dedicated
+/// handlers: reads and mutations travel as typed contract requests answered
+/// directly by the kernel command handler; the mutation action vocabulary
+/// shared with `tx_mutate_batch` lives in `WorkerEngineHost._applyMutation`.
 part of 'worker_engine.dart';
 
 /// Store-registration handlers (see the file doc above).
@@ -22,19 +21,18 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
     if (storesRaw != null) {
       for (final s in storesRaw) {
         final schema = parseSchema(s);
-        // Defense in depth: never register an encrypted store when the engine
-        // has no field cipher — the facade already rejects this at open.
+        // Never register an encrypted store without an engine cipher — the
+        // facade already rejects this at open.
         final hasEncrypted = schema.fields.any((f) => f.encrypted);
         if (hasEncrypted && pocket.fieldCipher == null) {
           throw ValidationException(
               'Store "${schema.name}" declares encrypted fields but no '
               'fieldCipher was provided.');
         }
-        // The open handshake validates the schema
-        // manifest BEFORE any registration — the page-computed fingerprint
-        // must match the worker's own compilation (so both runtimes provably
-        // mean the same schema), and unsupported executable features fail in
-        // registerStore on the web runtime — all before any DDL.
+        // The open handshake validates the manifest BEFORE any registration:
+        // the page-computed fingerprint must match the worker's compilation
+        // (both runtimes provably mean the same schema), and unsupported
+        // features fail in registerStore — all before any DDL.
         final manifest = SchemaManifest.compile(schema);
         final expected = expectedFingerprints[schema.name];
         if (expected != null && expected != manifest.fingerprint) {
