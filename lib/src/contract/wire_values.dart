@@ -1,12 +1,20 @@
 part of 'contract.dart';
 
-/// Tagged wire encoding for values that cross a runtime boundary.
+/// Tagged wire encoding for values crossing a runtime boundary.
 ///
-/// JSON-representable values pass through unchanged (maps with string keys,
-/// lists, String, num, bool, null). Non-JSON values are wrapped in a tagged
-/// form so the decode side can reconstruct the exact type.
+/// JSON-representable values pass through unchanged; non-JSON values
+/// ([DateTime], [Uint8List]) are wrapped in a tagged form so the decode side
+/// reconstructs the exact type.
 const String _wireTagKey = '__lp_t';
 
+/// Encodes [value] for the wire; throws [WireException] for non-wire-safe
+/// types.
+///
+/// Timestamps are instants: encoding stores epoch milliseconds (which are
+/// independent of the source `DateTime.isUtc` flag) and decoding always
+/// reconstructs a UTC `DateTime`. The wire therefore normalizes timestamps
+/// to UTC representation; it never applies a timezone offset to the instant.
+/// Wall-clock locality is not part of the wire contract.
 Object? encodeWireValue(Object? value) {
   if (value is DateTime) {
     return {_wireTagKey: 'datetime', 'v': value.millisecondsSinceEpoch};
@@ -28,6 +36,8 @@ Object? encodeWireValue(Object? value) {
   throw WireException('Value of type ${value.runtimeType} is not wire-safe.');
 }
 
+/// Reverses [encodeWireValue], reconstructing tagged values to their exact
+/// types; plain maps and lists decode recursively.
 Object? decodeWireValue(Object? value) {
   if (value is Map) {
     final tag = value[_wireTagKey];
@@ -58,12 +68,74 @@ Object? decodeWireValue(Object? value) {
   return value;
 }
 
-/// Raised for any malformed wire payload, value, or unknown tag. Never a raw
+/// Raised for any malformed wire payload, value, or unknown tag — never a raw
 /// cast exception.
+///
+/// {@template localpocket.wire_exception}
+/// {@endtemplate}
 class WireException implements Exception {
+  /// {@macro localpocket.wire_exception}
   WireException(this.message);
+
+  /// Human-readable description of the malformed payload.
   final String message;
 
   @override
   String toString() => 'WireException: $message';
+}
+
+// ---------------------------------------------------------------------------
+// Typed required-field extraction. Decoder factories use these instead of
+// raw casts so a malformed payload always surfaces as a [WireException] —
+// the boundary's only error type — never as a null-check or cast error.
+// ---------------------------------------------------------------------------
+
+/// Extracts a required non-null [String] wire field.
+String _wireString(Object? v, String field) {
+  if (v is String) return v;
+  throw WireException('Malformed wire field "$field".');
+}
+
+/// Extracts a required non-null [int] wire field.
+int _wireInt(Object? v, String field) {
+  if (v is int) return v;
+  throw WireException('Malformed wire field "$field".');
+}
+
+/// Extracts an optional [String] wire field: `null` passes through; a
+/// present wrong-typed value is rejected.
+String? _optWireString(Object? v, String field) {
+  if (v == null) return null;
+  return _wireString(v, field);
+}
+
+/// Extracts an optional [int] wire field with [fallback] for absence; a
+/// present wrong-typed value is rejected.
+int _optWireInt(Object? v, String field, int fallback) {
+  if (v == null) return fallback;
+  return _wireInt(v, field);
+}
+
+/// Extracts an optional [DateTime] wire field; a present wrong-typed value
+/// is rejected rather than read as "absent".
+DateTime? _optWireDateTime(Object? v, String field) {
+  if (v == null) return null;
+  if (v is DateTime) return v;
+  throw WireException('Malformed wire field "$field".');
+}
+
+/// Extracts a required set of strings from a wire list; any non-string
+/// element is rejected.
+Set<String> _wireStringSet(Object? v, String field) {
+  if (v is List) {
+    final out = <String>{};
+    for (final e in v) {
+      if (e is! String) {
+        throw WireException('Malformed wire field "$field".');
+      }
+      out.add(e);
+    }
+    return out;
+  }
+  throw WireException('Malformed wire field "$field".');
 }

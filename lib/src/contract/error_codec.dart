@@ -1,8 +1,8 @@
 part of 'contract.dart';
 
-/// Encodes any error crossing the runtime boundary into a stable wire form.
-/// Typed kernel errors keep their identity; anything else is categorized so
-/// the caller always receives a named error, never a raw crash.
+/// Encodes any boundary-crossing error into a stable wire form. Typed kernel
+/// errors keep their identity; anything else is categorized so the caller
+/// always receives a named error.
 Map<String, Object?> encodeError(Object error) {
   String typeName;
   String message = error.toString();
@@ -25,11 +25,13 @@ Map<String, Object?> encodeError(Object error) {
   } else if (error is StateError) {
     typeName = 'StateError';
     message = error.message;
+  } else if (error is RangeError) {
+    // RangeError before ArgumentError: it extends it, so a later check would
+    // be unreachable and range failures would cross the wire mislabeled.
+    typeName = 'RangeError';
+    message = '${error.message}';
   } else if (error is ArgumentError) {
     typeName = 'ArgumentError';
-    message = '${error.message}';
-  } else if (error is RangeError) {
-    typeName = 'RangeError';
     message = '${error.message}';
   } else {
     typeName = 'unknown';
@@ -63,7 +65,7 @@ String _localPocketErrorType(LocalPocketError error) => switch (error) {
       FieldNotSelectedError() => 'FieldNotSelectedError',
     };
 
-/// Decodes a wire error back into a typed error. Known kernel errors are
+/// Decodes a wire error into a typed error. Known kernel errors are
 /// reconstructed exactly; unknown categories degrade to [WireException] with
 /// the original type name preserved in the message.
 Object decodeError(Map<String, Object?> wire) {

@@ -1,9 +1,12 @@
 part of 'contract.dart';
 
-/// An immutable snapshot of one file attachment: the same shape both
-/// platforms expose as `FileRef`. This is the wire-safe form of the kernel's
-/// `lp_file_refs` row; it carries no behavior.
+/// Wire-safe snapshot of one file attachment (the kernel's `lp_file_refs` row
+/// without behavior).
+///
+/// {@template localpocket.file_ref_data}
+/// {@endtemplate}
 final class FileRefData {
+  /// {@macro localpocket.file_ref_data}
   const FileRefData({
     required this.refId,
     required this.store,
@@ -17,17 +20,18 @@ final class FileRefData {
     this.lastError,
   });
 
+  /// Decodes from its wire map; malformed required fields throw [WireException].
   factory FileRefData.fromJson(Map<String, Object?> json) => FileRefData(
-        refId: json['refId']! as String,
-        store: json['store']! as String,
-        recordId: json['recordId']! as String,
-        field: json['field']! as String,
-        hash: json['hash']! as String,
-        state: json['state']! as String,
-        remoteName: json['remoteName'] as String?,
-        nextRetryAt: json['nextRetryAt'] as int? ?? 0,
-        attemptCount: json['attemptCount'] as int? ?? 0,
-        lastError: json['lastError'] as String?,
+        refId: _wireString(json['refId'], 'refId'),
+        store: _wireString(json['store'], 'store'),
+        recordId: _wireString(json['recordId'], 'recordId'),
+        field: _wireString(json['field'], 'field'),
+        hash: _wireString(json['hash'], 'hash'),
+        state: _wireString(json['state'], 'state'),
+        remoteName: _optWireString(json['remoteName'], 'remoteName'),
+        nextRetryAt: _optWireInt(json['nextRetryAt'], 'nextRetryAt', 0),
+        attemptCount: _optWireInt(json['attemptCount'], 'attemptCount', 0),
+        lastError: _optWireString(json['lastError'], 'lastError'),
       );
 
   /// Stable local file-reference ID.
@@ -48,7 +52,7 @@ final class FileRefData {
   /// Remote filename, when known.
   final String? remoteName;
 
-  /// Lifecycle state: pending upload, synced, pending remove, remote-only, or
+  /// Lifecycle state: pending_upload, synced, pending_remove, remote_only,
   /// orphaned.
   final String state;
 
@@ -61,6 +65,7 @@ final class FileRefData {
   /// Most recent file-operation error.
   final String? lastError;
 
+  /// Serializes the reference into its wire map.
   Map<String, Object?> toJson() => {
         'refId': refId,
         'store': store,
@@ -75,15 +80,16 @@ final class FileRefData {
       };
 }
 
-// ---------------------------------------------------------------------------
 // bounded upload sessions
-// ---------------------------------------------------------------------------
 
 /// Begins a bounded upload session for one attachment. The session id is
-/// kernel-minted; the accepted chunk limit rides the result so the caller can
-/// chunk correctly without guessing. No catalog row exists until the finish
-/// request, so an interrupted upload leaves no durable state.
+/// kernel-minted; the accepted chunk limit rides the result. No catalog row
+/// exists until finish, so an interrupted upload leaves no durable state.
+///
+/// {@template localpocket.file_begin_upload_request}
+/// {@endtemplate}
 final class FileBeginUploadRequest extends Request<FileUploadSessionResult> {
+  /// {@macro localpocket.file_begin_upload_request}
   const FileBeginUploadRequest({
     required this.store,
     required this.recordId,
@@ -94,19 +100,26 @@ final class FileBeginUploadRequest extends Request<FileUploadSessionResult> {
     this.allowVolatileBlobs = false,
   });
 
+  /// Store owning the record the attachment belongs to.
   final String store;
+
+  /// Record the attachment belongs to.
   final String recordId;
+
+  /// Attachment field name.
+  final String field;
+
+  /// Remote filename for the uploaded blob.
+  final String name;
 
   /// Declared upload size in bytes.
   final int size;
-  final String field;
-  final String name;
 
   /// Optional expected SHA-256 checksum.
   final String? expectedSha256;
 
-  /// Whether the caller accepts a volatile (in-memory) blob store for this
-  /// attachment — forwarded to the kernel file service at finish time.
+  /// Whether a volatile (in-memory) blob store is acceptable; forwarded to
+  /// the kernel at finish time.
   final bool allowVolatileBlobs;
 
   @override
@@ -127,10 +140,17 @@ final class FileBeginUploadRequest extends Request<FileUploadSessionResult> {
 }
 
 /// Hands one bounded chunk to an open upload session.
+///
+/// {@template localpocket.file_chunk_request}
+/// {@endtemplate}
 final class FileChunkRequest extends Request<OkResult> {
+  /// {@macro localpocket.file_chunk_request}
   const FileChunkRequest({required this.session, required this.chunk});
 
+  /// Upload session id returned by the begin request.
   final String session;
+
+  /// The next bytes of the upload.
   final Uint8List chunk;
 
   @override
@@ -142,11 +162,16 @@ final class FileChunkRequest extends Request<OkResult> {
   Map<String, Object?> toJson() => {'session': session, 'chunk': chunk};
 }
 
-/// Completes an upload session: the kernel reassembles the chunks, hashes and
-/// stores the bytes, and creates the durable file reference.
+/// Completes an upload: the kernel reassembles chunks, hashes and stores the
+/// bytes, and creates the durable file reference.
+///
+/// {@template localpocket.file_finish_request}
+/// {@endtemplate}
 final class FileFinishRequest extends Request<FileRefResult> {
+  /// {@macro localpocket.file_finish_request}
   const FileFinishRequest({required this.session});
 
+  /// Upload session id returned by the begin request.
   final String session;
 
   @override
@@ -158,13 +183,16 @@ final class FileFinishRequest extends Request<FileRefResult> {
   Map<String, Object?> toJson() => {'session': session};
 }
 
-/// Closes (cancels) an in-progress download stream: the kernel releases the
-/// stream's subscription and credit window, so an abandoned download stops
-/// pushing chunks instead of starving until close. Idempotent — an unknown or
-/// already-finished stream answers Ok.
+/// Closes (cancels) an in-progress download stream, releasing its subscription
+/// and credit window. Idempotent — unknown/finished streams answer Ok.
+///
+/// {@template localpocket.file_close_request}
+/// {@endtemplate}
 final class FileCloseRequest extends Request<OkResult> {
+  /// {@macro localpocket.file_close_request}
   const FileCloseRequest({required this.stream});
 
+  /// Download stream id to close.
   final String stream;
 
   @override
@@ -177,9 +205,14 @@ final class FileCloseRequest extends Request<OkResult> {
 }
 
 /// Aborts an upload session and releases its buffered bytes.
+///
+/// {@template localpocket.file_abort_request}
+/// {@endtemplate}
 final class FileAbortRequest extends Request<OkResult> {
+  /// {@macro localpocket.file_abort_request}
   const FileAbortRequest({required this.session});
 
+  /// Upload session id to abort.
   final String session;
 
   @override
@@ -191,20 +224,27 @@ final class FileAbortRequest extends Request<OkResult> {
   Map<String, Object?> toJson() => {'session': session};
 }
 
-// ---------------------------------------------------------------------------
 // metadata + download
-// ---------------------------------------------------------------------------
 
 /// Lists the file references attached to a record field.
+///
+/// {@template localpocket.files_list_request}
+/// {@endtemplate}
 final class FilesListRequest extends Request<FileRefsResult> {
+  /// {@macro localpocket.files_list_request}
   const FilesListRequest({
     required this.store,
     required this.recordId,
     this.field = attachmentFieldDefault,
   });
 
+  /// Store owning the record.
   final String store;
+
+  /// Record to list attachments for.
   final String recordId;
+
+  /// Attachment field name.
   final String field;
 
   @override
@@ -217,11 +257,14 @@ final class FilesListRequest extends Request<FileRefsResult> {
       {'store': store, 'recordId': recordId, 'field': field};
 }
 
-/// Opens a download stream for one attachment. Chunks arrive as
-/// [FileChunkEvent] envelopes under a caller-provided credit budget
-/// ([FileCreditRequest]); the stream ends with a terminal (`last`) event. The
-/// file is never buffered whole on the caller side of the runtime boundary.
+/// Opens a download stream for one attachment: chunks arrive as
+/// [FileChunkEvent] envelopes under a caller-driven credit budget
+/// ([FileCreditRequest]); the stream ends with a terminal (`last`) event.
+///
+/// {@template localpocket.file_open_request}
+/// {@endtemplate}
 final class FileOpenRequest extends Request<FileOpenResult> {
+  /// {@macro localpocket.file_open_request}
   const FileOpenRequest({
     required this.store,
     required this.recordId,
@@ -230,9 +273,16 @@ final class FileOpenRequest extends Request<FileOpenResult> {
     this.refId,
   });
 
+  /// Store owning the record.
   final String store;
+
+  /// Record holding the attachment.
   final String recordId;
+
+  /// Attachment field name.
   final String field;
+
+  /// Zero-based attachment index within the field.
   final int index;
 
   /// Selects a specific reference instead of the [index]-th.
@@ -253,13 +303,19 @@ final class FileOpenRequest extends Request<FileOpenResult> {
       };
 }
 
-/// Grants [bytes] of download credit to an open file stream. Flow control is
-/// caller-driven: the kernel pauses the stream when its outstanding
-/// (un-credited) bytes reach the credit window.
+/// Grants [bytes] of download credit to an open stream. The kernel pauses the
+/// stream when outstanding (un-credited) bytes reach the credit window.
+///
+/// {@template localpocket.file_credit_request}
+/// {@endtemplate}
 final class FileCreditRequest extends Request<OkResult> {
+  /// {@macro localpocket.file_credit_request}
   const FileCreditRequest({required this.stream, required this.bytes});
 
+  /// Download stream id to credit.
   final String stream;
+
+  /// Additional bytes the stream may push.
   final int bytes;
 
   @override
@@ -272,7 +328,11 @@ final class FileCreditRequest extends Request<OkResult> {
 }
 
 /// Removes a file reference from a record.
+///
+/// {@template localpocket.file_remove_request}
+/// {@endtemplate}
 final class FileRemoveRequest extends Request<OkResult> {
+  /// {@macro localpocket.file_remove_request}
   const FileRemoveRequest({
     required this.store,
     required this.recordId,
@@ -281,10 +341,19 @@ final class FileRemoveRequest extends Request<OkResult> {
     this.refId,
   });
 
+  /// Store owning the record.
   final String store;
+
+  /// Record holding the attachment.
   final String recordId;
+
+  /// Attachment field name.
   final String field;
+
+  /// Zero-based attachment index within the field.
   final int index;
+
+  /// Selects a specific reference instead of the [index]-th.
   final String? refId;
 
   @override
@@ -303,7 +372,11 @@ final class FileRemoveRequest extends Request<OkResult> {
 }
 
 /// Garbage-collects unreferenced blobs and stale temporary uploads.
+///
+/// {@template localpocket.file_gc_request}
+/// {@endtemplate}
 final class FileGcRequest extends Request<FileGcResult> {
+  /// {@macro localpocket.file_gc_request}
   const FileGcRequest({
     this.blobGraceMs = 604800000,
     this.tmpGraceMs = 86400000,
@@ -327,9 +400,14 @@ final class FileGcRequest extends Request<FileGcResult> {
 
 /// Evicts synced blobs (LRU) until stored attachment bytes are at most
 /// [maxBytes].
+///
+/// {@template localpocket.enforce_storage_cap_request}
+/// {@endtemplate}
 final class EnforceStorageCapRequest extends Request<FileCapResult> {
+  /// {@macro localpocket.enforce_storage_cap_request}
   const EnforceStorageCapRequest({required this.maxBytes});
 
+  /// Maximum stored attachment bytes to keep.
   final int maxBytes;
 
   @override
@@ -342,7 +420,11 @@ final class EnforceStorageCapRequest extends Request<FileCapResult> {
 }
 
 /// Reports whether the runtime-owned blob store is durable.
+///
+/// {@template localpocket.storage_status_request}
+/// {@endtemplate}
 final class StorageStatusRequest extends Request<StorageStatusResult> {
+  /// {@macro localpocket.storage_status_request}
   const StorageStatusRequest();
 
   @override
@@ -354,16 +436,20 @@ final class StorageStatusRequest extends Request<StorageStatusResult> {
   Map<String, Object?> toJson() => const {};
 }
 
-// ---------------------------------------------------------------------------
 // file results
-// ---------------------------------------------------------------------------
 
 /// A freshly opened (or accepted) upload session.
+///
+/// {@template localpocket.file_upload_session_result}
+/// {@endtemplate}
 final class FileUploadSessionResult extends Result {
+  /// {@macro localpocket.file_upload_session_result}
   const FileUploadSessionResult({
     required this.session,
     required this.maxChunkBytes,
   });
+
+  /// Stable wire tag for this result type.
   static const String tagValue = 'fileUploadSession';
   @override
   String get tag => tagValue;
@@ -380,12 +466,19 @@ final class FileUploadSessionResult extends Result {
 }
 
 /// One file reference (the [FileFinishRequest] outcome), or a miss.
+///
+/// {@template localpocket.file_ref_result}
+/// {@endtemplate}
 final class FileRefResult extends Result {
+  /// {@macro localpocket.file_ref_result}
   const FileRefResult(this.ref);
+
+  /// Stable wire tag for this result type.
   static const String tagValue = 'fileRef';
   @override
   String get tag => tagValue;
 
+  /// The created reference, or null when the session was unknown.
   final FileRefData? ref;
 
   @override
@@ -393,12 +486,19 @@ final class FileRefResult extends Result {
 }
 
 /// The file references attached to a record field.
+///
+/// {@template localpocket.file_refs_result}
+/// {@endtemplate}
 final class FileRefsResult extends Result {
+  /// {@macro localpocket.file_refs_result}
   const FileRefsResult(this.refs);
+
+  /// Stable wire tag for this result type.
   static const String tagValue = 'fileRefs';
   @override
   String get tag => tagValue;
 
+  /// The references attached to the field.
   final List<FileRefData> refs;
 
   @override
@@ -408,12 +508,19 @@ final class FileRefsResult extends Result {
 }
 
 /// A opened download stream: chunks arrive as events until the terminal one.
+///
+/// {@template localpocket.file_open_result}
+/// {@endtemplate}
 final class FileOpenResult extends Result {
+  /// {@macro localpocket.file_open_result}
   const FileOpenResult({required this.stream});
+
+  /// Stable wire tag for this result type.
   static const String tagValue = 'fileOpen';
   @override
   String get tag => tagValue;
 
+  /// Kernel-minted stream id; credit and close requests carry it.
   final String stream;
 
   @override
@@ -421,12 +528,19 @@ final class FileOpenResult extends Result {
 }
 
 /// Number of unreferenced blobs and stale files removed.
+///
+/// {@template localpocket.file_gc_result}
+/// {@endtemplate}
 final class FileGcResult extends Result {
+  /// {@macro localpocket.file_gc_result}
   const FileGcResult({required this.cleaned});
+
+  /// Stable wire tag for this result type.
   static const String tagValue = 'fileGc';
   @override
   String get tag => tagValue;
 
+  /// Number of blobs and stale files removed.
   final int cleaned;
 
   @override
@@ -434,12 +548,19 @@ final class FileGcResult extends Result {
 }
 
 /// Number of blobs evicted by the storage cap.
+///
+/// {@template localpocket.file_cap_result}
+/// {@endtemplate}
 final class FileCapResult extends Result {
+  /// {@macro localpocket.file_cap_result}
   const FileCapResult({required this.evicted});
+
+  /// Stable wire tag for this result type.
   static const String tagValue = 'fileCap';
   @override
   String get tag => tagValue;
 
+  /// Number of blobs evicted.
   final int evicted;
 
   @override
@@ -447,26 +568,34 @@ final class FileCapResult extends Result {
 }
 
 /// Honest blob-store durability: `false` means bytes vanish on restart.
+///
+/// {@template localpocket.storage_status_result}
+/// {@endtemplate}
 final class StorageStatusResult extends Result {
+  /// {@macro localpocket.storage_status_result}
   const StorageStatusResult({required this.durable});
+
+  /// Stable wire tag for this result type.
   static const String tagValue = 'storageStatus';
   @override
   String get tag => tagValue;
 
+  /// Whether attachment bytes survive a restart.
   final bool durable;
 
   @override
   Map<String, Object?> toJson() => {'durable': durable};
 }
 
-// ---------------------------------------------------------------------------
 // file events
-// ---------------------------------------------------------------------------
 
-/// One chunk of an open download stream. [chunk] carries the next bytes; the
-/// terminal event has [last] set (and an empty [chunk]); a failed stream ends
-/// with [last] set and [error] describing the failure.
+/// One chunk of an open download stream; the terminal event has [last] set
+/// (empty [chunk], or [error] on failure).
+///
+/// {@template localpocket.file_chunk_event}
+/// {@endtemplate}
 final class FileChunkEvent extends Event {
+  /// {@macro localpocket.file_chunk_event}
   const FileChunkEvent({
     required this.stream,
     required this.chunk,
@@ -474,13 +603,21 @@ final class FileChunkEvent extends Event {
     this.error,
   });
 
+  /// Stable wire tag for this event type.
   static const String tagValue = 'fileChunk';
   @override
   String get tag => tagValue;
 
+  /// Download stream the chunk belongs to.
   final String stream;
+
+  /// The next bytes of the download (empty on the terminal event).
   final Uint8List chunk;
+
+  /// Whether this is the terminal event of the stream.
   final bool last;
+
+  /// Failure description when the stream ends with an error.
   final String? error;
 
   @override

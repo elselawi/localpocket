@@ -1,16 +1,18 @@
 part of 'contract.dart';
 
-// The sync family crosses the runtime boundary as typed commands and
-// committed-fact events. Status snapshots ride BOTH paths: pushed as
-// [SyncStatusEvent] envelopes (the engine's status stream) and pullable as a
-// [SyncStatusRequest] result (the current snapshot, `closed` when the engine
-// never started). Auth is explicit: the token crosses only via
-// [SyncUpdateAuthRequest] — it is never persisted or logged — and the engine
-// reports a rejected token as [AuthRequiredEvent].
+// Sync crosses the boundary as typed commands and committed-fact events.
+// Status rides BOTH paths: pushed as [SyncStatusEvent] and pullable via
+// [SyncStatusRequest] (`closed` when the engine never started). Auth is
+// explicit: tokens cross only via [SyncUpdateAuthRequest] (never persisted or
+// logged); a rejected token surfaces as [AuthRequiredEvent].
 
 /// Wire-safe snapshot of [SyncStatus]: the engine state machine position,
 /// the pending/conflict/hidden/blocked counters, and the sync timestamps.
+///
+/// {@template localpocket.sync_status_data}
+/// {@endtemplate}
 final class SyncStatusData {
+  /// {@macro localpocket.sync_status_data}
   const SyncStatusData({
     required this.state,
     required this.pending,
@@ -22,19 +24,18 @@ final class SyncStatusData {
     this.lastSuccessfulSyncAt,
   });
 
+  /// Decodes from its wire map; a present-but-wrong-typed value is rejected
+  /// instead of silently reading as "never synced".
   factory SyncStatusData.fromJson(Map<String, Object?> json) => SyncStatusData(
         state: _engineState(json['state']),
         pending: _int(json['pending']),
         conflicts: _int(json['conflicts']),
         hidden: _int(json['hidden']),
         blocked: _int(json['blocked']),
-        lastError: json['lastError'] as String?,
-        lastSyncAt: json['lastSyncAt'] is DateTime
-            ? json['lastSyncAt']! as DateTime
-            : null,
-        lastSuccessfulSyncAt: json['lastSuccessfulSyncAt'] is DateTime
-            ? json['lastSuccessfulSyncAt']! as DateTime
-            : null,
+        lastError: _optWireString(json['lastError'], 'lastError'),
+        lastSyncAt: _optWireDateTime(json['lastSyncAt'], 'lastSyncAt'),
+        lastSuccessfulSyncAt: _optWireDateTime(
+            json['lastSuccessfulSyncAt'], 'lastSuccessfulSyncAt'),
       );
 
   /// The snapshot of the live [SyncStatus] model.
@@ -57,11 +58,22 @@ final class SyncStatusData {
     hidden: 0,
   );
 
+  /// The engine state machine position.
   final SyncEngineState state;
+
+  /// Records with pending local work.
   final int pending;
+
+  /// Records with an open conflict.
   final int conflicts;
+
+  /// Records hidden from the default query scope.
   final int hidden;
+
+  /// Operations parked in the recoverable `blocked` state.
   final int blocked;
+
+  /// Description of the most recent engine error.
   final String? lastError;
 
   /// Time of the most recent completed sync cycle (an attempt).
@@ -70,6 +82,7 @@ final class SyncStatusData {
   /// Time of the most recent ERROR-FREE completed sync cycle.
   final DateTime? lastSuccessfulSyncAt;
 
+  /// Rebuilds the live [SyncStatus] model from this snapshot.
   SyncStatus toSyncStatus() => SyncStatus(
         state: state,
         pending: pending,
@@ -81,6 +94,7 @@ final class SyncStatusData {
         lastSuccessfulSyncAt: lastSuccessfulSyncAt,
       );
 
+  /// Serializes the snapshot into its wire map (DateTimes ride pre-encoded).
   Map<String, Object?> toJson() => {
         'state': state.name,
         'pending': pending,
@@ -94,11 +108,14 @@ final class SyncStatusData {
       };
 }
 
-/// Wire-safe one-cycle report: pulled/swept per-store counters, the pushed
-/// total, dead-letter and blocked op counts, discarded local edits, and
-/// whether the cycle hit an error. COMPLETE by contract: every field the
-/// model exposes survives the codec.
+/// Wire-safe one-cycle report (pulled/swept per store, pushed, dead-letter,
+/// blocked, discarded, error flag). COMPLETE by contract: every model field
+/// survives the codec.
+///
+/// {@template localpocket.sync_report_data}
+/// {@endtemplate}
 final class SyncReportData {
+  /// {@macro localpocket.sync_report_data}
   const SyncReportData({
     this.pulled = const {},
     this.swept = const {},
@@ -109,6 +126,7 @@ final class SyncReportData {
     this.hadError = false,
   });
 
+  /// Decodes a report from its wire map.
   factory SyncReportData.fromJson(Map<String, Object?> json) => SyncReportData(
         pulled: _intMap(json['pulled']),
         swept: _intMap(json['swept']),
@@ -119,6 +137,7 @@ final class SyncReportData {
         hadError: json['hadError'] == true,
       );
 
+  /// Captures a live [SyncReport] model.
   factory SyncReportData.of(SyncReport report) => SyncReportData(
         pulled: report.pulled,
         swept: report.swept,
@@ -150,6 +169,7 @@ final class SyncReportData {
   /// Whether the cycle encountered an error.
   final bool hadError;
 
+  /// Rebuilds the live [SyncReport] model from this snapshot.
   SyncReport toSyncReport() => SyncReport(
         pulled: pulled,
         swept: swept,
@@ -160,6 +180,7 @@ final class SyncReportData {
         hadError: hadError,
       );
 
+  /// Serializes the report into its wire map.
   Map<String, Object?> toJson() => {
         'pulled': pulled,
         'swept': swept,
@@ -171,23 +192,24 @@ final class SyncReportData {
       };
 }
 
-// ---------------------------------------------------------------------------
 // sync requests
-// ---------------------------------------------------------------------------
 
-/// Starts the sync engine (and its realtime connection): sync start OWNS
-/// realtime — there is no separate realtime start command. Restarts cleanly:
-/// a running engine is stopped first.
+/// Starts the sync engine (and its realtime connection — start OWNS realtime,
+/// there is no separate realtime command). Stops a running engine first.
+///
+/// {@template localpocket.sync_start_request}
+/// {@endtemplate}
 final class SyncStartRequest extends Request<SyncStartResult> {
+  /// {@macro localpocket.sync_start_request}
   const SyncStartRequest({required this.baseUrl, this.scopeId, this.token});
 
+  /// Base URL of the sync backend.
   final String baseUrl;
 
   /// Identifies this client in the sync identity; defaults engine-side.
   final String? scopeId;
 
-  /// The initial bearer token, if the caller already holds one. Never
-  /// persisted or logged.
+  /// The initial bearer token, if already held. Never persisted or logged.
   final String? token;
 
   @override
@@ -204,7 +226,11 @@ final class SyncStartRequest extends Request<SyncStartResult> {
 }
 
 /// Stops the sync engine and its realtime connection.
+///
+/// {@template localpocket.sync_stop_request}
+/// {@endtemplate}
 final class SyncStopRequest extends Request<OkResult> {
+  /// {@macro localpocket.sync_stop_request}
   const SyncStopRequest();
 
   @override
@@ -216,7 +242,11 @@ final class SyncStopRequest extends Request<OkResult> {
 }
 
 /// Runs one full sync cycle immediately and returns its complete report.
+///
+/// {@template localpocket.sync_now_request}
+/// {@endtemplate}
 final class SyncNowRequest extends Request<SyncReportResult> {
+  /// {@macro localpocket.sync_now_request}
   const SyncNowRequest();
 
   @override
@@ -228,7 +258,11 @@ final class SyncNowRequest extends Request<SyncReportResult> {
 }
 
 /// Parks periodic and event-driven cycles (manual `syncNow` still works).
+///
+/// {@template localpocket.sync_pause_request}
+/// {@endtemplate}
 final class SyncPauseRequest extends Request<OkResult> {
+  /// {@macro localpocket.sync_pause_request}
   const SyncPauseRequest();
 
   @override
@@ -240,7 +274,11 @@ final class SyncPauseRequest extends Request<OkResult> {
 }
 
 /// Resumes parked cycles.
+///
+/// {@template localpocket.sync_resume_request}
+/// {@endtemplate}
 final class SyncResumeRequest extends Request<OkResult> {
+  /// {@macro localpocket.sync_resume_request}
   const SyncResumeRequest();
 
   @override
@@ -251,11 +289,16 @@ final class SyncResumeRequest extends Request<OkResult> {
   Map<String, Object?> toJson() => const {};
 }
 
-/// Replaces the bearer token the engine holds after a refresh or login. This
-/// is the ONLY channel a token crosses; it unblocks an auth-required engine.
+/// Replaces the bearer token after a refresh or login — the ONLY channel a
+/// token crosses; unblocks an auth-required engine.
+///
+/// {@template localpocket.sync_update_auth_request}
+/// {@endtemplate}
 final class SyncUpdateAuthRequest extends Request<OkResult> {
+  /// {@macro localpocket.sync_update_auth_request}
   const SyncUpdateAuthRequest({this.token});
 
+  /// The new bearer token, or null to clear. Never persisted or logged.
   final String? token;
 
   @override
@@ -267,9 +310,14 @@ final class SyncUpdateAuthRequest extends Request<OkResult> {
 }
 
 /// Informs the engine of online/offline connectivity changes.
+///
+/// {@template localpocket.sync_set_connectivity_request}
+/// {@endtemplate}
 final class SyncSetConnectivityRequest extends Request<OkResult> {
+  /// {@macro localpocket.sync_set_connectivity_request}
   const SyncSetConnectivityRequest({required this.online});
 
+  /// Whether the network is currently reachable.
   final bool online;
 
   @override
@@ -282,7 +330,11 @@ final class SyncSetConnectivityRequest extends Request<OkResult> {
 
 /// Reads the current status snapshot (`closed` when sync never started).
 /// Pushed snapshots ride [SyncStatusEvent].
+///
+/// {@template localpocket.sync_status_request}
+/// {@endtemplate}
 final class SyncStatusRequest extends Request<SyncStatusResult> {
+  /// {@macro localpocket.sync_status_request}
   const SyncStatusRequest();
 
   @override
@@ -293,17 +345,22 @@ final class SyncStatusRequest extends Request<SyncStatusResult> {
   Map<String, Object?> toJson() => const {};
 }
 
-// ---------------------------------------------------------------------------
 // sync results
-// ---------------------------------------------------------------------------
 
 /// The engine state the start request left the runtime in.
+///
+/// {@template localpocket.sync_start_result}
+/// {@endtemplate}
 final class SyncStartResult extends Result {
+  /// {@macro localpocket.sync_start_result}
   const SyncStartResult({required this.state});
+
+  /// Stable wire tag for this result type.
   static const String tagValue = 'syncStart';
   @override
   String get tag => tagValue;
 
+  /// The engine state machine position after the start.
   final SyncEngineState state;
 
   @override
@@ -311,12 +368,19 @@ final class SyncStartResult extends Result {
 }
 
 /// One completed sync cycle's report.
+///
+/// {@template localpocket.sync_report_result}
+/// {@endtemplate}
 final class SyncReportResult extends Result {
+  /// {@macro localpocket.sync_report_result}
   const SyncReportResult({required this.report});
+
+  /// Stable wire tag for this result type.
   static const String tagValue = 'syncReport';
   @override
   String get tag => tagValue;
 
+  /// The completed cycle's report.
   final SyncReportData report;
 
   @override
@@ -324,45 +388,60 @@ final class SyncReportResult extends Result {
 }
 
 /// The current status snapshot.
+///
+/// {@template localpocket.sync_status_result}
+/// {@endtemplate}
 final class SyncStatusResult extends Result {
+  /// {@macro localpocket.sync_status_result}
   const SyncStatusResult({required this.status});
+
+  /// Stable wire tag for this result type.
   static const String tagValue = 'syncStatus';
   @override
   String get tag => tagValue;
 
+  /// The current status snapshot.
   final SyncStatusData status;
 
   @override
   Map<String, Object?> toJson() => {'status': status.toJson()};
 }
 
-// ---------------------------------------------------------------------------
 // sync events
-// ---------------------------------------------------------------------------
 
 /// A pushed status snapshot from the engine's status stream.
+///
+/// {@template localpocket.sync_status_event}
+/// {@endtemplate}
 final class SyncStatusEvent extends Event {
+  /// {@macro localpocket.sync_status_event}
   const SyncStatusEvent({required this.status});
 
+  /// Stable wire tag for this event type.
   static const String tagValue = 'syncStatusEvent';
   @override
   String get tag => tagValue;
 
+  /// The pushed status snapshot.
   final SyncStatusData status;
 
   @override
   Map<String, Object?> toJson() =>
-      // DateTimes are not event-safe: the status map travels pre-encoded so
-      // the timestamps survive the transport untouched.
+      // DateTimes aren't event-safe: the status map travels pre-encoded so
+      // timestamps survive the transport untouched.
       {'status': encodeWireValue(status.toJson())};
 }
 
-/// The engine's token was rejected and a refresh did not (yet) produce a
-/// valid one: the caller must fetch a fresh token and push it with
-/// [SyncUpdateAuthRequest].
+/// The engine's token was rejected and no refresh produced a valid one: the
+/// caller must fetch a fresh token and push it via [SyncUpdateAuthRequest].
+///
+/// {@template localpocket.auth_required_event}
+/// {@endtemplate}
 final class AuthRequiredEvent extends Event {
+  /// {@macro localpocket.auth_required_event}
   const AuthRequiredEvent();
 
+  /// Stable wire tag for this event type.
   static const String tagValue = 'authRequired';
   @override
   String get tag => tagValue;

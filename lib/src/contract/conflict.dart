@@ -1,10 +1,12 @@
 part of 'contract.dart';
 
-/// An immutable snapshot of one conflict: the shared base plus the local and
-/// remote documents at detection time, the dirty-field sets, and the
-/// application-selected resolution when one is stored. This is the wire-safe
-/// form of the kernel's conflict row; it carries no behavior.
+/// Wire-safe snapshot of one conflict: base + local/remote docs, dirty-field
+/// sets, detected-at, and the stored resolution if any.
+///
+/// {@template localpocket.conflict_data}
+/// {@endtemplate}
 final class ConflictData {
+  /// {@macro localpocket.conflict_data}
   const ConflictData({
     required this.store,
     required this.recordId,
@@ -17,18 +19,19 @@ final class ConflictData {
     this.resolved,
   });
 
+  /// Decodes from its wire map; malformed required fields throw [WireException].
   factory ConflictData.fromJson(Map<String, Object?> json) => ConflictData(
-        store: json['store']! as String,
-        recordId: json['recordId']! as String,
-        base: (json['base']! as Map).cast<String, Object?>(),
-        local: (json['local']! as Map).cast<String, Object?>(),
-        remote: (json['remote']! as Map).cast<String, Object?>(),
-        dirtyLocal: (json['dirtyLocal']! as List).cast<String>().toSet(),
-        dirtyRemote: (json['dirtyRemote']! as List).cast<String>().toSet(),
-        detectedAt: json['detectedAt']! as int,
+        store: _wireString(json['store'], 'store'),
+        recordId: _wireString(json['recordId'], 'recordId'),
+        base: _stringMap(json['base'], 'base'),
+        local: _stringMap(json['local'], 'local'),
+        remote: _stringMap(json['remote'], 'remote'),
+        dirtyLocal: _wireStringSet(json['dirtyLocal'], 'dirtyLocal'),
+        dirtyRemote: _wireStringSet(json['dirtyRemote'], 'dirtyRemote'),
+        detectedAt: _wireInt(json['detectedAt'], 'detectedAt'),
         resolved: json['resolved'] == null
             ? null
-            : (json['resolved']! as Map).cast<String, Object?>(),
+            : _stringMap(json['resolved'], 'resolved'),
       );
 
   /// Store whose record is conflicted.
@@ -58,6 +61,7 @@ final class ConflictData {
   /// Application-selected resolution, when stored.
   final Map<String, Object?>? resolved;
 
+  /// Serializes the conflict into its wire map.
   Map<String, Object?> toJson() => {
         'store': store,
         'recordId': recordId,

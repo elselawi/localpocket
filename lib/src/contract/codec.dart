@@ -1,36 +1,56 @@
 part of 'contract.dart';
 
+/// {@template localpocket.wire_request}
 /// One wire-level request envelope: a stable tag plus its typed payload.
+/// {@endtemplate}
 final class WireRequest {
+  /// {@macro localpocket.wire_request}
   const WireRequest({required this.tag, required this.payload});
+
+  /// Stable wire tag naming the request variant.
   final String tag;
+
+  /// The typed payload of the request.
   final Map<String, Object?> payload;
 }
 
-/// One wire-level result envelope. Decoding verifies the tag is the result
-/// family expected for the request being answered.
+/// One wire-level result envelope; decoding verifies the tag matches the
+/// expected result family.
+///
+/// {@template localpocket.wire_result}
+/// {@endtemplate}
 final class WireResult {
+  /// {@macro localpocket.wire_result}
   const WireResult({required this.tag, required this.payload});
+
+  /// Stable wire tag naming the result variant.
   final String tag;
+
+  /// The typed payload of the result.
   final Map<String, Object?> payload;
 }
 
+/// {@template localpocket.wire_event}
 /// One wire-level event envelope.
+/// {@endtemplate}
 final class WireEvent {
+  /// {@macro localpocket.wire_event}
   const WireEvent({required this.tag, required this.payload});
+
+  /// Stable wire tag naming the event variant.
   final String tag;
+
+  /// The typed payload of the event.
   final Map<String, Object?> payload;
 }
 
-/// Exhaustive codecs for the contract. Encoding is compiler-exhaustive over
-/// the sealed hierarchies; decoding validates every payload and rejects
-/// unknown tags, missing fields, and wrong types with [WireException].
+/// Exhaustive codecs for the contract. Encoding is compiler-exhaustive over the
+/// sealed hierarchies; decoding validates every payload and rejects unknown
+/// tags, missing fields, and wrong types with [WireException].
 abstract final class ContractCodec {
-  /// One representative instance per request variant. Used by contract tests
-  /// to prove every variant round-trips and every tag is unique.
-  ///
-  /// The list is final because the binary chunk sample cannot be const; every
-  /// other sample stays const via the spread.
+  /// One representative instance per request variant (contract-test fixture:
+  /// round-trips and tag uniqueness). Final — the binary chunk sample can't be
+  /// const and rides outside the const spread.
   static final List<Request> requestSamples = [
     ...const <Request>[
       OpenRequest(stores: [], manifestFingerprints: {}),
@@ -98,8 +118,7 @@ abstract final class ContractCodec {
       SyncSetConnectivityRequest(online: true),
       SyncStatusRequest(),
     ],
-    // Binary payloads cannot be const; the chunk sample rides outside the
-    // const spread.
+    // Binary payloads can't be const; rides outside the const spread.
     FileChunkRequest(session: 'x', chunk: Uint8List.fromList([1, 2, 3])),
   ];
 
@@ -157,10 +176,8 @@ abstract final class ContractCodec {
     SyncStatusResult(status: SyncStatusData.closed),
   ];
 
-  /// One representative instance per event variant.
-  ///
-  /// The list is final because the binary chunk event cannot be const; every
-  /// other sample stays const via the spread.
+  /// One representative instance per event variant (final — the binary chunk
+  /// event can't be const and rides outside the const spread).
   static final List<Event> eventSamples = [
     ...const <Event>[
       CommittedChange(
@@ -172,6 +189,21 @@ abstract final class ContractCodec {
         changedFields: {'name'},
       ),
       WatchSnapshot(subscription: 'x', items: []),
+      ConflictsSnapshot(
+        subscription: 'x',
+        conflicts: [
+          ConflictData(
+            store: 's',
+            recordId: 'i',
+            base: {'id': 'i'},
+            local: {'id': 'i'},
+            remote: {'id': 'i'},
+            dirtyLocal: {'name'},
+            dirtyRemote: {'title'},
+            detectedAt: 0,
+          ),
+        ],
+      ),
       SyncStatusEvent(status: SyncStatusData.closed),
       AuthRequiredEvent(),
     ],
@@ -185,11 +217,13 @@ abstract final class ContractCodec {
 
   // -- requests -------------------------------------------------------------
 
+  /// Encodes a request into its wire map (tag plus payload).
   static Map<String, Object?> encodeRequest(Request request) => {
         'tag': request.tag,
         'payload': encodeWireValue(request.toJson()),
       };
 
+  /// Wraps a request into its wire envelope.
   static WireRequest encodeRequestEnvelope(Request request) {
     final m = encodeRequest(request);
     return WireRequest(
@@ -197,6 +231,8 @@ abstract final class ContractCodec {
         payload: m['payload']! as Map<String, Object?>);
   }
 
+  /// Decodes a request map (or envelope payload) into its typed variant;
+  /// throws [WireException] for unknown tags or malformed payloads.
   static Request decodeRequest(Map<String, Object?> raw) {
     final tag = raw['tag'];
     if (tag is! String) throw WireException('Missing request tag.');
@@ -242,7 +278,9 @@ abstract final class ContractCodec {
           store: _store(m),
           recordId: _required(m, 'recordId'),
           size: size,
-          field: m['field'] is String ? m['field']! as String : attachmentFieldDefault,
+          field: m['field'] is String
+              ? m['field']! as String
+              : attachmentFieldDefault,
           name: m['name'] is String ? m['name']! as String : 'blob.bin',
           expectedSha256: m['expectedSha256'] is String
               ? m['expectedSha256']! as String
@@ -263,7 +301,9 @@ abstract final class ContractCodec {
         return FilesListRequest(
           store: _store(m),
           recordId: _required(m, 'recordId'),
-          field: m['field'] is String ? m['field']! as String : attachmentFieldDefault,
+          field: m['field'] is String
+              ? m['field']! as String
+              : attachmentFieldDefault,
         );
       case 'fileOpen':
         final index = m['index'];
@@ -273,7 +313,9 @@ abstract final class ContractCodec {
         return FileOpenRequest(
           store: _store(m),
           recordId: _required(m, 'recordId'),
-          field: m['field'] is String ? m['field']! as String : attachmentFieldDefault,
+          field: m['field'] is String
+              ? m['field']! as String
+              : attachmentFieldDefault,
           index: index is int ? index : 0,
           refId: m['refId'] is String ? m['refId']! as String : null,
         );
@@ -293,7 +335,9 @@ abstract final class ContractCodec {
         return FileRemoveRequest(
           store: _store(m),
           recordId: _required(m, 'recordId'),
-          field: m['field'] is String ? m['field']! as String : attachmentFieldDefault,
+          field: m['field'] is String
+              ? m['field']! as String
+              : attachmentFieldDefault,
           index: index is int ? index : 0,
           refId: m['refId'] is String ? m['refId']! as String : null,
         );
@@ -423,15 +467,21 @@ abstract final class ContractCodec {
           throw WireException('Malformed txBegin payload.');
         }
         final durabilityName = m['durability'];
-        final durability = TransactionDurability.values
-            .where((d) => d.name == durabilityName)
-            .firstOrNull;
-        if (durabilityName is String && durability == null) {
-          throw WireException('Unknown tx durability: $durabilityName');
-        }
+        // Absent keeps the default; a present value must be a known
+        // durability name — a wrong-typed one can never be silently
+        // downgraded to `normal`.
+        final durability = durabilityName == null
+            ? TransactionDurability.normal
+            : durabilityName is String
+                ? TransactionDurability.values
+                        .where((d) => d.name == durabilityName)
+                        .firstOrNull ??
+                    (throw WireException(
+                        'Unknown tx durability: $durabilityName'))
+                : throw WireException('Malformed txBegin durability.');
         return TransactionBeginRequest(
           readOnly: readOnly,
-          durability: durability ?? TransactionDurability.normal,
+          durability: durability,
         );
       case 'txCommit':
       case 'txRollback':
@@ -536,13 +586,14 @@ abstract final class ContractCodec {
 
   // -- results --------------------------------------------------------------
 
+  /// Encodes a result into its wire map (tag plus payload).
   static Map<String, Object?> encodeResult(Result result) => {
         'tag': result.tag,
         'payload': encodeWireValue(result.toJson()),
       };
 
-  /// Decodes a result envelope, verifying it is the result family expected
-  /// for [request]. A valid result for the wrong operation is rejected.
+  /// Decodes a result map for [request], verifying the tag matches the
+  /// expected result family; throws [WireException] otherwise.
   static Result decodeResult(Request request, Map<String, Object?> raw) {
     final tag = raw['tag'];
     if (tag is! String) throw WireException('Missing result tag.');
@@ -591,7 +642,8 @@ abstract final class ContractCodec {
         final rows = m['rows'];
         if (rows is! List) throw WireException('Malformed rows payload.');
         return RowsResult([
-          for (final r in rows) r == null ? null : _stringMap(r, 'rows'),
+          for (var i = 0; i < rows.length; i++)
+            rows[i] == null ? null : _stringMap(rows[i], 'rows[$i]'),
         ]);
       case MutationResult.tagValue:
         final ids = m['ids'];
@@ -602,7 +654,7 @@ abstract final class ContractCodec {
         final items = m['items'];
         if (items is! List) throw WireException('Malformed page payload.');
         return QueryRowsResult(
-          items: [for (final i in items) _stringMap(i, 'items')],
+          items: _stringMapList(items, 'items'),
           hasNext: m['hasNext'] == true,
           hasPrev: m['hasPrev'] == true,
           nextCursor:
@@ -688,7 +740,7 @@ abstract final class ContractCodec {
           throw WireException('Malformed fileRefs payload.');
         }
         return FileRefsResult([
-          for (final r in refs) FileRefData.fromJson(_stringMap(r, 'refs')),
+          for (final r in _stringMapList(refs, 'refs')) FileRefData.fromJson(r),
         ]);
       case FileOpenResult.tagValue:
         final stream = m['stream'];
@@ -737,11 +789,14 @@ abstract final class ContractCodec {
 
   // -- events ---------------------------------------------------------------
 
+  /// Encodes an event into its wire map (tag plus payload).
   static Map<String, Object?> encodeEvent(Event event) => {
         'tag': event.tag,
         'payload': event.toJson(),
       };
 
+  /// Decodes an event map into its typed variant; throws [WireException] for
+  /// unknown tags or malformed payloads.
   static Event decodeEvent(Map<String, Object?> raw) {
     final tag = raw['tag'];
     if (tag is! String) throw WireException('Missing event tag.');
@@ -782,7 +837,7 @@ abstract final class ContractCodec {
         }
         return WatchSnapshot(
           subscription: subscription,
-          items: [for (final i in items) _stringMap(i, 'items')],
+          items: _stringMapList(items, 'items'),
         );
       case ConflictsSnapshot.tagValue:
         final subscription = payload['subscription'];
@@ -829,6 +884,15 @@ abstract final class ContractCodec {
       return {for (final e in v.entries) e.key.toString(): e.value};
     }
     throw WireException('Malformed field "$field".');
+  }
+
+  /// Decodes a list of string-keyed maps; a malformed element names the
+  /// failing index so large payloads stay debuggable.
+  static List<Map<String, Object?>> _stringMapList(Object? v, String field) {
+    if (v is! List) throw WireException('Malformed field "$field".');
+    return [
+      for (var i = 0; i < v.length; i++) _stringMap(v[i], '$field[$i]'),
+    ];
   }
 
   static ChangeOrigin _changeOrigin(Object? v) => switch (v) {

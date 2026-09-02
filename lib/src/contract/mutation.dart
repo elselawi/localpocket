@@ -1,55 +1,110 @@
 part of 'contract.dart';
 
-/// A typed mutation command for one store. Records remain the wire-safe data
-/// language of the raw surface; the typed write layer lowers its writes into
-/// these variants.
+/// A typed mutation command for one store. Records stay the wire-safe data
+/// language; the typed write layer lowers its writes into these variants.
 sealed class Mutation {
   const Mutation();
 }
 
+/// {@template localpocket.mutation_put}
+/// Writes a whole record; fails when the id already exists.
+/// {@endtemplate}
 final class MutationPut extends Mutation {
+  /// {@macro localpocket.mutation_put}
   const MutationPut(this.record);
+
+  /// The record to create.
   final Map<String, Object?> record;
 }
 
+/// {@template localpocket.mutation_upsert}
+/// Writes a whole record, creating it when the id does not exist yet.
+/// {@endtemplate}
 final class MutationUpsert extends Mutation {
+  /// {@macro localpocket.mutation_upsert}
   const MutationUpsert(this.record);
+
+  /// The record to write.
   final Map<String, Object?> record;
 }
 
+/// {@template localpocket.mutation_put_all}
+/// Writes several whole records in one tx; fails if any id exists.
+/// {@endtemplate}
 final class MutationPutAll extends Mutation {
+  /// {@macro localpocket.mutation_put_all}
   const MutationPutAll(this.records);
+
+  /// The records to create.
   final List<Map<String, Object?>> records;
 }
 
+/// {@template localpocket.mutation_upsert_all}
+/// Writes several whole records in one transaction, creating missing ids.
+/// {@endtemplate}
 final class MutationUpsertAll extends Mutation {
+  /// {@macro localpocket.mutation_upsert_all}
   const MutationUpsertAll(this.records);
+
+  /// The records to write.
   final List<Map<String, Object?>> records;
 }
 
+/// {@template localpocket.mutation_patch}
+/// Merges [MutationPatch.changes] into an existing record.
+/// {@endtemplate}
 final class MutationPatch extends Mutation {
+  /// {@macro localpocket.mutation_patch}
   const MutationPatch(this.id, this.changes);
+
+  /// Id of the record to patch.
   final String id;
+
+  /// Field values to merge into the record.
   final Map<String, Object?> changes;
 }
 
+/// {@template localpocket.mutation_patch_all}
+/// Patches several records in one transaction (id → field changes).
+/// {@endtemplate}
 final class MutationPatchAll extends Mutation {
+  /// {@macro localpocket.mutation_patch_all}
   const MutationPatchAll(this.patches);
+
+  /// Record id → field values to merge.
   final Map<String, Map<String, Object?>> patches;
 }
 
+/// {@template localpocket.mutation_archive}
+/// Archives a record (out of the default query scope, still synced).
+/// {@endtemplate}
 final class MutationArchive extends Mutation {
+  /// {@macro localpocket.mutation_archive}
   const MutationArchive(this.id);
+
+  /// Id of the record to archive.
   final String id;
 }
 
+/// {@template localpocket.mutation_restore}
+/// Restores an archived record into the default query scope.
+/// {@endtemplate}
 final class MutationRestore extends Mutation {
+  /// {@macro localpocket.mutation_restore}
   const MutationRestore(this.id);
+
+  /// Id of the record to restore.
   final String id;
 }
 
+/// {@template localpocket.mutation_purge}
+/// Hard-deletes a record together with its sync bookkeeping.
+/// {@endtemplate}
 final class MutationPurge extends Mutation {
+  /// {@macro localpocket.mutation_purge}
   const MutationPurge(this.id);
+
+  /// Id of the record to purge.
   final String id;
 }
 
