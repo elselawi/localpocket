@@ -19,6 +19,20 @@ import 'package:localpocket/src/kernel/change_bus.dart'
 import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/files/attachment_field.dart';
 import 'package:localpocket/src/kernel/sync/status.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart'
+    show
+        SyncError,
+        TransientNetworkError,
+        ServerBusyError,
+        ServerError,
+        AuthError,
+        ForbiddenError,
+        NotFoundError,
+        PayloadError,
+        ProtocolError,
+        DuplicateIdError,
+        BatchFailedError,
+        RemoteVersionConflict;
 
 // The typed error hierarchy crosses the boundary via the error codec, so it
 // is part of the contract surface; sync status models back the status/report

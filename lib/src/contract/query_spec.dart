@@ -93,7 +93,11 @@ final class QuerySpecData {
     return QuerySpecData(
       where: conditions(whereRaw),
       orGroups: [
-        if (groupsRaw is List)
+        // Absence is the documented empty default; a present wrong-typed
+        // group list can never silently degrade the filter.
+        if (groupsRaw != null && groupsRaw is! List)
+          throw WireException('Malformed query orGroups.')
+        else if (groupsRaw is List)
           for (final g in groupsRaw) conditions(g),
       ],
       predicate: !m.containsKey('predicate') || m['predicate'] == null
@@ -104,17 +108,19 @@ final class QuerySpecData {
               // unfiltered query.
               : throw WireException('Malformed query predicate.'),
       order: [
-        if (orderRaw is List)
+        if (orderRaw != null && orderRaw is! List)
+          throw WireException('Malformed query order.')
+        else if (orderRaw is List)
           for (final o in orderRaw) QueryOrderTermData.fromJson(o),
       ],
-      limit: limitRaw is int ? limitRaw : null,
-      all: m['all'] == true,
-      select:
-          selectRaw is List ? [for (final s in selectRaw) s.toString()] : null,
-      includeArchived: m['includeArchived'] == true,
-      includeHidden: m['includeHidden'] == true,
-      cursor: cursorRaw is String ? cursorRaw : null,
-      backward: m['backward'] == true,
+      limit: limitRaw == null ? null : _wireInt(limitRaw, 'limit'),
+      all: _optWireBool(m['all'], 'all', false),
+      select: selectRaw == null ? null : _wireStringList(selectRaw, 'select'),
+      includeArchived:
+          _optWireBool(m['includeArchived'], 'includeArchived', false),
+      includeHidden: _optWireBool(m['includeHidden'], 'includeHidden', false),
+      cursor: _optWireString(cursorRaw, 'cursor'),
+      backward: _optWireBool(m['backward'], 'backward', false),
     );
   }
 }

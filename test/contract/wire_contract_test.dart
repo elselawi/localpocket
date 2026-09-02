@@ -1,6 +1,20 @@
 import 'dart:typed_data';
 
 import 'package:localpocket/src/contract/contract.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart'
+    show
+        SyncError,
+        TransientNetworkError,
+        ServerBusyError,
+        ServerError,
+        AuthError,
+        ForbiddenError,
+        NotFoundError,
+        PayloadError,
+        ProtocolError,
+        DuplicateIdError,
+        BatchFailedError,
+        RemoteVersionConflict;
 import 'package:test/test.dart';
 
 void main() {
@@ -24,6 +38,36 @@ void main() {
       // to exactly one result tag.
       final map = ContractCodec.requestResultTags;
       expect(map.length, ContractCodec.requestSamples.length);
+    });
+
+    test('every request variant has a sample', () {
+      // The complete tag manifest: the decoder switch is compiler-exhaustive
+      // over the sealed request family, so a new variant must land here AND in
+      // requestSamples — a missing sample breaks runtime correlation for every
+      // client that sends it.
+      const allTags = [
+        'open', 'capabilities', 'health', 'close', //
+        'get', 'rows', 'mutate', 'query', 'count', 'countDistinct', 'distinct',
+        'ids', 'aggregate', 'explain', 'search',
+        'txBegin', 'txCommit', 'txRollback', 'txSavepoint', 'txRollbackTo',
+        'txRelease',
+        'watchOne', 'watch', 'watchCancel',
+        'analyze', 'walCheckpoint', 'vacuum', 'pruneOutbox', 'compact',
+        'runMaintenance',
+        'conflictsList', 'conflictGet', 'conflictsResolve',
+        'conflictsAcceptLocal', 'conflictsAcceptRemote', 'conflictsWatch',
+        'fileBeginUpload', 'fileChunk', 'fileFinish', 'fileClose', 'fileAbort',
+        'filesList', 'fileOpen', 'fileCredit', 'fileRemove', 'fileGc',
+        'fileEnforceStorageCap', 'fileStorageStatus',
+        'syncStart', 'syncStop', 'syncNow', 'syncPause', 'syncResume',
+        'syncUpdateAuth', 'syncSetConnectivity', 'syncStatus',
+      ];
+      final sampled = ContractCodec.requestSamples.map((r) => r.tag).toSet();
+      for (final tag in allTags) {
+        expect(sampled, contains(tag),
+            reason: 'request "$tag" has no requestSamples entry — sends of it '
+                'fail correlation on every runtime');
+      }
     });
   });
 
@@ -315,6 +359,20 @@ void main() {
       expect(decoded['a']['c'], [true, null]);
     });
 
+    test('a user map carrying the reserved tag key survives as a map', () {
+      const userObject = {
+        '__lp_t': 'datetime',
+        'v': 1700000000000,
+      };
+      final decoded =
+          decodeWireValue(encodeWireValue({'row': userObject}))! as Map;
+      expect(decoded['row'], isA<Map>(),
+          reason: 'a user JSON-object shaped like a tag must never be '
+              'reconstructed into a DateTime');
+      expect((decoded['row'] as Map)['__lp_t'], 'datetime');
+      expect((decoded['row'] as Map)['v'], 1700000000000);
+    });
+
     test('non-representable values are rejected', () {
       expect(
         () => encodeWireValue(Object()),
@@ -399,6 +457,53 @@ void main() {
           decodeError(encodeError(NotNullConstraintException(field: 'title')))
               as NotNullConstraintException;
       expect(notNull.field, 'title');
+    });
+
+    test('the unique-constraint colliding value survives the wire', () {
+      final decoded = decodeError(encodeError(UniqueConstraintException(
+          field: 'qty',
+          value: 7,
+          message: 'dup'))) as UniqueConstraintException;
+      expect(decoded.value, 7);
+
+      // A non-wire-safe value is dropped rather than breaking the error path.
+      final dropped = decodeError(encodeError(UniqueConstraintException(
+          field: 'blob',
+          value: Object(),
+          message: 'dup'))) as UniqueConstraintException;
+      expect(dropped.value, isNull);
+
+      // A WireException keeps its message without double-labeling.
+      final wire = decodeError(encodeError(WireException('bad envelope')))
+          as WireException;
+      expect(wire.message, 'bad envelope');
+    });
+
+    test('sync errors keep their subtype identity across the wire', () {
+      final cases = <SyncError>[
+        TransientNetworkError('net down'),
+        ServerBusyError('3', 'busy'),
+        ServerError('srv'),
+        AuthError('auth'),
+        ForbiddenError('no'),
+        NotFoundError('gone'),
+        PayloadError('bad'),
+        ProtocolError('wire'),
+        DuplicateIdError('dup'),
+        BatchFailedError('poison'),
+        RemoteVersionConflict(message: 'moved'),
+      ];
+      for (final error in cases) {
+        final decoded = decodeError(encodeError(error)) as SyncError;
+        expect(decoded.runtimeType, error.runtimeType,
+            reason: '${error.runtimeType} lost its identity over the wire');
+        expect(decoded.message, error.message);
+      }
+
+      // Retry-after rides the details map.
+      final busy = decodeError(encodeError(ServerBusyError('7', 'busy')))
+          as ServerBusyError;
+      expect(busy.retryAfter, '7');
     });
 
     test('plain errors carry no details key', () {
@@ -522,6 +627,121 @@ void main() {
       // Absent and null stay legal: no predicate means no filter.
       expect(QuerySpecData.fromJson(payload..remove('predicate')).predicate,
           isNull);
+    });
+
+    test('a malformed spec field fails typed, never degrades the query', () {
+      final base = QuerySpecData(
+        where: [QueryConditionData('qty', QueryConditionOp.eq, value: 3)],
+        order: [QueryOrderTermData('qty')],
+        limit: 10,
+        cursor: 'c1',
+        select: const ['name'],
+      );
+
+      void expectMalformed(String field, Object? value) {
+        final payload = base.toJson();
+        payload[field] = value;
+        expect(
+          () => QuerySpecData.fromJson(payload),
+          throwsA(isA<WireException>()),
+          reason: 'wrong-typed "$field" must fail typed',
+        );
+      }
+
+      expectMalformed('order', 'qty');
+      expectMalformed('limit', 'ten');
+      expectMalformed('cursor', 5);
+      expectMalformed('select', 'name');
+      expectMalformed('all', 'yes');
+      expectMalformed('includeHidden', 1);
+      expectMalformed('backward', 'back');
+
+      // A non-string select element is rejected, not stringified.
+      final badElement = base.toJson();
+      badElement['select'] = ['name', 5];
+      expect(
+        () => QuerySpecData.fromJson(badElement),
+        throwsA(isA<WireException>()),
+      );
+
+      // Absent optional fields keep their documented defaults.
+      final minimal = QuerySpecData.fromJson(QuerySpecData().toJson());
+      expect(minimal.order, isEmpty);
+      expect(minimal.limit, isNull);
+      expect(minimal.select, isNull);
+      expect(minimal.all, isFalse);
+    });
+
+    test('a non-string element in a required id list fails typed', () {
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'rows',
+          'payload': encodeWireValue({
+            'store': 's',
+            'ids': ['a', 2],
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a non-string ids element fails typed, never a raw cast',
+      );
+      expect(
+        () => ContractCodec.decodeResult(
+          const MutateRequest(store: 's', mutation: MutationPut({})),
+          {
+            'tag': MutationResult.tagValue,
+            'payload': encodeWireValue({
+              'ids': ['a', true],
+            }),
+          },
+        ),
+        throwsA(isA<WireException>()),
+      );
+    });
+
+    test('a wrong-typed scalar result field fails typed, never coerces', () {
+      // Aggregate: a present non-num value must not read as "no rows".
+      expect(
+        () => ContractCodec.decodeResult(
+          const AggregateRequest(
+              store: 's',
+              fn: AggregateFn.sum,
+              field: 'f',
+              spec: QuerySpecData()),
+          {
+            'tag': AggregateResult.tagValue,
+            'payload': encodeWireValue({'value': 'lots'}),
+          },
+        ),
+        throwsA(isA<WireException>()),
+      );
+      // Capability bools: a present wrong-typed value must not flip meaning.
+      expect(
+        () => ContractCodec.decodeResult(
+          const CapabilitiesRequest(),
+          {
+            'tag': CapabilitiesResult.tagValue,
+            'payload': encodeWireValue({
+              'sqliteVersion': '3.0.0',
+              'durable': 'yes',
+            }),
+          },
+        ),
+        throwsA(isA<WireException>()),
+      );
+      // Committed-change field sets reject non-string entries.
+      expect(
+        () => ContractCodec.decodeEvent({
+          'tag': CommittedChange.tagValue,
+          'payload': {
+            'store': 's',
+            'id': 'i',
+            'origin': 'local',
+            'action': 'put',
+            'changedFields': ['name', 7],
+          },
+        }),
+        throwsA(isA<WireException>()),
+      );
     });
 
     test('a wrong-typed tx durability fails typed, never silently normal', () {

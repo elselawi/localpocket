@@ -16,8 +16,23 @@ Map<String, Object?> encodeError(Object error) {
       details = {'field': error.field};
     } else if (error is UniqueConstraintException) {
       details = {'field': error.field};
+      // The colliding value rides along when it is wire-safe; the error
+      // path must never throw, so an unsafe value is simply dropped.
+      try {
+        details['value'] = encodeWireValue(error.value);
+      } on WireException {
+        // value is not wire-safe; decode sees null.
+      }
     } else if (error is NotNullConstraintException) {
       details = {'field': error.field};
+    }
+  } else if (error is SyncError) {
+    // Sync failures keep their subtype identity so the engine's retry /
+    // dead-letter decisions survive the boundary on every runtime.
+    typeName = _syncErrorType(error);
+    message = error.message;
+    if (error is ServerBusyError && error.retryAfter != null) {
+      details = {'retryAfter': error.retryAfter};
     }
   } else if (error is WireException) {
     typeName = 'WireException';
@@ -65,6 +80,20 @@ String _localPocketErrorType(LocalPocketError error) => switch (error) {
       FieldNotSelectedError() => 'FieldNotSelectedError',
     };
 
+String _syncErrorType(SyncError error) => switch (error) {
+      TransientNetworkError() => 'TransientNetworkError',
+      ServerBusyError() => 'ServerBusyError',
+      ServerError() => 'ServerError',
+      AuthError() => 'AuthError',
+      ForbiddenError() => 'ForbiddenError',
+      NotFoundError() => 'NotFoundError',
+      PayloadError() => 'PayloadError',
+      ProtocolError() => 'ProtocolError',
+      DuplicateIdError() => 'DuplicateIdError',
+      BatchFailedError() => 'BatchFailedError',
+      RemoteVersionConflict() => 'RemoteVersionConflict',
+    };
+
 /// Decodes a wire error into a typed error. Known kernel errors are
 /// reconstructed exactly; unknown categories degrade to [WireException] with
 /// the original type name preserved in the message.
@@ -81,12 +110,23 @@ Object decodeError(Map<String, Object?> wire) {
     return null;
   }
 
+  Object? detailValue(String key) {
+    if (details is Map) return decodeWireValue(details[key]);
+    return null;
+  }
+
   switch (type) {
+    case 'WireException':
+      // Encode stamps the type name; decode must not double-label it into
+      // the message.
+      return WireException(m);
     case 'ValidationException':
       return ValidationException(m, field: detail('field'));
     case 'UniqueConstraintException':
       return UniqueConstraintException(
-          field: detail('field') ?? '', message: m);
+          field: detail('field') ?? '',
+          value: detailValue('value'),
+          message: m);
     case 'NotNullConstraintException':
       return NotNullConstraintException(
           field: detail('field') ?? '', message: m);
@@ -122,6 +162,30 @@ Object decodeError(Map<String, Object?> wire) {
       return FieldNotSelectedError(detail('field') ?? '');
     case 'TypedStoreMismatchError':
       return TypedStoreMismatchError(m);
+    case 'TransientNetworkError':
+      return TransientNetworkError(m);
+    case 'ServerBusyError':
+      return ServerBusyError(detail('retryAfter'), m);
+    case 'ServerError':
+      return ServerError(m);
+    case 'AuthError':
+      return AuthError(m);
+    case 'ForbiddenError':
+      return ForbiddenError(m);
+    case 'NotFoundError':
+      return NotFoundError(m);
+    case 'PayloadError':
+      return PayloadError(m);
+    case 'ProtocolError':
+      return ProtocolError(m);
+    case 'DuplicateIdError':
+      return DuplicateIdError(m);
+    case 'BatchFailedError':
+      return BatchFailedError(m);
+    case 'RemoteVersionConflict':
+      // The embedded remote record is not wire-encodable; the caller
+      // re-fetches for the merge, so only the message crosses.
+      return RemoteVersionConflict(message: m);
     case 'StateError':
       return StateError(m);
     case 'ArgumentError':

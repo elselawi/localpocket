@@ -101,6 +101,7 @@ abstract final class ContractCodec {
       ConflictsWatchRequest(),
       FileBeginUploadRequest(store: 's', recordId: 'i', size: 3),
       FileFinishRequest(session: 'x'),
+      FileCloseRequest(stream: 'x'),
       FileAbortRequest(session: 'x'),
       FilesListRequest(store: 's', recordId: 'i'),
       FileOpenRequest(store: 's', recordId: 'i'),
@@ -259,8 +260,7 @@ abstract final class ContractCodec {
           stores: [for (final s in stores) _stringMap(s, 'stores')],
           manifestFingerprints: {
             for (final e in fingerprints.entries)
-              if (e.key is String && e.value is String)
-                e.key as String: e.value as String,
+              e.key.toString(): _wireString(e.value, 'fingerprint'),
           },
         );
       case 'capabilities':
@@ -278,14 +278,12 @@ abstract final class ContractCodec {
           store: _store(m),
           recordId: _required(m, 'recordId'),
           size: size,
-          field: m['field'] is String
-              ? m['field']! as String
-              : attachmentFieldDefault,
-          name: m['name'] is String ? m['name']! as String : 'blob.bin',
-          expectedSha256: m['expectedSha256'] is String
-              ? m['expectedSha256']! as String
-              : null,
-          allowVolatileBlobs: m['allowVolatileBlobs'] == true,
+          field: _optWireStringFallback(
+              m['field'], 'field', attachmentFieldDefault),
+          name: _optWireStringFallback(m['name'], 'name', 'blob.bin'),
+          expectedSha256: _optWireString(m['expectedSha256'], 'expectedSha256'),
+          allowVolatileBlobs: _optWireBool(
+              m['allowVolatileBlobs'], 'allowVolatileBlobs', false),
         );
       case 'fileChunk':
         final chunk = m['chunk'];
@@ -301,23 +299,17 @@ abstract final class ContractCodec {
         return FilesListRequest(
           store: _store(m),
           recordId: _required(m, 'recordId'),
-          field: m['field'] is String
-              ? m['field']! as String
-              : attachmentFieldDefault,
+          field: _optWireStringFallback(
+              m['field'], 'field', attachmentFieldDefault),
         );
       case 'fileOpen':
-        final index = m['index'];
-        if (index != null && index is! int) {
-          throw WireException('Malformed fileOpen payload.');
-        }
         return FileOpenRequest(
           store: _store(m),
           recordId: _required(m, 'recordId'),
-          field: m['field'] is String
-              ? m['field']! as String
-              : attachmentFieldDefault,
-          index: index is int ? index : 0,
-          refId: m['refId'] is String ? m['refId']! as String : null,
+          field: _optWireStringFallback(
+              m['field'], 'field', attachmentFieldDefault),
+          index: _optWireInt(m['index'], 'index', 0),
+          refId: _optWireString(m['refId'], 'refId'),
         );
       case 'fileCredit':
         final bytes = m['bytes'];
@@ -328,18 +320,13 @@ abstract final class ContractCodec {
       case 'fileClose':
         return FileCloseRequest(stream: _required(m, 'stream'));
       case 'fileRemove':
-        final index = m['index'];
-        if (index != null && index is! int) {
-          throw WireException('Malformed fileRemove payload.');
-        }
         return FileRemoveRequest(
           store: _store(m),
           recordId: _required(m, 'recordId'),
-          field: m['field'] is String
-              ? m['field']! as String
-              : attachmentFieldDefault,
-          index: index is int ? index : 0,
-          refId: m['refId'] is String ? m['refId']! as String : null,
+          field: _optWireStringFallback(
+              m['field'], 'field', attachmentFieldDefault),
+          index: _optWireInt(m['index'], 'index', 0),
+          refId: _optWireString(m['refId'], 'refId'),
         );
       case 'fileGc':
         final blobGraceMs = m['blobGraceMs'];
@@ -363,8 +350,8 @@ abstract final class ContractCodec {
         }
         return SyncStartRequest(
           baseUrl: baseUrl,
-          scopeId: m['scopeId'] is String ? m['scopeId']! as String : null,
-          token: m['token'] is String ? m['token']! as String : null,
+          scopeId: _optWireString(m['scopeId'], 'scopeId'),
+          token: _optWireString(m['token'], 'token'),
         );
       case 'syncStop':
         return const SyncStopRequest();
@@ -376,7 +363,7 @@ abstract final class ContractCodec {
         return const SyncResumeRequest();
       case 'syncUpdateAuth':
         return SyncUpdateAuthRequest(
-            token: m['token'] is String ? m['token']! as String : null);
+            token: _optWireString(m['token'], 'token'));
       case 'syncSetConnectivity':
         final online = m['online'];
         if (online is! bool) {
@@ -396,7 +383,7 @@ abstract final class ContractCodec {
         if (ids is! List) throw WireException('Malformed rows payload.');
         return RowsRequest(
           store: _store(m),
-          ids: [for (final i in ids) i as String],
+          ids: _wireStringList(ids, 'ids'),
           session: _optionalSession(m),
         );
       case 'mutate':
@@ -517,8 +504,7 @@ abstract final class ContractCodec {
         }
         return WatchCancelRequest(subscription: subscription);
       case 'analyze':
-        return AnalyzeRequest(
-            store: m['store'] is String ? m['store']! as String : null);
+        return AnalyzeRequest(store: _optWireString(m['store'], 'store'));
       case 'walCheckpoint':
         return const WalCheckpointRequest();
       case 'vacuum':
@@ -539,8 +525,7 @@ abstract final class ContractCodec {
         }
         return RunMaintenanceRequest(compactOlderThanMs: compactOlderThanMs);
       case 'conflictsList':
-        final store = m['store'];
-        return ConflictsListRequest(store: store is String ? store : null);
+        return ConflictsListRequest(store: _optWireString(m['store'], 'store'));
       case 'conflictGet':
         return ConflictGetRequest(store: _store(m), id: _required(m, 'id'));
       case 'conflictsResolve':
@@ -558,8 +543,8 @@ abstract final class ContractCodec {
       case 'conflictsAcceptRemote':
         return AcceptRemoteRequest(store: _store(m), id: _required(m, 'id'));
       case 'conflictsWatch':
-        final store = m['store'];
-        return ConflictsWatchRequest(store: store is String ? store : null);
+        return ConflictsWatchRequest(
+            store: _optWireString(m['store'], 'store'));
       default:
         return null;
     }
@@ -621,19 +606,21 @@ abstract final class ContractCodec {
         return const OkResult();
       case CapabilitiesResult.tagValue:
         return CapabilitiesResult(
-          sqliteVersion: m['sqliteVersion'] as String? ?? '',
-          hasStrict: m['hasStrict'] == true,
-          walSupported: m['walSupported'] == true,
-          hasFts5: m['hasFts5'] == true,
-          isWeb: m['isWeb'] == true,
-          storage: m['storage'] as String? ?? 'file',
-          durable: m['durable'] != false,
-          journal: m['journal'] as String? ?? 'unknown',
+          sqliteVersion:
+              _optWireStringFallback(m['sqliteVersion'], 'sqliteVersion', ''),
+          hasStrict: _optWireBool(m['hasStrict'], 'hasStrict', false),
+          walSupported: _optWireBool(m['walSupported'], 'walSupported', false),
+          hasFts5: _optWireBool(m['hasFts5'], 'hasFts5', false),
+          isWeb: _optWireBool(m['isWeb'], 'isWeb', false),
+          storage: _optWireStringFallback(m['storage'], 'storage', 'file'),
+          durable: _optWireBool(m['durable'], 'durable', true),
+          journal: _optWireStringFallback(m['journal'], 'journal', 'unknown'),
         );
       case HealthResult.tagValue:
         return HealthResult(
-          ok: m['ok'] == true,
-          sqliteVersion: m['sqliteVersion'] as String? ?? '',
+          ok: _optWireBool(m['ok'], 'ok', false),
+          sqliteVersion:
+              _optWireStringFallback(m['sqliteVersion'], 'sqliteVersion', ''),
         );
       case RowResult.tagValue:
         final row = m['row'];
@@ -647,20 +634,17 @@ abstract final class ContractCodec {
         ]);
       case MutationResult.tagValue:
         final ids = m['ids'];
-        return MutationResult(
-          ids: ids is List ? [for (final i in ids) i as String] : const [],
-        );
+        if (ids is! List) throw WireException('Malformed ids payload.');
+        return MutationResult(ids: _wireStringList(ids, 'ids'));
       case QueryRowsResult.tagValue:
         final items = m['items'];
         if (items is! List) throw WireException('Malformed page payload.');
         return QueryRowsResult(
           items: _stringMapList(items, 'items'),
-          hasNext: m['hasNext'] == true,
-          hasPrev: m['hasPrev'] == true,
-          nextCursor:
-              m['nextCursor'] is String ? m['nextCursor']! as String : null,
-          prevCursor:
-              m['prevCursor'] is String ? m['prevCursor']! as String : null,
+          hasNext: _optWireBool(m['hasNext'], 'hasNext', false),
+          hasPrev: _optWireBool(m['hasPrev'], 'hasPrev', false),
+          nextCursor: _optWireString(m['nextCursor'], 'nextCursor'),
+          prevCursor: _optWireString(m['prevCursor'], 'prevCursor'),
         );
       case CountResult.tagValue:
         final value = m['value'];
@@ -673,10 +657,9 @@ abstract final class ContractCodec {
       case IdsResult.tagValue:
         final ids = m['ids'];
         if (ids is! List) throw WireException('Malformed ids payload.');
-        return IdsResult([for (final i in ids) i as String]);
+        return IdsResult(_wireStringList(ids, 'ids'));
       case AggregateResult.tagValue:
-        final value = m['value'];
-        return AggregateResult(value is num ? value : null);
+        return AggregateResult(_optWireNum(m['value'], 'value'));
       case ExplainResult.tagValue:
         final plan = m['plan'];
         if (plan is! String) throw WireException('Malformed explain payload.');
@@ -761,7 +744,8 @@ abstract final class ContractCodec {
         }
         return FileCapResult(evicted: evicted);
       case StorageStatusResult.tagValue:
-        return StorageStatusResult(durable: m['durable'] == true);
+        return StorageStatusResult(
+            durable: _optWireBool(m['durable'], 'durable', false));
       case SyncStartResult.tagValue:
         final state = m['state'];
         if (state is! String) {
@@ -825,9 +809,9 @@ abstract final class ContractCodec {
               oldRecord == null ? null : _stringMap(oldRecord, 'oldRecord'),
           newRecord:
               newRecord == null ? null : _stringMap(newRecord, 'newRecord'),
-          changedFields: changedFields is List
-              ? {for (final f in changedFields) f as String}
-              : const {},
+          changedFields: changedFields == null
+              ? const {}
+              : _wireStringSet(changedFields, 'changedFields'),
         );
       case WatchSnapshot.tagValue:
         final subscription = payload['subscription'];
@@ -861,9 +845,8 @@ abstract final class ContractCodec {
         return FileChunkEvent(
           stream: stream,
           chunk: chunk,
-          last: payload['last'] == true,
-          error:
-              payload['error'] is String ? payload['error']! as String : null,
+          last: _optWireBool(payload['last'], 'last', false),
+          error: _optWireString(payload['error'], 'error'),
         );
       case SyncStatusEvent.tagValue:
         final status = payload['status'];
