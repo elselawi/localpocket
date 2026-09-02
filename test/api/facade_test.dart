@@ -40,6 +40,41 @@ void main() {
       await db.close();
     });
 
+    test(
+        'a failing openWith surfaces the original error, never a cleanup '
+        'failure', () async {
+      await expectLater(
+        LocalPocket.openWith(
+          options(),
+          (handler) => throw StateError('runtime boom'),
+        ),
+        throwsA(isA<StateError>()
+            .having((e) => e.message, 'message', 'runtime boom')),
+      );
+    });
+
+    test(
+        'a corrupt row distinguishes a missing required field from a null '
+        'one', () {
+      final absent = Row(Tasks.store, {'id': 'x', 'archived': false});
+      final nulled = Row(Tasks.store, {
+        'id': 'x',
+        'archived': false,
+        'title': null,
+      });
+
+      expect(
+        () => absent(Tasks.title),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.message, 'message', contains('missing'))),
+      );
+      expect(
+        () => nulled(Tasks.title),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.message, 'message', contains('holds null'))),
+      );
+    });
+
     test('put returns the created row; get/getAll read it back', () async {
       final db = await LocalPocket.open(options());
       addTearDown(db.close);

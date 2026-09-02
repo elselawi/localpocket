@@ -344,13 +344,28 @@ final class Store<S extends StoreDef<S>> {
       onListen: () async {
         final started =
             await _runtime.send(WatchRequest(store: name, spec: data));
-        if (cancelled) return;
+        if (cancelled) {
+          // Cancelled while the request was in flight: the kernel already
+          // registered the subscription, so it must be torn down explicitly
+          // or it would keep re-querying on every store change forever.
+          try {
+            await _runtime
+                .send(WatchCancelRequest(subscription: started.subscription));
+          } catch (_) {
+            // The runtime may already be closed; the watch dies with it.
+          }
+          return;
+        }
         subscription = started.subscription;
         events = _runtime.events.listen(
           (event) {
             if (event is WatchSnapshot && event.subscription == subscription) {
               controller.add([
-                for (final row in event.items) Row<S>(def, row),
+                // Projection enforcement matches _page: reading a field
+                // excluded by the spec's projection throws the same typed
+                // error on watch rows as on query rows.
+                for (final row in event.items)
+                  Row<S>(def, row, projected: projectedOf(spec)),
               ]);
             }
           },

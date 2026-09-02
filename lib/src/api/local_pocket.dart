@@ -213,7 +213,7 @@ final class LocalPocket {
     return result.removed;
   }
 
-  /// Closes the database. Subsequent sends fail with a typed error; live
+  /// Closes the database. Subsequent sends fail with a `StateError`; live
   /// event and watch streams end. The platform opener's onClose hook (web:
   /// flush OPFS via the worker connection) runs after the close command.
   Future<void> close() async {

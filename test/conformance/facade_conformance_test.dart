@@ -454,6 +454,33 @@ void main() {
             reason: 'the original window was zeta before alpha');
       });
 
+      test('projected watch rows enforce the same projection contract',
+          () async {
+        db = await open();
+        addTearDown(db.close);
+        final tasks = db.store(Tasks.store);
+        await tasks.put([Tasks.title.set('watched'), Tasks.priority.set(3)]);
+
+        final snapshots = <List<Row<Tasks>>>[];
+        final sub = tasks
+            .watch(QuerySpec<Tasks>(
+              select: [Tasks.title],
+              limit: 10,
+            ))
+            .listen(snapshots.add);
+        addTearDown(sub.cancel);
+        await _waitFor(() => snapshots.isNotEmpty);
+
+        final row = snapshots.last.single;
+        expect(row(Tasks.title), 'watched');
+        // A selected- away field must throw the SAME typed error a query()
+        // row throws — not read as null and not fail with a validation
+        // error on the stripped id.
+        expect(
+            () => row(Tasks.priority), throwsA(isA<FieldNotSelectedError>()));
+        expect(() => row.archived, throwsA(isA<FieldNotSelectedError>()));
+      });
+
       test('committed-change events flow through the facade', () async {
         db = await open();
         addTearDown(db.close);

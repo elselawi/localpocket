@@ -176,7 +176,7 @@ final class Files<S extends StoreDef<S>> {
   /// chunks cross the boundary as they are consumed and memory stays bounded
   /// no matter how large the file. Without a declared length the source is
   /// buffered first to learn its size. A volatile blob store (see
-  /// [isBlobStorageDurable]) fails the attach with a typed error unless
+  /// [isBlobStorageDurable]) fails the attach with a `StateError` unless
   /// [allowVolatileBlobs] is `true` — byte loss on restart becomes an
   /// explicit choice.
   Future<FileRef> attach({
@@ -330,13 +330,35 @@ final class Files<S extends StoreDef<S>> {
   /// surfaces the kernel's error).
   Future<Stream<List<int>>> open(FileRef ref) async {
     _ensureOpen();
-    // ignore: close_sinks
-    final controller = StreamController<List<int>>();
     // Chunk events can overtake the open reply (they travel a different
     // channel); buffer events for the not-yet-known stream briefly.
     final buffered = <FileChunkEvent>[];
     var streamId = '';
     var closed = false;
+    // Credits are held while the consumer is paused (or has not attached
+    // yet) so the kernel window — not this buffer — bounds memory.
+    var paused = true;
+    var pendingCredit = 0;
+
+    void flushCredits() {
+      if (pendingCredit <= 0 || closed) return;
+      final bytes = pendingCredit;
+      pendingCredit = 0;
+      unawaited(_credit(streamId, bytes));
+    }
+
+    // ignore: close_sinks
+    final controller = StreamController<List<int>>(
+      onPause: () => paused = true,
+      onResume: () {
+        paused = false;
+        flushCredits();
+      },
+      onListen: () {
+        paused = false;
+        flushCredits();
+      },
+    );
 
     void consume(FileChunkEvent event) {
       if (event.error != null) {
@@ -345,13 +367,17 @@ final class Files<S extends StoreDef<S>> {
         closed = true;
         return;
       }
-      if (event.chunk.isNotEmpty) controller.add(event.chunk);
+      if (event.chunk.isNotEmpty) {
+        controller.add(event.chunk);
+        pendingCredit += event.chunk.length;
+      }
       if (event.last) {
         closed = true;
         if (!controller.isClosed) unawaited(controller.close());
-      } else {
-        // Credit the consumed bytes back so the kernel keeps streaming.
-        unawaited(_credit(event.stream, event.chunk.length));
+      } else if (!paused) {
+        // Credit the consumed bytes back so the kernel keeps streaming —
+        // only when the consumer is actually keeping up.
+        flushCredits();
       }
     }
 

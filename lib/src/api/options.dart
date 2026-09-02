@@ -60,7 +60,7 @@ final class LocalPocketOptions {
   /// Primarily the native wiring: on web the worker configures its own
   /// backend (a non-PocketBase factory fails the web open typed instead of
   /// being silently ignored). A runtime without a factory fails sync start
-  /// with a typed error.
+  /// with a `StateError`.
   final SyncBackendFactory? syncBackendFactory;
 
   /// The blob store holding attachment bytes for this database, or `null`
@@ -68,7 +68,7 @@ final class LocalPocketOptions {
   ///
   /// On web the worker resolves its own store (OPFS with a volatile fallback);
   /// natively this is the storage adapter. Without one, file operations fail
-  /// with a typed error.
+  /// with a `StateError`.
   final BlobStore? blobStore;
 }
 
