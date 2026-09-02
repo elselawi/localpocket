@@ -101,7 +101,7 @@ void main() {
         store: 'widgets',
         recordId: id,
         kind: OpQueueKind.fileUpload,
-        payload: {'hash': 'abc123', 'field': 'imgs'},
+        payload: {'hash': 'abc123', 'field': 'attachments'},
         dependsOnOp: opA!.opId,
       );
 

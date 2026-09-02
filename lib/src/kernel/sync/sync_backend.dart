@@ -2,6 +2,7 @@
 /// and PocketBase-compatible timestamp helpers.
 library;
 
+
 /// PocketBase's hard per-page ceiling: a list `perPage` above this is
 /// rejected with a 400 (and an absent `perPage` defaults to 30). The engine
 /// clamps every page size to this so a configured `maxPage` above the cap
@@ -189,7 +190,7 @@ class RemoteRecord {
     required this.store,
     required this.updated,
     required this.data,
-    this.imgs = const [],
+    this.attachments = const [],
   });
 
   /// Remote record ID.
@@ -204,8 +205,10 @@ class RemoteRecord {
   /// Remote record payload.
   final Map<String, Object?> data;
 
-  /// Remote attachment filenames.
-  final List<String> imgs;
+  /// Remote attachment filenames for the backend's attachment field. The
+  /// backend owns the mapping to its own wire field; the kernel sees only
+  /// the generic attachment list.
+  final List<String> attachments;
 
   /// Copies this record while replacing selected fields.
   RemoteRecord copyWith({String? updated, Map<String, Object?>? data}) =>
@@ -216,7 +219,7 @@ class RemoteRecord {
         store: store,
         updated: updated ?? this.updated,
         data: data ?? this.data,
-        imgs: imgs,
+        attachments: attachments,
       );
 }
 

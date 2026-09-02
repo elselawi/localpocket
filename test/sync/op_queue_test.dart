@@ -21,12 +21,12 @@ void main() {
         store: 'widgets',
         recordId: 'r1',
         kind: OpQueueKind.fileUpload,
-        payload: {'field': 'imgs'});
+        payload: {'field': 'attachments'});
     await pocket.opQueue.enqueue(
         store: 'widgets',
         recordId: 'r2',
         kind: OpQueueKind.fileRemove,
-        payload: {'field': 'imgs'});
+        payload: {'field': 'attachments'});
 
     final rows = await pocket.db.query('lp_op_queue', orderBy: 'seq ASC');
     expect(rows, hasLength(2));

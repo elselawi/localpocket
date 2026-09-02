@@ -257,16 +257,19 @@ class PbRealtime {
 
   RemoteRecord _parseRecord(Map<dynamic, dynamic> raw) {
     final id = raw['id'];
-    final store = raw['store'];
+    final store = raw[client.fieldNames.storeField];
     final updated = raw['updated'];
-    final data = raw['data'];
-    final imgs = raw['imgs'];
+    final data = raw[client.fieldNames.dataField];
+    // The record's attachment field maps onto the generic attachments list.
+    final attachments = raw[client.fieldNames.attachmentsField];
     return RemoteRecord(
       id: id is String ? id : '',
       store: store is String ? store : '',
       updated: updated is String ? updated : '',
       data: data is Map ? Map<String, Object?>.from(data) : const {},
-      imgs: imgs is List ? imgs.whereType<String>().toList() : const [],
+      attachments: attachments is List
+          ? attachments.whereType<String>().toList()
+          : const [],
     );
   }
 }

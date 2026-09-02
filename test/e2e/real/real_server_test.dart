@@ -560,9 +560,9 @@ void main() {
 
     test('real_file_upload_and_single_file_clear', () async {
       // Live-verified file modifier semantics: a streamed upload
-      // APPENDS a file to the record's imgs list; `removeNames` clears one
+      // APPENDS a file to the record's attachments list; `removeNames` clears one
       // file (single-file clearing). Requires the real data collection to
-      // expose an `imgs` file field.
+      // expose an `attachments` file field.
       final store = uniqueStore();
       final h = await RealHarness.create(store: store);
       registerCleanup(h);
@@ -581,20 +581,20 @@ void main() {
           ),
         },
       );
-      expect(uploaded.imgs, hasLength(1),
-          reason: 'the upload appends one entry to imgs');
-      final remoteName = uploaded.imgs.single;
+      expect(uploaded.attachments, hasLength(1),
+          reason: 'the upload appends one entry to attachments');
+      final remoteName = uploaded.attachments.single;
 
       // Single-file clearing: remove exactly that file.
       final cleared = await h.backend.updateRecordFiles(
         id: id,
         removeNames: [remoteName],
       );
-      expect(cleared.imgs, isEmpty, reason: 'the single file is cleared');
+      expect(cleared.attachments, isEmpty, reason: 'the single file is cleared');
 
       // The remote record reflects the empty list.
       final fetched = await h.backend.getRecord(id);
-      expect(fetched!.imgs, isEmpty);
+      expect(fetched!.attachments, isEmpty);
     });
 
     test('real_realtime_gap_hint_on_connect', () async {

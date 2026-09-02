@@ -104,13 +104,13 @@ class FakeTransport implements HttpTransport {
   static String recordBody(String id,
           {String store = 'widgets',
           Map<String, Object?>? data,
-          List<String>? imgs,
+          List<String>? attachments,
           String updated = '2026-08-15 10:00:00.000Z'}) =>
       jsonEncode({
         'id': id,
         'store': store,
         'updated': updated,
         'data': data ?? {'id': id, 'name': 'n'},
-        if (imgs != null) 'imgs': imgs,
+        if (attachments != null) 'imgs': attachments,
       });
 }

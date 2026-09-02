@@ -140,7 +140,7 @@ abstract class WireServer {
   /// Hard-deletes [id] on the server.
   Future<void> deleteRecord(String store, String id);
 
-  /// Reads the server-side record: `{data, imgs, updated}` or null.
+  /// Reads the server-side record: `{data, attachments, updated}` or null.
   Future<Map<String, Object?>?> readRecord(String store, String id);
 
   /// Counts every record of [store] on the server.
@@ -258,7 +258,7 @@ class MockWireServer extends WireServer {
     final r = mock.records[id];
     return r == null
         ? null
-        : {'data': r.data, 'imgs': r.imgs, 'updated': r.updated};
+        : {'data': r.data, 'imgs': r.attachments, 'updated': r.updated};
   }
 
   @override
@@ -409,7 +409,7 @@ class RealWireServer extends WireServer {
   Future<Map<String, Object?>?> readRecord(String store, String id) async {
     try {
       final r = await _backend.getRecord(id);
-      return {'data': r!.data, 'imgs': r.imgs, 'updated': r.updated};
+      return {'data': r!.data, 'imgs': r.attachments, 'updated': r.updated};
     } on NotFoundError {
       return null;
     }

@@ -87,11 +87,11 @@ void main() {
       // A's cycle uploads via multipart; the server renames + stores bytes.
       await a.engine.syncNow();
       expect(await a.engine.syncStore.countPending(), 0);
-      final imgs = await remoteImgs(s, id);
-      expect(imgs, hasLength(1),
+      final attachments = await remoteImgs(s, id);
+      expect(attachments, hasLength(1),
           reason: 'the upload appended one server-renamed file');
       if (s is MockWireServer) {
-        final remoteName = imgs.single! as String;
+        final remoteName = attachments.single! as String;
         expect(s.mock.fileBytes.containsKey('$id/$remoteName'), isTrue);
         expect(s.mock.fileBytes['$id/$remoteName'], bytes,
             reason: 'the exact bytes landed on the server');
@@ -99,7 +99,7 @@ void main() {
       // A's ref settled with the server-minted remote name.
       final refsA = await a.pocket.files.list(store: s.store, recordId: id);
       expect(refsA.single.state, 'synced');
-      expect(refsA.single.remoteName, imgs.single);
+      expect(refsA.single.remoteName, attachments.single);
 
       // B pulls: observeRemoteFiles records the ref, prefetch downloads it.
       await b.engine.syncNow();
@@ -225,10 +225,10 @@ void main() {
       expect(await readAll(stream), List<int>.filled(64, 2));
     });
 
-    wireTest('peer reaps even when the LAST file is removed (empty imgs)',
+    wireTest('peer reaps even when the LAST file is removed (empty attachments)',
         (s) async {
       // Regression pin: the remote-shrink reconciliation previously only ran
-      // when the pulled record's `imgs` was non-empty, so removing the ONLY
+      // when the pulled record's `attachments` was non-empty, so removing the ONLY
       // file on a record left the peer's stale ref (and its blob) behind
       // forever. lib/src/kernel/sync/puller.dart now observes remote files even for
       // empty `imgs` when the record exists locally.
@@ -253,14 +253,14 @@ void main() {
       expect(refsB0, hasLength(1));
       expect(refsB0.single.state, 'synced');
 
-      // A removes it -> the server's imgs becomes EMPTY.
+      // A removes it -> the server's `imgs` becomes EMPTY.
       await a.pocket.files
           .remove(store: s.store, recordId: id, refId: ref.refId);
       await a.engine.syncNow();
       expect(await remoteImgs(s, id), isEmpty,
           reason: 'the last file was removed server-side');
 
-      // B pulls; even with empty imgs the shrink reaps the stale ref.
+      // B pulls; even with empty `imgs` the shrink reaps the stale ref.
       await b.engine.syncNow();
       final refsB1 = await b.pocket.files.list(store: s.store, recordId: id);
       expect(refsB1, isEmpty,

@@ -7,6 +7,7 @@ import 'dart:convert';
 
 import '../../kernel/sync/sync_backend.dart';
 import 'auth.dart';
+import 'field_names.dart';
 import 'filter_builder.dart';
 import 'transport.dart';
 
@@ -18,7 +19,10 @@ class PbClient {
   ///
   /// {@macro localpocket.pb_client}
   PbClient(
-      {required this.transport, required this.baseUrl, required this.auth});
+      {required this.transport,
+      required this.baseUrl,
+      required this.auth,
+      this.fieldNames = const PbFieldNames()});
 
   /// HTTP transport used for all requests.
   final HttpTransport transport;
@@ -28,6 +32,9 @@ class PbClient {
 
   /// Authentication manager used to inject and refresh bearer tokens.
   final AuthManager auth;
+
+  /// The wire-field configuration: collection and record field names.
+  final PbFieldNames fieldNames;
 
   /// Returns the currently usable authentication token.
   Future<Token> authToken() => auth.token();
@@ -45,9 +52,11 @@ class PbClient {
   }) async {
     String filter;
     if (idPrefix != null) {
-      filter = sweepFilter(store, idPrefix, fromId: fromId);
+      filter = sweepFilter(store, idPrefix,
+          fromId: fromId, storeField: fieldNames.storeField);
     } else {
-      final base = pullFilter(store, fromUpdated ?? '1970-01-01 00:00:00.000Z');
+      final base = pullFilter(store, fromUpdated ?? '1970-01-01 00:00:00.000Z',
+          storeField: fieldNames.storeField);
       filter = fromId == null ? base : pullPageFilter(base, fromId);
     }
     final query = <String, String>{
@@ -89,8 +98,8 @@ class PbClient {
     final res = await _sendAuth('POST', uri,
         body: jsonEncode({
           'id': id,
-          'store': store,
-          'data': jsonDecode(dataJson),
+          fieldNames.storeField: store,
+          fieldNames.dataField: jsonDecode(dataJson),
         }));
     if (res.status == 400 && _isDuplicateId(res)) {
       throw DuplicateIdError(_errorMessage(res));
@@ -140,7 +149,7 @@ class PbClient {
     // "Concurrent edits & last-write-wins".
     final uri = _record(id);
     final res = await _sendAuth('PATCH', uri,
-        body: jsonEncode({'data': jsonDecode(dataJson)}));
+        body: jsonEncode({fieldNames.dataField: jsonDecode(dataJson)}));
     _expectStatus(res, [200], uri);
     return _parseRecord(_decode(res));
   }
@@ -155,12 +164,12 @@ class PbClient {
   }) async {
     final uri = _record(id);
     final fields = <String, String>{};
-    if (dataJson != null) fields['data'] = dataJson;
+    if (dataJson != null) fields[fieldNames.dataField] = dataJson;
     if (keepNames != null) {
-      fields['imgs+'] = keepNames.join(',');
+      fields['${fieldNames.attachmentsField}+'] = keepNames.join(',');
     }
     if (removeNames != null) {
-      fields['imgs-'] = jsonEncode(removeNames);
+      fields['${fieldNames.attachmentsField}-'] = jsonEncode(removeNames);
     }
     final res = await _sendMultipartAuth(
       HttpMultipartRequest(
@@ -201,11 +210,11 @@ class PbClient {
       for (final op in ops)
         {
           'method': 'PUT',
-          'url': '/api/collections/data/records',
+          'url': '/api/collections/${fieldNames.collection}/records',
           'body': {
             'id': op.id,
-            'store': op.store,
-            'data': jsonDecode(op.dataJson),
+            fieldNames.storeField: op.store,
+            fieldNames.dataField: jsonDecode(op.dataJson),
           },
         },
     ];
@@ -273,12 +282,13 @@ class PbClient {
 
   // --------------------------------------------------------------- helpers --
 
-  Uri _records() => baseUrl.resolve('/api/collections/data/records');
+  Uri _records() =>
+      baseUrl.resolve('/api/collections/${fieldNames.collection}/records');
 
   /// NOTE: must build the full path — `_records().resolve(id)` would resolve
   /// against the last segment and drop `records`.
-  Uri _record(String id) => baseUrl
-      .resolve('/api/collections/data/records/${Uri.encodeComponent(id)}');
+  Uri _record(String id) => baseUrl.resolve(
+      '/api/collections/${fieldNames.collection}/records/${Uri.encodeComponent(id)}');
 
   /// Sends with the bearer token; on 401 refreshes once and retries.
   /// Transport failures map to [TransientNetworkError] for the engine.
@@ -387,7 +397,7 @@ class PbClient {
   RemoteRecord _parseRecord(Object? raw) {
     if (raw is! Map) throw ProtocolError('Record is not a JSON object.');
     final id = raw['id'];
-    final store = raw['store'];
+    final store = raw[fieldNames.storeField];
     final updated = raw['updated'];
     if (id is! String || updated is! String) {
       throw ProtocolError('Record missing id/updated.');
@@ -397,16 +407,18 @@ class PbClient {
     // data.id is normalized by the engine's `normalizeRemote` (a mismatch
     // becomes a MapFailure and quarantines that record — never fails the
     // whole store). The adapter passes data through verbatim.
-    final data = raw['data'];
+    final data = raw[fieldNames.dataField];
     final dataMap =
         data is Map ? Map<String, Object?>.from(data) : <String, Object?>{};
-    final imgs = raw['imgs'];
+    final attachments = raw[fieldNames.attachmentsField];
     return RemoteRecord(
       id: id,
       store: storeStr,
       updated: updated,
       data: dataMap,
-      imgs: imgs is List ? imgs.whereType<String>().toList() : const <String>[],
+      attachments: attachments is List
+          ? attachments.whereType<String>().toList()
+          : const <String>[],
     );
   }
 

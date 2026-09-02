@@ -323,7 +323,7 @@ void main() {
       expect(sr!.syncState, SyncState.quarantine);
     });
 
-    test('malformed imgs filenames are observed without crashing', () async {
+    test('malformed attachments filenames are observed without crashing', () async {
       final h = await EngineHarness.create();
       addTearDown(h.close);
       final id = h.mock.seed(store: 'widgets', data: doc('', 'w'));
@@ -334,7 +334,7 @@ void main() {
               store: 'widgets',
               updated: '2026-01-01 00:00:00.001Z',
               data: {'name': 'w'},
-              imgs: ['weird name.png', '..%2F..traversal', 'ünïcödé.bin']),
+              attachments: ['weird name.png', '..%2F..traversal', 'ünïcödé.bin']),
         ]),
       ]);
 

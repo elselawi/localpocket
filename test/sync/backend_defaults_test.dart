@@ -191,7 +191,7 @@ void main() {
         store: 'widgets',
         updated: '2026-01-01 00:00:00.000Z',
         data: {'name': 'old'},
-        imgs: ['f.bin'],
+        attachments: ['f.bin'],
       );
 
       final newData = base.copyWith(data: {'name': 'new'});
@@ -200,7 +200,7 @@ void main() {
       expect(newData.updated, '2026-01-01 00:00:00.000Z',
           reason: 'updated is preserved when not replaced');
       expect(newData.data, {'name': 'new'});
-      expect(newData.imgs, ['f.bin']);
+      expect(newData.attachments, ['f.bin']);
 
       final newUpdated = base.copyWith(updated: '2026-02-02 00:00:00.000Z');
       expect(newUpdated.updated, '2026-02-02 00:00:00.000Z');

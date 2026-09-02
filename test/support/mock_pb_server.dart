@@ -20,7 +20,7 @@ class PbRecord {
     required this.store,
     required this.data,
     required this.updated,
-    this.imgs = const [],
+    this.attachments = const [],
     this.serverHidden = false,
     this.hideFromList = false,
     this.banned = false,
@@ -30,7 +30,7 @@ class PbRecord {
   String store;
   Map<String, Object?> data;
   String updated;
-  List<String> imgs;
+  List<String> attachments;
   bool serverHidden; // list/view rule revoked
   bool hideFromList; // list rule only: still GET-able by id (404 on view)
   bool banned; // rejects writes (for poison testing)
@@ -43,7 +43,7 @@ class PbRecord {
         'collectionName': 'data',
         'store': store,
         'data': data,
-        'imgs': imgs,
+        'imgs': attachments,
         'created': updated,
         'updated': updated,
         if (serverHidden) 'hiddenRule': true,
@@ -188,7 +188,7 @@ class MockPbServer {
     Map<String, Object?>? data,
     String? id,
     String? updated,
-    List<String>? imgs,
+    List<String>? attachments,
   }) {
     final rid = id ?? generateRecordId();
     records[rid] = PbRecord(
@@ -196,7 +196,7 @@ class MockPbServer {
       store: store,
       data: data ?? const {},
       updated: updated ?? nextUpdated(),
-      imgs: imgs ?? const [],
+      attachments: attachments ?? const [],
     );
     return rid;
   }
@@ -646,8 +646,8 @@ class MockPbServer {
       return _sendJson(
           req, 404, {'message': 'The requested resource wasn\'t found.'});
     }
-    // Multipart uploads (real PB file modifier contract): `imgs+` FILE parts
-    // APPEND server-renamed files, `imgs-` removes by name, `data` merges.
+    // Multipart uploads (real PB file modifier contract): `attachments+` FILE parts
+    // APPEND server-renamed files, `attachments-` removes by name, `data` merges.
     final ct = req.headers.contentType;
     if (ct?.mimeType == 'multipart/form-data') {
       final raw = await req
@@ -670,11 +670,11 @@ class MockPbServer {
           for (final n in names) {
             fileBytes.remove('${r.id}/$n');
           }
-          r.imgs = r.imgs.where((n) => !names.contains(n)).toList();
+          r.attachments = r.attachments.where((n) => !names.contains(n)).toList();
         } else if (part.name == 'imgs+' && part.filename != null) {
           final renamed = 'file_${_tick}_${part.filename}';
           fileBytes['${r.id}/$renamed'] = part.bytes;
-          r.imgs = [...r.imgs, renamed];
+          r.attachments = [...r.attachments, renamed];
         } else if (part.name == 'data' && part.filename == null) {
           final data = jsonDecode(utf8.decode(part.bytes));
           if (data is Map) {

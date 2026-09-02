@@ -109,7 +109,7 @@ void main() {
       await pocket.outbox.registerFileRef(
           store: 'widgets',
           recordId: id,
-          field: 'imgs',
+          field: 'attachments',
           hash: 'abc123',
           size: 10);
       await pocket.outbox.registerFileRef(

@@ -24,9 +24,9 @@ import '../support/wire_server.dart';
 ///   CLIENT's job, by content hash (the engine collapses identical-byte
 ///   attaches to one ref), never by name (the server appends a fresh name);
 /// - `imgs-` removes by the SERVER-minted name only: removing by the
-///   original client filename is a silent no-op (200, imgs unchanged);
+///   original client filename is a silent no-op (200, attachments unchanged);
 /// - a whole-field wipe (`imgs-` with every name in one request) answers
-///   `imgs: []` on the response AND on the next GET;
+///   `attachments: []` on the response AND on the next GET;
 /// - (live probe) a file upload/remove DOES bump the server-managed
 ///   `record.updated` — the file lane can rely on the pull to re-deliver
 ///   file changes (the mock re-stamps `updated` on file changes too, a
@@ -44,7 +44,7 @@ void main() {
         prefetchFiles: true,
       );
 
-  /// The current server-side `imgs` list for [id].
+  /// The current server-side `attachments` list for [id].
   Future<List<Object?>> remoteImgs(WireServer s, String id) async =>
       (await s.readRecord(s.store, id))!['imgs']! as List;
 
@@ -245,7 +245,7 @@ void main() {
       // server answers 200 with `imgs` unchanged and the file still there.
       final kept =
           await a.backend.updateRecordFiles(id: id, removeNames: ['orig.bin']);
-      expect(kept.imgs, [serverName],
+      expect(kept.attachments, [serverName],
           reason: 'a wrong-name removal is a silent no-op (never a 400, '
               'never a partial wipe)');
       expect(await remoteImgs(s, id), [serverName],
@@ -254,14 +254,14 @@ void main() {
       // POSITIVE: removing by the server-minted name clears it.
       final cleared =
           await a.backend.updateRecordFiles(id: id, removeNames: [serverName]);
-      expect(cleared.imgs, isEmpty,
+      expect(cleared.attachments, isEmpty,
           reason: 'the server-minted name removes the file');
       expect(await remoteImgs(s, id), isEmpty);
     });
 
     // -------------------------------------------------------------- #33 --
     wireTest(
-        'whole-field wipe: imgs- with every name answers imgs: [] on the '
+        'whole-field wipe: imgs- with every name answers attachments: [] on the '
         'response AND on the next GET', (s) async {
       final mock = s is MockWireServer ? s.mock : null;
       final a = await fileClient(s);
@@ -289,7 +289,7 @@ void main() {
       // Whole-field wipe: ONE imgs- carrying every name at once.
       final wiped =
           await a.backend.updateRecordFiles(id: id, removeNames: names);
-      expect(wiped.imgs, isEmpty, reason: 'the wipe response carries imgs: []');
+      expect(wiped.attachments, isEmpty, reason: 'the wipe response carries `imgs`: []');
       expect(await remoteImgs(s, id), isEmpty,
           reason: 'the next GET confirms the field is empty');
       if (mock != null) {
@@ -328,13 +328,13 @@ void main() {
               '(the mock re-stamps it too — a deliberate mirror that agrees)');
 
       final cleared = await a.backend
-          .updateRecordFiles(id: id, removeNames: uploaded.imgs.cast<String>());
+          .updateRecordFiles(id: id, removeNames: uploaded.attachments.cast<String>());
       final updatedAfterRemove =
           (await s.readRecord(s.store, id))!['updated']! as String;
       expect(updatedAfterRemove, isNot(updatedAfterUpload),
           reason: 'EMPIRICAL PIN: a file removal also bumps updated — a pull '
               're-delivers the record, so the file lane can rely on it');
-      expect(cleared.imgs, isEmpty);
+      expect(cleared.attachments, isEmpty);
     });
 
     // -------------------------------------------------------------- #35 --

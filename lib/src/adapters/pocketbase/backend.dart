@@ -15,6 +15,7 @@ import 'dart:async';
 import '../../kernel/hashing.dart';
 import '../../kernel/sync/sync_backend.dart';
 import 'auth.dart';
+import 'field_names.dart';
 import 'pb_client.dart';
 import 'sse.dart';
 import 'transport.dart';
@@ -56,16 +57,32 @@ abstract base class PBBackend implements SyncBackend {
     this.maxPage = 200,
     this.maxBatch = 25,
     this.identity,
-    this.realtimeCollection = 'data',
+    String? realtimeCollection,
     HttpTransport? transport,
-  }) : transport = transport ?? PackageHttpTransport() {
+    this.fieldNames = const PbFieldNames(),
+  })  : _explicitRealtimeCollection = realtimeCollection,
+        transport = transport ?? PackageHttpTransport() {
     _auth = AuthManager(tokenProvider);
-    _client =
-        PbClient(transport: this.transport, baseUrl: baseUrl, auth: _auth);
+    _client = PbClient(
+        transport: this.transport,
+        baseUrl: baseUrl,
+        auth: _auth,
+        fieldNames: fieldNames);
   }
 
   /// LocalPocket stores represented in the remote data collection.
   List<String> get storeNames => const [];
+
+  /// The wire-field configuration: collection and record field names.
+  ///
+  /// This adapter is the ONLY place these names are known; the kernel sees
+  /// only the generic `RemoteRecord` vocabulary.
+  final PbFieldNames fieldNames;
+
+  /// The PocketBase collection holding synced records: the explicitly set
+  /// realtime collection when given, else [PbFieldNames.collection].
+  String get effectiveCollection =>
+      _explicitRealtimeCollection ?? fieldNames.collection;
 
   /// PocketBase server base URL.
   final Uri baseUrl;
@@ -87,9 +104,10 @@ abstract base class PBBackend implements SyncBackend {
   /// throws so sync state is never shared across accounts.
   final String? identity;
 
-  /// The remote collection the realtime client subscribes to (every
-  /// store lives in the single `data` collection; PB realtime is per-collection).
-  final String realtimeCollection;
+  /// The remote collection the realtime client subscribes to. Defaults to
+  /// [PbFieldNames.collection]; set explicitly to subscribe elsewhere (PB
+  /// realtime is per-collection).
+  final String? _explicitRealtimeCollection;
 
   /// HTTP transport used by the adapter.
   final HttpTransport transport;
@@ -164,7 +182,7 @@ abstract base class PBBackend implements SyncBackend {
     if (_realtime != null) return;
     final rt = PbRealtime(
       client: _client,
-      collectionNames: [realtimeCollection],
+      collectionNames: [effectiveCollection],
       backoffBase: const Duration(milliseconds: 200),
       onGapClosed: _onGapClosed,
       onEvent: _onRealtimeEvent,
@@ -326,7 +344,7 @@ abstract base class PBBackend implements SyncBackend {
     final mapped = uploads?.map((field, file) => MapEntry(
           field,
           HttpMultipartFile(
-            field: 'imgs+',
+            field: '${fieldNames.attachmentsField}+',
             filename: file.filename,
             length: file.length,
             streamFactory: file.streamFactory,
@@ -382,6 +400,7 @@ final class PocketBaseRawBackend extends PBBackend {
     super.realtimeCollection,
     super.realtimeDebounce,
     super.transport,
+    super.fieldNames,
     this.stores = const [],
   });
 
@@ -398,7 +417,11 @@ final class PocketBaseRawBackend extends PBBackend {
 /// the adapter layer out of the runtime's import graph (R1/R3).
 class PocketBaseSyncBackendFactory implements SyncBackendFactory {
   /// Creates the PocketBase backend factory.
-  const PocketBaseSyncBackendFactory();
+  const PocketBaseSyncBackendFactory({this.fieldNames = const PbFieldNames()});
+
+  /// The wire-field configuration every backend created by this factory
+  /// uses (collection + record field names).
+  final PbFieldNames fieldNames;
 
   @override
   Future<SyncBackend> create({
@@ -412,6 +435,7 @@ class PocketBaseSyncBackendFactory implements SyncBackendFactory {
       tokenProvider: _SourceTokenProvider(tokenSource),
       stores: stores,
       identity: identity,
+      fieldNames: fieldNames,
     );
     // Sync start owns realtime: the SSE connection opens with the backend.
     await backend.startRealtime();

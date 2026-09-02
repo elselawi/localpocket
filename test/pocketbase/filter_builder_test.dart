@@ -17,6 +17,22 @@ void main() {
       );
     });
 
+    test('a custom store field name flows into the filters', () {
+      expect(
+        pullFilter('widgets', '2026-08-14 10:00:00.000Z',
+            storeField: 'kind'),
+        "(kind='widgets' && updated>='2026-08-14 10:00:00.000Z')",
+      );
+      expect(
+        sweepFilter('widgets', 'a', storeField: 'kind'),
+        "(kind='widgets' && id~'a%')",
+      );
+      expect(
+        sweepFilter('widgets', 'z', fromId: 'zabc123', storeField: 'kind'),
+        "(kind='widgets' && id~'z%' && id>'zabc123')",
+      );
+    });
+
     test('sweep bucket and keyset golden', () {
       expect(
         sweepFilter('widgets', 'a'),

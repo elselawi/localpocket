@@ -410,7 +410,7 @@ void main() {
         'ref_id': 'ref1',
         'store': 'widgets',
         'record_id': id,
-        'field': 'imgs',
+        'field': 'attachments',
         'hash': 'h1',
         'state': 'pending_upload',
       });
@@ -447,7 +447,7 @@ void main() {
         'ref_id': 'refv',
         'store': 'widgets',
         'record_id': id,
-        'field': 'imgs',
+        'field': 'attachments',
         'hash': 'hv',
         'state': 'pending_upload',
       });

@@ -346,7 +346,7 @@ void main() {
   });
 
   group('realtime event validation and ordering', () {
-    test('missing/invalid id, store, updated, data, imgs are tolerated',
+    test('missing/invalid id, store, updated, data, attachments are tolerated',
         () async {
       final fake = FakeTransport();
       final events = <PbRealtimeEvent>[];
@@ -370,8 +370,8 @@ void main() {
       expect(events[0].record.updated, '');
       expect(events[0].record.data, isEmpty);
       expect(events[1].record.id, '', reason: 'non-string id -> empty');
-      expect(events[1].record.imgs, ['ok.png'],
-          reason: 'non-string imgs entries filtered');
+      expect(events[1].record.attachments, ['ok.png'],
+          reason: 'non-string attachments entries filtered');
     });
 
     test('event actions outside create/update/delete still delivered',

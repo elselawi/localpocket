@@ -602,7 +602,7 @@ void main() {
       await h.pocket.outbox.registerFileRef(
           store: 'widgets',
           recordId: id,
-          field: 'imgs',
+          field: 'attachments',
           hash: 'refhash',
           size: 10);
       await h.pocket.db.execute(

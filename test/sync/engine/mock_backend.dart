@@ -15,15 +15,15 @@ class MockRecord {
     required this.store,
     required this.data,
     required this.updated,
-    this.imgs = const [],
+    this.attachments = const [],
   });
   final String id;
   final String store;
   Map<String, Object?> data;
   String updated;
-  List<String> imgs;
+  List<String> attachments;
   RemoteRecord toRemote() => RemoteRecord(
-      id: id, store: store, updated: updated, data: data, imgs: imgs);
+      id: id, store: store, updated: updated, data: data, attachments: attachments);
 }
 
 /// Scripted behaviors consumed one at a time per method.
@@ -49,6 +49,7 @@ class MockSyncBackend implements SyncBackend {
   bool authValid = true;
   bool batchEnabled = false;
   int maxBatch = 25;
+
 
   @override
   Future<void> prepare() async {
@@ -113,7 +114,7 @@ class MockSyncBackend implements SyncBackend {
     Map<String, Object?>? data,
     String? id,
     String? updated,
-    List<String>? imgs,
+    List<String>? attachments,
   }) {
     final rid = id ?? generateRecordId();
     records[rid] = MockRecord(
@@ -121,7 +122,7 @@ class MockSyncBackend implements SyncBackend {
       store: store,
       data: data ?? const {},
       updated: updated ?? nextUpdated(),
-      imgs: imgs ?? const [],
+      attachments: attachments ?? const [],
     );
     return rid;
   }
@@ -295,7 +296,7 @@ class MockSyncBackend implements SyncBackend {
     final rec = records[id];
     if (rec == null) throw NotFoundError('record $id not found');
 
-    final currentImgs = List<String>.from(rec.imgs);
+    final currentImgs = List<String>.from(rec.attachments);
     if (removeNames != null) {
       currentImgs.removeWhere((name) => removeNames.contains(name));
     }
@@ -310,7 +311,7 @@ class MockSyncBackend implements SyncBackend {
       }
     }
 
-    rec.imgs = currentImgs;
+    rec.attachments = currentImgs;
     if (dataJson != null) {
       final decoded = jsonDecode(dataJson);
       if (decoded is Map) {

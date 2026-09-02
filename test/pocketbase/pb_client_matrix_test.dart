@@ -141,7 +141,7 @@ void main() {
           reason: 'record missing id/updated');
     });
 
-    test('missing/invalid imgs normalize to an empty list (never crash)',
+    test('missing/invalid attachments normalize to an empty list (never crash)',
         () async {
       final fake = FakeTransport();
       fake.sendStatus(
@@ -160,15 +160,15 @@ void main() {
                 'store': 'widgets',
                 'updated': '2026-08-15 10:00:00.000Z',
                 'data': {'id': 'r2'},
-                // no imgs key at all
+                // no attachments key at all
               },
             ],
           }));
       final b = backendWith(fake);
       final recs = await b.listChanges('widgets');
-      expect(recs[0].imgs, ['ok.png'],
-          reason: 'non-string imgs entries are filtered out');
-      expect(recs[1].imgs, isEmpty, reason: 'missing imgs -> empty');
+      expect(recs[0].attachments, ['ok.png'],
+          reason: 'non-string attachments entries are filtered out');
+      expect(recs[1].attachments, isEmpty, reason: 'missing attachments -> empty');
     });
 
     test('getRecord 404 is NotFoundError, 200 parses', () async {
@@ -365,7 +365,7 @@ void main() {
     test('multipart fields for data/keep/remove and the auth header', () async {
       final fake = FakeTransport();
       fake.multipartStatus(
-          200, FakeTransport.recordBody('r1', imgs: ['a.png', 'b.png']));
+          200, FakeTransport.recordBody('r1', attachments: ['a.png', 'b.png']));
       final b = backendWith(fake);
       await b.updateRecordFilesStream(
         id: 'r1',
@@ -422,7 +422,7 @@ void main() {
     test('updateRecordFiles with keep/remove/upload uses multipart', () async {
       final keep = FakeTransport();
       keep.multipartStatus(
-          200, FakeTransport.recordBody('r1', imgs: ['a.png']));
+          200, FakeTransport.recordBody('r1', attachments: ['a.png']));
       await backendWith(keep).updateRecordFiles(id: 'r1', keepNames: ['a.png']);
       expect(keep.multiparts, hasLength(1),
           reason: 'keepNames forces the multipart path');
@@ -437,7 +437,7 @@ void main() {
 
       final upload = FakeTransport();
       upload.multipartStatus(
-          200, FakeTransport.recordBody('r1', imgs: ['f.bin']));
+          200, FakeTransport.recordBody('r1', attachments: ['f.bin']));
       await backendWith(upload).updateRecordFiles(id: 'r1', uploads: {
         'f.bin': [1, 2, 3]
       });

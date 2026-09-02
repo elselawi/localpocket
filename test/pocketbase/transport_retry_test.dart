@@ -41,7 +41,7 @@ void main() {
       fake.readFilesOnMultipart = true; // consume streams like a real transport
       fake.multipartStatus(401, '{"message":"no"}');
       fake.multipartStatus(
-          200, FakeTransport.recordBody('r1', imgs: ['f.bin']));
+          200, FakeTransport.recordBody('r1', attachments: ['f.bin']));
       var factoryCalls = 0;
       final b = PocketBaseRawBackend(
         baseUrl: Uri.parse('https://pb.example.test'),
