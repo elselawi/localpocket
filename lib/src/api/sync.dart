@@ -66,10 +66,10 @@ final class PocketBaseSync {
   bool get isRunning => _started;
 
   /// User-facing synchronization status snapshots, pushed by the engine.
-  Stream<SyncStatus> get status => _runtime.events
+  Stream<SyncStatusData> get status => _runtime.events
       .where((event) => event is SyncStatusEvent)
       .cast<SyncStatusEvent>()
-      .map((event) => event.status.toSyncStatus());
+      .map((event) => event.status);
 
   /// Fires when the backend reports that authentication is required again:
   /// refresh the token through the caller-owned provider and push it with
@@ -101,8 +101,8 @@ final class PocketBaseSync {
 
   /// Runs one full pull → sweep → push cycle immediately and returns its
   /// complete report.
-  Future<SyncReport> syncNow() async =>
-      (await _runtime.send(const SyncNowRequest())).report.toSyncReport();
+  Future<SyncReportData> syncNow() async =>
+      (await _runtime.send(const SyncNowRequest())).report;
 
   /// Parks periodic and event-driven cycles (manual [syncNow] still works).
   Future<void> pause() => _runtime.send(const SyncPauseRequest());

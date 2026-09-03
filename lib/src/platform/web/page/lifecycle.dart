@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import '../../../kernel/sync/status.dart';
+import '../../../contract/contract.dart';
 import 'protocol.dart';
 
 /// Fails every worker-owned stream with a [DatabaseWorkerClosedException]
@@ -8,7 +8,7 @@ import 'protocol.dart';
 /// disposal; an unexpected worker close only reports the terminal error and
 /// clears registrations so teardown still closes each controller exactly once.
 void failWorkerStreams({
-  required StreamController<SyncStatus> syncStatusController,
+  required StreamController<SyncStatusData> syncStatusController,
   required StreamController<void> authRequiredController,
   Object? error,
 }) {

@@ -87,8 +87,8 @@ class KernelCommandHandler implements CommandHandler {
   final _fileDownloads = <String, FileDownloadState>{};
   SyncEngine? _syncEngine;
   _KernelTokenSource? _syncTokenSource;
-  StreamSubscription<SyncStatus>? _syncStatusSubscription;
-  SyncStatus? _lastSyncStatus;
+  StreamSubscription<SyncStatusData>? _syncStatusSubscription;
+  SyncStatusData? _lastSyncStatus;
   int _counter = 0;
 
   @override
@@ -328,10 +328,8 @@ class KernelCommandHandler implements CommandHandler {
         SyncUpdateAuthRequest(:final token) => _syncUpdateAuth(token),
         SyncSetConnectivityRequest(:final online) =>
           _syncLifecycle(() => _requireSyncEngine().setConnectivity(online)),
-        SyncStatusRequest() => Future.value(SyncStatusResult(
-            status: _lastSyncStatus == null
-                ? SyncStatusData.closed
-                : SyncStatusData.of(_lastSyncStatus!))),
+        SyncStatusRequest() => Future.value(
+            SyncStatusResult(status: _lastSyncStatus ?? SyncStatusData.closed)),
       };
 
   // -- lifecycle ------------------------------------------------------------
@@ -983,7 +981,7 @@ class KernelCommandHandler implements CommandHandler {
     _syncEngine = engine;
     _syncStatusSubscription = engine.status.listen((status) {
       _lastSyncStatus = status;
-      _events.add(SyncStatusEvent(status: SyncStatusData.of(status)));
+      _events.add(SyncStatusEvent(status: status));
     });
     await engine.start();
     return SyncStartResult(state: engine.state);
@@ -994,7 +992,7 @@ class KernelCommandHandler implements CommandHandler {
 
   Future<Result> _syncNow() async {
     final report = await _requireSyncEngine().syncNow();
-    return SyncReportResult(report: SyncReportData.of(report));
+    return SyncReportResult(report: report);
   }
 
   Future<Result> _syncLifecycle(Future<void> Function() action) async {

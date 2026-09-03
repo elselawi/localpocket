@@ -56,9 +56,9 @@ void main() {
     expect(decoded.report.discarded, 3);
     expect(decoded.report.hadError, isTrue);
 
-    // The decoded report maps back onto the model with identical fields.
-    final model = decoded.report.toSyncReport();
-    expect(contract.SyncReportData.of(model).toJson(), report.toJson());
+    // The decoded report round-trips through its own codec with identical
+    // fields.
+    expect(decoded.report.toJson(), report.toJson());
   });
 
   test('status timestamps survive the event codec (pre-encoded datetimes)',
