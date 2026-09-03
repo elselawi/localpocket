@@ -169,12 +169,17 @@ class StreamValidationResult {
 
 /// Consumes a byte stream while computing its SHA-256 digest, verifying size
 /// and expected hash constraints, and optionally piping chunks to [onChunk].
+///
+/// [maxBytes] bounds the stream mid-flight: once [totalBytes] exceeds it the
+/// consume aborts with a [StateError], so an unbounded or lying source can
+/// never be fully buffered by a caller that sets a ceiling.
 Future<StreamValidationResult> processAndValidateBlobStream(
   Stream<List<int>> bytes, {
   FutureOr<void> Function(List<int> chunk)? onChunk,
   String? expectedSha256,
   int? expectedSize,
   String? key,
+  int? maxBytes,
 }) async {
   final output = <Digest>[];
   final byteSink = sha256.startChunkedConversion(
@@ -188,6 +193,11 @@ Future<StreamValidationResult> processAndValidateBlobStream(
     }
     byteSink.add(chunk);
     totalBytes += chunk.length;
+    final cap = maxBytes;
+    if (cap != null && totalBytes > cap) {
+      throw StateError(
+          'Blob exceeds the $cap byte ceiling (streamed $totalBytes bytes).');
+    }
   }
   byteSink.close();
 

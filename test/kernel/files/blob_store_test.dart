@@ -718,6 +718,23 @@ void main() {
       expect(result.hash, key, reason: 'the key wins over the digest');
       expect(result.totalBytes, 3);
     });
+
+    test('a maxBytes ceiling aborts mid-stream once exceeded', () async {
+      Stream<List<int>> chunks() async* {
+        yield [1, 2, 3];
+        yield [4, 5, 6];
+        yield [7, 8, 9];
+      }
+
+      await expectLater(
+        processAndValidateBlobStream(chunks(), maxBytes: 5),
+        throwsA(isA<StateError>()
+            .having((e) => e.message, 'message', contains('byte ceiling'))),
+      );
+      // At-or-below the ceiling is accepted (the cap is strict over-limit).
+      final ok = await processAndValidateBlobStream(chunks(), maxBytes: 9);
+      expect(ok.totalBytes, 9);
+    });
   });
 
   group('BlobMissingError / BlobStorageException classification', () {

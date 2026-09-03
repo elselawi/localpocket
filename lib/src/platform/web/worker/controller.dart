@@ -256,15 +256,27 @@ final class _ConnectionSink implements WorkerEventSink {
   /// {@macro localpocket.__connection_sink}
   _ConnectionSink(this.connection);
 
+  /// Maximum in-flight worker→page event deliveries per connection. Above
+  /// this the sink drops new events so a blocked tab or a busy session can
+  /// never grow the postMessage queue without bound. Watch snapshots are
+  /// latest-wins (a superseded drop is fine — the next refresh carries the
+  /// current state); sync status streams tolerate loss by design.
+  static const int _maxInFlight = 128;
+
   final ClientConnection connection;
+  int _inFlight = 0;
 
   @override
   void emit(Map<String, Object?> event) {
+    if (_inFlight >= _maxInFlight) return;
+    _inFlight++;
     // Delivery is best-effort: a connection that closed mid-flight must not
     // surface an unhandled async error inside the worker.
-    unawaited(connection
-        .customRequest(event.jsify())
-        .then<void>((_) {}, onError: (_) {}));
+    unawaited(connection.customRequest(event.jsify()).then<void>((_) {
+      _inFlight--;
+    }, onError: (_) {
+      _inFlight--;
+    }));
   }
 }
 

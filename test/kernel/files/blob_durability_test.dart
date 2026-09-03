@@ -42,8 +42,11 @@ void main() {
       expect(source, contains('if (!await _isOpfsAvailable()) return null;'),
           reason: '_getOpfsDir short-circuits to null (=> memory fallback) '
               'when the probe fails');
-      expect(source, contains('_memoryFallback[result.hash] = data;'),
-          reason: 'put() writes bytes only to memory when no OPFS dir exists');
+      expect(source, contains('_putVolatile(result.hash, data);'),
+          reason: 'put() routes to the volatile fallback only when no OPFS '
+              'dir exists');
+      expect(source, contains('_memoryFallback[hash] = data;'),
+          reason: 'the fallback write is the only place bytes go to memory');
       expect(source, contains('_memoryFallback.containsKey(hash)'),
           reason: 'open()/exists()/size() serve bytes from the fallback');
     });

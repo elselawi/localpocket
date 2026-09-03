@@ -29,14 +29,38 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   validateWebOpenConfig(path: options.path, encrypted: false);
 
   // The worker boot configures the sync backend factory itself (code cannot
-  // cross the worker boundary) — a different caller-configured factory would
-  // be silently ignored, so fail the open typed instead.
+  // cross the worker boundary) — a caller-configured factory would be
+  // silently ignored, so fail the open typed instead. The identity check
+  // rejects not only foreign factory CLASSES but any foreign INSTANCE (a
+  // PocketBaseSyncBackendFactory subclass or a non-const instance): only the
+  // worker's own canonical const factory may configure the backend.
+  const workerBackendFactory = PocketBaseSyncBackendFactory();
   if (options.syncBackendFactory != null &&
-      options.syncBackendFactory is! PocketBaseSyncBackendFactory) {
+      !identical(options.syncBackendFactory, workerBackendFactory)) {
     throw ValidationException(
         'syncBackendFactory cannot cross the web worker boundary: the worker '
         'configures the PocketBase factory itself. Omit the option on web, or '
         'run the sync attachment on a native runtime for custom backends.');
+  }
+  // A caller-injected clock is code and cannot cross into the worker either;
+  // the worker keeps the system clock. Rejecting keeps suites honest: an
+  // injected `now` that passes on native but silently uses the real clock on
+  // the worker leg would corrupt cross-runtime test parity.
+  if (options.now != null) {
+    throw ValidationException(
+        'The injectable `now` clock cannot cross the web worker boundary: the '
+        'worker uses the system clock. Omit the option on web (or run on a '
+        'native runtime for an injected clock).');
+  }
+  // Same for a caller-provided blob store: the worker builds its own
+  // OPFS-backed store, and a caller store object (with its methods) cannot
+  // cross the boundary. Failing typed keeps attachment bytes where the caller
+  // expects them instead of silently landing in a store it cannot reach.
+  if (options.blobStore != null) {
+    throw ValidationException(
+        'A caller-provided blobStore cannot cross the web worker boundary: '
+        'the worker builds its own OPFS-backed store. Omit the option on web '
+        '(or run on a native runtime for a custom blob store).');
   }
 
   final schemas = [

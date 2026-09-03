@@ -64,7 +64,16 @@ final class RemoteRuntimeClient implements RuntimeClient {
       return;
     }
     final encoded = map['event'];
-    if (encoded is! Map) return;
+    if (encoded is! Map) {
+      // A shape change with a matching version is exactly the failure the
+      // version check exists to prevent — surface it instead of silently
+      // dead-ending every watch/sync stream. (Only the controller being
+      // closed short-circuits here; the method is synchronous so the top
+      // guard covers the whole body.)
+      _events.addError(wire.ProtocolEnvelopeException(
+          'Malformed contract event envelope: "event" is not a map.'));
+      return;
+    }
     try {
       _events.add(ContractCodec.decodeEvent(_stringKeyed(encoded)));
     } on Object {
