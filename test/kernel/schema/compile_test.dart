@@ -481,6 +481,19 @@ void main() {
           throwsA(isA<SchemaRegistrationError>().having(
               (e) => e.message, 'message', contains('not a declared field'))));
     });
+
+    test('FTS with no fields is rejected instead of emitting invalid DDL', () {
+      final empty = CollectionSchema<Object?>(
+        name: 't',
+        version: 1,
+        fields: [Field.text('a')],
+        fts: const FtsSpec([]),
+      );
+      expect(
+          () => DdlCompiler(caps).compile(empty),
+          throwsA(isA<SchemaRegistrationError>().having(
+              (e) => e.message, 'message', contains('at least one field'))));
+    });
   });
 
   group('DDL constraints and capability variants', () {

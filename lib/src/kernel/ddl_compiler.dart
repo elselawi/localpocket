@@ -241,6 +241,12 @@ class DdlCompiler {
   List<String> _buildFts(CollectionSchema<Object?> schema) {
     final fts = schema.fts;
     if (fts == null) return const [];
+    if (fts.fields.isEmpty) {
+      // An empty field list would emit invalid FTS5 DDL (no columns) and fail
+      // with a raw SqliteException at open — reject typed at registration.
+      throw SchemaRegistrationError(
+          'FTS requires at least one field to index.');
+    }
     final out = <String>[];
     final store = schema.name;
     final table = '${store}_fts';

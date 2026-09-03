@@ -119,11 +119,13 @@ int writeCanonicalValue(StringBuffer out, Object? value) {
   if (value is Map) {
     // Keys are stringified and sorted lexicographically. Lookups use the
     // ORIGINAL key (a non-String key never matches its toString() form);
-    // colliding keys cannot be lossless in JSON — fail loudly.
+    // colliding keys cannot be lossless in JSON — fail loudly. A Set makes
+    // the collision check linear instead of quadratic per inserted key.
     final entries = <(String, Object)>[];
+    final seen = <String>{};
     for (final original in value.keys) {
       final s = original.toString();
-      if (entries.any((e) => e.$1 == s)) {
+      if (!seen.add(s)) {
         throw ArgumentError(
             'Cannot canonicalize map: keys collide after toString() ("$s").');
       }

@@ -14,7 +14,6 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 
 import '../../kernel/sync/backoff.dart';
@@ -177,7 +176,9 @@ class PbRealtime {
         }),
       ));
 
-  static double _defaultJitter(int attempt) => 0.5 + Random().nextDouble();
+  /// Reconnect jitter, delegating to the shared sync backoff primitive so
+  /// the realtime loop can never drift from the sync engine's timing.
+  static double _defaultJitter(int attempt) => defaultBackoffJitter(attempt);
 
   Future<void> _connectOnce() async {
     var token = await client.authToken();

@@ -53,19 +53,22 @@ final class LoopbackRuntimeClient implements RuntimeClient {
     // Encode → decode: the kernel only ever sees what survived the wire.
     final decoded =
         ContractCodec.decodeRequest(ContractCodec.encodeRequest(request));
+    final Result result;
     try {
-      final result = await _handler.handle(decoded);
-      // Encode → decode with correlation: only the answering result family is
-      // accepted.
-      final decodedResult = ContractCodec.decodeResult(
-          request, ContractCodec.encodeResult(result));
-      return decodedResult as R;
+      // Only the handler call is wrapped: application errors round-trip
+      // through the wire codec so the same-body harness exercises error
+      // reconstruction exactly like the remote leg. Encode/decode and
+      // correlation failures BELOW stay raw — a kernel/codec bug must not
+      // launder into a `WireException('unknown: …')` application error.
+      result = await _handler.handle(decoded);
     } catch (e) {
-      // Application errors round-trip through the wire codec too, so the
-      // same-body harness exercises error reconstruction fidelity exactly
-      // like the remote leg — not just result fidelity.
       throw decodeError(encodeError(e));
     }
+    // Encode → decode with correlation: only the answering result family is
+    // accepted.
+    final decodedResult =
+        ContractCodec.decodeResult(request, ContractCodec.encodeResult(result));
+    return decodedResult as R;
   }
 
   @override

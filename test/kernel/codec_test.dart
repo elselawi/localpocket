@@ -538,7 +538,7 @@ void main() {
       );
     });
 
-    test('invalid base64 ciphertext throws FormatException', () {
+    test('invalid base64 ciphertext throws a typed storage error', () {
       final row = {
         'id': 'aaaaaaaaaaaaaaa',
         'name': null,
@@ -551,7 +551,8 @@ void main() {
       };
       expect(
         () => decodeDbRow(encSchema, row, cipher: cipher),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<StorageError>().having(
+            (e) => e.message, 'message', contains('failed to decrypt'))),
       );
     });
 
@@ -809,11 +810,12 @@ void main() {
       final swapped2 = Map<String, Object?>.of(row2)
         ..['secret'] = row1['secret'];
       // The record id is bound into the AAD: record 2's ciphertext cannot be
-      // read out of record 1 (and vice versa).
+      // read out of record 1 (and vice versa). The MAC failure surfaces as a
+      // typed storage error, not a raw StateError.
       expect(() => decodeDbRow(encSchema, swapped1, cipher: cipher),
-          throwsA(isA<StateError>()));
+          throwsA(isA<StorageError>()));
       expect(() => decodeDbRow(encSchema, swapped2, cipher: cipher),
-          throwsA(isA<StateError>()));
+          throwsA(isA<StorageError>()));
 
       // Same-record field swap: ciphertext written for 'code' cannot be read
       // back out of the same record's 'secret' cell.
@@ -826,7 +828,7 @@ void main() {
         ..['secret'] = rowA['code']
         ..['code'] = rowA['secret'];
       expect(() => decodeDbRow(encSchema, fieldSwapped, cipher: cipher),
-          throwsA(isA<StateError>()));
+          throwsA(isA<StorageError>()));
     });
 
     test('provider returning different ciphers per store/field', () {

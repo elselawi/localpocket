@@ -34,9 +34,8 @@ IndexSpec indexSpec<S>(
 /// Not `const` — descriptor inputs are runtime objects. Output is the same
 /// raw [FtsSpec] shape used by the database.
 ///
-/// When the descriptor list is empty, pass the owner explicitly, for example
-/// `ftsSpec<MyStore>([])`, so the intended store type is documented at the
-/// call site.
+/// [fields] must name at least one field: an empty list is rejected at schema
+/// registration (FTS5 requires at least one indexed column).
 FtsSpec ftsSpec<S>(
   List<FieldDef<S, Object?>> fields, {
   bool fuzzy = false,

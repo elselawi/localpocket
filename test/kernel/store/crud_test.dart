@@ -388,27 +388,32 @@ void main() {
       expect(await col.query().all().count(), 2);
     });
 
-    test('NaN and infinity real values', () async {
+    test('non-finite real values are rejected', () async {
       final pocket = await openPocket();
       addTearDown(pocket.close);
       final col = pocket.collection('widgets');
 
-      // NaN passes validation but SQLite stores it as NULL.
+      // NaN/±Infinity cannot be persisted losslessly (canonical JSON has no
+      // such literals), so they are rejected at validation rather than
+      // silently stored as NULL or as bytes that fail every later decode.
       final nanId = generateRecordId();
-      await col.put({'id': nanId, 'name': 'nan', 'price': double.nan});
-      final nanDoc = await col.get(nanId);
-      expect(nanDoc!['price'], isNull, reason: 'SQLite stores NaN as NULL');
-
-      // +Infinity is a valid REAL and round-trips.
+      await expectLater(
+        col.put({'id': nanId, 'name': 'nan', 'price': double.nan}),
+        throwsA(isA<ValidationException>()),
+      );
       final infId = generateRecordId();
-      await col.put({'id': infId, 'name': 'inf', 'price': double.infinity});
-      expect((await col.get(infId))!['price'], double.infinity);
-
-      // -Infinity round-trips too.
+      await expectLater(
+        col.put({'id': infId, 'name': 'inf', 'price': double.infinity}),
+        throwsA(isA<ValidationException>()),
+      );
       final ninfId = generateRecordId();
-      await col.put(
-          {'id': ninfId, 'name': 'ninf', 'price': double.negativeInfinity});
-      expect((await col.get(ninfId))!['price'], double.negativeInfinity);
+      await expectLater(
+        col.put(
+            {'id': ninfId, 'name': 'ninf', 'price': double.negativeInfinity}),
+        throwsA(isA<ValidationException>()),
+      );
+      expect(await col.query().all().count(), 0,
+          reason: 'non-finite reals never reach the database');
     });
 
     test('application validator failures are rejected', () async {
