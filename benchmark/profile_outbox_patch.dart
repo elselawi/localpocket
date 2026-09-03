@@ -10,9 +10,11 @@ library;
 
 import 'dart:io';
 
-import 'package:localpocket/src/kernel/database_adapter.dart' show DirectSqliteDatabase;
+import 'package:localpocket/src/kernel/database_adapter.dart'
+    show DirectSqliteDatabase;
 import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
-import 'package:localpocket/src/kernel/local_pocket.dart' show DurabilityClass, LocalPocket;
+import 'package:localpocket/src/kernel/local_pocket.dart' show LocalPocket;
+import 'package:localpocket/src/kernel/transaction_coordinator.dart';
 
 import 'persist.dart';
 import 'profile_util.dart';

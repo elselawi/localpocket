@@ -21,8 +21,9 @@ library;
 import 'dart:io';
 
 import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
-import 'package:localpocket/src/kernel/local_pocket.dart' show DurabilityClass, LocalPocket;
+import 'package:localpocket/src/kernel/local_pocket.dart' show LocalPocket;
 import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/kernel/transaction_coordinator.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
 import 'persist.dart';
