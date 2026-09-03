@@ -17,17 +17,16 @@ import 'dart:typed_data';
 import 'package:collection/collection.dart' show ListEquality;
 import 'package:meta/meta.dart';
 import 'database_adapter.dart';
-import 'execution_context.dart';
 import 'database_factory.dart';
 
 import 'capabilities.dart';
 import 'codec.dart';
 import 'change_bus.dart';
 import 'cipher.dart';
+import 'command_handler.dart';
 import 'ddl_compiler.dart';
 import 'fts_normalizer.dart';
 import 'kernel_context.dart';
-import 'file_sessions.dart';
 import 'migrator.dart';
 import 'mutation_service.dart';
 import 'perf_counters.dart';
@@ -38,23 +37,15 @@ import 'store.dart';
 import 'system_tables.dart';
 import 'transaction.dart';
 import 'transaction_coordinator.dart';
-import 'watch.dart';
 import 'write_queue.dart';
-import 'query/ir.dart';
-import 'query/query_builder/query_builder.dart';
-import 'query/query_builder/predicate_tree.dart';
-import 'query/search_builder/search_builder.dart';
-import 'sync/engine.dart';
 import 'sync/op_queue.dart';
 import 'sync/outbox.dart';
 import 'sync/conflicts.dart';
 import 'sync/sync_tables.dart';
-import 'sync/sync_backend.dart' show SyncBackendFactory, SyncTokenSource;
+import 'sync/sync_backend.dart' show SyncBackendFactory;
 import 'files/blob_store.dart';
 import 'file_service.dart';
 import '../contract/contract.dart';
-
-part 'command_handler.dart';
 
 /// Default clock: wall-clock epoch milliseconds.
 int _defaultNow() => DateTime.now().millisecondsSinceEpoch;

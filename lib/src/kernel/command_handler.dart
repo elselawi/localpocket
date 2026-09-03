@@ -1,9 +1,35 @@
-/// Part of `local_pocket.dart` — the kernel command handler.
-///
-/// One exhaustive dispatcher from typed contract requests to named results,
-/// over the kernel services. The request hierarchy is sealed, so the
-/// compiler rejects the switch the moment a new variant lacks a case.
-part of 'local_pocket.dart';
+/// The kernel command dispatcher: one exhaustive switch from typed contract
+/// requests to named results, over the kernel services. The request hierarchy
+/// is sealed, so the compiler rejects the switch the moment a new variant
+/// lacks a case.
+library;
+
+import 'dart:async';
+import 'dart:typed_data';
+
+import '../contract/contract.dart';
+import 'capabilities.dart';
+import 'change_bus.dart';
+import 'execution_context.dart';
+import 'file_sessions.dart';
+import 'file_service.dart';
+import 'kernel_context.dart';
+import 'local_pocket.dart';
+import 'query/ir.dart';
+import 'query/query_builder/predicate_tree.dart';
+import 'query/query_builder/query_builder.dart';
+import 'query/search_builder/search_builder.dart';
+import 'schema.dart';
+import 'schema_manifest.dart';
+import 'store.dart';
+import 'read_service.dart';
+import 'database_adapter.dart' show DatabaseExecutor;
+import 'sync/conflicts.dart';
+import 'sync/engine.dart';
+import 'sync/sync_backend.dart';
+import 'transaction.dart';
+import 'transaction_coordinator.dart';
+import 'watch.dart';
 
 /// Marker used to unwind a held transaction/savepoint body on rollback.
 class _RollbackSignal implements Exception {

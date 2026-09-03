@@ -215,6 +215,21 @@ void main() {
           reason: '$f must not reference the platform open implementations');
     }
   });
+
+  test('kernel has no part-libraries (all services are real libraries)', () {
+    // Every kernel service (hub, dispatcher, mutation/read/file services,
+    // context) is a real library receiving KernelContext explicitly — none is
+    // a `part` sharing the hub's private surface. Enforced here so the
+    // architecture cannot regress by adding a new part-libraries.
+    for (final f in kernel) {
+      final content = File(f).readAsStringSync();
+      expect(RegExp(r'^\s*part\s+', multiLine: true).hasMatch(content), isFalse,
+          reason: '$f must not declare a part');
+      expect(RegExp(r"^\s*part\s+of\s+'", multiLine: true).hasMatch(content),
+          isFalse,
+          reason: '$f must not be part of another library');
+    }
+  });
 }
 
 Iterable<String> _filesUnder(String dir) => Directory(dir)
