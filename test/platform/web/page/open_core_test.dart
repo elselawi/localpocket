@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:localpocket/src/contract/contract.dart';
 import 'package:localpocket/src/kernel/capabilities.dart';
 import 'package:localpocket/src/platform/web/page/open_core.dart';
 import 'package:localpocket/src/platform/web/page/web_storage_capabilities.dart';
@@ -206,6 +207,49 @@ void main() {
       expect(reconciled.storage.storage, 'opfs');
       expect(identical(reconciled.capabilities, initialCaps), isTrue);
       expect(identical(reconciled.storage, initialStorage), isTrue);
+    });
+  });
+
+  group('guardWorkerSpawn', () {
+    test('returns the connect result when the handshake settles in time',
+        () async {
+      final result = await guardWorkerSpawn(() async => 'connected',
+          timeout: const Duration(seconds: 5));
+      expect(result, 'connected');
+    });
+
+    test('a wedged handshake fails typed instead of hanging the open',
+        () async {
+      final never = Completer<String>();
+      await expectLater(
+        guardWorkerSpawn(() => never.future,
+            timeout: const Duration(milliseconds: 30)),
+        throwsA(isA<DatabaseWorkerTimeoutException>()
+            .having(
+              (e) => e.op,
+              'op',
+              'workerSpawn',
+            )
+            .having(
+                (e) => e.timeout, 'timeout', const Duration(milliseconds: 30))),
+      );
+    });
+
+    test('zero disables the bound: a slow handshake still completes', () async {
+      final slow = Completer<String>();
+      final guarded =
+          guardWorkerSpawn(() => slow.future, timeout: Duration.zero);
+      slow.complete('late-but-alive');
+      expect(await guarded, 'late-but-alive');
+    });
+
+    test('an already-failed connect propagates its own error untouched',
+        () async {
+      await expectLater(
+        guardWorkerSpawn(() async => throw StateError('spawn refused'),
+            timeout: const Duration(seconds: 5)),
+        throwsA(isA<StateError>()),
+      );
     });
   });
 }

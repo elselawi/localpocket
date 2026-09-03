@@ -97,6 +97,7 @@ final class BootstrapOptions {
     this.workerAssetPath,
     this.wasmAssetPath,
     this.requestTimeout = const Duration(seconds: 30),
+    this.spawnTimeout = const Duration(seconds: 60),
   });
 
   /// Asset path of the bundled database worker script.
@@ -107,4 +108,10 @@ final class BootstrapOptions {
 
   /// Wall-clock bound for one request crossing the runtime boundary.
   final Duration requestTimeout;
+
+  /// Wall-clock bound for spawning the database worker and completing its
+  /// connect handshake (web only). A spawn wedged past this bound fails the
+  /// open with a `DatabaseWorkerTimeoutException` instead of hanging the
+  /// caller forever. Zero disables the bound.
+  final Duration spawnTimeout;
 }

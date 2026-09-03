@@ -8,6 +8,7 @@ library;
 import 'dart:async';
 
 import '../../../kernel/capabilities.dart';
+import '../../../contract/contract.dart';
 import 'web_storage_capabilities.dart';
 
 /// {@template localpocket.resolved_asset}
@@ -122,4 +123,21 @@ Future<bool> requestPersistenceWithFallback(
       worker: boolOrNull(remote['worker']) ?? storage.worker,
     ),
   );
+}
+
+/// Bounds the worker spawn/connect handshake: a connect future that has not
+/// settled within [timeout] fails with a [DatabaseWorkerTimeoutException]
+/// instead of hanging `open()` forever (the late future is abandoned and
+/// never surfaced). [timeout] `Duration.zero` disables the bound.
+///
+/// Pure-Dart and VM-testable with an injectable connect future; the
+/// production call site passes the real `connectToRecommended` future.
+Future<T> guardWorkerSpawn<T>(Future<T> Function() connect,
+    {required Duration timeout}) async {
+  if (timeout <= Duration.zero) {
+    return connect();
+  }
+  return connect().timeout(timeout,
+      onTimeout: () => throw DatabaseWorkerTimeoutException(
+          requestId: -1, op: 'workerSpawn', timeout: timeout));
 }

@@ -127,9 +127,14 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
         return null;
       },
     );
-    final connectResult = await webSqlite.connectToRecommended(
-      options.path,
-      additionalOptions: openArgs.jsify(),
+    // Spawn/handshake watchdog: a worker that never connects (blocked spawn,
+    // wedged wasm instantiation) fails the open typed instead of hanging the
+    // caller forever. The connect future is never left orphaned: on timeout
+    // a late completion is disposed via the existing failure path.
+    final connectResult = await guardWorkerSpawn(
+      () => webSqlite.connectToRecommended(options.path,
+          additionalOptions: openArgs.jsify()),
+      timeout: options.bootstrap.spawnTimeout,
     );
     disposeConnected = () => connectResult.database.dispose();
 
