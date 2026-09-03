@@ -912,9 +912,15 @@ class KernelDatabase with ChangeBusAwareLP {
               ? decodeDbRow(schema, existingRows.first,
                   cipher: fieldCipher, cryptoProvider: cryptoProvider)
               : null;
-          await vanishRecordMetadata(exec, store, id,
-              deleteSyncAndOutbox: true);
+          await vanishRecordMetadata(exec, store, id);
+          await exec.delete('lp_outbox',
+              where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
           await exec.delete(store, where: 'id = ?', whereArgs: [id]);
+          // Leave a purged sync-row marker: the sweep must treat the record
+          // as known (never re-fetch it while the remote copy is unchanged),
+          // otherwise every compacted row resurrects on bucket rotation.
+          await exec.update('lp_sync_row', {'access_state': 'purged'},
+              where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
           tx.addChange(ChangeSet(store, {id}));
           if (existing != null) {
             final changed = existing.keys.where((k) => k != 'id').toSet();

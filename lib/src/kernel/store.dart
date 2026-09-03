@@ -595,7 +595,7 @@ class Collection with ChangeBusAwareStore {
     }
     hooks?.mutationCrashPoint?.call('after-domain-write');
 
-    await _pocket.outbox.applyLocalMutation(
+    final writeResult = await _pocket.outbox.applyLocalMutation(
       table: _table,
       exec: _ex,
       id: recordId,
@@ -611,23 +611,37 @@ class Collection with ChangeBusAwareStore {
     );
     hooks?.mutationCrashPoint?.call('after-outbox');
 
+    // The vanish path (a never-remotely-known record archived) hard-deletes
+    // the domain row inside applyLocalMutation; the event must say so instead
+    // of advertising state that never commits.
+    final vanished = writeResult.vanished;
     final ChangeAction changeAction;
-    switch (action) {
-      case MutationAction.create:
-      case MutationAction.createOrUpdate:
-      case MutationAction.createOrUpdateMerge:
-        changeAction =
-            existingRow == null ? ChangeAction.create : ChangeAction.update;
-      case MutationAction.update:
-        changeAction = ChangeAction.update;
-      case MutationAction.archive:
-        changeAction = ChangeAction.archive;
-      case MutationAction.restore:
-        changeAction = ChangeAction.restore;
+    if (vanished) {
+      changeAction = ChangeAction.purge;
+    } else {
+      switch (action) {
+        case MutationAction.create:
+        case MutationAction.createOrUpdate:
+        case MutationAction.createOrUpdateMerge:
+          changeAction =
+              existingRow == null ? ChangeAction.create : ChangeAction.update;
+        case MutationAction.update:
+          changeAction = ChangeAction.update;
+        case MutationAction.archive:
+          changeAction = ChangeAction.archive;
+        case MutationAction.restore:
+          changeAction = ChangeAction.restore;
+      }
     }
 
     final Set<String> changedFieldsSet;
-    if (action == MutationAction.archive || action == MutationAction.restore) {
+    if (vanished) {
+      changedFieldsSet = {
+        for (final k in (existingRow ?? logical).keys)
+          if (k != 'id') k,
+      };
+    } else if (action == MutationAction.archive ||
+        action == MutationAction.restore) {
       changedFieldsSet = {'archived'};
     } else if (existingRow == null) {
       changedFieldsSet = logical.keys.where((k) => k != 'id').toSet();
@@ -642,7 +656,7 @@ class Collection with ChangeBusAwareStore {
         origin: ChangeOrigin.local,
         action: changeAction,
         oldRecord: existingRow,
-        newRecord: logical,
+        newRecord: vanished ? null : logical,
         changedFields: changedFieldsSet,
       ));
     }

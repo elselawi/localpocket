@@ -388,10 +388,7 @@ final class SyncStatusEvent extends Event {
   final SyncStatusData status;
 
   @override
-  Map<String, Object?> toJson() =>
-      // DateTimes aren't event-safe: the status map travels pre-encoded so
-      // timestamps survive the transport untouched.
-      {'status': encodeWireValue(status.toJson())};
+  Map<String, Object?> toJson() => {'status': status.toJson()};
 }
 
 /// The engine's token was rejected and no refresh produced a valid one: the

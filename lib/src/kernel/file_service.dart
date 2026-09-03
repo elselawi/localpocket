@@ -227,7 +227,11 @@ class LocalPocketFiles {
         dependsOnOp = outboxRows.first['op_id'] as String?;
       }
 
-      // 2. Insert lp_file_refs
+      // 2. Insert lp_file_refs. remote_name stays NULL until the upload op
+      // completes: only the upload completion may record the remote-assigned
+      // filename, otherwise a caller-supplied local name would make the
+      // remove path believe the file exists remotely and queue a bogus
+      // remote delete that can never succeed.
       await exec.insert(
           'lp_file_refs',
           {
@@ -236,7 +240,7 @@ class LocalPocketFiles {
             'record_id': recordId,
             'field': resolvedField,
             'hash': hash,
-            'remote_name': name,
+            'remote_name': null,
             'state': 'pending_upload',
           },
           conflictAlgorithm: ConflictAlgorithm.replace);
@@ -266,7 +270,7 @@ class LocalPocketFiles {
         recordId: recordId,
         field: resolvedField,
         hash: hash,
-        remoteName: name,
+        remoteName: null,
         state: 'pending_upload',
       );
     });

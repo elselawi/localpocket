@@ -119,6 +119,38 @@ void main() {
               .having((e) => e.field, 'field', 'phone')));
     });
 
+    test('declared unique index compiles without the id tie-breaker', () {
+      final compiled = DdlCompiler(caps).compile(widgetsSchema(indexes: const [
+        IndexSpec(['name'])
+      ]));
+      expect(
+          compiled.indexDdl.join('\n'),
+          contains('CREATE INDEX "ix_widgets_live_name" ON "widgets" '
+              '("name", "id")'));
+
+      final unique = DdlCompiler(caps).compile(widgetsSchema(indexes: const [
+        IndexSpec(['name'], unique: true)
+      ]));
+      final ddl = unique.indexDdl.join('\n');
+      expect(
+          ddl,
+          contains('CREATE UNIQUE INDEX "ux_widgets_name" ON "widgets" '
+              '("name") WHERE'));
+      expect(ddl, isNot(contains('("name", "id")')));
+    });
+
+    test('declared unique index enforces on duplicate insert', () async {
+      final schema = widgetsSchema(indexes: const [
+        IndexSpec(['name'], unique: true)
+      ]);
+      final pocket = await openPocket(stores: [schema]);
+      addTearDown(pocket.close);
+      final col = pocket.collection('widgets');
+      await col.put(record(id: generateRecordId(), name: 'dupe'));
+      await expectLater(col.put(record(id: generateRecordId(), name: 'dupe')),
+          throwsA(isA<UniqueConstraintException>()));
+    });
+
     test('fts declaration generates external content and triggers', () async {
       final compiled = DdlCompiler(caps)
           .compile(widgetsSchema(fts: const FtsSpec(['name', 'meta'])));

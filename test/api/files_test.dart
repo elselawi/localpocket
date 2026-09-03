@@ -38,7 +38,9 @@ void main() {
       expect(ref.recordId, id);
       expect(ref.field, 'imgs');
       expect(ref.state, 'pending_upload');
-      expect(ref.remoteName, 'note.txt');
+      // remote_name is recorded only by upload completion — a pending ref
+      // has never reached the remote.
+      expect(ref.remoteName, isNull);
       expect(ref.hash, isNotEmpty);
 
       final refs = await files.list(recordId: id);
@@ -52,7 +54,9 @@ void main() {
 
       await files.remove(ref);
       final after = await files.list(recordId: id);
-      expect(after.single.state, 'pending_remove');
+      // A never-uploaded ref vanishes on remove: no pending_remove state and
+      // no remote delete op against a nonexistent attachment.
+      expect(after, isEmpty);
     });
 
     test('a stream source with a declared length streams the same payload',
@@ -77,7 +81,8 @@ void main() {
         ),
         allowVolatileBlobs: true,
       );
-      expect(ref.remoteName, 's.bin');
+      // remote_name stays null until upload completion adopts the filename.
+      expect(ref.remoteName, isNull);
 
       final bytes = await (await files.open(ref)).expand((c) => c).toList();
       expect(utf8.decode(bytes), 'streamed attachment');

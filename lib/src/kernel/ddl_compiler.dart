@@ -195,7 +195,9 @@ class DdlCompiler {
   List<String> _buildIndexes(CollectionSchema<Object?> schema) {
     final out = <String>[];
     for (final ix in schema.indexes) {
-      final cols = _indexColumns(ix.columns);
+      // A UNIQUE index must not carry the `id` tie-breaker: id is unique per
+      // row, so appending it would stop the constraint from ever firing.
+      final cols = _indexColumns(ix.columns, appendId: !ix.unique);
       final scope = ix.scope == IndexScope.live
           ? 'archived = 0 AND hidden = 0'
           : 'archived = 0';
@@ -229,9 +231,10 @@ class DdlCompiler {
     return out;
   }
 
-  static List<String> _indexColumns(List<String> cols) {
+  static List<String> _indexColumns(List<String> cols,
+      {required bool appendId}) {
     final result = cols.map(quote).toList();
-    if (!cols.contains('id')) result.add(quote('id'));
+    if (appendId && !cols.contains('id')) result.add(quote('id'));
     return result;
   }
 

@@ -299,8 +299,11 @@ void main() {
       await b.listChanges('widgets',
           fromUpdated: '2026-08-15 10:00:00.000Z', fromId: 'r100', perPage: 50);
       final q = fake.sends.single.url.queryParameters;
-      expect(q['filter'],
-          "(store='widgets' && updated>='2026-08-15 10:00:00.000Z') && id>'r100'");
+      expect(
+          q['filter'],
+          "(store='widgets' && updated>='2026-08-15 10:00:00.000Z') && "
+          "(updated>'2026-08-15 10:00:00.000Z' || "
+          "(updated='2026-08-15 10:00:00.000Z' && id>'r100'))");
       expect(q['sort'], 'updated,id');
       expect(q['perPage'], '50');
       expect(q['skipTotal'], '1');

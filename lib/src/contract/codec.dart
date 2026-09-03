@@ -773,10 +773,15 @@ abstract final class ContractCodec {
 
   // -- events ---------------------------------------------------------------
 
-  /// Encodes an event into its wire map (tag plus payload).
+  /// Encodes an event into its wire map (tag plus payload). The payload is
+  /// wrapped in [encodeWireValue] exactly like requests and results: a
+  /// committed record may legitimately contain an escaped/`__lp_t`-shaped
+  /// object or a raw `DateTime`/`Uint8List`, and the decode side runs
+  /// [decodeWireValue] — skipping the encode would re-interpret such values
+  /// (and fail JSON transports on raw typed values).
   static Map<String, Object?> encodeEvent(Event event) => {
         'tag': event.tag,
-        'payload': event.toJson(),
+        'payload': encodeWireValue(event.toJson()),
       };
 
   /// Decodes an event map into its typed variant; throws [WireException] for

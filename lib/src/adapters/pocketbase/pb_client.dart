@@ -55,9 +55,9 @@ class PbClient {
       filter = sweepFilter(store, idPrefix,
           fromId: fromId, storeField: fieldNames.storeField);
     } else {
-      final base = pullFilter(store, fromUpdated ?? '1970-01-01 00:00:00.000Z',
-          storeField: fieldNames.storeField);
-      filter = fromId == null ? base : pullPageFilter(base, fromId);
+      final from = fromUpdated ?? '1970-01-01 00:00:00.000Z';
+      final base = pullFilter(store, from, storeField: fieldNames.storeField);
+      filter = fromId == null ? base : pullPageFilter(base, from, fromId);
     }
     final query = <String, String>{
       'filter': filter,
@@ -268,15 +268,27 @@ class PbClient {
     return parsed;
   }
 
-  /// Batch capability probe: 403 = disabled; 200/3xx/400 (an ENABLED server
+  /// Batch capability probe: 403/404/405/501 = the route is disabled or
+  /// absent (an old server or one with the batch API turned off) → the
+  /// engine falls back to per-record push. 200/3xx/400 (an ENABLED server
   /// answers the empty batch) = enabled. 401 after the refresh-retry is an
   /// auth failure; 408/429/5xx are transient. Both are typed errors so
   /// `prepare()` can re-probe instead of caching a wrong capability.
+  ///
+  /// Known limit: the probe cannot detect a server that HAS `/api/batch`
+  /// but lacks the non-stock collection-level PUT-upsert that [pushBatch]
+  /// relies on — such a server dead-letters batches and needs a manual
+  /// retry with batch mode disabled.
   Future<bool> probeBatch() async {
     final uri = baseUrl.resolve('/api/batch');
     final res = await _sendAuth('POST', uri,
         body: jsonEncode({'requests': <Object?>[]}));
-    if (res.status == 403) return false;
+    if (res.status == 403 ||
+        res.status == 404 ||
+        res.status == 405 ||
+        res.status == 501) {
+      return false;
+    }
     if (res.status == 401) throw AuthError(_errorMessage(res));
     if (res.status == 408 || res.status == 429 || res.status >= 500) {
       throw TransientNetworkError('batch probe status ${res.status}');

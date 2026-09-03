@@ -40,8 +40,10 @@ String ftsNormalizerName(String store) => 'lp_norm_$store';
 /// reindexing.
 String ftsTriggerExpr(
     String store, FtsNormalization normalize, String side, String column) {
-  if (normalize.isEmpty) return '$side.${DdlCompiler.quote(column)}';
   final col = DdlCompiler.quote(column);
+  if (normalize.isEmpty) {
+    return side.isEmpty ? col : '$side.$col';
+  }
   final ref = side.isEmpty ? col : '${DdlCompiler.quote(side)}.$col';
   return '${DdlCompiler.quote(ftsNormalizerName(store))}($ref)';
 }

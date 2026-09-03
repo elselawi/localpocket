@@ -278,6 +278,46 @@ void main() {
       });
     }
 
+    test('committed record payloads are wire-encoded, never re-interpreted',
+        () {
+      // A user JSON-object may legitimately carry the reserved tag key; the
+      // event encode side must escape it exactly like requests/results, so
+      // the decode side reconstructs the user's data instead of mistaking
+      // it for a tagged wrapper.
+      const escapedUserMap = {
+        '__lp_t': 'map',
+        'v': {'x': 1}
+      };
+      final at = DateTime.utc(2026, 9, 1, 8, 0);
+      final bytes = Uint8List.fromList(const [9, 8, 7]);
+      final event = CommittedChange(
+        store: 's',
+        id: 'abc123',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.update,
+        oldRecord: null,
+        newRecord: {
+          'id': 'abc123',
+          'meta': escapedUserMap,
+          'at': at,
+          'blob': bytes,
+        },
+        changedFields: const {'meta'},
+      );
+
+      final wire = ContractCodec.encodeEvent(event);
+      // The escape survives the encode: the reserved-tag object is wrapped,
+      // not treated as already-encoded.
+      final payload = wire['payload']! as Map;
+      final meta = (payload['newRecord']! as Map)['meta']! as Map;
+      expect(meta['__lp_t'], 'map', reason: 'the escape must be wrapped once');
+
+      final decoded = ContractCodec.decodeEvent(wire) as CommittedChange;
+      expect(decoded.newRecord!['meta'], escapedUserMap);
+      expect(decoded.newRecord!['at'], at);
+      expect(decoded.newRecord!['blob'], bytes);
+    });
+
     test('unknown events fail', () {
       expect(
         () => ContractCodec.decodeEvent({'tag': 'mystery', 'payload': {}}),

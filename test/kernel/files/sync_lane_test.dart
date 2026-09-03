@@ -754,8 +754,8 @@ void main() {
       final refs = await h.pocket.files.list(store: 'widgets', recordId: recId);
       expect(refs.single.state, 'pending_upload',
           reason: 'a local upload is never shrunk by the remote list');
-      expect(refs.single.remoteName, 'local.png',
-          reason: 'the pending upload keeps its requested name');
+      expect(refs.single.remoteName, isNull,
+          reason: 'remote_name is set only by upload completion');
     });
 
     test('pending-remove refs are untouched by remote shrink', () async {
