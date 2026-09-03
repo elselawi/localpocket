@@ -64,7 +64,7 @@ Future<void> main() async {
       for (var i = 0; i < 20; i++) {
         final res = await executeCompiledQuery(
           pocket,
-          (sql, args) => pocket.traceQuery(sql, args),
+          (sql, args) => pocket.maintenance.traceQuery(sql, args),
           plan,
           pageLimit: n,
         );

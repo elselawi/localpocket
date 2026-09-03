@@ -46,17 +46,17 @@ void main() {
 
       // Out-of-band record deletion (bypassing purge's own ref release):
       // the ref now points at a record that no longer exists.
-      await pocket.traceExecute('DELETE FROM widgets WHERE id = ?', [recId]);
+      await pocket.maintenance.traceExecute('DELETE FROM widgets WHERE id = ?', [recId]);
 
       await pocket.files.gc(blobGrace: Duration.zero);
 
       expect(
-        await pocket.traceQuery(
+        await pocket.maintenance.traceQuery(
             'SELECT ref_id FROM lp_file_refs WHERE ref_id = ?', [ref.refId]),
         isEmpty,
         reason: 'the orphaned reference is collected',
       );
-      final blobMeta = await pocket.traceQuery(
+      final blobMeta = await pocket.maintenance.traceQuery(
           'SELECT refcount FROM lp_blobs WHERE hash = ?', [ref.hash]);
       if (blobMeta.isNotEmpty) {
         expect(blobMeta.first['refcount'], 0,

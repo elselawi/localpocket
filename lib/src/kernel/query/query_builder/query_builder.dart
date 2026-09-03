@@ -133,7 +133,7 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
       [List<Object?>? args]) {
     final pocket = _requirePocket;
     final executor = _executor;
-    if (executor == null) return pocket.traceQuery(sql, args);
+    if (executor == null) return pocket.maintenance.traceQuery(sql, args);
     pocket.testHooks?.onQuery?.call(sql);
     pocket.perf.recordQuery();
     return executor.rawQuery(sql, args ?? const []);
@@ -865,6 +865,9 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
   ///
   /// Ordering is honoured only for order clauses on [field] itself (others
   /// would make DISTINCT meaningless); results are otherwise unordered.
+  /// Values decode to their logical form (the same per-kind rule a row's
+  /// field decode applies), so a bool column yields Dart bools and a
+  /// JSON field parsed maps/lists.
   Future<List<Object?>> distinct(String field) async {
     _checkQueryable(field);
     final copy = _copyWith(
@@ -879,7 +882,11 @@ class QueryBuilder implements QueryFilterDsl<QueryBuilder> {
     final (sql, args) = copy._compile(limitOverride: limit);
     final distinctSql = sql.replaceFirst('SELECT ', 'SELECT DISTINCT ');
     final rows = await copy._runQuery(distinctSql, args);
-    return [for (final r in rows) r[field]];
+    final declared = _schema.fieldByName(field);
+    return [
+      for (final r in rows)
+        decodeDistinctValue(field, declared, r[field], store: _schema.name)
+    ];
   }
 
   /// Whether [field] can be aggregated numerically. Only declared numeric

@@ -234,19 +234,23 @@ class KernelCommandHandler implements CommandHandler {
         WatchOneRequest(:final store, :final id) => _watchOne(store, id),
         WatchRequest(:final store, :final spec) => _watch(store, spec),
         WatchCancelRequest(:final subscription) => _unwatch(subscription),
-        AnalyzeRequest(:final store) =>
-          context.database.analyze(store).then((_) => const OkResult()),
-        WalCheckpointRequest() =>
-          context.database.walCheckpoint().then((_) => const OkResult()),
+        AnalyzeRequest(:final store) => context.database.maintenance
+            .analyze(store)
+            .then((_) => const OkResult()),
+        WalCheckpointRequest() => context.database.maintenance
+            .walCheckpoint()
+            .then((_) => const OkResult()),
         VacuumRequest() =>
-          context.database.vacuum().then((_) => const OkResult()),
-        PruneOutboxRequest() => context.database
+          context.database.maintenance.vacuum().then((_) => const OkResult()),
+        PruneOutboxRequest() => context.database.maintenance
             .pruneOutbox()
-            .then((removed) => PruneOutboxResult(removed: removed)),
-        CompactRequest(:final store, :final olderThanMs) => context.database
+            .then((int removed) => PruneOutboxResult(removed: removed)),
+        CompactRequest(:final store, :final olderThanMs) => context
+            .database.maintenance
             .compact(store, olderThan: Duration(milliseconds: olderThanMs))
-            .then((removed) => CompactResult(removed: removed)),
-        RunMaintenanceRequest(:final compactOlderThanMs) => context.database
+            .then((int removed) => CompactResult(removed: removed)),
+        RunMaintenanceRequest(:final compactOlderThanMs) => context
+            .database.maintenance
             .runMaintenance(
                 compactOlderThan: Duration(milliseconds: compactOlderThanMs))
             .then((_) => const OkResult()),
@@ -374,7 +378,7 @@ class KernelCommandHandler implements CommandHandler {
     for (final raw in stores) {
       final schema = CollectionSchema<Object?>.fromJson(raw);
       if (!context.database.storeNames.contains(schema.name)) {
-        await context.database.registerStore(schema);
+        await context.database.schemaService.registerStore(schema);
       } else {
         final registered = context.database.requireTable(schema.name).manifest;
         final compiled = SchemaManifest.compile(schema);

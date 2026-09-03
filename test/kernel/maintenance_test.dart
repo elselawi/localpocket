@@ -40,8 +40,8 @@ void main() {
     test('analyze runs with and without a store argument', () async {
       final pocket = await openPocket();
       addTearDown(pocket.close);
-      await pocket.analyze();
-      await pocket.analyze('widgets');
+      await pocket.maintenance.analyze();
+      await pocket.maintenance.analyze('widgets');
     });
 
     test('walCheckpoint runs when WAL is supported', () async {
@@ -52,7 +52,7 @@ void main() {
       await pocket
           .collection('widgets')
           .put(record(id: generateRecordId(), name: 'x'));
-      await pocket.walCheckpoint();
+      await pocket.maintenance.walCheckpoint();
     });
 
     test('walCheckpoint is a no-op when the engine lacks WAL support',
@@ -71,7 +71,7 @@ void main() {
           reason: 'web profile reports no WAL');
 
       executed.clear();
-      await pocket.walCheckpoint();
+      await pocket.maintenance.walCheckpoint();
       expect(
           executed.where((s) => s.contains('wal_checkpoint')).toList(), isEmpty,
           reason: 'walCheckpoint must not touch the engine without WAL');
@@ -87,8 +87,8 @@ void main() {
             .collection('widgets')
             .put(record(id: generateRecordId(), name: 'n$i'));
       }
-      await pocket.vacuum();
-      await pocket.vacuum(pages: 1);
+      await pocket.maintenance.vacuum();
+      await pocket.maintenance.vacuum(pages: 1);
     });
   });
 
@@ -119,7 +119,7 @@ void main() {
       await pocket.outbox
           .ack('widgets', visible, serverUpdated: '2026-01-01 00:00:00.000Z');
 
-      final removed = await pocket.compact('widgets',
+      final removed = await pocket.maintenance.compact('widgets',
           olderThan: const Duration(days: 1), nowMs: now);
       expect(removed, 1, reason: 'only the old clean archived row is removed');
 
@@ -143,7 +143,7 @@ void main() {
       await seedCleanArchivedRow(pocket, atCutoff, lastSeenMs: cutoff);
       await seedCleanArchivedRow(pocket, below, lastSeenMs: cutoff - 1);
 
-      final removed = await pocket.compact('widgets',
+      final removed = await pocket.maintenance.compact('widgets',
           olderThan: const Duration(days: 1), nowMs: now);
       expect(removed, 1);
       expect(await pocket.collection('widgets').get(atCutoff), isNotNull,
@@ -186,7 +186,7 @@ void main() {
           where: 'store = ? AND record_id = ?',
           whereArgs: ['widgets', id]);
 
-      await pocket.compact('widgets',
+      await pocket.maintenance.compact('widgets',
           olderThan: const Duration(days: 1), nowMs: now);
 
       expect(await pocket.collection('widgets').get(id), isNull);
@@ -216,7 +216,7 @@ void main() {
               .collection('widgets')
               .put(record(id: generateRecordId(), name: 'w$i')),
       ];
-      final compactF = pocket.compact('widgets',
+      final compactF = pocket.maintenance.compact('widgets',
           olderThan: const Duration(days: 1), nowMs: now);
       await Future.wait([...writes, compactF]);
       expect(await pocket.collection('widgets').get(old), isNull);
@@ -235,7 +235,7 @@ void main() {
     final localEvents = <RecordChangeEvent>[];
     final localSub = pocket.onLocal().listen(localEvents.add);
 
-    final removed = await pocket.compact('widgets',
+    final removed = await pocket.maintenance.compact('widgets',
         olderThan: const Duration(days: 1), nowMs: now);
     expect(removed, 1);
 
@@ -267,7 +267,7 @@ void main() {
         for (var i = 0; i < 20; i++)
           col.put(record(id: generateRecordId(), name: 'w$i')),
       ];
-      final pruneF = pocket.pruneOutbox();
+      final pruneF = pocket.maintenance.pruneOutbox();
       await Future.wait([...writes, pruneF]);
       // All writes are intact; the outbox holds one op per unsynced record.
       expect(await col.query().all().count(), 20);
@@ -287,7 +287,7 @@ void main() {
       await pocket
           .collection('widgets')
           .put(record(id: generateRecordId(), name: 'keep'));
-      await pocket.runMaintenance(compactOlderThan: const Duration(days: 1));
+      await pocket.maintenance.runMaintenance(compactOlderThan: const Duration(days: 1));
       expect(await pocket.collection('widgets').query().all().count(), 1,
           reason: 'runMaintenance compacted the old archived row');
     });
@@ -308,7 +308,7 @@ void main() {
           'record_id, error, payload_json) VALUES (1, \'max_attempts\', '
           '\'widgets\', \'r2\', \'e\', \'{}\')');
 
-      await pocket.runMaintenance();
+      await pocket.maintenance.runMaintenance();
 
       final ops = await pocket.db.rawQuery(
           'SELECT COUNT(*) c FROM lp_op_queue WHERE op_id = \'op-done\'');

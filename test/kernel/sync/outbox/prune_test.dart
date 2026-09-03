@@ -161,7 +161,7 @@ void main() {
       await insertOutboxOp(pocket, orphan, 'op-$orphan', 7000);
 
       // A cap below the count must NOT evict any pending op.
-      final pruned = await pocket.pruneOutbox(maxEntries: 1);
+      final pruned = await pocket.maintenance.pruneOutbox(maxEntries: 1);
       expect(pruned, 2, reason: 'only the stale clean op and the orphan op');
 
       final remaining = await outboxIds(pocket);
@@ -200,9 +200,9 @@ void main() {
       await seedRecord(pocket, error, 'error', 1000, lastError: 'boom');
       await seedRecord(pocket, dirty, 'dirty', 2000);
 
-      expect(await pocket.pruneOutbox(maxEntries: 2), 0);
+      expect(await pocket.maintenance.pruneOutbox(maxEntries: 2), 0);
       expect(await outboxIds(pocket), {error, dirty});
-      expect(await pocket.pruneOutbox(maxEntries: 5), 0);
+      expect(await pocket.maintenance.pruneOutbox(maxEntries: 5), 0);
       expect(await outboxIds(pocket), {error, dirty});
     });
 
@@ -216,11 +216,11 @@ void main() {
       await seedRecord(pocket, dirty, 'dirty', 2000);
 
       // zero
-      expect(await pocket.pruneOutbox(maxEntries: 0), 0);
+      expect(await pocket.maintenance.pruneOutbox(maxEntries: 0), 0);
       expect(await outboxIds(pocket), {error, dirty},
           reason: 'pending ops survive even at maxEntries 0');
       // negative
-      expect(await pocket.pruneOutbox(maxEntries: -1), 0);
+      expect(await pocket.maintenance.pruneOutbox(maxEntries: -1), 0);
       expect(await outboxIds(pocket), {error, dirty},
           reason: 'negative maxEntries never evicts pending ops');
     });
@@ -235,7 +235,7 @@ void main() {
       // Orphaned: no lp_sync_row entry.
       await insertOutboxOp(pocket, orphan, 'op-$orphan', 2000);
 
-      final pruned = await pocket.pruneOutbox(maxEntries: 100);
+      final pruned = await pocket.maintenance.pruneOutbox(maxEntries: 100);
       expect(pruned, 1);
       expect(await outboxIds(pocket), {withSync});
       await expectSyncInvariants(pocket, 'widgets', orphan);
@@ -253,7 +253,7 @@ void main() {
       await seedRecord(pocket, newest, 'error', 3000, lastError: 'boom');
       await seedRecord(pocket, oldest, 'error', 1000, lastError: 'boom');
 
-      await pocket.pruneOutbox(maxEntries: 1);
+      await pocket.maintenance.pruneOutbox(maxEntries: 1);
       expect(await outboxIds(pocket), {oldest, middle, newest},
           reason: 'error ops are dead-lettered unsynced edits; all survive');
       for (final id in [oldest, middle, newest]) {
@@ -267,7 +267,7 @@ void main() {
       final error = generateRecordId();
       await seedRecord(pocket, error, 'error', 1000, lastError: 'boom');
 
-      await pocket.pruneOutbox(maxEntries: 0);
+      await pocket.maintenance.pruneOutbox(maxEntries: 0);
       // Both the op (the only record of the pending edit) and the sync row
       // survive, and the op_id still mirrors the op.
       expect(await outboxIds(pocket), {error});

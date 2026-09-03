@@ -207,11 +207,15 @@ final class Store<S extends StoreDef<S>> {
     return result.value;
   }
 
-  /// The distinct values of [field]. [limit] caps the scan; without it the
-  /// kernel applies its built-in 1000-value cap (returning values is
-  /// memory-bounded, unlike [countDistinct], which counts exactly).
-  Future<List<Object?>> distinct(
-    FieldDef<S, Object?> field, {
+  /// The distinct values of [field], decoded to its value type — the same
+  /// boundary codecs a [Row] read applies (an enum yields its Dart members,
+  /// not wire strings). Optional fields can contribute a `null` distinct
+  /// value, so the element type follows the descriptor's nullability.
+  /// [limit] caps the scan; without it the kernel applies its built-in
+  /// 1000-value cap (returning values is memory-bounded, unlike
+  /// [countDistinct], which counts exactly).
+  Future<List<T>> distinct<T>(
+    FieldDef<S, T> field, {
     int? limit,
   }) async {
     _checkOwner(field.owner, field.name);
@@ -222,7 +226,9 @@ final class Store<S extends StoreDef<S>> {
       spec: QuerySpecData(limit: limit),
       session: _session,
     ));
-    return result.values;
+    return [
+      for (final value in result.values) decodeStored<T>(field, value),
+    ];
   }
 
   /// The ids of the records matching [spec]. The spec needs a page size or

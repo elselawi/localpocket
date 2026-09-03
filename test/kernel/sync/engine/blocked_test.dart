@@ -232,7 +232,7 @@ void main() {
       await h.engine.syncNow();
       expect((await sr(h.pocket, id))!.syncState, SyncState.blocked);
 
-      await h.pocket.pruneOutbox();
+      await h.pocket.maintenance.pruneOutbox();
       expect((await sr(h.pocket, id))!.syncState, SyncState.blocked,
           reason: 'prune must never drop a blocked op');
       expect(

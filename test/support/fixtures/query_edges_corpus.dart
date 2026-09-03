@@ -224,7 +224,7 @@ class CompiledSearchHandle implements SearchHandle {
   Future<List<SearchResult>> fetch() async {
     final res = await executeCompiledQuery(
       _pocket,
-      (sql, args) => _pocket.traceQuery(sql, args),
+      (sql, args) => _pocket.maintenance.traceQuery(sql, args),
       _builder.compilePlan(),
     );
     return [
@@ -457,7 +457,7 @@ class CompiledQueryHandle implements QueryHandle {
     );
     final res = await executeCompiledQuery(
       _pocket,
-      (sql, args) => _pocket.traceQuery(sql, args),
+      (sql, args) => _pocket.maintenance.traceQuery(sql, args),
       plan,
       pageLimit: allMode ? null : limit,
     );
@@ -494,7 +494,7 @@ class CompiledQueryHandle implements QueryHandle {
     );
     final res = await executeCompiledQuery(
       _pocket,
-      (sql, args) => _pocket.traceQuery(sql, args),
+      (sql, args) => _pocket.maintenance.traceQuery(sql, args),
       plan,
       pageLimit: allMode ? null : limit,
     );
@@ -512,7 +512,7 @@ class CompiledQueryHandle implements QueryHandle {
         _builder.compilePlan(limitOverride: 1, cursor: bidirectional);
     final probeRes = await executeCompiledQuery(
       _pocket,
-      (sql, args) => _pocket.traceQuery(sql, args),
+      (sql, args) => _pocket.maintenance.traceQuery(sql, args),
       probePlan,
       pageLimit: 1,
     );
@@ -530,7 +530,7 @@ class CompiledQueryHandle implements QueryHandle {
   Future<int> count() async {
     final res = await executeCompiledQuery(
       _pocket,
-      (sql, args) => _pocket.traceQuery(sql, args),
+      (sql, args) => _pocket.maintenance.traceQuery(sql, args),
       _builder.compileCountPlan(),
     );
     return res['value'] as int;
@@ -540,7 +540,7 @@ class CompiledQueryHandle implements QueryHandle {
   Future<int> countDistinct(String field) async {
     final res = await executeCompiledQuery(
       _pocket,
-      (sql, args) => _pocket.traceQuery(sql, args),
+      (sql, args) => _pocket.maintenance.traceQuery(sql, args),
       _builder.compileCountDistinctPlan(field),
     );
     return res['value'] as int;
@@ -550,7 +550,7 @@ class CompiledQueryHandle implements QueryHandle {
   Future<List<Object?>> distinct(String field) async {
     final res = await executeCompiledQuery(
       _pocket,
-      (sql, args) => _pocket.traceQuery(sql, args),
+      (sql, args) => _pocket.maintenance.traceQuery(sql, args),
       _builder.compileDistinctPlan(field),
     );
     return (res['values'] as List).cast<Object?>();
@@ -571,7 +571,7 @@ class CompiledQueryHandle implements QueryHandle {
   Future<num?> _aggregate(String fn, String field) async {
     final res = await executeCompiledQuery(
       _pocket,
-      (sql, args) => _pocket.traceQuery(sql, args),
+      (sql, args) => _pocket.maintenance.traceQuery(sql, args),
       _builder.compileAggregatePlan(fn, field),
     );
     return res['value'] as num?;
@@ -581,7 +581,7 @@ class CompiledQueryHandle implements QueryHandle {
   Future<List<String>> ids() async {
     final res = await executeCompiledQuery(
       _pocket,
-      (sql, args) => _pocket.traceQuery(sql, args),
+      (sql, args) => _pocket.maintenance.traceQuery(sql, args),
       _builder.compileIdsPlan(),
     );
     return (res['ids'] as List).cast<String>();
@@ -591,7 +591,7 @@ class CompiledQueryHandle implements QueryHandle {
   Future<String> explain() async {
     final res = await executeCompiledQuery(
       _pocket,
-      (sql, args) => _pocket.traceQuery(sql, args),
+      (sql, args) => _pocket.maintenance.traceQuery(sql, args),
       _builder.compileExplainPlan(),
     );
     return res['plan'] as String;

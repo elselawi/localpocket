@@ -229,7 +229,7 @@ Future<void> main() async {
     swKs.stop();
 
     final swOffset = Stopwatch()..start();
-    await rawDb.traceQuery(
+    await rawDb.maintenance.traceQuery(
         'SELECT * FROM widgets WHERE archived = 0 AND hidden = 0 ORDER BY qty ASC, id ASC LIMIT 50 OFFSET 50000');
     swOffset.stop();
 

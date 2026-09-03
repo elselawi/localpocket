@@ -74,7 +74,7 @@ void main() {
           path: t.path, database: db, platform: PlatformProfile.web);
       addTearDown(pocket.close);
 
-      await pocket.walCheckpointPassive();
+      await pocket.maintenance.walCheckpointPassive();
       expect(
         executed.where((s) => s.contains('wal_checkpoint')).toList(),
         isEmpty,

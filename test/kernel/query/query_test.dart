@@ -211,7 +211,7 @@ void main() {
       // Executing the cursor plan matches the native keyset page.
       final res = await executeCompiledQuery(
         pocket,
-        (sql, args) => pocket.traceQuery(sql, args),
+        (sql, args) => pocket.maintenance.traceQuery(sql, args),
         plan,
         pageLimit: 3,
       );

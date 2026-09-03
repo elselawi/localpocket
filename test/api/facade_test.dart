@@ -230,7 +230,7 @@ void main() {
       // connection: the kernel's JSON decode succeeds (a map), the typed
       // list codec refuses it.
       final raw = await kernel.KernelDatabase.open(path: t.path, stores: []);
-      await raw.traceExecute('UPDATE "tasks" SET "tags" = ? WHERE "id" = ?',
+      await raw.maintenance.traceExecute('UPDATE "tasks" SET "tags" = ? WHERE "id" = ?',
           ['{"a": 1}', created.id]);
       await raw.close();
 

@@ -136,12 +136,12 @@ final class KernelContext {
 
   /// Executes SQL, notifying the test hooks observer.
   Future<void> traceExecute(String sql, [List<Object?>? arguments]) =>
-      database.traceExecute(sql, arguments);
+      database.maintenance.traceExecute(sql, arguments);
 
   /// Runs a raw query, notifying the test hooks observer.
   Future<List<Map<String, Object?>>> traceQuery(String sql,
           [List<Object?>? arguments]) =>
-      database.traceQuery(sql, arguments);
+      database.maintenance.traceQuery(sql, arguments);
 
   /// Throws when a handle-level operation is attempted inside a transaction.
   void guardOutsideTx() => database.guardOutsideTxForKernel();

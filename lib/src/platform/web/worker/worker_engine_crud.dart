@@ -41,7 +41,7 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
               'the worker compiled different schemas.');
         }
         if (!pocket.storeNames.contains(schema.name)) {
-          await pocket.registerStore(schema);
+          await pocket.schemaService.registerStore(schema);
         } else {
           // Re-sent store: the definition must still match what the worker
           // already registered.

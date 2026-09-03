@@ -385,6 +385,32 @@ Object? _decodeStoredValue(
   return stored;
 }
 
+/// Decodes one declared field's stored column value into its logical form —
+/// the same per-kind rule [decodeDbRow] applies, shared instead of
+/// duplicated. For read terminals that return one column (e.g. `distinct`),
+/// where the value exists outside any one record's context and encrypted
+/// fields are rejected before the plan compiles, so no cipher is resolved.
+Object? decodeFieldValue(
+  Field f,
+  Object? stored, {
+  required String store,
+}) =>
+    _decodeStoredValue(f, stored, store: store, recordId: '');
+
+/// Decodes one `DISTINCT` column value. Declared fields decode through
+/// [decodeFieldValue]; the synthetic `id`/`hidden` columns pass through
+/// (they hold their logical form directly) and `archived` mirrors the row
+/// codec's bool form.
+Object? decodeDistinctValue(
+  String field,
+  Field? declared,
+  Object? stored, {
+  required String store,
+}) =>
+    declared == null
+        ? (field == 'archived' ? stored == 1 : stored)
+        : decodeFieldValue(declared, stored, store: store);
+
 Object? _encodeValue(Field f, Object? v,
     {FieldCipher? cipher, List<int> aad = const []}) {
   if (v == null) return null;

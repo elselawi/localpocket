@@ -691,7 +691,7 @@ void main() {
       //     local work are never purged. Then full maintenance.
       nowMs += const Duration(days: 400).inMilliseconds;
       await h.engine.sweeper.sweepBucket('widgets', 0);
-      await h.pocket.runMaintenance(compactOlderThan: const Duration(days: 90));
+      await h.pocket.maintenance.runMaintenance(compactOlderThan: const Duration(days: 90));
       await step('purge + maintenance');
 
       // 12. An engine restart: a fresh engine picks up the surviving state.

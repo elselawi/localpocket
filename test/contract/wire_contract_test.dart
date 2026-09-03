@@ -597,8 +597,7 @@ void main() {
       expect(decodedRange.message, 'r');
     });
 
-    test('standard runtime errors are named; strangers degrade to unknown',
-        () {
+    test('standard runtime errors are named; strangers degrade to unknown', () {
       final encoded = encodeError(const FormatException('nope'));
       expect(encoded['type'], 'FormatException');
       // The message rides as the full textual form for getters without a

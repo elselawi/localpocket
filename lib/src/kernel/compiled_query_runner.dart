@@ -62,10 +62,17 @@ Future<Map<String, Object?>> executeCompiledQuery(
     case 'countDistinct':
       return {'value': firstIntValue(rows) ?? 0};
     case 'distinct':
+      // The compiled plan names its projected column after SELECT DISTINCT;
+      // the value decode mirrors the native builder's rule per kind.
+      final column = _distinctColumn(plan.sql);
+      final schema = pocket.requireTable(plan.store).schema;
+      final declared = schema.fieldByName(column);
       return {
         'values': [
           for (final r in rows)
-            if (r.isNotEmpty) r.values.first
+            if (r.isNotEmpty)
+              decodeDistinctValue(column, declared, r.values.first,
+                  store: plan.store)
         ]
       };
     case 'ids':
@@ -88,4 +95,23 @@ Future<Map<String, Object?>> executeCompiledQuery(
     default:
       throw StateError('Unsupported compiled operation: ${plan.operation}');
   }
+}
+
+/// Extracts the projected column name from a compiled `SELECT DISTINCT
+/// "column" FROM …` plan.
+String _distinctColumn(String sql) {
+  final start = sql.indexOf('DISTINCT ');
+  if (start < 0) {
+    throw StateError('A distinct plan must carry a SELECT DISTINCT clause.');
+  }
+  final rest = sql.substring(start + 'DISTINCT '.length);
+  if (rest.startsWith('"')) {
+    final end = rest.indexOf('"', 1);
+    if (end < 0) {
+      throw StateError('A distinct plan column must be quoted.');
+    }
+    return rest.substring(1, end);
+  }
+  final end = rest.indexOf(' ');
+  return end < 0 ? rest : rest.substring(0, end);
 }

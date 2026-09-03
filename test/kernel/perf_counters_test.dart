@@ -169,9 +169,9 @@ void main() {
       expect(perf.queries, 0, reason: 'raw query is not traced');
 
       // Traced statements and queries are counted exactly.
-      await pocket.traceExecute('SELECT 1');
+      await pocket.maintenance.traceExecute('SELECT 1');
       expect(perf.statements, 1);
-      await pocket.traceQuery('SELECT 1');
+      await pocket.maintenance.traceQuery('SELECT 1');
       expect(perf.queries, 1);
 
       // A user-facing query routes through traceQuery.

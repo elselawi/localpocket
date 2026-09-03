@@ -217,7 +217,7 @@ class Migrator {
 
     try {
       final state = await _kvGet(db, markerKey);
-      final hasBackup = await pocket.backupFileExists(backupFile);
+      final hasBackup = await pocket.schemaService.backupFileExists(backupFile);
       if (state == 'done' && hasBackup) {
         // A previous run COMPLETED the rebuild; its backup is the pre-
         // migration safety net and is never overwritten: refuse loudly.
@@ -249,7 +249,7 @@ class Migrator {
       // and remove the stale backup so VACUUM INTO can restart cleanly.
       await db.execute('DROP TABLE IF EXISTS ${DdlCompiler.quote(newTable)}');
       if (hasBackup) {
-        await pocket.deleteBackupFile(backupFile);
+        await pocket.schemaService.deleteBackupFile(backupFile);
       }
       await _kvSet(db, markerKey, 'rebuilding');
 

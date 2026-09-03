@@ -63,8 +63,8 @@ void main() {
       }
 
       // Explicit ANALYZE
-      await pocket.analyze();
-      await pocket.analyze('widgets');
+      await pocket.maintenance.analyze();
+      await pocket.maintenance.analyze('widgets');
 
       // Verify PRAGMA optimize runs on close
       expect(pocket.optimizeRanOnClose, isFalse);
@@ -232,7 +232,7 @@ void main() {
           whereArgs: ['widgets', hiddenId]);
 
       // Execute compact(olderThan: 90 days)
-      final compacted = await pocket.compact('widgets',
+      final compacted = await pocket.maintenance.compact('widgets',
           olderThan: const Duration(days: 90), nowMs: now);
       expect(compacted, 1,
           reason: 'Only the single qualifying row must be compacted');
@@ -271,11 +271,11 @@ void main() {
       );
 
       // Prune orphaned/clean outbox entries
-      final pruned = await pocket.pruneOutbox();
+      final pruned = await pocket.maintenance.pruneOutbox();
       expect(pruned, 1);
 
       // Run full maintenance state machine
-      await pocket.runMaintenance();
+      await pocket.maintenance.runMaintenance();
       expect(await col.get(id1), isNotNull);
       expect(await col.get(id2), isNotNull);
     });

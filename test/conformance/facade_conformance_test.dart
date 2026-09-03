@@ -534,7 +534,7 @@ void main() {
         await db.close();
 
         final raw = await kernel.KernelDatabase.open(path: t.path, stores: []);
-        await raw.traceExecute('UPDATE "tasks" SET "tags" = ? WHERE "id" = ?',
+        await raw.maintenance.traceExecute('UPDATE "tasks" SET "tags" = ? WHERE "id" = ?',
             ['{"not": "a list"}', created.id]);
         await raw.close();
 

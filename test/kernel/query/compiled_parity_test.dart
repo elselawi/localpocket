@@ -75,7 +75,7 @@ void main() {
     );
     return executeCompiledQuery(
       pocket,
-      (sql, args) => pocket.traceQuery(sql, args),
+      (sql, args) => pocket.maintenance.traceQuery(sql, args),
       plan,
       pageLimit: pageLimit ?? (allMode ? null : limit),
     );
@@ -136,7 +136,7 @@ void main() {
     final expected = await native.count();
     final res = await executeCompiledQuery(
         pocket,
-        (sql, args) => pocket.traceQuery(sql, args),
+        (sql, args) => pocket.maintenance.traceQuery(sql, args),
         compiled.compileCountPlan());
     expect(res['value'], expected);
   }
@@ -156,7 +156,7 @@ void main() {
     };
     final res = await executeCompiledQuery(
         pocket,
-        (sql, args) => pocket.traceQuery(sql, args),
+        (sql, args) => pocket.maintenance.traceQuery(sql, args),
         compiled.compileAggregatePlan(fn, field));
     expect(res['value'], expected);
   }
@@ -170,7 +170,7 @@ void main() {
     final expected = await native.distinct(field);
     final res = await executeCompiledQuery(
         pocket,
-        (sql, args) => pocket.traceQuery(sql, args),
+        (sql, args) => pocket.maintenance.traceQuery(sql, args),
         compiled.compileDistinctPlan(field));
     expect(res['values'], expected);
   }
@@ -183,7 +183,7 @@ void main() {
     compiled = shape(compiled);
     final expected = await native.ids();
     final res = await executeCompiledQuery(pocket,
-        (sql, args) => pocket.traceQuery(sql, args), compiled.compileIdsPlan());
+        (sql, args) => pocket.maintenance.traceQuery(sql, args), compiled.compileIdsPlan());
     expect(res['ids'], expected);
   }
 
@@ -196,7 +196,7 @@ void main() {
     final expected = await native.explain();
     final res = await executeCompiledQuery(
         pocket,
-        (sql, args) => pocket.traceQuery(sql, args),
+        (sql, args) => pocket.maintenance.traceQuery(sql, args),
         compiled.compileExplainPlan());
     expect(res['plan'], expected);
   }
@@ -238,7 +238,7 @@ void main() {
           await native.countDistinct('size'),
           (await executeCompiledQuery(
               pocket,
-              (sql, args) => pocket.traceQuery(sql, args),
+              (sql, args) => pocket.maintenance.traceQuery(sql, args),
               compiled.compileCountDistinctPlan('size')))['value']);
     });
 
@@ -273,7 +273,7 @@ void main() {
       final compiled = SearchBuilder.compileOnly(articles, 'database')
         ..limit(10);
       final res = await executeCompiledQuery(pocket,
-          (sql, args) => pocket.traceQuery(sql, args), compiled.compilePlan());
+          (sql, args) => pocket.maintenance.traceQuery(sql, args), compiled.compilePlan());
       final results = (res['results'] as List)
           .map((r) => SearchResult(
               id: (r as Map)['id'] as String,

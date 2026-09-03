@@ -11,23 +11,20 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:collection/collection.dart' show ListEquality;
 import 'package:meta/meta.dart';
 import 'database_adapter.dart';
 import 'database_factory.dart';
 
 import 'capabilities.dart';
-import 'codec.dart';
 import 'change_bus.dart';
 import 'cipher.dart';
 import 'command_handler.dart';
 import 'ddl_compiler.dart';
-import 'fts_normalizer.dart';
 import 'kernel_context.dart';
-import 'migrator.dart';
+import 'maintenance_service.dart';
+import 'schema_service.dart';
 import 'mutation_service.dart';
 import 'perf_counters.dart';
 import 'read_service.dart';
@@ -258,11 +255,13 @@ class KernelDatabase with ChangeBusAwareLP {
     _transactions = TransactionCoordinator(kernel);
     mutations = MutationService(kernel);
     reads = ReadService(kernel);
-    commands = KernelCommandHandler(kernel);
     outbox = Outbox.internal(this);
     opQueue = OpQueue.internal(this);
     conflicts = Conflicts.internal(this);
     files = LocalPocketFiles.internal(this, blobStore: blobStore);
+    maintenance = MaintenanceService(kernel);
+    schemaService = SchemaService(kernel);
+    commands = KernelCommandHandler(kernel);
   }
 
   /// The shared dependency set every kernel service receives. Native and the
@@ -282,6 +281,12 @@ class KernelDatabase with ChangeBusAwareLP {
 
   /// The kernel read owner (compiled-plan execution and result shaping).
   late final ReadService reads;
+
+  /// The kernel maintenance owner (housekeeping, compaction, tracing).
+  late final MaintenanceService maintenance;
+
+  /// The kernel schema owner (registration, migrations dispatch, manifests).
+  late final SchemaService schemaService;
 
   /// The exhaustive command dispatcher over the runtime contract.
   late final KernelCommandHandler commands;
@@ -444,7 +449,7 @@ class KernelDatabase with ChangeBusAwareLP {
       );
       await _recordCoreMigration(db, pocket.now);
       for (final schema in stores) {
-        await pocket.registerStore(schema);
+        await pocket.schemaService.registerStore(schema);
       }
       return pocket;
     } catch (e) {
@@ -486,212 +491,6 @@ class KernelDatabase with ChangeBusAwareLP {
       'applied_at': now(),
       'duration_ms': 0,
     });
-  }
-
-  /// Registers [schema], creating or migrating its SQLite table.
-  ///
-  /// Before any DDL the schema is compiled into a [SchemaManifest] and
-  /// validated: duplicate store names are rejected; the worker runtime
-  /// rejects executable features that cannot cross the worker boundary; and
-  /// a behavior change at the SAME version (fingerprint mismatch) is
-  /// rejected — bump the version and provide a migration.
-  Future<void> registerStore(CollectionSchema<Object?> schema) async {
-    // Store identity must be unambiguous.
-    if (_tables.containsKey(schema.name)) {
-      throw SchemaRegistrationError(
-          'Duplicate store name "${schema.name}" in this open call.');
-    }
-    // Reject unrepresentable behavior before anything touches disk.
-    final manifest = SchemaManifest.compile(schema);
-    if (capabilities.platform == PlatformProfile.web &&
-        manifest.unsupportedFeatures.isNotEmpty) {
-      throw UnsupportedSchemaFeatureError(
-          'Store "${schema.name}" declares executable features that cannot '
-          'run on the worker runtime: ${manifest.unsupportedFeatures.join(', ')}.');
-    }
-    await _assertSameVersionManifestUnchanged(schema, manifest);
-
-    final compiled = DdlCompiler(capabilities).compile(schema);
-    // The write-side normalizer must exist before ANY trigger can fire
-    // (fresh create below, or the FTS-rebuild / destructive paths).
-    if (schema.fts != null) {
-      registerFtsNormalizer(db, schema.name, schema.fts!.normalize);
-    }
-    final existing = await db.query('lp_stores',
-        where: 'store = ?', whereArgs: [schema.name], limit: 1);
-    if (existing.isEmpty) {
-      await db.execute(compiled.tableDdl);
-      for (final ix in compiled.indexDdl) {
-        await db.execute(ix);
-      }
-      for (final f in compiled.ftsDdl) {
-        await db.execute(f);
-      }
-      await db.insert('lp_stores', {
-        'store': schema.name,
-        'table_name': schema.name,
-        'schema_ver': schema.version,
-        'definition_json': jsonEncode(schema.toJson()),
-        'created_at': now(),
-      });
-      await Migrator.recordMigration(db,
-          name: 'create:${schema.name}', from: 0, to: schema.version, now: now);
-    } else {
-      final current = existing.first['schema_ver']! as int;
-      if (current > schema.version) {
-        throw SchemaTooNewError(
-            'Store "${schema.name}" on disk is schema v$current, but this package supports v${schema.version}.');
-      }
-      if (current < schema.version) {
-        await Migrator.migrateStore(this, schema, fromVersion: current);
-      }
-      await _rebuildFtsIfConfigChanged(schema);
-      await db.update(
-          'lp_stores',
-          {
-            'definition_json': jsonEncode(schema.toJson()),
-            'schema_ver': schema.version
-          },
-          where: 'store = ?',
-          whereArgs: [schema.name]);
-    }
-    _tables[schema.name] = StoreTable(schema, compiled, manifest: manifest);
-    // Persist the manifest so the NEXT open can compare behavior, not just
-    // version numbers.
-    await _persistSchemaManifest(schema.name, manifest);
-  }
-
-  /// The persisted manifest key for [store].
-  static String _manifestMetaKey(String store) => 'schema_manifest:$store';
-
-  /// Rejects a behavior-affecting manifest change at the SAME schema version.
-  /// Legacy databases without a persisted manifest adopt the current one.
-  Future<void> _assertSameVersionManifestUnchanged(
-      CollectionSchema<Object?> schema, SchemaManifest manifest) async {
-    final rows = await db.query('lp_meta',
-        where: 'k = ?', whereArgs: [_manifestMetaKey(schema.name)], limit: 1);
-    if (rows.isEmpty) return; // adoption: first open of a manifest-era store
-    SchemaManifest? persisted;
-    try {
-      final raw = rows.first['v'];
-      persisted =
-          SchemaManifest.fromJson(raw is String ? jsonDecode(raw) : raw);
-    } on LocalPocketError {
-      // Unreadable/corrupt persisted manifest: treat as adoption so the
-      // store can recover; the corrupt value is overwritten below.
-      return;
-    }
-    if (persisted.version != schema.version) return; // version change: legal
-    if (persisted.fingerprint != manifest.fingerprint) {
-      throw SchemaRegistrationError(
-          'Store "${schema.name}" changed behavior at the SAME schema '
-          'version ${schema.version}. Bump the store version and provide a '
-          'migration description.');
-    }
-  }
-
-  /// Persists the manifest (and its fingerprint) for the NEXT open.
-  Future<void> _persistSchemaManifest(
-      String store, SchemaManifest manifest) async {
-    final key = _manifestMetaKey(store);
-    final json = manifest.encodedJson;
-    final existing =
-        await db.query('lp_meta', where: 'k = ?', whereArgs: [key], limit: 1);
-    if (existing.isEmpty) {
-      await db.insert('lp_meta', {'k': key, 'v': json});
-    } else {
-      await db.update('lp_meta', {'v': json}, where: 'k = ?', whereArgs: [key]);
-    }
-  }
-
-  /// Whether the destructive-migration backup file at [path] exists, via the
-  /// platform file hooks. Returns false when none is wired.
-  Future<bool> backupFileExists(String path) async {
-    final d = db;
-    if (d is DirectSqliteDatabase && d.backupFileExists != null) {
-      return await d.backupFileExists!(path);
-    }
-    return false;
-  }
-
-  /// Recreates the FTS index when the persisted configuration differs from
-  /// the registered schema (tokenizer, fields, or normalization rules); a
-  /// ledger row records the rebuild.
-  Future<void> _rebuildFtsIfConfigChanged(
-      CollectionSchema<Object?> schema) async {
-    final stored = await db.query('lp_stores',
-        columns: ['definition_json'],
-        where: 'store = ?',
-        whereArgs: [schema.name],
-        limit: 1);
-    if (stored.isEmpty) return;
-    CollectionSchema<Object?>? old;
-    try {
-      final raw = stored.first['definition_json'];
-      final decoded = raw is String ? jsonDecode(raw) as Object? : raw;
-      old = CollectionSchema<Object?>.fromJson(
-          Map<String, Object?>.from(decoded! as Map));
-    } on StorageError {
-      // Unreadable definition: leave the existing index alone; a later
-      // destructive migration is the recovery path.
-      return;
-    }
-    final before = old.fts;
-    final after = schema.fts;
-    final same = identical(before, after) ||
-        (before == null && after == null) ||
-        (before != null &&
-            after != null &&
-            const ListEquality<String>().equals(before.fields, after.fields) &&
-            before.fuzzy == after.fuzzy &&
-            before.normalize == after.normalize);
-    if (same) return;
-
-    final sw = Stopwatch()..start();
-    // Drop old triggers first: they are recreated by compiled.ftsDdl below
-    // and CREATE TRIGGER fails if an old one is still present.
-    for (final suffix in ['_ai', '_ad', '_au']) {
-      await db.execute(
-          'DROP TRIGGER IF EXISTS ${DdlCompiler.quote(schema.name + suffix)}');
-    }
-    if (before != null) {
-      await db.execute(
-          'DROP TABLE IF EXISTS ${DdlCompiler.quote('${schema.name}_fts')}');
-    }
-    if (after != null) {
-      for (final f in DdlCompiler(capabilities).compile(schema).ftsDdl) {
-        await db.execute(f);
-      }
-      // The fts5 'rebuild' command re-tokenizes RAW text and bypasses the
-      // trigger normalizers; repopulate through the same trigger expressions
-      // so reindexed terms match query-side normalization.
-      await db.execute("INSERT INTO ${DdlCompiler.quote('${schema.name}_fts')}"
-          "(${DdlCompiler.quote('${schema.name}_fts')}) VALUES('delete-all')");
-      final fts = schema.fts!;
-      final colList = fts.fields.map(DdlCompiler.quote).join(', ');
-      final selectList = fts.fields
-          .map((c) => ftsTriggerExpr(schema.name, fts.normalize, '', c))
-          .join(', ');
-      await db.execute('INSERT INTO ${DdlCompiler.quote('${schema.name}_fts')}'
-          '(rowid, $colList) SELECT rowid, $selectList FROM '
-          '${DdlCompiler.quote(schema.name)}');
-    }
-    sw.stop();
-    await Migrator.recordMigration(db,
-        name: 'fts:${schema.name}',
-        from: schema.version,
-        to: schema.version,
-        durationMs: sw.elapsedMilliseconds,
-        now: now);
-  }
-
-  /// Removes the destructive-migration backup file at [path] via the
-  /// platform file hooks. No-op when none is wired.
-  Future<void> deleteBackupFile(String path) async {
-    final d = db;
-    if (d is DirectSqliteDatabase && d.backupFileDeleter != null) {
-      await d.backupFileDeleter!(path);
-    }
   }
 
   /// Returns the registered table for [name], or throws if it is unknown.
@@ -763,192 +562,6 @@ class KernelDatabase with ChangeBusAwareLP {
   Future<T> read<T>(Future<T> Function(Tx tx) action) {
     _guardOutsideTx();
     return _transactions.read(action);
-  }
-
-  /// Executes SQL, notifying the test [TestHooks.onExecute] observer.
-  Future<void> traceExecute(String sql, [List<Object?>? arguments]) {
-    testHooks?.onExecute?.call(sql);
-    perf.recordStatement();
-    return db.execute(sql, arguments ?? const []);
-  }
-
-  /// Runs a raw query, notifying the test [TestHooks.onQuery] observer.
-  Future<List<Map<String, Object?>>> traceQuery(String sql,
-      [List<Object?>? arguments]) {
-    testHooks?.onQuery?.call(sql);
-    perf.recordQuery();
-    return db.rawQuery(sql, arguments ?? const []);
-  }
-
-  /// Runs SQLite `ANALYZE` to refresh query-planner statistics.
-  ///
-  /// Pass [store] to analyze one collection, or omit it to analyze the whole
-  /// database. This is normally maintenance work rather than a per-request
-  /// operation.
-  Future<void> analyze([String? store]) async {
-    if (store == null) {
-      await db.execute('ANALYZE');
-    } else {
-      await db.execute('ANALYZE ${DdlCompiler.quote(store)}');
-    }
-  }
-
-  /// Runs SQLite `PRAGMA wal_checkpoint(TRUNCATE)` to checkpoint and truncate the WAL.
-  Future<void> walCheckpoint() async {
-    if (capabilities.walSupported) {
-      await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
-    }
-  }
-
-  /// Runs a non-blocking `PRAGMA wal_checkpoint(PASSIVE)`; with
-  /// `wal_autocheckpoint=0` this is the WAL-bounding knob invoked after
-  /// write bursts (see `_noteWriteCommitted`).
-  Future<void> walCheckpointPassive() async {
-    if (capabilities.walSupported) {
-      await db.execute('PRAGMA wal_checkpoint(PASSIVE)');
-    }
-  }
-
-  /// Runs SQLite `VACUUM` or `PRAGMA incremental_vacuum` to reclaim unused database pages.
-  Future<void> vacuum({int? pages}) async {
-    if (pages != null) {
-      await db.execute('PRAGMA incremental_vacuum($pages)');
-    } else {
-      await db.execute('VACUUM');
-    }
-  }
-
-  /// Prunes orphaned or superseded outbox operations.
-  ///
-  /// Only outbox rows whose sync row is `clean` (edit settled) or absent
-  /// (orphaned) are removed — every other state is retained because the op
-  /// is the only record of a pending edit, and evicting it would lose
-  /// unsynced data and leave a dangling `op_id`. [maxEntries] is kept for
-  /// API compatibility but not enforced.
-  Future<int> pruneOutbox({int maxEntries = 10000}) async {
-    var pruned = 0;
-    await transaction((tx) async {
-      final exec = tx.executor;
-      // Never evict the op of a dirty/inFlight/conflict/blocked/error/
-      // quarantine row: it is the only record of the unsynced edit.
-      final orphaned = await exec.rawQuery(
-        'SELECT o.store, o.record_id FROM lp_outbox o '
-        'LEFT JOIN lp_sync_row s ON s.store = o.store AND s.record_id = o.record_id '
-        "WHERE s.record_id IS NULL OR s.sync_state = 'clean'",
-      );
-      for (final r in orphaned) {
-        final st = r['store']! as String;
-        final id = r['record_id']! as String;
-        await exec.delete('lp_outbox',
-            where: 'store = ? AND record_id = ?', whereArgs: [st, id]);
-        pruned++;
-      }
-    });
-    return pruned;
-  }
-
-  /// Runs the complete maintenance state machine:
-  /// 1. Compacts eligible archived rows across all stores
-  /// 2. Prunes the outbox
-  /// 3. Garbage-collects terminal sync bookkeeping ([gcSyncHousekeeping])
-  /// 4. Executes WAL checkpointing
-  /// 5. Optimizes planner statistics
-  Future<void> runMaintenance(
-      {Duration compactOlderThan = const Duration(days: 90),
-      Duration deadLetterRetention = const Duration(days: 90)}) async {
-    for (final store in storeNames) {
-      await compact(store, olderThan: compactOlderThan);
-    }
-    await pruneOutbox();
-    await gcSyncHousekeeping(deadLetterRetention: deadLetterRetention);
-    await walCheckpoint();
-    await analyze();
-  }
-
-  /// Bounds the sync bookkeeping tables that otherwise grow without bound:
-  /// removes op-queue rows that reached the terminal `done` state (their work
-  /// is complete and nothing reads them again — done rows are never blocking,
-  /// only `pending`/`failed` rows are) and prunes dead-letter audit rows older
-  /// than [deadLetterRetention].
-  Future<void> gcSyncHousekeeping(
-      {Duration deadLetterRetention = const Duration(days: 90)}) async {
-    await transaction((tx) async {
-      final exec = tx.executor;
-      await exec.delete('lp_op_queue', where: "state = 'done'");
-      final cutoff = now() - deadLetterRetention.inMilliseconds;
-      await exec.delete('lp_dead_letter', where: 'at < ?', whereArgs: [cutoff]);
-    });
-  }
-
-  /// Compacts synced archived rows older than [olderThan].
-  ///
-  /// Deletes ONLY rows that are `archived=1 AND sync_state='clean' AND hidden=0 AND last_seen < now−olderThan`
-  /// and drops their file refs and blob refcounts.
-  Future<int> compact(String store,
-      {required Duration olderThan, int? nowMs}) async {
-    final current = nowMs ?? now();
-    final cutoff = current - olderThan.inMilliseconds;
-    var count = 0;
-    const chunkSize = 250;
-    final schema = requireTable(store).schema;
-    while (true) {
-      final rows = await db.rawQuery(
-        'SELECT b.id FROM ${DdlCompiler.quote(store)} b '
-        'JOIN lp_sync_row sr ON sr.store = ? AND sr.record_id = b.id '
-        'WHERE b.archived = 1 AND b.hidden = 0 AND sr.sync_state = ? '
-        'AND sr.last_seen_at IS NOT NULL AND sr.last_seen_at < ? '
-        'ORDER BY b.id LIMIT ?',
-        [store, SyncState.clean.name, cutoff, chunkSize],
-      );
-      if (rows.isEmpty) break;
-      await transaction((tx) async {
-        final exec = tx.executor;
-        for (final r in rows) {
-          final id = r['id']! as String;
-          // Revalidate eligibility inside the transaction: a concurrent
-          // write between the candidate SELECT and here must prevent a
-          // stale deletion.
-          final stillEligible = await exec.rawQuery(
-            'SELECT b.id FROM ${DdlCompiler.quote(store)} b '
-            'JOIN lp_sync_row sr ON sr.store = ? AND sr.record_id = b.id '
-            'WHERE b.id = ? AND b.archived = 1 AND b.hidden = 0 '
-            'AND sr.sync_state = ? AND sr.last_seen_at IS NOT NULL '
-            'AND sr.last_seen_at < ? LIMIT 1',
-            [store, id, SyncState.clean.name, cutoff],
-          );
-          if (stillEligible.isEmpty) continue;
-          final existingRows = await exec.rawQuery(
-              'SELECT * FROM ${DdlCompiler.quote(store)} WHERE id = ? LIMIT 1',
-              [id]);
-          final existing = existingRows.isNotEmpty
-              ? decodeDbRow(schema, existingRows.first,
-                  cipher: fieldCipher, cryptoProvider: cryptoProvider)
-              : null;
-          await vanishRecordMetadata(exec, store, id);
-          await exec.delete('lp_outbox',
-              where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
-          await exec.delete(store, where: 'id = ?', whereArgs: [id]);
-          // Leave a purged sync-row marker: the sweep must treat the record
-          // as known (never re-fetch it while the remote copy is unchanged),
-          // otherwise every compacted row resurrects on bucket rotation.
-          await exec.update('lp_sync_row', {'access_state': 'purged'},
-              where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
-          tx.addChange(ChangeSet(store, {id}));
-          if (existing != null) {
-            tx.emitRecord(
-              store: store,
-              id: id,
-              origin: ChangeOrigin.local,
-              action: ChangeAction.purge,
-              oldRecord: existing,
-              newRecord: null,
-            );
-          }
-          count++;
-        }
-      });
-    }
-    return count;
   }
 
   /// The compiled per-store tables. Internal kernel access.

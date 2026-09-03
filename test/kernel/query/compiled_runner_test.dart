@@ -54,7 +54,7 @@ void main() {
       pocket,
       (sql, args) async {
         ran = true;
-        return pocket.traceQuery(sql, args);
+        return pocket.maintenance.traceQuery(sql, args);
       },
       plan,
       pageLimit: 0,
