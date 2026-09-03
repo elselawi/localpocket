@@ -8,6 +8,7 @@ import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart'
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/kernel/store.dart';
 import 'package:localpocket/src/kernel/compiled_query_runner.dart';
+import 'package:localpocket/src/kernel/read_service.dart';
 import 'package:test/test.dart';
 
 import '../helpers.dart';

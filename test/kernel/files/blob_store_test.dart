@@ -35,8 +35,7 @@ class _MinimalBlobStore extends BlobStore {
   Future<int?> size(String hash) => throw UnimplementedError();
 
   @override
-  Future<int> cleanTmp(
-          {Duration olderThan = const Duration(hours: 24)}) =>
+  Future<int> cleanTmp({Duration olderThan = const Duration(hours: 24)}) =>
       throw UnimplementedError();
 
   @override
@@ -734,8 +733,7 @@ void main() {
       expect(missing.toString(), contains('BlobMissingError'));
       expect(missing.toString(), contains('a' * 64));
 
-      final storage =
-          BlobStorageException(Exception('disk full'), 'b' * 64);
+      final storage = BlobStorageException(Exception('disk full'), 'b' * 64);
       expect(storage.hash, 'b' * 64);
       expect(storage.cause, isA<Exception>());
       expect(storage.toString(), contains('BlobStorageException'));
@@ -779,7 +777,8 @@ void main() {
           reason: 'bytes vanish with the process; nothing survives restarts');
     });
 
-    test('the base modifiedAt default reports unknown for every hash', () async {
+    test('the base modifiedAt default reports unknown for every hash',
+        () async {
       // A store that does not override modifiedAt (e.g. an OPFS-backed web
       // store with no cheap mtime) reports null so GC never ages its blobs.
       final bare = _MinimalBlobStore();
@@ -808,7 +807,8 @@ void main() {
           reason: 'a missing blob reports null size');
     });
 
-    test('delete, cleanTmp, listHashes and isDurable delegate to the inner '
+    test(
+        'delete, cleanTmp, listHashes and isDurable delegate to the inner '
         'store', () async {
       final store = EncryptingBlobStore(inner, encrypt: enc, decrypt: dec);
       final data = utf8.encode('delegated');

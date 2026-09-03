@@ -225,7 +225,8 @@ void main() {
       expect(await readAll(stream), List<int>.filled(64, 2));
     });
 
-    wireTest('peer reaps even when the LAST file is removed (empty attachments)',
+    wireTest(
+        'peer reaps even when the LAST file is removed (empty attachments)',
         (s) async {
       // Regression pin: the remote-shrink reconciliation previously only ran
       // when the pulled record's `attachments` was non-empty, so removing the ONLY

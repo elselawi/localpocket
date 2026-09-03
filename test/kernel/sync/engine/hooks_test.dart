@@ -22,7 +22,8 @@ void main() {
   );
 
   group('Remote & Sync Hooks', () {
-    test('pulling new remote record emits ChangeOrigin.remote with ChangeAction.create',
+    test(
+        'pulling new remote record emits ChangeOrigin.remote with ChangeAction.create',
         () async {
       final h = await EngineHarness.create(stores: [tasksSchema]);
       addTearDown(h.close);
@@ -55,7 +56,8 @@ void main() {
       await sub.cancel();
     });
 
-    test('pulling remote update on clean local record emits ChangeOrigin.remote update',
+    test(
+        'pulling remote update on clean local record emits ChangeOrigin.remote update',
         () async {
       final h = await EngineHarness.create(stores: [tasksSchema]);
       addTearDown(h.close);
@@ -67,7 +69,8 @@ void main() {
       await h.engine.syncNow();
 
       final remoteEvents = <RecordChangeEvent>[];
-      final sub = h.pocket.collection('tasks').onRemote().listen(remoteEvents.add);
+      final sub =
+          h.pocket.collection('tasks').onRemote().listen(remoteEvents.add);
 
       // Update on remote server
       h.mock.seed(
@@ -228,7 +231,8 @@ void main() {
       await sub.cancel();
     });
 
-    test('server transformed payload adoption in settlement emits ChangeOrigin.resolution',
+    test(
+        'server transformed payload adoption in settlement emits ChangeOrigin.resolution',
         () async {
       final h = await EngineHarness.create(stores: [tasksSchema]);
       addTearDown(h.close);
@@ -247,10 +251,10 @@ void main() {
           .listen(resolutionEvents.add);
 
       // Settle push with server-transformed payload
-      final op = (await h.pocket.outbox.readOp(
-          h.pocket.db, 'tasks', 'task00000000001'))!;
-      final pushedHash = payloadHash(
-          tasksSchema, {'title': 'Original Title', 'done': false, 'id': 'task00000000001'});
+      final op = (await h.pocket.outbox
+          .readOp(h.pocket.db, 'tasks', 'task00000000001'))!;
+      final pushedHash = payloadHash(tasksSchema,
+          {'title': 'Original Title', 'done': false, 'id': 'task00000000001'});
 
       final serverPayload = {
         'id': 'task00000000001',
@@ -280,4 +284,3 @@ void main() {
     });
   });
 }
-

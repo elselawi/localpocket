@@ -12,7 +12,8 @@ import 'dart:io';
 
 import 'package:localpocket/src/kernel/ids.dart'
     show generateRecordId, recordIdPattern;
-import 'package:localpocket/src/kernel/sync/sync_backend.dart' show formatPbTimestamp;
+import 'package:localpocket/src/kernel/sync/sync_backend.dart'
+    show formatPbTimestamp;
 
 class PbRecord {
   PbRecord({
@@ -670,7 +671,8 @@ class MockPbServer {
           for (final n in names) {
             fileBytes.remove('${r.id}/$n');
           }
-          r.attachments = r.attachments.where((n) => !names.contains(n)).toList();
+          r.attachments =
+              r.attachments.where((n) => !names.contains(n)).toList();
         } else if (part.name == 'imgs+' && part.filename != null) {
           final renamed = 'file_${_tick}_${part.filename}';
           fileBytes['${r.id}/$renamed'] = part.bytes;

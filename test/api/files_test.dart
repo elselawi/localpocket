@@ -1,7 +1,8 @@
 import 'dart:convert';
 
 import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/kernel/files/blob_store.dart' show MemoryBlobStore;
+import 'package:localpocket/src/kernel/files/blob_store.dart'
+    show MemoryBlobStore;
 import 'package:localpocket/src/api/writes.dart';
 import 'package:test/test.dart';
 

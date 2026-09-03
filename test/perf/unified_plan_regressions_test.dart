@@ -29,7 +29,8 @@ class _DelayedBatchBackend extends MockSyncBackend {
 
 void main() {
   group('unified performance-plan regression guards', () {
-    test('async normalization preserves inline results without requiring isolates',
+    test(
+        'async normalization preserves inline results without requiring isolates',
         () async {
       final schema = CollectionSchema<Object?>(
         name: 'patients',
@@ -99,7 +100,8 @@ void main() {
           reason: 'a current-shape pulled row must not lazily migrate forever');
     });
 
-    test('file-op drain resolves dependencies with set-based queries', () async {
+    test('file-op drain resolves dependencies with set-based queries',
+        () async {
       final statements = <String>[];
       final h = await EngineHarness.create();
       final db = h.pocket.db as DirectSqliteDatabase;
@@ -139,7 +141,8 @@ void main() {
       );
     });
 
-    test('batch settlement uses one local transaction and preserves edits in flight',
+    test(
+        'batch settlement uses one local transaction and preserves edits in flight',
         () async {
       final backend = _DelayedBatchBackend()..batchEnabled = true;
       final statements = <String>[];
@@ -158,22 +161,29 @@ void main() {
       final cycle = h.engine.syncNow();
       await backend.started.future;
 
-      await h.pocket.collection('widgets').patch(id, {'name': 'edited-in-flight'});
+      await h.pocket
+          .collection('widgets')
+          .patch(id, {'name': 'edited-in-flight'});
       statements.clear();
       backend.release.complete();
       await cycle;
 
       final local = await h.pocket.collection('widgets').get(id);
       expect(local!['name'], 'edited-in-flight');
-      expect((await h.pocket.outbox.readSyncRow(h.pocket.db, 'widgets', id))!.syncState,
+      expect(
+          (await h.pocket.outbox.readSyncRow(h.pocket.db, 'widgets', id))!
+              .syncState,
           SyncState.dirty,
           reason: 'an edit during HTTP must remain pending');
-      expect(await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull);
+      expect(
+          await h.pocket.outbox.readOp(h.pocket.db, 'widgets', id), isNotNull);
 
       final begins = statements.where((sql) => sql.startsWith('BEGIN')).length;
-      final pragmas = statements.where((sql) => sql.startsWith('PRAGMA')).length;
+      final pragmas =
+          statements.where((sql) => sql.startsWith('PRAGMA')).length;
       expect(begins, 1,
-          reason: 'successful batch settlement should use one local transaction');
+          reason:
+              'successful batch settlement should use one local transaction');
       expect(pragmas, lessThanOrEqualTo(2),
           reason: 'settlement batch must not toggle durability per item');
     });

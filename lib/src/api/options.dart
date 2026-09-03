@@ -15,7 +15,7 @@ import '../schema/store_def.dart';
 
 /// Re-exported so callers configuring durability can name it from the same
 /// import as the rest of the facade vocabulary.
-export '../kernel/local_pocket.dart' show DurabilityClass;
+export '../kernel/transaction_coordinator.dart' show DurabilityClass;
 
 /// {@template localpocket.local_pocket_options}
 /// Everything [LocalPocket.open] needs to bring up a database.

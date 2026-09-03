@@ -23,7 +23,11 @@ class MockRecord {
   String updated;
   List<String> attachments;
   RemoteRecord toRemote() => RemoteRecord(
-      id: id, store: store, updated: updated, data: data, attachments: attachments);
+      id: id,
+      store: store,
+      updated: updated,
+      data: data,
+      attachments: attachments);
 }
 
 /// Scripted behaviors consumed one at a time per method.
@@ -49,7 +53,6 @@ class MockSyncBackend implements SyncBackend {
   bool authValid = true;
   bool batchEnabled = false;
   int maxBatch = 25;
-
 
   @override
   Future<void> prepare() async {

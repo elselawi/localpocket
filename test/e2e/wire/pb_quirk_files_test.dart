@@ -289,7 +289,8 @@ void main() {
       // Whole-field wipe: ONE imgs- carrying every name at once.
       final wiped =
           await a.backend.updateRecordFiles(id: id, removeNames: names);
-      expect(wiped.attachments, isEmpty, reason: 'the wipe response carries `imgs`: []');
+      expect(wiped.attachments, isEmpty,
+          reason: 'the wipe response carries `imgs`: []');
       expect(await remoteImgs(s, id), isEmpty,
           reason: 'the next GET confirms the field is empty');
       if (mock != null) {
@@ -327,8 +328,8 @@ void main() {
               'EMPIRICAL PIN: a file upload bumps the server-managed updated '
               '(the mock re-stamps it too — a deliberate mirror that agrees)');
 
-      final cleared = await a.backend
-          .updateRecordFiles(id: id, removeNames: uploaded.attachments.cast<String>());
+      final cleared = await a.backend.updateRecordFiles(
+          id: id, removeNames: uploaded.attachments.cast<String>());
       final updatedAfterRemove =
           (await s.readRecord(s.store, id))!['updated']! as String;
       expect(updatedAfterRemove, isNot(updatedAfterUpload),

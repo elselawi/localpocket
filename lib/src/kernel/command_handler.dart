@@ -84,7 +84,7 @@ class KernelCommandHandler implements CommandHandler {
   final _watches = <String, StreamSubscription<dynamic>>{};
   final _fileUploads = FileUploadSessionRegistry();
   Timer? _uploadExpiryTimer;
-  final _fileDownloads = <String, _FileDownload>{};
+  final _fileDownloads = <String, FileDownloadState>{};
   SyncEngine? _syncEngine;
   _KernelTokenSource? _syncTokenSource;
   StreamSubscription<SyncStatus>? _syncStatusSubscription;
@@ -865,7 +865,7 @@ class KernelCommandHandler implements CommandHandler {
       refId: refId,
     );
     final id = 'f${++_counter}';
-    final download = _FileDownload(id);
+    final download = FileDownloadState(id);
     // The subscription is owned by the download registry and cancelled on
     // handler close.
     // ignore: cancel_subscriptions

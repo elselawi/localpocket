@@ -518,7 +518,8 @@ void main() {
       await h.pocket.db.execute(
           "UPDATE lp_op_queue SET next_retry_at = 0 WHERE kind = 'fileRemove'");
       await h.engine.syncNow();
-      expect(mock.records[recId]!.attachments, isEmpty, reason: 'remove applied');
+      expect(mock.records[recId]!.attachments, isEmpty,
+          reason: 'remove applied');
       refs = await h.pocket.files.list(store: 'widgets', recordId: recId);
       expect(refs, isEmpty);
       expect((await queueOpRow(h, 'fileRemove'))['state'], 'done');
@@ -535,7 +536,9 @@ void main() {
       });
 
       final recId = mock.seed(
-          store: 'widgets', data: {'name': 'w'}, attachments: ['remote_doc.pdf']);
+          store: 'widgets',
+          data: {'name': 'w'},
+          attachments: ['remote_doc.pdf']);
       mock.serverFiles['$recId/remote_doc.pdf'] = utf8.encode('pdf bytes');
       await h.engine.syncNow();
 
@@ -652,7 +655,9 @@ void main() {
       });
 
       final recId = mock.seed(
-          store: 'widgets', data: {'name': 'w'}, attachments: ['a.png', 'b.png']);
+          store: 'widgets',
+          data: {'name': 'w'},
+          attachments: ['a.png', 'b.png']);
       mock.serverFiles['$recId/a.png'] = utf8.encode('bytes a');
       mock.serverFiles['$recId/b.png'] = utf8.encode('bytes b');
       await h.engine.syncNow();
@@ -699,7 +704,9 @@ void main() {
       });
 
       final recId = mock.seed(
-          store: 'widgets', data: {'name': 'w'}, attachments: ['a.png', 'b.png']);
+          store: 'widgets',
+          data: {'name': 'w'},
+          attachments: ['a.png', 'b.png']);
       mock.serverFiles['$recId/a.png'] = utf8.encode('bytes a');
       mock.serverFiles['$recId/b.png'] = utf8.encode('bytes b');
       await h.engine.syncNow();
@@ -762,7 +769,9 @@ void main() {
       });
 
       final recId = mock.seed(
-          store: 'widgets', data: {'name': 'w'}, attachments: ['a.png', 'b.png']);
+          store: 'widgets',
+          data: {'name': 'w'},
+          attachments: ['a.png', 'b.png']);
       mock.serverFiles['$recId/a.png'] = utf8.encode('bytes a');
       mock.serverFiles['$recId/b.png'] = utf8.encode('bytes b');
       await h.engine.syncNow();
@@ -1047,8 +1056,8 @@ void main() {
         ],
       );
       addTearDown(h.close);
-      final recId =
-          mock.seed(store: 'widgets', data: {'name': 'w'}, attachments: ['f.bin']);
+      final recId = mock
+          .seed(store: 'widgets', data: {'name': 'w'}, attachments: ['f.bin']);
       // First pass: the prefetch download fails outright, so the ref stays
       // remote_only (observation happens in the same pass as prefetch).
       mock.script('downloadFile', [MockThrow(TransientNetworkError())]);
@@ -1089,8 +1098,8 @@ void main() {
         ],
       );
       addTearDown(h.close);
-      final recId =
-          mock.seed(store: 'widgets', data: {'name': 'w'}, attachments: ['f.bin']);
+      final recId = mock
+          .seed(store: 'widgets', data: {'name': 'w'}, attachments: ['f.bin']);
       await h.engine.syncNow(); // pull observes + prefetches the named file
       final downloadsBefore = mock.downloadFileCalls;
 
@@ -1207,8 +1216,8 @@ void main() {
       );
       addTearDown(h.close);
       final bytes = utf8.encode('prefetched content');
-      final recId =
-          mock.seed(store: 'widgets', data: {'name': 'w'}, attachments: ['pf.bin']);
+      final recId = mock
+          .seed(store: 'widgets', data: {'name': 'w'}, attachments: ['pf.bin']);
       mock.serverFiles['$recId/pf.bin'] = bytes;
       await h.engine.syncNow();
 
@@ -1228,8 +1237,8 @@ void main() {
         blobStore: MemoryBlobStore(),
       );
       addTearDown(h.close);
-      final recId =
-          mock.seed(store: 'widgets', data: {'name': 'w'}, attachments: ['photo.png']);
+      final recId = mock.seed(
+          store: 'widgets', data: {'name': 'w'}, attachments: ['photo.png']);
       await h.engine.syncNow();
       await h.pocket.files.attach(
           store: 'widgets',

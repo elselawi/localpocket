@@ -1,7 +1,28 @@
-/// Part of `local_pocket.dart` — the kernel context: the shared dependency
-/// set every kernel service receives. Services depend on this, never on the
-/// concrete facade; native and web construct it identically.
-part of 'local_pocket.dart';
+/// The kernel context: the shared dependency set every kernel service
+/// receives. Services depend on this, never on the concrete facade; native
+/// and web construct it identically.
+///
+/// This is a real library (not a hub part) precisely so that promoted
+/// services can import their explicit dependency set instead of inheriting
+/// the hub's whole private surface.
+library;
+
+import 'capabilities.dart' show SqliteCapabilities;
+import 'change_bus.dart' show ChangeBus;
+import 'cipher.dart' show CryptoProvider, FieldCipher;
+import 'database_adapter.dart' show Database;
+import 'execution_context.dart' show ExecutionContext;
+import 'file_service.dart' show LocalPocketFiles;
+import 'files/blob_store.dart' show BlobStore;
+import 'local_pocket.dart' show KernelDatabase, StoreTable, TestHooks;
+import 'mutation_service.dart' show MutationService;
+import 'perf_counters.dart' show PerfCounters;
+import 'read_service.dart' show ReadService;
+import 'sync/conflicts.dart' show Conflicts;
+import 'sync/op_queue.dart' show OpQueue;
+import 'sync/outbox.dart' show Outbox;
+import 'transaction_coordinator.dart' show TransactionCoordinator;
+import 'write_queue.dart' show WriteQueue;
 
 /// How long an interactive transaction session may sit without any
 /// session-scoped command before the kernel force-rolls it back. Reads and

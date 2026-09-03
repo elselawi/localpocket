@@ -254,7 +254,6 @@ void main() {
 
 /// Hermetic mock of an encrypted Database (e.g. SQLCipher wrapper)
 class _MockSqlCipherDatabase extends DirectSqliteDatabase {
-
   _MockSqlCipherDatabase._(
     super.rawDb, {
     required String path,

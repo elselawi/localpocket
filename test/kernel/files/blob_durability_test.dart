@@ -25,7 +25,8 @@ import '../../support/helpers.dart';
 /// the identical in-memory fallback semantics of [MemoryBlobStore].
 void main() {
   group('WebBlobStore durability wiring (structural)', () {
-    final source = File('lib/src/platform/web/worker/blob_store.dart').readAsStringSync();
+    final source =
+        File('lib/src/platform/web/worker/blob_store.dart').readAsStringSync();
 
     test('reports durability from a cached OPFS probe', () {
       expect(source, contains('Future<bool> get isDurable'));
@@ -121,8 +122,8 @@ void main() {
       final rec = generateRecordId();
       await pocket.collection('widgets').put({'id': rec, 'name': 'w'});
 
-      final ref = await pocket.files.attach(
-          store: 'widgets', recordId: rec, bytes: Stream.value([7, 8]));
+      final ref = await pocket.files
+          .attach(store: 'widgets', recordId: rec, bytes: Stream.value([7, 8]));
       expect(ref.state, 'pending_upload');
     });
   });

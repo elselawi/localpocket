@@ -1,5 +1,6 @@
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/transaction_coordinator.dart';
 import 'package:localpocket/src/kernel/sync/engine.dart';
 import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:test/test.dart';
