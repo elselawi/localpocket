@@ -115,6 +115,38 @@ void main() {
       expect(local['qty'], 5);
     });
 
+    test('quarantine parks a record once the attempt budget is exhausted',
+        () async {
+      var clock = 1000000;
+      final h = await EngineHarness.create(
+          config: testConfig(now: () => clock, maxAttempts: 2));
+      addTearDown(h.close);
+      final id = bucketAId();
+      h.mock.seed(store: 'widgets', data: {'qty': 1}, id: id);
+      await h.engine.syncNow();
+      expect((await sr(h.pocket, id))!.attemptCount, 1);
+
+      // Backoff elapses; the second quarantine exhausts the budget and parks
+      // the record (quarantine kept, but never due again).
+      clock = 2000000;
+      await h.engine.sweeper.sweepBucket('widgets', 0);
+      final row = await sr(h.pocket, id);
+      expect(row!.attemptCount, 2);
+      expect(row.nextRetryAt, greaterThan(clock + 1000000000),
+          reason: 'parked: never due again after the budget is exhausted');
+
+      // Parked records are never re-fetched by the sweep.
+      clock = 3000000;
+      final report = await h.engine.sweeper.sweepBucket('widgets', 0);
+      expect(report.fetched, 0, reason: 'parked record is not re-fetched');
+
+      // One dead-letter audit row per record (upsert, no accumulation).
+      final dead = await h.pocket.db
+          .query('lp_dead_letter', where: 'record_id = ?', whereArgs: [id]);
+      expect(dead, hasLength(1),
+          reason: 'repeated quarantines replace, never accumulate, the row');
+    });
+
     test('quarantine does not stall the store or block later records',
         () async {
       final h = await EngineHarness.create();

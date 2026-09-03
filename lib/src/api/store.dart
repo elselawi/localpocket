@@ -189,7 +189,8 @@ final class Store<S extends StoreDef<S>> {
   }
 
   /// Counts the distinct values of [field] among the records matching
-  /// [where].
+  /// [where]. Unlike [distinct], counting never materializes the values, so
+  /// omitting [limit] returns an exact, uncapped count.
   Future<int> countDistinct(
     FieldDef<S, Object?> field, {
     List<Cond<S>> where = const [],
@@ -207,7 +208,8 @@ final class Store<S extends StoreDef<S>> {
   }
 
   /// The distinct values of [field]. [limit] caps the scan; without it the
-  /// kernel applies its default cap for unbounded distinct scans.
+  /// kernel applies its built-in 1000-value cap (returning values is
+  /// memory-bounded, unlike [countDistinct], which counts exactly).
   Future<List<Object?>> distinct(
     FieldDef<S, Object?> field, {
     int? limit,

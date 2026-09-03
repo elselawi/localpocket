@@ -66,7 +66,13 @@ final class KernelContext {
   /// Capabilities detected for the active SQLite connection.
   final SqliteCapabilities capabilities;
 
-  /// Serializes all operations that use the owned connection.
+  /// Serializes WRITE-side operations that use the owned connection:
+  /// mutations, transaction sessions, and maintenance. Point READS (a
+  /// `get`/`query` outside a transaction) run directly on the connection and
+  /// are deliberately NOT queued here — on the single shared connection they
+  /// may observe uncommitted rows from an in-progress commit group within
+  /// this isolate (the write-queue + direct-read-snapshot model). Reads
+  /// issued through the transaction coordinator's `read()` ARE queued.
   final WriteQueue writeQueue;
 
   /// Performance counters.

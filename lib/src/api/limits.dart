@@ -7,8 +7,4 @@ abstract final class Limits {
   /// on dart2js, native i64, and the JSON wire alike, so an accidental raw
   /// crossing degrades to a harmless bound instead of corruption.
   static const int unbounded = 0x1FFFFFFFFFFFFF;
-
-  /// The engine's default cap on unbounded [distinct] scans — mirrors the
-  /// raw builder's `LIMIT 1000` fallback for distinct reads.
-  static const int distinctDefault = 1000;
 }

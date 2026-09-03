@@ -101,6 +101,12 @@ class Puller {
   /// The initial remote timestamp used when no cursor exists.
   static const String epoch = '1970-01-01 00:00:00.000Z';
 
+  /// `next_retry_at` sentinel for a quarantined record whose attempt budget
+  /// is exhausted: far enough in the future that the sweep's
+  /// `next_retry_at <= now` never selects it, yet small enough to survive
+  /// dart2js doubles (year 9999 in epoch ms).
+  static const int _quarantineParkMs = 253402300799000;
+
   int _nowMs() => config.now();
 
   // ------------------------------------------------------------------ pull --
@@ -699,6 +705,10 @@ class Puller {
     } catch (_) {
       payloadJson = jsonEncode({'raw': remote.data.toString()});
     }
+    // One audit row per (store, record_id): repeated quarantine attempts must
+    // not accumulate duplicate dead letters, so replace any prior row.
+    await exec.delete('lp_dead_letter',
+        where: 'store = ? AND record_id = ?', whereArgs: [store, remote.id]);
     await exec.insert('lp_dead_letter', {
       'at': _nowMs(),
       'kind': 'map_failure',
@@ -710,8 +720,14 @@ class Puller {
     final sr = await pocket.outbox.readSyncRow(exec, store, remote.id);
     // Backoff-gated retry: the sweeper re-fetches once `next_retry_at`
     // passes, so a malformed remote never stalls the pull cursor forever.
+    // The attempt budget is bounded by maxAttempts: a permanently malformed
+    // remote is parked (quarantine kept, never due again) for ops attention
+    // instead of being re-fetched forever.
     final attempt = (sr?.attemptCount ?? 0) + 1;
-    final retryAt = _nowMs() + config.delayFor(attempt).inMilliseconds;
+    final terminal = attempt >= config.maxAttempts;
+    final retryAt = terminal
+        ? _quarantineParkMs
+        : _nowMs() + config.delayFor(attempt).inMilliseconds;
     if (sr == null) {
       await exec.insert('lp_sync_row', {
         'store': store,

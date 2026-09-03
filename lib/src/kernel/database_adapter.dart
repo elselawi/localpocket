@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:sqlite3/common.dart';
 
+import 'errors.dart';
+
 /// LocalPocket database execution abstraction over [CommonDatabase].
 ///
 /// Implemented by direct native SQLite and managed web/worker runtimes.
@@ -123,6 +125,12 @@ class DirectSqliteDatabase implements Database {
   final Map<String, CommonPreparedStatement> _statementCache = {};
   final CommonDatabase _db;
   bool _isOpen = true;
+
+  /// Set when a rollback inside [transaction] failed: the single connection
+  /// is left inside an open transaction, so every later BEGIN fails until the
+  /// handle is recreated. Subsequent transactions fail fast and typed instead
+  /// of surfacing a raw "cannot start a transaction within a transaction".
+  bool _rollbackFailed = false;
 
   /// Platform hook reporting whether the destructive-migration backup file at
   /// [path] exists. Wired by the native factory (`dart:io`) and the web worker
@@ -324,6 +332,11 @@ class DirectSqliteDatabase implements Database {
     Future<T> Function(DatabaseExecutor txn) action, {
     bool? exclusive,
   }) async {
+    if (_rollbackFailed) {
+      throw StorageError(
+          'Database connection is wedged: an earlier rollback failed and left '
+          'an open transaction. Reopen the database to recover.');
+    }
     final beginSql =
         (exclusive == true) ? 'BEGIN EXCLUSIVE' : 'BEGIN IMMEDIATE';
     executeSync(beginSql);
@@ -334,9 +347,29 @@ class DirectSqliteDatabase implements Database {
     } catch (e) {
       try {
         executeSync('ROLLBACK');
-      } catch (_) {}
+      } catch (rollbackError) {
+        // `OR ROLLBACK` conflict handlers and some error paths already ended
+        // the transaction, so a rollback reporting "no transaction is active"
+        // is benign — nothing is left open. Any OTHER rollback failure leaves
+        // the transaction open on the single connection: every later BEGIN
+        // fails and the database is wedged until restart. Never swallow that
+        // case — surface a typed StorageError and poison the handle so later
+        // transactions fail fast and clearly.
+        if (!_rollbackSaysNoActiveTransaction(rollbackError)) {
+          _rollbackFailed = true;
+          throw StorageError('Rollback failed after a transaction error '
+              '($rollbackError); original error: $e. The database connection '
+              'is left in an open transaction; reopen to recover.');
+        }
+      }
       rethrow;
     }
+  }
+
+  static bool _rollbackSaysNoActiveTransaction(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('no transaction is active') ||
+        message.contains('cannot rollback');
   }
 
   static String _conflictClause(ConflictAlgorithm? algorithm) {

@@ -304,7 +304,10 @@ class KernelDatabase with ChangeBusAwareLP {
   /// Capabilities detected for the active SQLite connection.
   final SqliteCapabilities capabilities;
 
-  /// Serializes all operations that use the owned SQLite connection.
+  /// Serializes write-side operations that use the owned SQLite connection
+  /// (mutations, transaction sessions, maintenance). Point reads outside a
+  /// transaction run directly on the connection and are not queued — the
+  /// documented write-queue + direct-read-snapshot model.
   late final WriteQueue writeQueue;
 
   /// Performance counters for this database handle.
@@ -856,16 +859,34 @@ class KernelDatabase with ChangeBusAwareLP {
   /// Runs the complete maintenance state machine:
   /// 1. Compacts eligible archived rows across all stores
   /// 2. Prunes the outbox
-  /// 3. Executes WAL checkpointing
-  /// 4. Optimizes planner statistics
+  /// 3. Garbage-collects terminal sync bookkeeping ([gcSyncHousekeeping])
+  /// 4. Executes WAL checkpointing
+  /// 5. Optimizes planner statistics
   Future<void> runMaintenance(
-      {Duration compactOlderThan = const Duration(days: 90)}) async {
+      {Duration compactOlderThan = const Duration(days: 90),
+      Duration deadLetterRetention = const Duration(days: 90)}) async {
     for (final store in storeNames) {
       await compact(store, olderThan: compactOlderThan);
     }
     await pruneOutbox();
+    await gcSyncHousekeeping(deadLetterRetention: deadLetterRetention);
     await walCheckpoint();
     await analyze();
+  }
+
+  /// Bounds the sync bookkeeping tables that otherwise grow without bound:
+  /// removes op-queue rows that reached the terminal `done` state (their work
+  /// is complete and nothing reads them again — done rows are never blocking,
+  /// only `pending`/`failed` rows are) and prunes dead-letter audit rows older
+  /// than [deadLetterRetention].
+  Future<void> gcSyncHousekeeping(
+      {Duration deadLetterRetention = const Duration(days: 90)}) async {
+    await transaction((tx) async {
+      final exec = tx.executor;
+      await exec.delete('lp_op_queue', where: "state = 'done'");
+      final cutoff = now() - deadLetterRetention.inMilliseconds;
+      await exec.delete('lp_dead_letter', where: 'at < ?', whereArgs: [cutoff]);
+    });
   }
 
   /// Compacts synced archived rows older than [olderThan].

@@ -304,7 +304,7 @@ class SyncEngine {
   @visibleForTesting
   void handleLocalWrite(ChangeSet cs) {
     if (!_started || _paused || _authInvalid || _offline) return;
-    debugActions.add('push');
+    _recordAction('push');
     _scheduleCycle(config.pushDebounce);
   }
 
@@ -321,11 +321,11 @@ class SyncEngine {
     if (!pocket.storeNames.contains(hint.store)) return;
     final rec = hint.record;
     if (rec != null && hint.kind == BackendHintKind.changed) {
-      debugActions.add('fast:${hint.store}');
+      _recordAction('fast:${hint.store}');
       _fastPathTail = _fastPathTail.then((_) => _fastPath(rec));
       return;
     }
-    debugActions.add('pull:${hint.store}');
+    _recordAction('pull:${hint.store}');
     _scheduleCycle(config.pushDebounce, stores: [hint.store]);
   }
 
@@ -351,13 +351,13 @@ class SyncEngine {
   @visibleForTesting
   void handleTimer() {
     if (!_started) return;
-    debugActions.add('cycle');
-    unawaited(_runExclusiveCycle());
+    _recordAction('cycle');
+    _runBackgroundCycle();
   }
 
   /// Manual `db.sync.now()` → full cycle, returns a report.
   Future<SyncReportData> syncNow() {
-    debugActions.add('cycle');
+    _recordAction('cycle');
     return _runExclusiveCycle();
   }
 
@@ -377,9 +377,9 @@ class SyncEngine {
       _pendingFull = false;
       _pendingPullOnly.clear();
       if (full || pullOnly.isEmpty) {
-        unawaited(_runExclusiveCycle());
+        _runBackgroundCycle();
       } else {
-        unawaited(_runExclusiveCycle(pullOnly: pullOnly));
+        _runBackgroundCycle(pullOnly: pullOnly);
       }
     });
   }
@@ -392,7 +392,7 @@ class SyncEngine {
     _catchupTimer = Timer(Duration.zero, () {
       _catchupTimer = null;
       if (!_started) return;
-      unawaited(_runExclusiveCycle(pullOnly: stores));
+      _runBackgroundCycle(pullOnly: stores);
     });
   }
 
@@ -476,6 +476,30 @@ class SyncEngine {
     _cycleTail = result.then<SyncReportData>((_) => const SyncReportData(),
         onError: (Object _) => const SyncReportData());
     return result;
+  }
+
+  /// Records one trigger action in [debugActions], capped so a long-running
+  /// app cannot grow the debug list without bound.
+  static const int _maxDebugActions = 1000;
+
+  void _recordAction(String action) {
+    debugActions.add(action);
+    if (debugActions.length > _maxDebugActions) {
+      debugActions.removeRange(0, debugActions.length - _maxDebugActions);
+    }
+  }
+
+  /// Runs a full/pull-only cycle in the background. Background cycles have no
+  /// awaiting caller, so an unexpected non-SyncError failure (a raw backend
+  /// error escaping a lane) must be recorded and reflected in status rather
+  /// than surfacing as an unhandled zone error; the periodic timer retries.
+  /// [syncNow] keeps propagating its errors to the caller.
+  void _runBackgroundCycle({List<String>? pullOnly}) {
+    unawaited(_runExclusiveCycle(pullOnly: pullOnly).then<void>((_) {},
+        onError: (Object e, StackTrace st) {
+      _lastError ??= '$e';
+      unawaited(_transition(SyncEngineState.backoff));
+    }));
   }
 
   Future<SyncReportData> _doCycle({List<String>? pullOnly}) async {
