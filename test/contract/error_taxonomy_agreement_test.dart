@@ -1,5 +1,4 @@
 import 'package:localpocket/src/contract/contract.dart';
-import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:localpocket/src/platform/web/page/protocol.dart';
 import 'package:test/test.dart';

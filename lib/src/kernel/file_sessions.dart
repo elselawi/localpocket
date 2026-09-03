@@ -37,6 +37,12 @@ const Duration defaultUploadSessionTtl = Duration(minutes: 30);
 /// consumer grants more via a credit request (1 MiB).
 const int defaultFileDownloadWindowBytes = 1048576;
 
+/// Time an open download stream may sit without any chunk emission or credit
+/// before it is considered abandoned and its subscription is cancelled. Same
+/// containment rule as the interactive-transaction sweeper: nobody awaits
+/// the teardown, and teardown failures are contained.
+const Duration defaultDownloadSessionTtl = Duration(minutes: 30);
+
 /// An active bounded-chunk upload session.
 class FileUploadSession {
   /// Creates an upload session record.
@@ -262,6 +268,10 @@ class FileDownloadState {
 
   /// Bytes pushed to the consumer that have not been credited back yet.
   int outstanding = 0;
+
+  /// Last time this download did anything (a chunk was emitted or a credit
+  /// arrived); the idle sweeper cancels the stream past the session TTL.
+  DateTime lastActivity = DateTime.now();
 
   /// The source stream subscription; paused while [outstanding] fills the
   /// credit window, resumed by a credit request. Cancelled on handler close.

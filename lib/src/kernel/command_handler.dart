@@ -83,8 +83,11 @@ class _SavepointSession {
 
 /// The kernel-side command dispatcher.
 class KernelCommandHandler implements CommandHandler {
+  /// Creates the dispatcher. [downloadSessionTtl] bounds the idle lifetime
+  /// of open file-download sessions (see [defaultDownloadSessionTtl]).
   /// Internal: constructed by [KernelDatabase].
-  KernelCommandHandler(this.context) {
+  KernelCommandHandler(this.context,
+      {this.downloadSessionTtl = defaultDownloadSessionTtl}) {
     // One envelope per affected record; the change bus guarantees nothing
     // is emitted before the causing transaction committed.
     _changeSub = context.changeBus.events.listen((event) {
@@ -111,6 +114,10 @@ class KernelCommandHandler implements CommandHandler {
   final _fileUploads = FileUploadSessionRegistry();
   Timer? _uploadExpiryTimer;
   final _fileDownloads = <String, FileDownloadState>{};
+  Timer? _downloadSweepTimer;
+
+  /// Idle deadline for open download streams, injectable for tests.
+  final Duration downloadSessionTtl;
   SyncEngine? _syncEngine;
   _KernelTokenSource? _syncTokenSource;
   StreamSubscription<SyncStatusData>? _syncStatusSubscription;
@@ -912,6 +919,7 @@ class KernelCommandHandler implements CommandHandler {
     );
     final id = 'f${++_counter}';
     final download = FileDownloadState(id);
+    download.lastActivity = DateTime.now();
     // The subscription is owned by the download registry and cancelled on
     // handler close.
     // ignore: cancel_subscriptions
@@ -920,6 +928,7 @@ class KernelCommandHandler implements CommandHandler {
       (chunk) {
         final bytes = Uint8List.fromList(chunk);
         download.outstanding += bytes.length;
+        download.lastActivity = DateTime.now();
         _events.add(FileChunkEvent(stream: id, chunk: bytes));
         if (download.outstanding >= defaultFileDownloadWindowBytes) {
           sub.pause();
@@ -943,6 +952,7 @@ class KernelCommandHandler implements CommandHandler {
     );
     download.subscription = sub;
     _fileDownloads[id] = download;
+    _ensureDownloadSweeper();
     return FileOpenResult(stream: id);
   }
 
@@ -953,10 +963,40 @@ class KernelCommandHandler implements CommandHandler {
     }
     download.outstanding -= bytes;
     if (download.outstanding < 0) download.outstanding = 0;
+    download.lastActivity = DateTime.now();
     if (download.outstanding < defaultFileDownloadWindowBytes) {
       download.subscription.resume();
     }
     return const OkResult();
+  }
+
+  /// Starts the periodic download-session sweep on the first open stream; a
+  /// stream abandoned past [downloadSessionTtl] has its subscription
+  /// cancelled so the open kernel download cannot leak until handler close.
+  void _ensureDownloadSweeper() {
+    if (_downloadSweepTimer != null) return;
+    if (downloadSessionTtl <= Duration.zero) return;
+    final period =
+        Duration(microseconds: downloadSessionTtl.inMicroseconds ~/ 4);
+    _downloadSweepTimer = Timer.periodic(period, (_) {
+      if (_fileDownloads.isEmpty) {
+        _downloadSweepTimer?.cancel();
+        _downloadSweepTimer = null;
+        return;
+      }
+      final now = DateTime.now();
+      for (final entry in _fileDownloads.entries.toList()) {
+        if (now.difference(entry.value.lastActivity) <= downloadSessionTtl) {
+          continue;
+        }
+        _fileDownloads.remove(entry.key);
+        // Nobody awaits the teardown and there is no caller channel left to
+        // report to; contain any cancellation failure.
+        unawaited(entry.value.subscription
+            .cancel()
+            .then((_) {}, onError: (Object _, StackTrace __) {}));
+      }
+    });
   }
 
   /// Closes an in-progress download stream (an abandoned download is an
@@ -1192,6 +1232,8 @@ class KernelCommandHandler implements CommandHandler {
     _uploadExpiryTimer = null;
     _txSweepTimer?.cancel();
     _txSweepTimer = null;
+    _downloadSweepTimer?.cancel();
+    _downloadSweepTimer = null;
     _fileUploads.clear();
     for (final download in _fileDownloads.values) {
       unawaited(download.subscription.cancel());

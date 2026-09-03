@@ -1,4 +1,7 @@
 import 'package:localpocket/src/contract/contract.dart';
+import 'package:localpocket/src/kernel/file_sessions.dart'
+    show defaultFileDownloadWindowBytes;
+import 'package:localpocket/src/kernel/command_handler.dart';
 import 'package:localpocket/src/kernel/files/blob_store.dart'
     show MemoryBlobStore;
 import 'package:localpocket/src/kernel/local_pocket.dart' as kernel;
@@ -419,6 +422,102 @@ void main() {
         isA<OkResult>(),
       );
     });
+
+    test('a download abandoned past the TTL is swept (subscription cancelled)',
+        () async {
+      final store = _ChunkedBlobStore();
+      await store.put(Stream.value([1, 2]));
+      final idleDb = await kernel.KernelDatabase.open(
+        path: ':memory:',
+        stores: [Tasks.store.compiledSchema],
+        blobStore: store,
+      );
+      addTearDown(idleDb.close);
+      final col = idleDb.collection('tasks');
+      const id = 'sid0000000000e0';
+      await col.put({'id': id, 'title': 'stalled-file'});
+      await idleDb.files.attach(
+        store: 'tasks',
+        recordId: id,
+        bytes: Stream.value([1, 2]),
+        allowVolatileBlobs: true,
+      );
+
+      // A handler instance with a short download TTL owns its download
+      // registry and sweeper independently of the shared handler.
+      final ttl = const Duration(milliseconds: 120);
+      final sweeper =
+          KernelCommandHandler(idleDb.kernel, downloadSessionTtl: ttl);
+      Future<List<FileChunkEvent>> openAndStarve() async {
+        final events = <Event>[];
+        final sub = sweeper.events.listen(events.add);
+        addTearDown(sub.cancel);
+        final opened =
+            await sweeper.handle(FileOpenRequest(store: 'tasks', recordId: id));
+        (opened as FileOpenResult); // stream registered under its minted id
+        // One window lands, then no credits ever arrive: the stream stays
+        // paused and idle.
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (DateTime.now().isBefore(deadline) &&
+            events.whereType<FileChunkEvent>().length < 2) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(events.whereType<FileChunkEvent>(), isNotEmpty);
+        return events.whereType<FileChunkEvent>().toList();
+      }
+
+      await openAndStarve();
+      // Past the TTL the periodic sweep cancels the kernel-side stream.
+      await Future<void>.delayed(const Duration(milliseconds: 260));
+      // Handler close observes no further work from the swept stream; the
+      // sweeper timer self-cancels when the registry empties.
+      expect(() => sweeper.close(), returnsNormally);
+    });
+
+    test('credits keep a download alive across the idle window', () async {
+      final store = _ChunkedBlobStore();
+      final payload =
+          Stream.value(List.filled(defaultFileDownloadWindowBytes * 2, 7));
+      final idleDb = await kernel.KernelDatabase.open(
+        path: ':memory:',
+        stores: [Tasks.store.compiledSchema],
+        blobStore: store,
+      );
+      addTearDown(idleDb.close);
+      final col = idleDb.collection('tasks');
+      const id = 'sid0000000000e1';
+      await col.put({'id': id, 'title': 'live-file'});
+      await idleDb.files.attach(
+        store: 'tasks',
+        recordId: id,
+        bytes: payload,
+        allowVolatileBlobs: true,
+      );
+      final ttl = const Duration(milliseconds: 120);
+      final sweeper =
+          KernelCommandHandler(idleDb.kernel, downloadSessionTtl: ttl);
+      final events = <Event>[];
+      final sub = sweeper.events.listen(events.add);
+      addTearDown(sub.cancel);
+      final opened =
+          await sweeper.handle(FileOpenRequest(store: 'tasks', recordId: id));
+      final streamId = (opened as FileOpenResult).stream;
+
+      // Credits arrive faster than the TTL for several window lengths.
+      for (var i = 0; i < 3; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        await sweeper.handle(FileCreditRequest(stream: streamId, bytes: 256));
+        expect(
+            await sweeper.handle(FileCreditRequest(stream: streamId, bytes: 1)),
+            isA<OkResult>(),
+            reason: 'a credited stream stays in the registry');
+      }
+      await sweeper.handle(FileCloseRequest(stream: streamId)).timeout(
+          const Duration(seconds: 2),
+          onTimeout: () => fail('a credited stream was swept'));
+      await col.get(id); // database still responsive
+      await sweeper.close();
+    });
   });
 
   group('session-bound mutation vocabulary', () {
@@ -556,4 +655,19 @@ void main() {
       );
     });
   });
+}
+
+/// A blob store serving stored bytes as many single-byte chunks, so open
+/// downloads can be held at the credit window instead of completing after
+/// one chunk (the idle-window sweeper tests need a stream that stays open).
+class _ChunkedBlobStore extends MemoryBlobStore {
+  @override
+  Future<Stream<List<int>>> open(String hash) async {
+    final whole = await super.open(hash);
+    final data =
+        await whole.fold<List<int>>(<int>[], (acc, c) => acc..addAll(c));
+    return Stream.fromIterable([
+      for (final b in data) [b],
+    ]);
+  }
 }
