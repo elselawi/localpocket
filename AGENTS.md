@@ -57,6 +57,31 @@ adapter's).
 private surface). New command families and services go through `KernelContext`
 and hub-owned services — never as new library globals inside a part.
 
+## Vocabulary map
+
+One class per concept per layer, merged where concepts are identical. Merged
+pairs are marked; everything else is deliberately distinct (divergent data or
+behavioral) — do NOT "deduplicate" them into each other.
+
+| Concept | wire/contract | kernel | facade |
+|---|---|---|---|
+| record (typed row) | `RowData` (codec) | `Map<String,Object?>` domain row | `Row<S>` (immutable snapshot) |
+| page (query result) | `QueryRowsResult` | `Page` (items + cursor facts) | `Page<S>` (BEHAVIORAL: `next()`/`prev()` closures over `Cursor<S>`) |
+| query spec | `QuerySpecData` (no `Cond`) | query IR (`query/ir.dart`) | `QuerySpec<S>` (`Cond<S>`, `OrderTerm<S>`) |
+| search spec | `SearchSpecData` (has `all`) | search IR | `SearchSpec<S>` (no `all` — deliberately diverged; document, don't force) |
+| search hit | `SearchHitData` | search result rows | `SearchHit<S>` (typed) |
+| sync status | `SyncStatusData` (codec) | — (`SyncStatus` alias) | `SyncStatus` (alias, exported) |
+| sync report | `SyncReportData` (codec) | — (`SyncReport` alias) | `SyncReport` (alias, exported) |
+| change event | `CommittedChange` (wire) | `RecordChangeEvent` (engine) | `ChangeNotification` / `RecordChange<S>` |
+| conflict | `ConflictData` | `Conflict` (engine) | `Conflict` (facade view) |
+| file ref | `FileRefData` | `FileRef` (engine) | `FileRef` (facade) |
+| FTS declaration | — (fingerprint in store list) | `FtsSpec` (kernel type) | `ftsSpec()` builder in `schema_helpers.dart` (deliberate name; builds a `FtsSpec`) |
+| cursor | opaque token (`QueryRowsResult`) | `Cursor` (kernel mint/validate) | `Cursor<S>` (typed wrapper) |
+
+Merged: `SyncStatus`→`SyncStatusData` and `SyncReport`→`SyncReportData`
+(kernel duplicates deleted; codec stays in `contract/`; aliases keep the
+public names).
+
 ## Hard conventions
 
 **Errors.** One sealed family: `LocalPocketError` (`kernel/errors.dart`) for
