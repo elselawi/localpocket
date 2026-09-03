@@ -770,9 +770,18 @@ class KernelCommandHandler implements CommandHandler {
     // The subscription is owned by the watch registry and cancelled on
     // watch_cancel or handler close.
     // ignore: cancel_subscriptions
-    final sub = builder.watch().listen((List<Map<String, Object?>> rows) {
-      _events.add(WatchSnapshot(subscription: id, items: rows));
-    });
+    late final StreamSubscription<dynamic> sub;
+    // A refresh failure kills the watch (mirroring _watchOne) so a
+    // persistently failing query cannot leak the subscription forever.
+    sub = builder.watch().listen(
+      (List<Map<String, Object?>> rows) {
+        _events.add(WatchSnapshot(subscription: id, items: rows));
+      },
+      onError: (Object _) {
+        unawaited(sub.cancel());
+        _watches.remove(id);
+      },
+    );
     // ignore: cancel_subscriptions
     _watches[id] = sub;
     return Future.value(WatchStartedResult(subscription: id));

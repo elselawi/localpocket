@@ -374,7 +374,7 @@ void main() {
       );
     });
 
-    test('reserved system-table names fail at SQLite open', () {
+    test('reserved system-table prefixes fail typed at compile', () {
       for (final name in [
         'lp_sync_row',
         'lp_outbox',
@@ -386,9 +386,14 @@ void main() {
           version: 1,
           fields: [Field.text('a')],
         );
-        expect(openPocket(stores: [schema]),
-            throwsA(isA<sqlite.SqliteException>()),
-            reason: 'store named $name collides with a system table');
+        // A store colliding with the engine's metadata namespace is rejected
+        // at registration (typed) instead of failing with a raw
+        // SqliteException at open.
+        expect(
+            openPocket(stores: [schema]),
+            throwsA(isA<SchemaRegistrationError>().having(
+                (e) => e.message, 'message', contains('reserved prefix'))),
+            reason: 'store named $name is rejected at registration');
       }
     });
 
@@ -599,9 +604,12 @@ void main() {
     });
 
     test(
-        'double quotes in store names are escaped, field names with quotes '
-        'are rejected', () {
-      final schema = CollectionSchema<Object?>(
+        'quote characters in store names are rejected, field names with '
+        'quotes are rejected', () {
+      // A quote in a store name would break the FTS `content = '...'`
+      // reference and the adapter's `"<table>"` wrapping, so it is rejected
+      // at registration instead of relying on escaping.
+      final badStore = CollectionSchema<Object?>(
         name: 'we"ird',
         version: 1,
         fields: [Field.text('col')],
@@ -609,14 +617,12 @@ void main() {
           IndexSpec(['col'])
         ],
       );
-      final compiled = DdlCompiler(caps).compile(schema);
-      expect(compiled.tableDdl, contains('"we""ird"'));
-      expect(compiled.tableDdl, contains('"col" TEXT'));
-      expect(compiled.indexDdl.single, contains('"col"'));
-      expect(compiled.tableDdl, isNot(contains('"we"ird"')));
+      expect(
+          () => DdlCompiler(caps).compile(badStore),
+          throwsA(isA<SchemaRegistrationError>()
+              .having((e) => e.message, 'message', contains('quote'))));
 
-      // Field names no longer smuggle quotes: the strict identifier policy
-      // rejects them at registration instead of relying on escaping.
+      // Field names reject quotes via the strict identifier policy.
       final badField = CollectionSchema<Object?>(
         name: 't',
         version: 1,

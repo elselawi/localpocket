@@ -107,13 +107,25 @@ class PbClient {
         body: jsonEncode({
           'id': id,
           fieldNames.storeField: store,
-          fieldNames.dataField: jsonDecode(dataJson),
+          fieldNames.dataField: _decodePayload(dataJson),
         }));
     if (res.status == 400 && _isDuplicateId(res)) {
       throw DuplicateIdError(_errorMessage(res));
     }
     _expectStatus(res, [200, 201], uri);
     return _parseRecord(_decode(res));
+  }
+
+  /// Decodes a locally-stored payload (outbox/record `dataJson`) for the
+  /// wire. A corrupt payload can never be a valid request body; mapping the
+  /// decode failure to a typed [PayloadError] keeps a raw FormatException from
+  /// escaping the boundary (the pusher handles PayloadError as terminal).
+  Object? _decodePayload(String dataJson) {
+    try {
+      return jsonDecode(dataJson);
+    } catch (e) {
+      throw PayloadError('Corrupt local payload: $e');
+    }
   }
 
   /// Duplicate-id shapes (live-verified): PB v0.23+ returns
@@ -150,7 +162,7 @@ class PbClient {
     // hook or custom endpoint). See README "Concurrent edits & last-write-wins".
     final uri = _record(id);
     final res = await _sendAuth('PATCH', uri,
-        body: jsonEncode({fieldNames.dataField: jsonDecode(dataJson)}));
+        body: jsonEncode({fieldNames.dataField: _decodePayload(dataJson)}));
     _expectStatus(res, [200], uri);
     return _parseRecord(_decode(res));
   }
@@ -223,7 +235,7 @@ class PbClient {
           'body': {
             'id': op.id,
             fieldNames.storeField: op.store,
-            fieldNames.dataField: jsonDecode(op.dataJson),
+            fieldNames.dataField: _decodePayload(op.dataJson),
           },
         },
     ];

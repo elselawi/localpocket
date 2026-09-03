@@ -227,6 +227,29 @@ class Field {
     }
   }
 
+  /// Validates a store (collection) name. Store names become SQL table names
+  /// and are referenced in quoted and single-quoted contexts (FTS
+  /// `content = '<name>'`, adapter `"<table>"` wrapping), so they must not
+  /// carry quote characters — a `'` or `"` would break/inject those contexts —
+  /// and must not use SQLite's or the engine's reserved prefixes. Spaces,
+  /// unicode, and empty names remain legal (they are quoted throughout the
+  /// DDL layer); only quote characters and reserved prefixes are rejected.
+  static void validateStoreName(String name) {
+    if (name.contains("'") || name.contains('"')) {
+      throw SchemaRegistrationError(
+        'Store name "$name" must not contain quote characters: a quote would '
+        'break the FTS content reference and the database adapter\'s table '
+        'quoting.',
+      );
+    }
+    if (name.startsWith('sqlite_') || name.startsWith('lp_')) {
+      throw SchemaRegistrationError(
+        'Store name "$name" uses a reserved prefix (sqlite_ is SQLite-owned, '
+        'lp_ is the engine metadata namespace).',
+      );
+    }
+  }
+
   /// SQLite affinity for this field. Encrypted fields store base64
   /// ciphertext as TEXT (a STRICT INTEGER/REAL column would reject it).
   String get sqlType {

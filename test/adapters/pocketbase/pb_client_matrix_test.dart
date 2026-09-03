@@ -33,13 +33,15 @@ void main() {
       await expectLater(
         b.createRecord(
             id: generateRecordId(), store: 'widgets', dataJson: '{oops'),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<PayloadError>().having(
+            (e) => e.message, 'message', contains('Corrupt local payload'))),
       );
       expect(fake.sends, isEmpty, reason: 'no request for an unparseable body');
 
       await expectLater(
         b.updateRecord(id: generateRecordId(), dataJson: '["not","a","map"'),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<PayloadError>().having(
+            (e) => e.message, 'message', contains('Corrupt local payload'))),
       );
       expect(fake.sends, isEmpty,
           reason: 'updateRecord also validates before sending');

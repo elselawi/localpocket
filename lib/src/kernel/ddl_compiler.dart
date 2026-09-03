@@ -63,6 +63,11 @@ class DdlCompiler {
     final warnings = <String>[];
     final names = <String>{};
 
+    // Store names become SQL table names directly; validate before any DDL
+    // so a specials-bearing name fails typed instead of breaking/injecting
+    // the FTS module args or colliding with generated tables.
+    Field.validateStoreName(schema.name);
+
     for (final f in schema.fields) {
       Field.validateName(f.name);
       if (Field.reservedColumns.contains(f.name)) {
