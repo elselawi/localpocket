@@ -191,8 +191,55 @@ class Collection with ChangeBusAwareStore {
   Future<void> patchAllDirect(Map<String, Map<String, Object?>> patches) async {
     _ensureWritable();
     if (patches.isEmpty) return;
+    final exec = _ex;
+
+    // Chunked probe of the batch: domain rows first, then sync/outbox
+    // state for the rows that exist (same shape as putAllDirect's probe).
+    // N per-record LEFT JOIN round-trips collapse into ~3 chunked queries;
+    // the per-record apply below keeps its sequential error semantics.
+    const probePage = 2000;
+    final ids = patches.keys.toList();
+    final existingById = <String, Map<String, Object?>>{};
+    for (var start = 0; start < ids.length; start += probePage) {
+      final end = (start + probePage).clamp(0, ids.length);
+      final chunk = ids.sublist(start, end);
+      final ph = List.filled(chunk.length, '?').join(', ');
+      final rows = await exec.rawQuery(
+          'SELECT * FROM "${_table.tableName}" WHERE id IN ($ph)', chunk);
+      for (final r in rows) {
+        final id = r['id']! as String;
+        existingById[id] = decodeDbRow(_schema, r,
+            cipher: _pocket.fieldCipher,
+            cryptoProvider: _pocket.cryptoProvider);
+      }
+    }
+
+    final srById = <String, SyncRowState>{};
+    final opById = <String, OutboxOp>{};
+    final existingIds = existingById.keys.toList();
+    for (var start = 0; start < existingIds.length; start += probePage) {
+      final end = (start + probePage).clamp(0, existingIds.length);
+      final chunk = existingIds.sublist(start, end);
+      final ph = List.filled(chunk.length, '?').join(', ');
+      final args = [name, ...chunk];
+      final srRows = await exec.query('lp_sync_row',
+          where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+      for (final r in srRows) {
+        srById[r['record_id']! as String] = SyncRowState.fromRow(r);
+      }
+      final opRows = await exec.query('lp_outbox',
+          where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+      for (final r in opRows) {
+        opById[r['record_id']! as String] = OutboxOp.fromRow(r);
+      }
+    }
+
     for (final e in patches.entries) {
-      await patchDirect(e.key, e.value, coalesceChanges: true);
+      await patchDirect(e.key, e.value,
+          coalesceChanges: true,
+          prefetchedExisting: existingById[e.key],
+          prefetchedSr: srById[e.key],
+          prefetchedOp: opById[e.key]);
     }
     _tx!.addChange(ChangeSet(name, {for (final id in patches.keys) id}));
   }
@@ -256,44 +303,53 @@ class Collection with ChangeBusAwareStore {
   /// and the session-scoped `patch` wrapper.
   @internal
   Future<void> patchDirect(String id, Map<String, Object?> changes,
-      {bool coalesceChanges = false}) async {
+      {bool coalesceChanges = false,
+      Map<String, Object?>? prefetchedExisting,
+      SyncRowState? prefetchedSr,
+      OutboxOp? prefetchedOp}) async {
     _ensureWritable();
     final exec = _ex;
 
     // Fast path for dirty rows: the outbox payload already holds the full
     // desired state, so patch without re-reading the domain row. Sync-row
-    // and outbox state come from one LEFT JOIN round-trip.
-    final joined = await exec.rawQuery(
-        'SELECT s.*, '
-        'o.store AS o_store, o.record_id AS o_record_id, o.kind AS o_kind, '
-        'o.payload_json AS o_payload_json, o.base_updated AS o_base_updated, '
-        'o.base_hash AS o_base_hash, o.dirty_fields AS o_dirty_fields, '
-        'o.op_id AS o_op_id, o.created_at AS o_created_at, '
-        'o.updated_at AS o_updated_at, o.depends_on_op AS o_depends_on_op '
-        'FROM lp_sync_row s '
-        'LEFT JOIN lp_outbox o '
-        '  ON o.store = s.store AND o.record_id = s.record_id '
-        'WHERE s.store = ? AND s.record_id = ? LIMIT 1',
-        [name, id]);
+    // and outbox state come from one LEFT JOIN round-trip, or from a
+    // prefetched batch probe (patchAll) when supplied.
     SyncRowState? sr;
     OutboxOp? op;
-    if (joined.isNotEmpty) {
-      final row = joined.first;
-      sr = SyncRowState.fromRow(row);
-      if (row['o_kind'] != null) {
-        op = OutboxOp.fromRow({
-          'store': row['o_store'],
-          'record_id': row['o_record_id'],
-          'kind': row['o_kind'],
-          'payload_json': row['o_payload_json'],
-          'base_updated': row['o_base_updated'],
-          'base_hash': row['o_base_hash'],
-          'dirty_fields': row['o_dirty_fields'],
-          'op_id': row['o_op_id'],
-          'created_at': row['o_created_at'],
-          'updated_at': row['o_updated_at'],
-          'depends_on_op': row['o_depends_on_op'],
-        });
+    if (prefetchedSr != null || prefetchedOp != null) {
+      sr = prefetchedSr;
+      op = prefetchedOp;
+    } else {
+      final joined = await exec.rawQuery(
+          'SELECT s.*, '
+          'o.store AS o_store, o.record_id AS o_record_id, o.kind AS o_kind, '
+          'o.payload_json AS o_payload_json, o.base_updated AS o_base_updated, '
+          'o.base_hash AS o_base_hash, o.dirty_fields AS o_dirty_fields, '
+          'o.op_id AS o_op_id, o.created_at AS o_created_at, '
+          'o.updated_at AS o_updated_at, o.depends_on_op AS o_depends_on_op '
+          'FROM lp_sync_row s '
+          'LEFT JOIN lp_outbox o '
+          '  ON o.store = s.store AND o.record_id = s.record_id '
+          'WHERE s.store = ? AND s.record_id = ? LIMIT 1',
+          [name, id]);
+      if (joined.isNotEmpty) {
+        final row = joined.first;
+        sr = SyncRowState.fromRow(row);
+        if (row['o_kind'] != null) {
+          op = OutboxOp.fromRow({
+            'store': row['o_store'],
+            'record_id': row['o_record_id'],
+            'kind': row['o_kind'],
+            'payload_json': row['o_payload_json'],
+            'base_updated': row['o_base_updated'],
+            'base_hash': row['o_base_hash'],
+            'dirty_fields': row['o_dirty_fields'],
+            'op_id': row['o_op_id'],
+            'created_at': row['o_created_at'],
+            'updated_at': row['o_updated_at'],
+            'depends_on_op': row['o_depends_on_op'],
+          });
+        }
       }
     }
     if (sr != null && sr.syncState == SyncState.dirty && op != null) {
@@ -303,12 +359,18 @@ class Collection with ChangeBusAwareStore {
     }
 
     await _fallbackPatch(id, changes,
-        sr: sr, op: op, coalesceChanges: coalesceChanges);
+        sr: sr,
+        op: op,
+        prefetchedExisting: prefetchedExisting,
+        coalesceChanges: coalesceChanges);
   }
 
   Future<void> _fallbackPatch(String id, Map<String, Object?> changes,
-      {SyncRowState? sr, OutboxOp? op, bool coalesceChanges = false}) async {
-    final existing = await _readLogical(id);
+      {SyncRowState? sr,
+      OutboxOp? op,
+      Map<String, Object?>? prefetchedExisting,
+      bool coalesceChanges = false}) async {
+    final existing = prefetchedExisting ?? await _readLogical(id);
     if (existing == null) {
       throw RecordNotFoundException('No record $name/$id to patch.');
     }
