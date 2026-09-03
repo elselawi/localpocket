@@ -32,6 +32,18 @@ void main() {
     expect(decoded.status.lastError, 'boom');
   });
 
+  test('SyncReportData rejects a present-but-wrong-typed hadError flag', () {
+    // A wrong-typed flag used to decode as false, reporting an errored cycle
+    // as error-free.
+    expect(
+      () => contract.SyncReportData.fromJson(
+          {...const contract.SyncReportData().toJson(), 'hadError': 'yes'}),
+      throwsA(isA<contract.WireException>()),
+    );
+    // Absence keeps the documented default.
+    expect(const contract.SyncReportData().toJson()['hadError'], isFalse);
+  });
+
   test('a complete SyncReportData round-trips every field', () {
     const report = contract.SyncReportData(
       pulled: {'tasks': 4},

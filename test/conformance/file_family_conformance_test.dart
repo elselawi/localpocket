@@ -148,7 +148,7 @@ void main() {
             reason: 'the conformance blob store is a MemoryBlobStore');
       });
 
-      test('remove parks the ref as pending_remove; gc and cap round-trip',
+      test('remove of a never-uploaded ref vanishes it; gc and cap round-trip',
           () async {
         final id = generateRecordId();
         await attach(id, utf8.encode('to be removed'));
@@ -160,7 +160,10 @@ void main() {
           recordId: id,
         )))
             .refs;
-        expect(refs.single.state, 'pending_remove');
+        // remote_name is only set by upload completion, so this ref was
+        // never uploaded: remove drops it instead of queueing a bogus
+        // remote delete (pending_remove state needs an uploaded ref).
+        expect(refs, isEmpty);
 
         final gc = await runtime
             .send(const FileGcRequest(blobGraceMs: 0, tmpGraceMs: 0));

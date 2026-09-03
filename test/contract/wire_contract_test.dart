@@ -266,6 +266,31 @@ void main() {
         throwsA(isA<WireException>()),
       );
     });
+
+    test('list element failures name the failing index', () {
+      const request =
+          SearchRequest(store: 's', spec: SearchSpecData(term: 'x'));
+      expect(
+        () => ContractCodec.decodeResult(
+          request,
+          {
+            'tag': 'searchHits',
+            'payload': encodeWireValue({
+              'hits': [
+                {'store': 's', 'id': 'a', 'score': 1.0},
+                'not-a-hit',
+              ],
+            }),
+          },
+        ),
+        throwsA(isA<WireException>().having(
+          (e) => e.message,
+          'message',
+          contains('hits[1]'),
+        )),
+        reason: 'AGENTS gotcha: list decode errors name the failing index',
+      );
+    });
   });
 
   group('event round-trips', () {
@@ -411,6 +436,15 @@ void main() {
               'reconstructed into a DateTime');
       expect((decoded['row'] as Map)['__lp_t'], 'datetime');
       expect((decoded['row'] as Map)['v'], 1700000000000);
+    });
+
+    test('non-string map keys on a decode payload fail typed', () {
+      // The encode side stringifies keys; a decode payload with non-string
+      // keys is foreign or truncated. Silent key-dropping loses data.
+      expect(
+        () => decodeWireValue(<Object?, Object?>{1: 'a'}),
+        throwsA(isA<WireException>()),
+      );
     });
 
     test('non-representable values are rejected', () {

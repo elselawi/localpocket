@@ -443,18 +443,35 @@ class MockPbServer {
   }
 
   /// Minimal PB filter evaluator for the shapes the adapter emits:
-  /// `(f='v' && g>='v' [&& h>'v'])` and `(f='v' && id~'a%' [&& id>'v'])`.
+  /// `(f='v' && g>='v' [&& h>'v'])`, `(f='v' && id~'a%' [&& id>'v'])`, and
+  /// the tuple-keyset continuation `(...) && (updated>'U' || (updated='U'
+  /// && id>'I'))`.
   bool _matchesFilter(PbRecord r, String filter) {
     if (filter.isEmpty) return true;
-    final inner = filter.trim();
-    final noParens = inner.startsWith('(') && inner.endsWith(')')
-        ? inner.substring(1, inner.length - 1)
-        : inner;
-    final parts = _splitAnd(noParens);
-    for (final part in parts) {
+    // Top-level conjunction: depth-aware split so parenthesized groups stay
+    // intact (a group evaluates as a disjunction of conjunctions).
+    for (final part in _splitAnd(filter)) {
       if (!_evalPredicate(r, part.trim())) return false;
     }
     return true;
+  }
+
+  List<String> _splitOr(String s) {
+    final parts = <String>[];
+    var depth = 0;
+    var start = 0;
+    for (var i = 0; i < s.length; i++) {
+      final c = s[i];
+      if (c == '(') depth++;
+      if (c == ')') depth--;
+      if (depth == 0 && c == '|' && i + 1 < s.length && s[i + 1] == '|') {
+        parts.add(s.substring(start, i));
+        i++;
+        start = i + 1;
+      }
+    }
+    parts.add(s.substring(start));
+    return parts;
   }
 
   List<String> _splitAnd(String s) {
@@ -482,7 +499,25 @@ class MockPbServer {
       r'''^([A-Za-z_][A-Za-z0-9_]*)(~?)([>=<]*)\s*'((?:[^'\\]|\\.)*)'$''');
 
   bool _evalPredicate(PbRecord r, String pred) {
-    final m = _predRe.firstMatch(pred);
+    final p = pred.trim();
+    // A parenthesized group is a disjunction of conjunctions (the tuple
+    // keyset shape); parentheses are depth-aware so nested groups split
+    // correctly.
+    if (p.startsWith('(') && p.endsWith(')')) {
+      final inner = p.substring(1, p.length - 1);
+      for (final alt in _splitOr(inner)) {
+        var ok = true;
+        for (final part in _splitAnd(alt)) {
+          if (!_evalPredicate(r, part.trim())) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) return true;
+      }
+      return false;
+    }
+    final m = _predRe.firstMatch(p);
     if (m == null) return true; // unknown syntax: be permissive
     final field = m.group(1)!;
     final tilde = m.group(2)!;

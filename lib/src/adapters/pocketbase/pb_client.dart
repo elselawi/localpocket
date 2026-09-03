@@ -410,32 +410,68 @@ class PbClient {
     throw ProtocolError('Expected a JSON object, got ${decoded.runtimeType}.');
   }
 
-  RemoteRecord _parseRecord(Object? raw) {
+  /// Parses one remote record from a list or realtime payload.
+  ///
+  /// Wire policy: ABSENT optional fields default (projected sweep responses
+  /// legitimately omit `store`/`data`/attachments), but a PRESENT-BUT-
+  /// WRONG-TYPED field is a [ProtocolError] — silently defaulting it would
+  /// make a misconfigured store field parse every event with `store: ''`
+  /// and drop them all while realtime looks healthy.
+  static RemoteRecord parseRecord(Object? raw, PbFieldNames fieldNames) {
     if (raw is! Map) throw ProtocolError('Record is not a JSON object.');
     final id = raw['id'];
-    final store = raw[fieldNames.storeField];
     final updated = raw['updated'];
     if (id is! String || updated is! String) {
       throw ProtocolError('Record missing id/updated.');
     }
-    // `store` may be absent on projected sweep responses (fields=id,updated).
-    final storeStr = store is String ? store : '';
-    // data is passed through verbatim; the engine's `normalizeRemote`
+    final sf = fieldNames.storeField;
+    final storeVal = raw[sf];
+    final String store;
+    if (!raw.containsKey(sf) || storeVal == null) {
+      store = '';
+    } else if (storeVal is String) {
+      store = storeVal;
+    } else {
+      throw ProtocolError('Record field "$sf" is present but not a string.');
+    }
+    final df = fieldNames.dataField;
+    final dataVal = raw[df];
+    final Map<String, Object?> data;
+    if (!raw.containsKey(df) || dataVal == null) {
+      data = const {};
+    } else if (dataVal is Map) {
+      data = Map<String, Object?>.from(dataVal);
+    } else {
+      throw ProtocolError('Record field "$df" is present but not an object.');
+    }
+    final af = fieldNames.attachmentsField;
+    final attVal = raw[af];
+    final List<String> attachments;
+    if (!raw.containsKey(af) || attVal == null) {
+      attachments = const [];
+    } else if (attVal is List) {
+      for (var i = 0; i < attVal.length; i++) {
+        if (attVal[i] is! String) {
+          throw ProtocolError(
+              'Record field "$af"[$i] is present but not a string.');
+        }
+      }
+      attachments = attVal.cast<String>().toList();
+    } else {
+      throw ProtocolError('Record field "$af" is present but not a list.');
+    }
+    // data passes through verbatim; the engine's `normalizeRemote`
     // quarantines mismatches instead of failing the whole store.
-    final data = raw[fieldNames.dataField];
-    final dataMap =
-        data is Map ? Map<String, Object?>.from(data) : <String, Object?>{};
-    final attachments = raw[fieldNames.attachmentsField];
     return RemoteRecord(
       id: id,
-      store: storeStr,
+      store: store,
       updated: updated,
-      data: dataMap,
-      attachments: attachments is List
-          ? attachments.whereType<String>().toList()
-          : const <String>[],
+      data: data,
+      attachments: attachments,
     );
   }
+
+  RemoteRecord _parseRecord(Object? raw) => parseRecord(raw, fieldNames);
 
   /// Real PB batch item shape: `{body: <record>, status: <int>}`.
   PushResult _parsePushResult(Map<Object?, Object?> r, String opId) {

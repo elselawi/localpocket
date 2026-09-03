@@ -73,15 +73,25 @@ Object? decodeWireValue(Object? value) {
       // inner map is literal data: only its ENTRY VALUES decode recursively.
       final inner = value['v'];
       if (inner is! Map) throw WireException('Malformed map wire value.');
-      return {
-        for (final e in inner.entries)
-          if (e.key is String) e.key as String: decodeWireValue(e.value),
-      };
+      final out = <String, Object?>{};
+      for (final e in inner.entries) {
+        if (e.key is! String) {
+          throw WireException('Non-string map key on the wire: ${e.key}');
+        }
+        out[e.key as String] = decodeWireValue(e.value);
+      }
+      return out;
     }
-    return {
-      for (final e in value.entries)
-        if (e.key is String) e.key as String: decodeWireValue(e.value),
-    };
+    final plain = <String, Object?>{};
+    for (final e in value.entries) {
+      if (e.key is! String) {
+        // Silent key-dropping on a foreign payload is data loss; the encode
+        // side stringifies keys, so this is always malformed.
+        throw WireException('Non-string map key on the wire: ${e.key}');
+      }
+      plain[e.key as String] = decodeWireValue(e.value);
+    }
+    return plain;
   }
   if (value is List) {
     return [for (final v in value) decodeWireValue(v)];
@@ -168,15 +178,16 @@ String _optWireStringFallback(Object? v, String field, String fallback) {
   return _wireString(v, field);
 }
 
-/// Extracts a required list of strings; any non-string element is rejected.
+/// Extracts a required list of strings; any non-string element is rejected
+/// with the failing index named.
 List<String> _wireStringList(Object? v, String field) {
   if (v is List) {
     final out = <String>[];
-    for (final e in v) {
-      if (e is! String) {
-        throw WireException('Malformed wire field "$field".');
+    for (var i = 0; i < v.length; i++) {
+      if (v[i] is! String) {
+        throw WireException('Malformed wire field "$field[$i]".');
       }
-      out.add(e);
+      out.add(v[i] as String);
     }
     return out;
   }
@@ -184,15 +195,15 @@ List<String> _wireStringList(Object? v, String field) {
 }
 
 /// Extracts a required set of strings from a wire list; any non-string
-/// element is rejected.
+/// element is rejected with the failing index named.
 Set<String> _wireStringSet(Object? v, String field) {
   if (v is List) {
     final out = <String>{};
-    for (final e in v) {
-      if (e is! String) {
-        throw WireException('Malformed wire field "$field".');
+    for (var i = 0; i < v.length; i++) {
+      if (v[i] is! String) {
+        throw WireException('Malformed wire field "$field[$i]".');
       }
-      out.add(e);
+      out.add(v[i] as String);
     }
     return out;
   }

@@ -50,6 +50,33 @@ void main() {
       );
     });
 
+    test('a present-but-wrong-typed values list fails typed', () {
+      // A wrong-typed `values` on an inValues condition used to decode as
+      // null, silently turning a membership filter into an unfiltered query.
+      expect(
+        () => QueryConditionData.fromJson({
+          'field': 'x',
+          'op': 'inValues',
+          'values': 'nope',
+        }),
+        throwsA(isA<WireException>()),
+      );
+    });
+
+    test('order term desc rejects wrong-typed values', () {
+      expect(
+        () => QueryOrderTermData.fromJson({
+          'field': 'x',
+          'desc': 'yes',
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a string desc must not silently flip ordering',
+      );
+      expect(QueryOrderTermData.fromJson({'field': 'x'}).desc, isFalse);
+      expect(QueryOrderTermData.fromJson({'field': 'x', 'desc': true}).desc,
+          isTrue);
+    });
+
     test('wire values survive the encode/decode round-trip', () {
       const condition = QueryConditionData(
         'meta',
@@ -180,6 +207,19 @@ void main() {
           throwsA(isA<WireException>()));
       expect(
           () => SearchSpecData.fromJson('nope'), throwsA(isA<WireException>()));
+    });
+
+    test('SearchSpecData rejects present-but-wrong-typed fields', () {
+      // A wrong-typed limit used to decode as null (dropping the page cap),
+      // and wrong-typed flags used to silently decode as false.
+      expect(() => SearchSpecData.fromJson({'term': 'x', 'limit': '10'}),
+          throwsA(isA<WireException>()));
+      expect(() => SearchSpecData.fromJson({'term': 'x', 'all': 'yes'}),
+          throwsA(isA<WireException>()));
+      expect(() => SearchSpecData.fromJson({'term': 'x', 'includeArchived': 1}),
+          throwsA(isA<WireException>()));
+      expect(() => SearchSpecData.fromJson({'term': 'x', 'includeHidden': 'y'}),
+          throwsA(isA<WireException>()));
     });
   });
 }

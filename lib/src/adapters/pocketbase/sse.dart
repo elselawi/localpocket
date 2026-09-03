@@ -289,29 +289,12 @@ class PbRealtime {
     }
   }
 
-  RemoteRecord _parseRecord(Map<dynamic, dynamic> raw) {
-    final id = raw['id'];
-    final updated = raw['updated'];
-    // Same policy as the list path: missing id/updated is a protocol error,
-    // dropped here (the periodic pull is the backstop) — never normalized
-    // into an empty id/version that could travel through the fast path.
-    if (id is! String || updated is! String) {
-      throw ProtocolError('Realtime record missing id/updated.');
-    }
-    final store = raw[client.fieldNames.storeField];
-    final data = raw[client.fieldNames.dataField];
-    final attachments = raw[client.fieldNames.attachmentsField];
-    // `store` may be absent on projected responses, mirroring the list path.
-    return RemoteRecord(
-      id: id,
-      store: store is String ? store : '',
-      updated: updated,
-      data: data is Map ? Map<String, Object?>.from(data) : const {},
-      attachments: attachments is List
-          ? attachments.whereType<String>().toList()
-          : const [],
-    );
-  }
+  // Same parser as the list path (deduplicated, must never drift): missing
+  // id/updated is a protocol error, dropped here (the periodic pull is the
+  // backstop) — never normalized into an empty id/version that could travel
+  // through the fast path.
+  RemoteRecord _parseRecord(Map<dynamic, dynamic> raw) =>
+      PbClient.parseRecord(raw, client.fieldNames);
 }
 
 /// Incremental SSE text parser: `event:`, `data:`, `:` comments, and the

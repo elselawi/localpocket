@@ -112,7 +112,8 @@ final class SyncReportData {
         deadLettered: _int(json['deadLettered']),
         blocked: _int(json['blocked']),
         discarded: _int(json['discarded']),
-        hadError: json['hadError'] == true,
+        // A present wrong-typed flag must not read as an error-free cycle.
+        hadError: _optWireBool(json['hadError'], 'hadError', false),
       );
 
   /// Records pulled by store.

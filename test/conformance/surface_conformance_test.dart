@@ -87,8 +87,10 @@ void main() {
           expect(await files.isBlobStorageDurable, isFalse,
               reason: 'the conformance blob store is a MemoryBlobStore');
           await files.remove(ref);
-          expect(
-              (await files.list(recordId: id)).single.state, 'pending_remove');
+          // remote_name is only set by upload completion, so this ref was
+          // never uploaded: remove drops it instead of queueing a bogus
+          // remote delete.
+          expect(await files.list(recordId: id), isEmpty);
         });
 
         test('gc and storage cap round-trip the kernel counters', () async {
