@@ -53,4 +53,5 @@ part 'result.dart';
 part 'event.dart';
 part 'codec.dart';
 part 'error_codec.dart';
+part 'error_classifier.dart';
 part 'handler.dart';

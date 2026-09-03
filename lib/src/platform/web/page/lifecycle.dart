@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import '../../../contract/contract.dart';
-import 'protocol.dart';
 
 /// Fails every worker-owned stream with a [DatabaseWorkerClosedException]
 /// without closing the controllers. The graceful `close()` owns controller

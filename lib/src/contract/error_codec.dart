@@ -8,7 +8,7 @@ Map<String, Object?> encodeError(Object error) {
   String message = error.toString();
   Map<String, Object?>? details;
   if (error is LocalPocketError) {
-    typeName = _localPocketErrorType(error);
+    typeName = canonicalErrorType(error);
     message = error.message;
     if (error is ValidationException && error.field != null) {
       details = {'field': error.field};
@@ -29,27 +29,26 @@ Map<String, Object?> encodeError(Object error) {
   } else if (error is SyncError) {
     // Sync failures keep their subtype identity so the engine's retry /
     // dead-letter decisions survive the boundary on every runtime.
-    typeName = _syncErrorType(error);
+    typeName = canonicalErrorType(error);
     message = error.message;
     if (error is ServerBusyError && error.retryAfter != null) {
       details = {'retryAfter': error.retryAfter};
     }
-  } else if (error is WireException) {
-    typeName = 'WireException';
-    message = error.message;
-  } else if (error is StateError) {
-    typeName = 'StateError';
-    message = error.message;
-  } else if (error is RangeError) {
-    // RangeError before ArgumentError: it extends it, so a later check would
-    // be unreachable and range failures would cross the wire mislabeled.
-    typeName = 'RangeError';
-    message = '${error.message}';
-  } else if (error is ArgumentError) {
-    typeName = 'ArgumentError';
-    message = '${error.message}';
   } else {
-    typeName = 'unknown';
+    typeName = canonicalErrorType(error);
+    // Only the envelope and runtime-error families carry a `message` getter;
+    // named categories without one keep their full textual form.
+    if (error is WireException) {
+      message = error.message;
+    } else if (error is StateError) {
+      message = error.message;
+    } else if (error is RangeError) {
+      // RangeError keeps only its message text on the wire, never the
+      // index/attempt machinery.
+      message = '${error.message}';
+    } else if (error is ArgumentError) {
+      message = '${error.message}';
+    }
   }
   return {
     'type': typeName,
@@ -57,44 +56,6 @@ Map<String, Object?> encodeError(Object error) {
     if (details != null) 'details': details,
   };
 }
-
-String _localPocketErrorType(LocalPocketError error) => switch (error) {
-      ValidationException() => 'ValidationException',
-      UniqueConstraintException() => 'UniqueConstraintException',
-      NotNullConstraintException() => 'NotNullConstraintException',
-      CheckConstraintException() => 'CheckConstraintException',
-      PrimaryKeyConstraintException() => 'PrimaryKeyConstraintException',
-      ForeignKeyConstraintException() => 'ForeignKeyConstraintException',
-      UnsupportedSchemaFeatureError() => 'UnsupportedSchemaFeatureError',
-      FtsUnavailableError() => 'FtsUnavailableError',
-      SchemaRegistrationError() => 'SchemaRegistrationError',
-      SchemaTooNewError() => 'SchemaTooNewError',
-      StorageError() => 'StorageError',
-      RecordNotFoundException() => 'RecordNotFoundException',
-      ConflictNotFoundException() => 'ConflictNotFoundException',
-      StaleCursorError() => 'StaleCursorError',
-      MissingLimitError() => 'MissingLimitError',
-      ConflictBlockedError() => 'ConflictBlockedError',
-      DestructiveMigrationRefusedError() => 'DestructiveMigrationRefusedError',
-      ReadOnlyTxError() => 'ReadOnlyTxError',
-      TypedStoreMismatchError() => 'TypedStoreMismatchError',
-      FieldNotSelectedError() => 'FieldNotSelectedError',
-    };
-
-String _syncErrorType(SyncError error) => switch (error) {
-      TransientNetworkError() => 'TransientNetworkError',
-      ServerBusyError() => 'ServerBusyError',
-      ServerError() => 'ServerError',
-      AuthError() => 'AuthError',
-      ForbiddenError() => 'ForbiddenError',
-      NotFoundError() => 'NotFoundError',
-      PayloadError() => 'PayloadError',
-      ProtocolError() => 'ProtocolError',
-      DuplicateIdError() => 'DuplicateIdError',
-      BatchFailedError() => 'BatchFailedError',
-      RemoteVersionConflict() => 'RemoteVersionConflict',
-      SyncIdentityError() => 'SyncIdentityError',
-    };
 
 /// Decodes a wire error into a typed error. Known kernel errors are
 /// reconstructed exactly; unknown categories degrade to [WireException] with

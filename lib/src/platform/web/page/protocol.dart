@@ -5,12 +5,17 @@
 /// [webProtocolVersion]; a mismatch must fail with a typed exception.
 library;
 
+export '../../../contract/contract.dart'
+    show
+        DatabaseWorkerClosedException,
+        DatabaseWorkerTimeoutException,
+        ProtocolEnvelopeException,
+        ProtocolMismatchException;
+
 // Envelope fields are documented above; per-constant docs would add noise.
 // ignore_for_file: public_member_api_docs
 
-import '../../../contract/contract.dart' show WireException;
-import '../../../kernel/errors.dart';
-import '../../../kernel/sync/sync_backend.dart';
+import '../../../contract/contract.dart';
 
 /// Protocol version for every envelope. Bump on incompatible changes.
 /// v2: all reads are compiled query plans. v3: response `hasMore` → `hasNext`
@@ -65,81 +70,7 @@ class WireErrorCode {
 
 /// Maps an arbitrary error object to a stable, minification-safe wire error
 /// category string.
-String stableWireErrorType(Object error) {
-  // LocalPocket core errors
-  if (error is LocalPocketError) {
-    if (error is ValidationException) return 'ValidationException';
-    if (error is UniqueConstraintException) return 'UniqueConstraintException';
-    if (error is NotNullConstraintException) {
-      return 'NotNullConstraintException';
-    }
-    if (error is CheckConstraintException) return 'CheckConstraintException';
-    if (error is PrimaryKeyConstraintException) {
-      return 'PrimaryKeyConstraintException';
-    }
-    if (error is ForeignKeyConstraintException) {
-      return 'ForeignKeyConstraintException';
-    }
-    if (error is StorageError) return 'StorageError';
-    if (error is RecordNotFoundException) return 'RecordNotFoundException';
-    if (error is ConflictNotFoundException) {
-      return 'ConflictNotFoundException';
-    }
-    if (error is SchemaTooNewError) return 'SchemaTooNewError';
-    if (error is FtsUnavailableError) return 'FtsUnavailableError';
-    // Checked before SchemaRegistrationError: it is a subtype of it, so
-    // this must come first to be reachable.
-    if (error is UnsupportedSchemaFeatureError) {
-      return 'UnsupportedSchemaFeatureError';
-    }
-    if (error is SchemaRegistrationError) return 'SchemaRegistrationError';
-    if (error is StaleCursorError) return 'StaleCursorError';
-    if (error is MissingLimitError) return 'MissingLimitError';
-    if (error is ConflictBlockedError) return 'ConflictBlockedError';
-    if (error is DestructiveMigrationRefusedError) {
-      return 'DestructiveMigrationRefusedError';
-    }
-    if (error is ReadOnlyTxError) return 'ReadOnlyTxError';
-    if (error is TypedStoreMismatchError) return 'TypedStoreMismatchError';
-    if (error is FieldNotSelectedError) return 'FieldNotSelectedError';
-    return 'LocalPocketError';
-  }
-
-  // Sync & transport errors
-  if (error is SyncError) {
-    if (error is TransientNetworkError) return 'TransientNetworkError';
-    if (error is ServerBusyError) return 'ServerBusyError';
-    if (error is ServerError) return 'ServerError';
-    if (error is AuthError) return 'AuthError';
-    if (error is ForbiddenError) return 'ForbiddenError';
-    if (error is NotFoundError) return 'NotFoundError';
-    if (error is PayloadError) return 'PayloadError';
-    if (error is ProtocolError) return 'ProtocolError';
-    if (error is DuplicateIdError) return 'DuplicateIdError';
-    if (error is BatchFailedError) return 'BatchFailedError';
-    if (error is RemoteVersionConflict) return 'RemoteVersionConflict';
-    if (error is SyncIdentityError) return 'SyncIdentityError';
-    return 'SyncError';
-  }
-
-  // Malformed contract envelope: classified consistently across legs so a
-  // decode failure on web matches the loopback behavior.
-  if (error is WireException) return 'WireException';
-
-  // Standard Dart exceptions
-  if (error is ProtocolEnvelopeException) return 'ProtocolEnvelopeException';
-  if (error is DatabaseWorkerClosedException) {
-    return 'DatabaseWorkerClosedException';
-  }
-  if (error is ProtocolMismatchException) return 'ProtocolMismatchException';
-  if (error is RangeError) return 'RangeError';
-  if (error is StateError) return 'StateError';
-  if (error is ArgumentError) return 'ArgumentError';
-  if (error is FormatException) return 'FormatException';
-  if (error is UnsupportedError) return 'UnsupportedError';
-
-  return WireErrorCode.unknown;
-}
+String stableWireErrorType(Object error) => canonicalErrorType(error);
 
 /// {@template localpocket.web_request}
 /// A request envelope sent from the facade to the worker.
@@ -313,70 +244,10 @@ class WebError {
   }
 }
 
-/// {@template localpocket.database_worker_closed_exception}
-/// The worker or tab hosting the database is gone. Maps to the upstream
-/// `Channel to database worker is closed` condition.
-/// {@endtemplate}
-final class DatabaseWorkerClosedException implements Exception {
-  /// {@macro localpocket.database_worker_closed_exception}
-  DatabaseWorkerClosedException(
-      [this.message = 'The database worker is closed.']);
-
-  final String message;
-
-  @override
-  String toString() => 'DatabaseWorkerClosedException: $message';
-}
-
-/// {@template localpocket.database_worker_timeout_exception}
-/// A request to the worker did not complete within the per-request timeout.
-///
-/// The sender stays usable; a late response is abandoned.
-/// {@endtemplate}
-final class DatabaseWorkerTimeoutException implements Exception {
-  /// {@macro localpocket.database_worker_timeout_exception}
-  DatabaseWorkerTimeoutException({
-    required this.requestId,
-    required this.op,
-    required this.timeout,
-  });
-
-  final int requestId;
-  final String op;
-  final Duration timeout;
-
-  @override
-  String toString() => 'DatabaseWorkerTimeoutException: "$op" (request '
-      '$requestId) did not complete within ${timeout.inMilliseconds} ms.';
-}
-
-/// {@template localpocket.protocol_mismatch_exception}
-/// The other end speaks a different protocol version.
-/// {@endtemplate}
-final class ProtocolMismatchException implements Exception {
-  /// {@macro localpocket.protocol_mismatch_exception}
-  ProtocolMismatchException({required this.expected, required this.actual});
-
-  final int expected;
-  final int actual;
-
-  @override
-  String toString() =>
-      'ProtocolMismatchException: expected version $expected, got $actual';
-}
-
-/// {@template localpocket.protocol_envelope_exception}
-/// A malformed envelope, an unknown operation, or an invalid field.
-/// {@endtemplate}
-final class ProtocolEnvelopeException implements Exception {
-  /// {@macro localpocket.protocol_envelope_exception}
-  ProtocolEnvelopeException(this.message);
-
-  final String message;
-
-  @override
-  String toString() => 'ProtocolEnvelopeException: $message';
-}
+// The worker transport exception vocabulary (ProtocolEnvelopeException and
+// friends) is defined beside the canonical classifier in the contract layer
+// so the worker and page projections name the same types; the definitions
+// are re-exported from this library for its consumers.
 
 /// {@template localpocket.remote_local_pocket_exception}
 /// A typed LocalPocket error that crossed the wire from the worker.

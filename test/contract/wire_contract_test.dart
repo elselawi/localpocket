@@ -597,11 +597,18 @@ void main() {
       expect(decodedRange.message, 'r');
     });
 
-    test('a truly unknown object degrades with a category name', () {
+    test('standard runtime errors are named; strangers degrade to unknown',
+        () {
       final encoded = encodeError(const FormatException('nope'));
-      expect(encoded['type'], 'unknown');
-      final decoded = decodeError(encoded) as WireException;
-      expect(decoded.message, contains('nope'));
+      expect(encoded['type'], 'FormatException');
+      // The message rides as the full textual form for getters without a
+      // plain message field.
+      expect(encoded['message'], contains('nope'));
+      // A genuinely unclassified object still degrades to the unknown
+      // category and decodes as the wire error type.
+      final unknown = encodeError(Object());
+      expect(unknown['type'], 'unknown');
+      expect(decodeError(unknown), isA<WireException>());
     });
 
     test('decoding a wire error without a message yields an empty message', () {
