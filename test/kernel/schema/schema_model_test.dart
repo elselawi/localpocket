@@ -1,8 +1,12 @@
 import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/sync/merge.dart';
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
+
+/// A resolver stub for type-preservation tests; never invoked.
+MergeResult? _noResolve(MergeContext ctx) => null;
 
 /// Schema model serialization round-trip, immutability, and cache tests.
 void main() {
@@ -307,21 +311,24 @@ void main() {
   group('ConflictPolicy', () {
     test('constructor and defaults factory preserve properties', () {
       const policy = ConflictPolicy(
-        collectionResolver: 'resolver',
-        fieldOverrides: {'a': 'ra', 'b': 'rb'},
+        collectionResolver: LocalWinsResolver(),
+        fieldOverrides: {'a': CounterResolver(), 'b': RemoteWinsResolver()},
         editsUnarchive: true,
       );
-      expect(policy.collectionResolver, 'resolver');
-      expect(policy.fieldOverrides, {'a': 'ra', 'b': 'rb'});
+      expect(policy.collectionResolver, isA<LocalWinsResolver>());
+      expect(policy.fieldOverrides.keys.toSet(), {'a', 'b'});
+      expect(policy.fieldOverrides['a'], isA<CounterResolver>());
+      expect(policy.fieldOverrides['b'], isA<RemoteWinsResolver>());
       expect(policy.editsUnarchive, isTrue);
 
       final defaults = ConflictPolicy.defaults(
-        collectionResolver: 'cr',
-        fieldOverrides: {'x': 'rx'},
+        collectionResolver: const CustomResolver(_noResolve),
+        fieldOverrides: {'x': const AppendOnlyListResolver()},
         editsUnarchive: true,
       );
-      expect(defaults.collectionResolver, 'cr');
-      expect(defaults.fieldOverrides, {'x': 'rx'});
+      expect(defaults.collectionResolver, isA<CustomResolver>());
+      expect(defaults.fieldOverrides.keys, ['x']);
+      expect(defaults.fieldOverrides['x'], isA<AppendOnlyListResolver>());
       expect(defaults.editsUnarchive, isTrue);
 
       const empty = ConflictPolicy();

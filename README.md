@@ -432,11 +432,11 @@ and more...
 
 ## CRUD
 
-Every mutation is a list of `Write`s — `Tasks.title.set(...)` builds one,
-and `Writes` provides the id and extra-field helpers. Writes apply inside
-a transaction: either all of them or none.
+Every mutation is a list composed of `Write` commands —
+`Tasks.title.set(...)` builds one, and `Writes` provides the id
+and extra-field helpers. Writes apply inside a transaction:
+either all of them or none.
 
-<!-- localpocket-compile: typed-readme -->
 ```dart
   await tasks.put([
     // Put operations are upserts but
@@ -597,7 +597,8 @@ a transaction: either all of them or none.
     QuerySpec(
       where: [
         Tasks.done.eq(false), // not done
-        Tasks.status.inValues([TaskStatus.todo, TaskStatus.done]), // one of these
+        Tasks.status
+            .inValues([TaskStatus.todo, TaskStatus.done]), // one of these
         Tasks.priority.between(1, 5), // priority in range
         Tasks.dueAt.isNull(), // no due date set
       ],
@@ -605,6 +606,7 @@ a transaction: either all of them or none.
       limit: 20,
     ),
   );
+  print(donePage.items.length);
 
   final allDone = await tasks.query(
     QuerySpec(
@@ -615,6 +617,7 @@ a transaction: either all of them or none.
       where: [Tasks.done.eq(true)],
     ),
   );
+  print(allDone.items.length);
 
   // conditions compose into bigger ones with
   // & (and), | (or) and ~ (not). parentheses
@@ -631,6 +634,7 @@ a transaction: either all of them or none.
       limit: 20,
     ),
   );
+  print(matching.items.length);
 
   // pages carry their own continuation. next()/prev().
   // hasNext/hasPrev are snapshot facts: they describe what the database
@@ -642,8 +646,9 @@ a transaction: either all of them or none.
       limit: 20,
     ),
   );
-  final nextPage = await firstPage.next();       // null when hasNext is false
-  final again = await nextPage!.prev();          // back to the first page
+  final nextPage = await firstPage.next(); // null when hasNext is false
+  final again = await nextPage!.prev(); // back to the first page
+  print(again!.items.length);
 
   // get reads one record by id.
   // null when there is no such record — it doesn't throw
@@ -651,11 +656,13 @@ a transaction: either all of them or none.
 
   // fields are read through the descriptor: row(Tasks.field)
   final oneTitle = oneTask?.call(Tasks.title);
+  print(oneTitle);
 
   // count returns how many rows match. nothing else
   final activeCount = await tasks.count(QuerySpec(
     where: [Tasks.done.eq(false)],
   ));
+  print(activeCount);
 
   // ids returns the matching record ids
   // instead of whole rows
@@ -666,6 +673,7 @@ a transaction: either all of them or none.
       limit: 100,
     ),
   );
+  print(openIds);
 
   // sum / min / max / avg work on number fields only
   // (integer, real, date) — anything else won't compile.
@@ -891,14 +899,13 @@ a transaction: either all of them or none.
 
 ## Synchronization
 
+### token provider
+
 First you need to define a token provider. LocalPocket doesn't ship an
 auth layer — you own the credentials. The following example signs in
 over PocketBase's plain HTTP auth endpoints:
 
 ```dart
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-
 final class PocketBaseTokens implements TokenProvider {
   PocketBaseTokens({
     required this.baseUrl,
@@ -939,7 +946,8 @@ final class PocketBaseTokens implements TokenProvider {
 
   @override
   // the auth record id: stable per account, unlike the rotating token
-  String get identity => _recordId ?? (throw StateError('ensureSignedIn() first'));
+  String get identity =>
+      _recordId ?? (throw StateError('ensureSignedIn() first'));
 
   /// One up-front sign-in, so `identity` is known before sync attaches.
   Future<void> ensureSignedIn() async {
@@ -991,6 +999,8 @@ final myTokenProvider = PocketBaseTokens(
   password: 'app-password',
 );
 ```
+
+### Sync operations
 
 Then define the sync options and attach the sync layer:
 
@@ -1050,27 +1060,6 @@ Then define the sync options and attach the sync layer:
   report.discarded; // Local edits discarded in favor of the remote.
 ```
 
-`attachPocketBaseSync` returns a `PocketBaseSync` — the same surface on
-native and web. On native it drives a real `SyncEngine` in-process; on web
-the engine runs inside the package's worker and the host delegates to it
-through the facade. The sync logic is never duplicated: `SyncEngine` is the
-only implementation, in the process on the VM and in the worker in the
-browser.
-
-**How the single wiring works on both platforms**
-
-- The store list is never restated. The backend takes it from the stores
-you passed to `LocalPocket.open` (`LocalPocketOptions.stores`) — there is
-exactly one place that lists stores.
-- One host per database. Repeated `attachPocketBaseSync(...)` calls
-return the same live host, so two engines can never double-push one
-outbox. `stop()` releases the slot: re-attach for fresh config, or call
-`start()` again to restart the same host (streams reopen fresh).
-- Tokens stay in your code. The `TokenProvider` lives in your app and
-returns a `Token`; its value crosses only through sync start, and when
-the host reports `authRequired` you refresh in-page and push the new
-token with `updateAuth`.
-- `identity` doubles as the sync `scopeId` on web.
 
 **Gotchas:**
 
@@ -1100,9 +1089,146 @@ resolvers cover the common shapes — `LocalWinsResolver`, `CounterResolver`,
 
 Conflicts that need a human are held in `store.conflicts` (a
 `StoreConflicts<S>`: `listOpen`, `watch`, `resolve`, `acceptLocal`,
-`acceptRemote`) on native and web alike.
+`acceptRemote`).
 
-### Concurrent edits on PocketBase are last-write-wins
+### Setting resolution policies
+
+Policies are declared on the store, not set at runtime: override
+`StoreDef.conflictPolicy` once and the engine applies it to every merge.
+This is where automated resolution is configured — most apps never open
+a conflict by hand.
+
+```dart
+final class Posts extends StoreDef<Posts> {
+  Posts._() : super(name: 'posts', version: 1);
+  static final Posts store = Posts._();
+
+  static final title = store.schema.text('title').req();
+  static final views = store.schema.integer('views');
+  static final tags = store.schema.jsonList<String>('tags');
+
+  @override
+  List<FieldDef<Posts, Object?>> get fields => [title, views, tags];
+
+  // ---- automated resolution policy ----
+  @override
+  ConflictPolicy? get conflictPolicy => const ConflictPolicy(
+        // Whole-record resolver: runs only when BOTH sides changed the
+        // record; returning null declines — conservative merge plus
+        // review escalation.
+        collectionResolver: CustomResolver(pick),
+        // Field-level overrides (top-level or dotted paths like
+        // 'meta.name'; the most specific entry wins):
+        fieldOverrides: {
+          'views': CounterResolver(max: 1000000), // base + Δlocal + Δremote
+          'tags': SetUnionWithDeletionWinsResolver(), // union; deletions win
+          'title': LocalWinsResolver(),
+        },
+        // Editing a locally-archived record unarchives it.
+        editsUnarchive: true,
+        // A push whose target was deleted remotely:
+        // conflict (default; never loses data) | recreate | discardLocal.
+        missingRemote: MissingRemotePolicy.conflict,
+      );
+
+  // A custom resolver sees base, local, remote, and both dirty sets,
+  // and returns the merged document — or null to escalate for review.
+  static MergeResult? pick(MergeContext ctx) {
+    if (ctx.dirtyLocal.contains('title') &&
+        ctx.dirtyRemote.contains('title')) {
+      return MergeResult(merged: {
+        ...ctx.remote,
+        'title': '${ctx.local['title']} / ${ctx.remote['title']}',
+      });
+    }
+    return null; // decline: conservative merge + review escalation
+  }
+}
+```
+
+`Tasks` below declares no policy: that IS the default configuration —
+three-way merge, overlapping fields take the remote value, and delete
+races escalate to `store.conflicts`.
+
+### Watching and resolving open conflicts
+
+```dart
+  final tasks = db.store(Tasks.store);
+
+  // Stream the open conflicts as they appear — the current list arrives
+  // with the first snapshot, then re-emits on every add and resolution.
+  final sub = tasks.conflicts.watch().listen((open) {
+    for (final c in open) {
+      // base/local/remote are typed Row snapshots at detection time;
+      // dirtyLocal/dirtyRemote name the fields each side changed.
+      print('${c.recordId}: local=${c.local(Tasks.title)} '
+          'remote=${c.remote(Tasks.title)}');
+      if (c.remoteDeleted) {
+        print('  ^ deleted remotely while this edit was offline');
+      }
+    }
+  });
+
+  // Resolve one by id: accept a side wholesale ...
+  await tasks.conflicts.acceptLocal('task00000000001');
+  await tasks.conflicts.acceptRemote('task00000000002');
+
+  // ... or hand-merge the fields you decide
+  // (fields you don't mention keep their local values).
+  await tasks.conflicts.resolve('task00000000003', merged: [
+    Tasks.title.set('Chosen by the user'),
+    Tasks.done.set(true),
+  ]);
+
+  // Or enumerate the backlog on demand instead of streaming.
+  final open = await tasks.conflicts.listOpen();
+  print('${open.length} open conflict(s)');
+
+  await sub.cancel();
+```
+
+**Gotchas:**
+
+1. **An open conflict blocks edits to that record.** While a conflict is
+   open, `put`/`upsert`/`patch` on the record throw
+   `ConflictBlockedError` — resolve it first. Reads keep working: the
+   record still appears in queries, watches, and search with its local
+   state.
+
+2. **The default policy never escalates a two-sided merge.** With no
+   resolvers configured, both sides' non-overlapping edits merge
+   automatically and overlapping fields take the remote value. An open
+   conflict therefore means either a configured resolver declined
+   (returned `null` or `needsReview`) — or a remote deletion raced a
+   local edit, which escalates by default (`missingRemote: conflict`).
+
+3. **A store-level resolver only sees genuine conflicts.** The collection
+   resolver runs only when BOTH sides changed the record; one-sided edits
+   merge by the classic three-way rules without consulting it. An
+   always-escalate resolver (returning `null`) never fires on one-sided
+   edits — by design, so routine convergence can't loop into new
+   conflicts.
+
+4. **`acceptRemote` on a deletion conflict purges the local record.** The
+   remote side is a tombstone (`conflict.remoteDeleted` is `true`);
+   accepting mirrors the deletion. To keep the record, `acceptLocal` —
+   the resolution pushes as a create and recreates it remotely.
+
+5. **Resolution methods throw when the conflict is gone.** `resolve`
+  throws `ConflictNotFoundException`; `acceptLocal`/`acceptRemote` go
+  straight to the engine and surface a `StateError`. Two racing
+  resolutions: one wins, the other throws. Resolving a locally-purged
+  record is not an error: the stale conflict (and its dangling sync
+  rows) is cleaned up.
+
+6. **Resolvers are native-only vocabulary.** A store carrying
+   `collectionResolver` or `fieldOverrides` cannot cross the web worker —
+   the open fails typed with `UnsupportedSchemaFeatureError` before any
+   DDL. Declare executable resolvers on native targets only;
+   `editsUnarchive` and `missingRemote` policies ride the manifest on
+   every platform.
+
+**Note: Concurrent edits on PocketBase are last-write-wins**
 
 PocketBase has no conditional (compare-and-swap) writes, so **concurrent
 edits to the same record from two clients resolve last-write-wins on the

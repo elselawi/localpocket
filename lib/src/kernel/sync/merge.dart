@@ -433,7 +433,7 @@ class MergePolicy {
   /// Per-field resolver overrides. Keys may be top-level (`'meta'`) or
   /// dotted paths (`'meta.name'`); the most specific key wins and a
   /// top-level key governs its nested children unless overridden.
-  final Map<String, Object> fieldOverrides;
+  final Map<String, ConflictResolver> fieldOverrides;
 
   /// Whether local content edits should unarchive records.
   final bool editsUnarchive;
@@ -445,31 +445,27 @@ Object? resolveFieldValue(
   Object? baseVal,
   Object? localVal,
   Object? remoteVal,
-  Object? resolverOrPolicy,
+  ConflictResolver resolver,
 ) {
-  if (resolverOrPolicy is SetUnionWithDeletionWinsResolver) {
-    return resolverOrPolicy.resolveField(baseVal, localVal, remoteVal);
+  if (resolver is SetUnionWithDeletionWinsResolver) {
+    return resolver.resolveField(baseVal, localVal, remoteVal);
   }
-  if (resolverOrPolicy is CounterResolver) {
-    return resolverOrPolicy.resolveField(baseVal, localVal, remoteVal);
+  if (resolver is CounterResolver) {
+    return resolver.resolveField(baseVal, localVal, remoteVal);
   }
-  if (resolverOrPolicy is AppendOnlyListResolver) {
-    return resolverOrPolicy.resolveField(baseVal, localVal, remoteVal);
+  if (resolver is AppendOnlyListResolver) {
+    return resolver.resolveField(baseVal, localVal, remoteVal);
   }
-  if (resolverOrPolicy is AppendOnlyLinesResolver) {
-    return resolverOrPolicy.resolveField(baseVal, localVal, remoteVal);
+  if (resolver is AppendOnlyLinesResolver) {
+    return resolver.resolveField(baseVal, localVal, remoteVal);
   }
-  if (resolverOrPolicy is LocalWinsResolver) {
+  if (resolver is LocalWinsResolver) {
     return localVal;
   }
-  if (resolverOrPolicy is RemoteWinsResolver) {
+  if (resolver is RemoteWinsResolver) {
     return remoteVal;
   }
-  if (resolverOrPolicy is ConflictResolver) {
-    // A generic resolver on a field: remote wins by default.
-    return remoteVal;
-  }
-  // Package default: remote wins.
+  // A generic (unclassified) ConflictResolver on a field: remote wins.
   return remoteVal;
 }
 
@@ -481,7 +477,7 @@ class _ReviewFlag {
 /// The most specific `fieldOverrides` entry governing [path], walking up from
 /// the exact dotted path to the top-level key. A top-level entry therefore
 /// governs all its nested children (audit #24).
-Object? _overrideForPath(MergePolicy? policy, String path) {
+ConflictResolver? _overrideForPath(MergePolicy? policy, String path) {
   final overrides = policy?.fieldOverrides;
   if (overrides == null || overrides.isEmpty) return null;
   var p = path;

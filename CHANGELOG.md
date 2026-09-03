@@ -1,5 +1,22 @@
 ## Unreleased
 
+- **Conflict resolution policies are publicly configurable.** The conflict
+  vocabulary is exported from the one import — `ConflictPolicy`,
+  `MissingRemotePolicy`, `ConflictResolver`, `MergeContext`, `MergeResult`,
+  and the built-in resolvers (`RemoteWinsResolver`, `LocalWinsResolver`,
+  `CounterResolver`, `SetUnionWithDeletionWinsResolver`,
+  `AppendOnlyListResolver`, `AppendOnlyLinesResolver`, `CustomResolver`) — so
+  applications can declare automated resolution on a store
+  (`StoreDef.conflictPolicy`) without reaching into internals. Every resolver
+  handle is typed: `collectionResolver` is `ConflictResolver?` and
+  `fieldOverrides` is a `Map<String, ConflictResolver>` (previously
+  `Object?`/`Map<String, Object>`, where a mistyped value silently acted as
+  remote-wins) — junk in a policy is now a compile error. Typed accordingly:
+  the internal `MergePolicy` mirror, and `resolveFieldValue`/
+  `_overrideForPath` take `ConflictResolver` directly; the runtime
+  re-classification guards in the puller/pusher merge paths are gone. The
+  README conflict section documents policy configuration end to end.
+
 - **Liveness hardening for long-lived streams and batch writes.** Highlights:
   - **Stalled realtime sessions reconnect**: an SSE session that delivers
     nothing (not even keepalives) for `realtimeStallTimeout` (default

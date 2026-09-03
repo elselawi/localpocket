@@ -9,6 +9,7 @@ export 'src/kernel/change_bus.dart' show ChangeAction, ChangeOrigin;
 export 'src/kernel/errors.dart';
 export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
 export 'src/kernel/schema.dart'
+export 'src/kernel/sync/merge.dart'
 export 'src/kernel/sync/status.dart'
 export 'src/schema/cond.dart';
 export 'src/schema/field_def.dart';

@@ -583,9 +583,8 @@ class Puller {
             'Corrupt base payload for record "${remote.id}": ${e.message}');
         return ApplyResult.quarantined;
       }
-      final resolver = schema.conflictPolicy.collectionResolver;
       final policy = MergePolicy(
-        collectionResolver: resolver is ConflictResolver ? resolver : null,
+        collectionResolver: schema.conflictPolicy.collectionResolver,
         fieldOverrides: schema.conflictPolicy.fieldOverrides,
         editsUnarchive: schema.conflictPolicy.editsUnarchive,
       );

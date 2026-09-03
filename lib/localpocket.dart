@@ -46,7 +46,34 @@ export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
 // The schema helper types store declarations name. The raw schema types
 // (CollectionSchema, Field, ...) are kernel-internal and not exported.
 export 'src/kernel/schema.dart'
-    show IndexSpec, IndexScope, FtsSpec, FtsNormalization, StoreMigration;
+    show
+        ConflictPolicy,
+        FtsSpec,
+        FtsNormalization,
+        IndexScope,
+        IndexSpec,
+        MissingRemotePolicy,
+        StoreMigration;
+
+// The conflict-resolution vocabulary store declarations name
+// (`StoreDef.conflictPolicy`): the merge context/result a resolver sees,
+// the resolver interface, the five built-in resolvers, and the custom
+// wrapper. The kernel's `MergePolicy` mirror and the engine internals stay
+// internal. A schema carrying executable resolvers still cannot cross the
+// web worker (see UnsupportedSchemaFeatureError) — these types compile on
+// every platform, the worker rejects stores that declare them.
+export 'src/kernel/sync/merge.dart'
+    show
+        AppendOnlyLinesResolver,
+        AppendOnlyListResolver,
+        ConflictResolver,
+        CounterResolver,
+        CustomResolver,
+        LocalWinsResolver,
+        MergeContext,
+        MergeResult,
+        RemoteWinsResolver,
+        SetUnionWithDeletionWinsResolver;
 
 // The typed error hierarchy: the public API throws these (Row.get throws
 // FieldNotSelectedError, stale cursors throw StaleCursorError, unsupported

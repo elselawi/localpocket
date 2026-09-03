@@ -454,10 +454,7 @@ class Pusher {
       required Map<String, Object?> localPayload}) async {
     final fetchedLogical = normalizeRemote(schema, fetched);
     final policy = MergePolicy(
-      collectionResolver:
-          schema.conflictPolicy.collectionResolver is ConflictResolver
-              ? schema.conflictPolicy.collectionResolver! as ConflictResolver
-              : null,
+      collectionResolver: schema.conflictPolicy.collectionResolver,
       fieldOverrides: schema.conflictPolicy.fieldOverrides,
       editsUnarchive: schema.conflictPolicy.editsUnarchive,
     );

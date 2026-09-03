@@ -2,6 +2,7 @@
 library;
 
 import 'package:collection/collection.dart' show ListEquality;
+import 'package:localpocket/src/kernel/sync/merge.dart';
 
 import 'errors.dart';
 
@@ -651,8 +652,8 @@ class ConflictPolicy {
   ///
   /// {@macro localpocket.conflict_policy}
   factory ConflictPolicy.defaults({
-    Object? collectionResolver,
-    Map<String, Object> fieldOverrides = const {},
+    ConflictResolver? collectionResolver,
+    Map<String, ConflictResolver> fieldOverrides = const {},
     bool editsUnarchive = false,
     MissingRemotePolicy missingRemote = MissingRemotePolicy.conflict,
   }) =>
@@ -666,10 +667,10 @@ class ConflictPolicy {
       );
 
   /// Optional resolver for whole-record conflicts.
-  final Object? collectionResolver;
+  final ConflictResolver? collectionResolver;
 
   /// Resolver overrides keyed by field name.
-  final Map<String, Object> fieldOverrides;
+  final Map<String, ConflictResolver> fieldOverrides;
 
   /// Whether local content edits should unarchive a record.
   final bool editsUnarchive;
