@@ -300,18 +300,18 @@ void main() {
           .collection('widgets')
           .put(record(id: generateRecordId(), name: 'x'));
       // Seed a terminal (done) op-queue row and an expired dead-letter row.
-      await pocket.db.execute(
-          "INSERT INTO lp_op_queue (op_id, store, record_id, kind, "
-          "payload_json, state, created_at) "
-          "VALUES ('op-done', 'widgets', 'r1', 'file_upload', '{}', 'done', 1)");
-      await pocket.db.execute(
-          "INSERT INTO lp_dead_letter (at, kind, store, record_id, error, "
-          "payload_json) VALUES (1, 'max_attempts', 'widgets', 'r2', 'e', '{}')");
+      await pocket.db.execute('INSERT INTO lp_op_queue (op_id, store, '
+          'record_id, kind, payload_json, state, created_at) VALUES '
+          '(\'op-done\', \'widgets\', \'r1\', \'file_upload\', \'{}\', '
+          '\'done\', 1)');
+      await pocket.db.execute('INSERT INTO lp_dead_letter (at, kind, store, '
+          'record_id, error, payload_json) VALUES (1, \'max_attempts\', '
+          '\'widgets\', \'r2\', \'e\', \'{}\')');
 
       await pocket.runMaintenance();
 
       final ops = await pocket.db.rawQuery(
-          "SELECT COUNT(*) c FROM lp_op_queue WHERE op_id = 'op-done'");
+          'SELECT COUNT(*) c FROM lp_op_queue WHERE op_id = \'op-done\'');
       expect(ops.single['c'], 0, reason: 'terminal op-queue rows are GCd');
       final dead =
           await pocket.db.rawQuery('SELECT COUNT(*) c FROM lp_dead_letter');
