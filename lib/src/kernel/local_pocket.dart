@@ -935,16 +935,14 @@ class KernelDatabase with ChangeBusAwareLP {
               where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
           tx.addChange(ChangeSet(store, {id}));
           if (existing != null) {
-            final changed = existing.keys.where((k) => k != 'id').toSet();
-            tx.addRecordEvent(RecordChangeEvent(
+            tx.emitRecord(
               store: store,
               id: id,
               origin: ChangeOrigin.local,
               action: ChangeAction.purge,
               oldRecord: existing,
               newRecord: null,
-              changedFields: changed,
-            ));
+            );
           }
           count++;
         }

@@ -80,6 +80,36 @@ class Tx {
   /// write allocates nothing for notifications.
   bool get wantsRecordEvents => _pocket.changeBus.hasEventListeners;
 
+  /// The one emission path for post-commit record change events: consults
+  /// [wantsRecordEvents] first (an unwatched write allocates nothing), then
+  /// buffers the event for post-commit delivery. When [changedFields] is
+  /// omitted it defaults to every non-`id` key of [oldRecord]/[newRecord]
+  /// (the purge/create shape); pass it explicitly for patch-shaped events.
+  void emitRecord({
+    required String store,
+    required String id,
+    required ChangeOrigin origin,
+    required ChangeAction action,
+    Map<String, Object?>? oldRecord,
+    Map<String, Object?>? newRecord,
+    Set<String>? changedFields,
+  }) {
+    if (!wantsRecordEvents) return;
+    addRecordEvent(RecordChangeEvent(
+      store: store,
+      id: id,
+      origin: origin,
+      action: action,
+      oldRecord: oldRecord,
+      newRecord: newRecord,
+      changedFields: changedFields ??
+          (oldRecord ?? newRecord ?? const {})
+              .keys
+              .where((k) => k != 'id')
+              .toSet(),
+    ));
+  }
+
   /// Scoped collection access bound to this transaction. The returned
   /// collection permanently carries this transaction's execution context.
   Collection collection(String name) => Collection.internal(

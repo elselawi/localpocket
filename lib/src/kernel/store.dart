@@ -287,7 +287,7 @@ class Collection with ChangeBusAwareStore {
     _tx!.addChange(ChangeSet(name, {id}));
     if (existing != null) {
       final changed = {...existing.keys}..remove('id');
-      _tx!.addRecordEvent(RecordChangeEvent(
+      _tx!.emitRecord(
         store: name,
         id: id,
         origin: ChangeOrigin.local,
@@ -295,7 +295,7 @@ class Collection with ChangeBusAwareStore {
         oldRecord: existing,
         newRecord: null,
         changedFields: changed,
-      ));
+      );
     }
   }
 
@@ -475,7 +475,7 @@ class Collection with ChangeBusAwareStore {
       _tx?.addChange(ChangeSet(name, {id}));
     }
     if (_tx?.wantsRecordEvents ?? false) {
-      _tx?.addRecordEvent(RecordChangeEvent(
+      _tx?.emitRecord(
         store: name,
         id: id,
         origin: ChangeOrigin.local,
@@ -483,7 +483,7 @@ class Collection with ChangeBusAwareStore {
         oldRecord: currentPayload,
         newRecord: merged,
         changedFields: dirtyFields.toSet(),
-      ));
+      );
     }
   }
 
@@ -711,17 +711,15 @@ class Collection with ChangeBusAwareStore {
       changedFieldsSet = dirtyFields.toSet();
     }
 
-    if (_tx?.wantsRecordEvents ?? false) {
-      _tx?.addRecordEvent(RecordChangeEvent(
-        store: name,
-        id: recordId,
-        origin: ChangeOrigin.local,
-        action: changeAction,
-        oldRecord: existingRow,
-        newRecord: vanished ? null : logical,
-        changedFields: changedFieldsSet,
-      ));
-    }
+    _tx?.emitRecord(
+      store: name,
+      id: recordId,
+      origin: ChangeOrigin.local,
+      action: changeAction,
+      oldRecord: existingRow,
+      newRecord: vanished ? null : logical,
+      changedFields: changedFieldsSet,
+    );
 
     if (!coalesceChanges) {
       _tx?.addChange(ChangeSet(name, {recordId}));
@@ -878,15 +876,14 @@ class Collection with ChangeBusAwareStore {
     }
     if (wantsEvents) {
       for (final (rid, logical) in logicals) {
-        _tx!.addRecordEvent(RecordChangeEvent(
+        _tx!.emitRecord(
           store: name,
           id: rid,
           origin: ChangeOrigin.local,
           action: ChangeAction.create,
           oldRecord: null,
           newRecord: logical,
-          changedFields: logical.keys.where((k) => k != 'id').toSet(),
-        ));
+        );
       }
     }
   }
@@ -1008,15 +1005,14 @@ class Collection with ChangeBusAwareStore {
     }
     if (wantsEvents) {
       for (final (rid, logical) in allLogicals!) {
-        _tx!.addRecordEvent(RecordChangeEvent(
+        _tx!.emitRecord(
           store: name,
           id: rid,
           origin: ChangeOrigin.local,
           action: ChangeAction.create,
           oldRecord: null,
           newRecord: logical,
-          changedFields: logical.keys.where((k) => k != 'id').toSet(),
-        ));
+        );
       }
     }
   }

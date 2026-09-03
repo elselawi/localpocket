@@ -526,7 +526,7 @@ class Outbox {
         final changedFields = computeDirtyFields(
             oldLogical ?? const {}, settlement.mergedLogical!)
           ..remove('id');
-        tx.addRecordEvent(RecordChangeEvent(
+        tx.emitRecord(
           store: store,
           id: id,
           origin: ChangeOrigin.resolution,
@@ -534,7 +534,7 @@ class Outbox {
           oldRecord: oldLogical,
           newRecord: settlement.mergedLogical!,
           changedFields: changedFields,
-        ));
+        );
       }
     }
 
@@ -584,7 +584,7 @@ class Outbox {
       tx.addChange(ChangeSet(store, {id}));
       final changedFields = computeDirtyFields(currentLogical, serverLogical)
         ..remove('id');
-      tx.addRecordEvent(RecordChangeEvent(
+      tx.emitRecord(
         store: store,
         id: id,
         origin: ChangeOrigin.resolution,
@@ -592,7 +592,7 @@ class Outbox {
         oldRecord: currentLogical,
         newRecord: serverLogical,
         changedFields: changedFields,
-      ));
+      );
     } else {
       final serverHash = sha256Hex(settlement.serverDataJson);
       await exec.update(

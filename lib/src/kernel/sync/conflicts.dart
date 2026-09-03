@@ -319,7 +319,7 @@ class Conflicts {
       tx.addChange(ChangeSet('lp_conflicts', {id}));
       final changedFields = computeDirtyFields(record.local, mergedWithId)
         ..remove('id');
-      tx.addRecordEvent(RecordChangeEvent(
+      tx.emitRecord(
         store: store,
         id: id,
         origin: ChangeOrigin.resolution,
@@ -327,7 +327,7 @@ class Conflicts {
         oldRecord: record.local,
         newRecord: mergedWithId,
         changedFields: changedFields,
-      ));
+      );
     });
   }
 

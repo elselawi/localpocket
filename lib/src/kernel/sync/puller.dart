@@ -487,7 +487,7 @@ class Puller {
           syncRowChecked: true);
       tx.addChange(ChangeSet(store, {remote.id}));
       final changedFields = computeDirtyFields(const {}, logical)..remove('id');
-      tx.addRecordEvent(RecordChangeEvent(
+      tx.emitRecord(
         store: store,
         id: remote.id,
         origin: ChangeOrigin.remote,
@@ -495,7 +495,7 @@ class Puller {
         oldRecord: null,
         newRecord: logical,
         changedFields: changedFields,
-      ));
+      );
       return ApplyResult.applied;
     }
 
@@ -526,7 +526,7 @@ class Puller {
           syncRowChecked: true);
       tx.addChange(ChangeSet(store, {remote.id}));
       final changedFields = computeDirtyFields(localRow, logical)..remove('id');
-      tx.addRecordEvent(RecordChangeEvent(
+      tx.emitRecord(
         store: store,
         id: remote.id,
         origin: ChangeOrigin.remote,
@@ -534,7 +534,7 @@ class Puller {
         oldRecord: localRow,
         newRecord: logical,
         changedFields: changedFields,
-      ));
+      );
       return ApplyResult.applied;
     }
 
@@ -629,7 +629,7 @@ class Puller {
       await _touchSeen(tx, store, remote.id, remote.updated);
       tx.addChange(ChangeSet(store, {remote.id}));
       final changedFields = computeDirtyFields(localRow, merged)..remove('id');
-      tx.addRecordEvent(RecordChangeEvent(
+      tx.emitRecord(
         store: store,
         id: remote.id,
         origin: ChangeOrigin.resolution,
@@ -637,7 +637,7 @@ class Puller {
         oldRecord: localRow,
         newRecord: merged,
         changedFields: changedFields,
-      ));
+      );
       return ApplyResult.applied;
     }
 
@@ -866,7 +866,7 @@ class Puller {
             for (final id in chunk) {
               final oldRow = oldRowsById[id];
               if (oldRow != null) {
-                tx.addRecordEvent(RecordChangeEvent(
+                tx.emitRecord(
                   store: store,
                   id: id,
                   origin: ChangeOrigin.remote,
@@ -874,7 +874,7 @@ class Puller {
                   oldRecord: oldRow,
                   newRecord: {...oldRow, 'hidden': true},
                   changedFields: const {'hidden'},
-                ));
+                );
               }
             }
           }));
