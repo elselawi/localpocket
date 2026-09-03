@@ -510,30 +510,31 @@ final class Store<S extends StoreDef<S>> {
     required bool allowId,
   }) {
     final record = <String, Object?>{};
+    // The write family is sealed: the switch is compiler-exhaustive, so a
+    // new variant cannot silently drop its writes.
     for (final write in writes) {
-      if (write is FieldWrite<S>) {
-        _checkOwner(write.owner, write.name);
-        record[write.name] = write.encoded;
-      } else if (write is IdWrite<S>) {
-        if (!allowId) {
-          throw ArgumentError.value(
-            write.id,
-            'writes',
-            'Record ids are immutable: put/putAll assign them, '
-                'patch/patchAll cannot change them.',
-          );
-        }
-        if (record.containsKey('id')) {
-          throw ArgumentError.value(
-            write.id,
-            'writes',
-            'Duplicate id write in one record.',
-          );
-        }
-        record['id'] = write.id;
-      } else if (write is ExtraWrite<S>) {
-        _validateExtraKey(write.key);
-        record[write.key] = write.value;
+      switch (write) {
+        case FieldWrite<S>():
+          _checkOwner(write.owner, write.name);
+          record[write.name] = write.encoded;
+        case IdWrite<S>():
+          if (!allowId) {
+            throw ValidationException(
+              'Record ids are immutable: put/putAll assign them, '
+              'patch/patchAll cannot change them.',
+              field: 'writes',
+            );
+          }
+          if (record.containsKey('id')) {
+            throw ValidationException(
+              'Duplicate id write in one record.',
+              field: 'writes',
+            );
+          }
+          record['id'] = write.id;
+        case ExtraWrite<S>():
+          _validateExtraKey(write.key);
+          record[write.key] = write.value;
       }
     }
     return record;

@@ -1,4 +1,5 @@
-import 'package:localpocket/src/kernel/errors.dart' show ValidationException;
+import 'package:localpocket/src/kernel/errors.dart'
+    show SchemaRegistrationError, ValidationException;
 import 'package:localpocket/src/kernel/schema.dart' show Field;
 import 'package:localpocket/src/schema/cond.dart';
 import 'package:localpocket/src/schema/field_def.dart';
@@ -41,8 +42,11 @@ final class _RequiredNullable extends FieldDef<Box, String?> {
 
 void main() {
   group('FieldDef construction guards', () {
-    test('required: true with a nullable value type is a StateError', () {
-      expect(() => _RequiredNullable(), throwsStateError);
+    test(
+        'required: true with a nullable value type is a SchemaRegistrationError',
+        () {
+      expect(
+          () => _RequiredNullable(), throwsA(isA<SchemaRegistrationError>()));
     });
 
     test('inValues rejects an empty list', () {
@@ -205,14 +209,14 @@ void main() {
     test('duplicate enum values are rejected at construction', () {
       expect(
         () => Box.store.schema.enumOf('dup', [Stage.draft, Stage.draft]),
-        throwsStateError,
+        throwsA(isA<SchemaRegistrationError>()),
       );
     });
 
     test('an empty enum value list is rejected at construction', () {
       expect(
         () => Box.store.schema.enumOf<Enum>('empty', const []),
-        throwsStateError,
+        throwsA(isA<SchemaRegistrationError>()),
         reason: 'an enum with no members cannot encode or decode anything; '
             'it must fail at declaration, not at first use',
       );
@@ -223,7 +227,7 @@ void main() {
       expect(
         () => Box.store.schema
             .enumOf('foreign', [Stage.draft], wire: {Stage.active: 'ACTIVE'}),
-        throwsStateError,
+        throwsA(isA<SchemaRegistrationError>()),
       );
     });
 
@@ -231,7 +235,7 @@ void main() {
       expect(
         () => Box.store.schema
             .enumOf('collide', Stage.values, wire: {Stage.active: 'draft'}),
-        throwsStateError,
+        throwsA(isA<SchemaRegistrationError>()),
       );
     });
   });

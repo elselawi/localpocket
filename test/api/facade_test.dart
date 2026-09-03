@@ -151,7 +151,7 @@ void main() {
       final created = await tasks.put([Tasks.title.set('x')]);
       expect(
         tasks.patch(created.id, [Writes.id('nope')]),
-        throwsA(isA<ArgumentError>()),
+        throwsA(isA<ValidationException>()),
       );
       expect(
         tasks.patch('missing-id', [Tasks.title.set('y')]),

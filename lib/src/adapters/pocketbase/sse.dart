@@ -186,7 +186,7 @@ class PbRealtime {
       // The server revoked a token that may still be far from expiry: the
       // request path refreshes once on 401 and retries; realtime recovers
       // the same way instead of reconnecting forever with the stale token.
-      token = await client.auth.refreshNow();
+      token = await client.refreshAuthToken();
       res = await _openRealtime(token);
     }
     if (res.status != 200) {
@@ -268,7 +268,7 @@ class PbRealtime {
       if (sub.status == 401) {
         // Revoked token: refresh once and retry before the session counts as
         // failed (mirrors the request path).
-        sub = await _sendSubscribe(clientId, await client.auth.refreshNow());
+        sub = await _sendSubscribe(clientId, await client.refreshAuthToken());
       }
       if (sub.status != 204 && sub.status != 200) {
         throw HttpTransportException('realtime subscribe status ${sub.status}');

@@ -75,7 +75,7 @@ void main() {
       ));
       await expectLater(
         sync.start(),
-        throwsA(isA<StateError>()
+        throwsA(isA<ValidationException>()
             .having((e) => e.message, 'message', contains('No sync backend'))),
       );
     });

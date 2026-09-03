@@ -1,3 +1,4 @@
+import 'package:localpocket/src/contract/contract.dart' show WireException;
 import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:localpocket/src/platform/web/page/protocol.dart';
@@ -37,12 +38,13 @@ void main() {
       });
     });
 
-    test('kernel errors without a dedicated category degrade to the family',
-        () {
+    test('typed projection errors keep their own wire category', () {
+      // These used to degrade to the family category — the drift hazard the
+      // audit flagged; both now own their stable category like the rest.
       expect(stableWireErrorType(TypedStoreMismatchError('x')),
-          'LocalPocketError');
-      expect(
-          stableWireErrorType(FieldNotSelectedError('x')), 'LocalPocketError');
+          'TypedStoreMismatchError');
+      expect(stableWireErrorType(FieldNotSelectedError('x')),
+          'FieldNotSelectedError');
     });
 
     test('every sync error keeps its category name', () {
@@ -57,6 +59,7 @@ void main() {
         ProtocolError('x'): 'ProtocolError',
         DuplicateIdError('x'): 'DuplicateIdError',
         BatchFailedError('x'): 'BatchFailedError',
+        SyncIdentityError('x'): 'SyncIdentityError',
       };
       cases.forEach((error, expected) {
         expect(stableWireErrorType(error), expected,
@@ -78,6 +81,9 @@ void main() {
       expect(stableWireErrorType(ArgumentError('x')), 'ArgumentError');
       expect(stableWireErrorType(FormatException('x')), 'FormatException');
       expect(stableWireErrorType(UnsupportedError('x')), 'UnsupportedError');
+      expect(stableWireErrorType(WireException('x')), 'WireException',
+          reason: 'a malformed contract envelope classifies consistently '
+              'across legs (loopback raises WireException)');
       expect(stableWireErrorType(Object()), WireErrorCode.unknown);
     });
   });

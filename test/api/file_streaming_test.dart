@@ -61,7 +61,7 @@ void main() {
           field: 'imgs',
           allowVolatileBlobs: true,
         ),
-        throwsStateError,
+        throwsA(isA<ValidationException>()),
       );
       expect(await tasks.files.list(recordId: row.id, field: 'imgs'), isEmpty);
     });

@@ -346,14 +346,16 @@ class KernelCommandHandler implements CommandHandler {
         final registered = context.database.requireTable(schema.name).manifest;
         final compiled = SchemaManifest.compile(schema);
         if (registered.fingerprint != compiled.fingerprint) {
-          throw StateError('Schema manifest mismatch for "${schema.name}".');
+          throw SchemaRegistrationError(
+              'Schema manifest mismatch for "${schema.name}".');
         }
       }
       final expected = fingerprints[schema.name];
       if (expected != null &&
           expected !=
               context.database.requireTable(schema.name).manifest.fingerprint) {
-        throw StateError('Schema manifest mismatch for "${schema.name}".');
+        throw SchemaRegistrationError(
+            'Schema manifest mismatch for "${schema.name}".');
       }
     }
     return const OkResult();
@@ -949,7 +951,8 @@ class KernelCommandHandler implements CommandHandler {
     }
     final factory = context.database.syncBackendFactory;
     if (factory == null) {
-      throw StateError('No sync backend is configured for this runtime.');
+      throw ValidationException(
+          'No sync backend is configured for this runtime.');
     }
     await _stopSync();
     // The sync scope must be caller-supplied: a shared default would
@@ -988,7 +991,7 @@ class KernelCommandHandler implements CommandHandler {
   }
 
   SyncEngine _requireSyncEngine() =>
-      _syncEngine ?? (throw StateError('Sync is not started.'));
+      _syncEngine ?? (throw ValidationException('Sync is not started.'));
 
   Future<Result> _syncNow() async {
     final report = await _requireSyncEngine().syncNow();
@@ -1004,7 +1007,7 @@ class KernelCommandHandler implements CommandHandler {
     final tokenSource = _syncTokenSource;
     final engine = _requireSyncEngine();
     if (tokenSource == null) {
-      throw StateError('Sync is not started.');
+      throw ValidationException('Sync is not started.');
     }
     tokenSource.replace(token);
     await engine.markAuthValid();

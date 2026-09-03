@@ -677,7 +677,7 @@ void main() {
       ]) {
         await expectLater(
           h.runtime.send(request),
-          throwsA(isA<StateError>().having(
+          throwsA(isA<ValidationException>().having(
               (e) => e.message, 'message', contains('Sync is not started'))),
           reason: '${request.tag} before start fails typed',
         );
@@ -762,7 +762,7 @@ void main() {
       await ok(const contract.SyncStopRequest());
       await expectLater(
         h.runtime.send(const contract.SyncNowRequest()),
-        throwsA(isA<StateError>()),
+        throwsA(isA<ValidationException>()),
       );
     });
 
@@ -916,8 +916,10 @@ void main() {
       await chunk(session, [1, 2, 3, 4]);
       await h.runtime.send(contract.FileFinishRequest(session: session));
 
-      // remove by index parks the ref as pending_remove (engine semantics:
-      // the ref row stays until the removal is settled).
+      // The finish request commits the blob locally but remote_name is only
+      // recorded by the file-lane upload completion (no engine here), so the
+      // ref was never uploaded and remove drops it instead of queueing a
+      // bogus remote delete.
       await h.runtime.send(contract.FileRemoveRequest(
         store: 'widgets',
         recordId: id,
@@ -926,9 +928,7 @@ void main() {
       final refs = (await h.runtime
               .send(contract.FilesListRequest(store: 'widgets', recordId: id)))
           .refs;
-      expect(refs, hasLength(1));
-      expect(refs.single.state, 'pending_remove',
-          reason: 'remove transitions the ref to pending_remove');
+      expect(refs, isEmpty);
 
       // gc with explicit grace windows, and again with the defaults.
       final gc = await h.runtime

@@ -208,7 +208,8 @@ final class StoreConflicts<S extends StoreDef<S>> {
     _ensureOpen();
     final current = await get(id);
     if (current == null) {
-      throw StateError('No conflict found for $name/$id');
+      throw ConflictNotFoundException(
+          'No conflict found for $name/$id: the record does not exist locally.');
     }
     // The decision names its fields; everything else keeps the local
     // value. The kernel forces `id` to the conflicted record's id either

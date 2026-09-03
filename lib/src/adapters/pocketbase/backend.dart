@@ -157,7 +157,7 @@ abstract base class PBBackend implements SyncBackend {
   String get scopeId {
     final id = identity ?? tokenProvider.identity;
     if (id == null) {
-      throw StateError(
+      throw SyncIdentityError(
           'No sync identity: pass `identity:` to PocketBaseBackend or '
           'override TokenProvider.identity with a stable per-account id. '
           'Without one, sync state would be shared across all accounts on '

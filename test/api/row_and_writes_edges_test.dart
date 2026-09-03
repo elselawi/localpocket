@@ -109,7 +109,7 @@ void main() {
       expect(Alpha.store.id.required, isFalse);
       expect(
         () => Alpha.store.id.toField(),
-        throwsStateError,
+        throwsA(isA<SchemaRegistrationError>()),
         reason: 'the engine owns the id column; it is not a schema field',
       );
     });
@@ -118,7 +118,8 @@ void main() {
       // Compile-time proof: `Alpha.store.id.set(...)` does not compile
       // because _SystemFieldDef is not a SettableFieldDef. The runtime pin
       // below documents the descriptor kind.
-      expect(Alpha.store.archived.toField, throwsStateError);
+      expect(Alpha.store.archived.toField,
+          throwsA(isA<SchemaRegistrationError>()));
     });
   });
 
@@ -132,11 +133,11 @@ void main() {
       // An unforced late-final descriptor is invisible; touching it exposes
       // the omission to the verify pass.
       _Omitted.b;
-      expect(_Omitted.store.verify, throwsStateError);
+      expect(_Omitted.store.verify, throwsA(isA<SchemaRegistrationError>()));
     });
 
     test('a duplicate column name fails', () {
-      expect(_Duplicate.store.verify, throwsStateError);
+      expect(_Duplicate.store.verify, throwsA(isA<SchemaRegistrationError>()));
     });
 
     test('compiledSchema memoizes one compiled instance', () {

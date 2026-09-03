@@ -84,7 +84,9 @@ class AuthManager {
     // change the token being refreshed.
     final current = source;
     if (current == null) {
-      throw StateError('Cannot refresh without a cached token');
+      // Invariant: [refreshNow] loads the current token first, so this only
+      // fires on a refresh raced by an empty cache.
+      throw AuthError('Cannot refresh without a cached token');
     }
     try {
       final fresh = await provider.refreshToken(current);

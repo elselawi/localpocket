@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:localpocket/src/api/api.dart';
+import 'package:localpocket/src/kernel/errors.dart' show ValidationException;
 import 'package:localpocket/src/kernel/files/blob_store.dart'
     show MemoryBlobStore;
 import 'package:localpocket/src/api/writes.dart';
@@ -108,7 +109,7 @@ void main() {
           ),
           allowVolatileBlobs: true,
         ),
-        throwsA(isA<StateError>()
+        throwsA(isA<ValidationException>()
             .having((e) => e.message, 'message', contains('Size mismatch'))),
       );
     });

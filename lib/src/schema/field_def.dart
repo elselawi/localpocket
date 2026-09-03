@@ -45,7 +45,7 @@ abstract base class FieldDef<S, T> {
   })  : _decode = decode,
         _encode = encode {
     if (required && null is T) {
-      throw StateError(
+      throw SchemaRegistrationError(
           'FieldDef<$T> "$name" on store "$owner": required: true cannot be '
           'combined with a nullable value type.');
     }
@@ -622,16 +622,18 @@ void _verifyEnumCodec<E extends Enum>(
   Map<E, String> wire,
 ) {
   if (values.isEmpty) {
-    throw StateError('Enum field "$name" must accept at least one value.');
+    throw SchemaRegistrationError(
+        'Enum field "$name" must accept at least one value.');
   }
   if (values.toSet().length != values.length) {
-    throw StateError('Enum field "$name" contains duplicate values.');
+    throw SchemaRegistrationError(
+        'Enum field "$name" contains duplicate values.');
   }
   final accepted = values.toSet();
   final foreignOverrides =
       wire.keys.where((value) => !accepted.contains(value));
   if (foreignOverrides.isNotEmpty) {
-    throw StateError(
+    throw SchemaRegistrationError(
       'Enum field "$name" has wire overrides for values it does not accept.',
     );
   }
@@ -639,7 +641,7 @@ void _verifyEnumCodec<E extends Enum>(
   for (final value in values) {
     final encoded = wire[value] ?? value.name;
     if (!wireNames.add(encoded)) {
-      throw StateError(
+      throw SchemaRegistrationError(
         'Enum field "$name" maps multiple values to wire name "$encoded".',
       );
     }

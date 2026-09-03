@@ -94,9 +94,10 @@ final class FileRef {
 /// declared length and display name.
 ///
 /// The [stream] variant is for callers that already hold the bytes as a
-/// stream — declare [length] when you know it (the kernel rejects a finish
-/// whose actual size disagrees with the declared one). The [bytes] variant
-/// wraps an in-memory byte list and always knows its length.
+/// stream — declare [length] when you know it (the FACADE rejects a stream
+/// whose actual size disagrees with the declared one, before the finish
+/// request is sent). The [bytes] variant wraps an in-memory byte list and
+/// always knows its length.
 final class FileSource {
   const FileSource._(this._chunks, {this.length, this.name});
 
@@ -297,7 +298,8 @@ final class Files<S extends StoreDef<S>> {
         pendingLength = 0;
       }
       if (total != declared) {
-        throw StateError('Size mismatch: declared $declared but got $total');
+        throw ValidationException(
+            'Size mismatch: declared $declared but got $total');
       }
       final ref = await _send(FileFinishRequest(session: session.session));
       return FileRef.fromData(ref.ref!);
@@ -362,7 +364,10 @@ final class Files<S extends StoreDef<S>> {
 
     void consume(FileChunkEvent event) {
       if (event.error != null) {
-        controller.addError(StateError(event.error!));
+        // The kernel download failure crossed as a description string on the
+        // chunk event; surface it as a typed StorageError so callers can
+        // catch it like any other storage failure.
+        controller.addError(StorageError(event.error!));
         if (!controller.isClosed) unawaited(controller.close());
         closed = true;
         return;

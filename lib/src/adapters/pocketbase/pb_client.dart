@@ -36,8 +36,16 @@ class PbClient {
   /// The wire-field configuration: collection and record field names.
   final PbFieldNames fieldNames;
 
-  /// Returns the currently usable authentication token.
-  Future<Token> authToken() => auth.token();
+  /// Returns the currently usable authentication token. A caller-supplied
+  /// [TokenProvider] that throws is surfaced as a typed [AuthError] — never
+  /// a raw exception escaping into the sync engine.
+  Future<Token> authToken() async {
+    try {
+      return await auth.token();
+    } on Object catch (e) {
+      throw AuthError('token provider failed: $e');
+    }
+  }
 
   // ------------------------------------------------------------------ list --
 
@@ -340,10 +348,10 @@ class PbClient {
     int Function(T res) getStatus,
   ) async {
     try {
-      final token = await auth.token();
+      final token = await _authToken();
       var res = await sendFn(token.value);
       if (getStatus(res) == 401) {
-        final fresh = await auth.refreshNow();
+        final fresh = await _authRefresh();
         res = await sendFn(fresh.value);
       }
       return res;
@@ -351,6 +359,26 @@ class PbClient {
       throw TransientNetworkError(e.message);
     }
   }
+
+  Future<Token> _authToken() async {
+    try {
+      return await auth.token();
+    } on Object catch (e) {
+      throw AuthError('token provider failed: $e');
+    }
+  }
+
+  /// Forces a token refresh (401 / realtime re-auth path). A caller-supplied
+  /// [TokenProvider] that throws surfaces as a typed [AuthError].
+  Future<Token> refreshAuthToken() async {
+    try {
+      return await auth.refreshNow();
+    } on Object catch (e) {
+      throw AuthError('token refresh failed: $e');
+    }
+  }
+
+  Future<Token> _authRefresh() async => refreshAuthToken();
 
   Future<HttpResponse> _send(String method, Uri uri,
       {required String token, String? body}) async {
