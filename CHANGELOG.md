@@ -1,5 +1,60 @@
 ## Unreleased
 
+- **Liveness hardening for long-lived streams and batch writes.** Highlights:
+  - **Stalled realtime sessions reconnect**: an SSE session that delivers
+    nothing (not even keepalives) for `realtimeStallTimeout` (default
+    2 minutes; zero disables) is torn down and reconnected by a read-idle
+    watchdog, so a wedged event stream no longer silently stops delivering
+    changes. Flowing sessions are never disturbed.
+  - **Stalled download bodies fail typed**: a file download whose body
+    delivers no chunk for `downloadChunkIdle` (default 2 minutes; zero
+    disables) fails with a `TransientNetworkError` instead of hanging the
+    awaiter forever; a slow-but-flowing stream of any size completes.
+  - **Open download sessions cannot leak**: a kernel download stream that
+    receives neither chunks nor credits for `downloadSessionTtl` (default
+    30 minutes; zero disables) has its subscription cancelled by a periodic
+    sweeper instead of living until close.
+  - **`patchAll` batches its probes**: the per-record LEFT JOIN probes of a
+    many-record patch collapse into chunked `IN` queries (page 2000, the
+    same shape as `putAll`); per-record error semantics and the
+    `RecordNotFoundException` contract are unchanged.
+  - **A wedged worker spawn fails the web open typed**: a worker that never
+    completes its connect handshake fails the open with a
+    `DatabaseWorkerTimeoutException` after `BootstrapOptions.spawnTimeout`
+    (default 60 s; zero disables) instead of hanging forever.
+
+- **The kernel emits record events through one path.** Every post-commit
+  record notification — local mutations, batch creates, compaction purges,
+  remote applies/hides, outbox settlements, conflict resolutions — is
+  buffered through a single helper that consults the listener count first
+  (unwatched bulk writes still allocate nothing) and derives the changed
+  field set when the caller omits it. Pure internal refactor with zero
+  behavior change.
+
+- **`KernelDatabase` is a slim composition root.** The hub keeps only
+  identity, wiring, and delegates; the maintenance surface (trace wrappers,
+  analyze, WAL checkpointing, vacuum, outbox pruning, compaction, the
+  maintenance state machine) lives on `MaintenanceService`, and the schema
+  surface (store registration, manifest fingerprinting, FTS rebuild,
+  destructive-migration backup hooks) on `SchemaService` — both internal,
+  both receiving the shared kernel context explicitly. The facade contract
+  is unchanged; kernel-driven tests reach the moved methods through
+  `db.maintenance` / `db.schemaService`.
+
+- **`Store.distinct` is typed by its field descriptor.** The method is now
+  `Future<List<T>> distinct<T>(FieldDef<S, T> field, {int? limit})` — the
+  element type is inferred from the descriptor (`distinct(Tasks.status)`
+  yields `TaskStatus` members, not wire strings), decoded through the same
+  boundary codecs a `Row` read applies. Optional fields can contribute a
+  `null` distinct value, so the element type follows the descriptor's
+  nullability. Supporting kernel change: distinct values now decode to their
+  logical form at the kernel boundary (a bool column returns Dart bools
+  instead of the stored `0`/`1`), identical on the native and web-worker
+  paths; the raw `QueryBuilder.distinct` and the wire `DistinctResult`
+  carry these logical values too. Callers holding the old
+  `List<Object?>` result may need a one-line type adjustment — string,
+  int, and double fields are unaffected.
+
 - **The kernel hub no longer uses `part`-libraries.** Every kernel service —
   the hub, the command dispatcher, the mutation/read/file services, and
   `KernelContext` — is a real library receiving its dependencies explicitly;
