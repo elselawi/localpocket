@@ -167,38 +167,39 @@ void main() {
           isNotEmpty);
     });
 
-        test('distinct decodes values through the field codecs', () async {
-          final (facade, _) = await _seedPair();
-          addTearDown(facade.close);
-          final tasks = facade.store(Tasks.store);
+    test('distinct decodes values through the field codecs', () async {
+      final (facade, _) = await _seedPair();
+      addTearDown(facade.close);
+      final tasks = facade.store(Tasks.store);
 
-          // A bool column yields Dart bools — not the stored 0/1.
-          final dones = await tasks.distinct(Tasks.done, limit: 10);
-          expect(dones.toSet(), {true, false});
-          expect(dones.every((v) => v is bool), isTrue);
+      // A bool column yields Dart bools — not the stored 0/1.
+      final dones = await tasks.distinct(Tasks.done, limit: 10);
+      expect(dones.toSet(), {true, false});
+      expect(dones.every((v) => v is bool), isTrue);
 
-          // dateTime decodes to UTC DateTime, not the epoch-ms integer.
-          await tasks.put([Tasks.title.set('dated'), Tasks.dueAt
-            .set(DateTime.utc(2027, 3, 1))]);
-          final dues = await tasks.distinct(Tasks.dueAt, limit: 10);
-          // The unseeded rows contribute the null distinct value (optional
-          // field), so the set is {null, the one date}.
-          expect(dues, hasLength(2));
-          final due = dues.whereType<DateTime>().single;
-          expect(due.isUtc, isTrue);
-          expect(due, DateTime.utc(2027, 3, 1));
+      // dateTime decodes to UTC DateTime, not the epoch-ms integer.
+      await tasks.put([
+        Tasks.title.set('dated'),
+        Tasks.dueAt.set(DateTime.utc(2027, 3, 1))
+      ]);
+      final dues = await tasks.distinct(Tasks.dueAt, limit: 10);
+      // The unseeded rows contribute the null distinct value (optional
+      // field), so the set is {null, the one date}.
+      expect(dues, hasLength(2));
+      final due = dues.whereType<DateTime>().single;
+      expect(due.isUtc, isTrue);
+      expect(due, DateTime.utc(2027, 3, 1));
 
-          // jsonList decodes to List<String>, not the canonical JSON string.
-          final tagLists = await tasks.distinct(Tasks.tags, limit: 10);
-            expect(tagLists.whereType<List<String>>(), hasLength(5));
-            expect(
-              tagLists.whereType<List<String>>().first,
-              everyElement(isA<String>()));
+      // jsonList decodes to List<String>, not the canonical JSON string.
+      final tagLists = await tasks.distinct(Tasks.tags, limit: 10);
+      expect(tagLists.whereType<List<String>>(), hasLength(5));
+      expect(tagLists.whereType<List<String>>().first,
+          everyElement(isA<String>()));
 
-          // The static element type comes from the descriptor, no downcast.
-          final priorities = await tasks.distinct(Tasks.priority, limit: 10);
-          expect(priorities.whereType<int>(), hasLength(5));
-        });
+      // The static element type comes from the descriptor, no downcast.
+      final priorities = await tasks.distinct(Tasks.priority, limit: 10);
+      expect(priorities.whereType<int>(), hasLength(5));
+    });
 
     test('projection matches the raw builder column set', () async {
       final (facade, raw) = await _seedPair();

@@ -34,9 +34,4 @@ Future<List<int>> openBytes<S extends StoreDef<S>>(
   required String recordId,
   String field = 'notes',
   int index = 0,
-}) => openBytesImpl<S>(
-  files,
-  recordId: recordId,
-  field: field,
-  index: index,
-);
+}) => openBytesImpl<S>(files, recordId: recordId, field: field, index: index);

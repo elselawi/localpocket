@@ -27,7 +27,9 @@ class _MaintenancePageState extends State<MaintenancePage> {
     if (db == null) return;
     setState(() => _loading = true);
     try {
-      final plan = await db.store(PlaygroundTasks.store).explain(
+      final plan = await db
+          .store(PlaygroundTasks.store)
+          .explain(
             QuerySpec(
               where: [PlaygroundTasks.completed.eq(false)],
               orderBy: [PlaygroundTasks.priority.asc],

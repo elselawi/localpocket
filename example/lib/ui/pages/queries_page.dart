@@ -37,11 +37,11 @@ class _QueriesPageState extends State<QueriesPage> {
 
   /// Maps the dropdown's wire status strings onto the typed enum.
   static TaskStatus? _taskStatus(String s) => switch (s) {
-        'todo' => TaskStatus.todo,
-        'in_progress' => TaskStatus.inProgress,
-        'done' => TaskStatus.done,
-        _ => null,
-      };
+    'todo' => TaskStatus.todo,
+    'in_progress' => TaskStatus.inProgress,
+    'done' => TaskStatus.done,
+    _ => null,
+  };
 
   Future<void> _run({bool next = false}) async {
     final db = _db;
@@ -84,9 +84,7 @@ class _QueriesPageState extends State<QueriesPage> {
       if (mounted) {
         setState(() {
           _count = cnt;
-          _items = [
-            for (final r in page.items) r.toJson(),
-          ];
+          _items = [for (final r in page.items) r.toJson()];
           if (_sort == 'title') {
             _items.sort(
               (a, b) => (a['title'] as String? ?? '').compareTo(

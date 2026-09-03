@@ -119,8 +119,8 @@ void main() {
       await pocket.outbox
           .ack('widgets', visible, serverUpdated: '2026-01-01 00:00:00.000Z');
 
-      final removed = await pocket.maintenance.compact('widgets',
-          olderThan: const Duration(days: 1), nowMs: now);
+      final removed = await pocket.maintenance
+          .compact('widgets', olderThan: const Duration(days: 1), nowMs: now);
       expect(removed, 1, reason: 'only the old clean archived row is removed');
 
       expect(await pocket.collection('widgets').get(old), isNull);
@@ -143,8 +143,8 @@ void main() {
       await seedCleanArchivedRow(pocket, atCutoff, lastSeenMs: cutoff);
       await seedCleanArchivedRow(pocket, below, lastSeenMs: cutoff - 1);
 
-      final removed = await pocket.maintenance.compact('widgets',
-          olderThan: const Duration(days: 1), nowMs: now);
+      final removed = await pocket.maintenance
+          .compact('widgets', olderThan: const Duration(days: 1), nowMs: now);
       expect(removed, 1);
       expect(await pocket.collection('widgets').get(atCutoff), isNotNull,
           reason: 'last_seen_at == cutoff is strictly kept');
@@ -186,8 +186,8 @@ void main() {
           where: 'store = ? AND record_id = ?',
           whereArgs: ['widgets', id]);
 
-      await pocket.maintenance.compact('widgets',
-          olderThan: const Duration(days: 1), nowMs: now);
+      await pocket.maintenance
+          .compact('widgets', olderThan: const Duration(days: 1), nowMs: now);
 
       expect(await pocket.collection('widgets').get(id), isNull);
       expect(await pocket.files.list(store: 'widgets', recordId: id), isEmpty);
@@ -216,8 +216,8 @@ void main() {
               .collection('widgets')
               .put(record(id: generateRecordId(), name: 'w$i')),
       ];
-      final compactF = pocket.maintenance.compact('widgets',
-          olderThan: const Duration(days: 1), nowMs: now);
+      final compactF = pocket.maintenance
+          .compact('widgets', olderThan: const Duration(days: 1), nowMs: now);
       await Future.wait([...writes, compactF]);
       expect(await pocket.collection('widgets').get(old), isNull);
       expect(await pocket.collection('widgets').query().count(), 20);
@@ -235,8 +235,8 @@ void main() {
     final localEvents = <RecordChangeEvent>[];
     final localSub = pocket.onLocal().listen(localEvents.add);
 
-    final removed = await pocket.maintenance.compact('widgets',
-        olderThan: const Duration(days: 1), nowMs: now);
+    final removed = await pocket.maintenance
+        .compact('widgets', olderThan: const Duration(days: 1), nowMs: now);
     expect(removed, 1);
 
     await Future<void>.delayed(Duration.zero);
@@ -287,7 +287,8 @@ void main() {
       await pocket
           .collection('widgets')
           .put(record(id: generateRecordId(), name: 'keep'));
-      await pocket.maintenance.runMaintenance(compactOlderThan: const Duration(days: 1));
+      await pocket.maintenance
+          .runMaintenance(compactOlderThan: const Duration(days: 1));
       expect(await pocket.collection('widgets').query().all().count(), 1,
           reason: 'runMaintenance compacted the old archived row');
     });

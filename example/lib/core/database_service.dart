@@ -67,12 +67,14 @@ class DatabaseService {
           PlaygroundTasks.description.set(t['description'] as String?),
           PlaygroundTasks.status.set(_taskStatus(t['status'] as String)),
           PlaygroundTasks.priority.set(t['priority'] as int),
-          PlaygroundTasks.dueAt
-              .set(now.add(Duration(days: (t['priority'] as int) * 3))),
+          PlaygroundTasks.dueAt.set(
+            now.add(Duration(days: (t['priority'] as int) * 3)),
+          ),
           PlaygroundTasks.completed.set(t['completed'] as bool),
           PlaygroundTasks.tags.set((t['tags'] as List).cast<String>()),
-          PlaygroundTasks.assignedTo
-              .set(_assign(t['title'] as String, nameToId)),
+          PlaygroundTasks.assignedTo.set(
+            _assign(t['title'] as String, nameToId),
+          ),
         ],
     ]);
     await db.store(PlaygroundPosts.store).putAll([
@@ -109,10 +111,10 @@ class DatabaseService {
       UserRole.values.firstWhere((r) => r.name == value);
 
   static TaskStatus _taskStatus(String value) => switch (value) {
-        'done' => TaskStatus.done,
-        'in_progress' => TaskStatus.inProgress,
-        _ => TaskStatus.todo,
-      };
+    'done' => TaskStatus.done,
+    'in_progress' => TaskStatus.inProgress,
+    _ => TaskStatus.todo,
+  };
 
   static String? _assign(String title, Map<String, String> nameToId) {
     if (title.contains('FTS') || title.contains('search')) {

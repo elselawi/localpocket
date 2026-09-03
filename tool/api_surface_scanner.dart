@@ -192,7 +192,8 @@ int _lastDeclarationStart(String body, int offset) {
   return 0;
 }
 
-String _normalizePath(String value) {  final parts = <String>[];
+String _normalizePath(String value) {
+  final parts = <String>[];
   for (final part in value.replaceAll('\\', '/').split('/')) {
     if (part.isEmpty || part == '.') continue;
     if (part == '..') {
@@ -415,7 +416,10 @@ List<String> publicInventory(Directory root, String entrypoint) {
         if (depth != 0) continue;
         if (ch != '(') continue;
         final name = _identifierBefore(body, i);
-        if (name == null || name.startsWith('_') || name == 'if' || name == 'for') {
+        if (name == null ||
+            name.startsWith('_') ||
+            name == 'if' ||
+            name == 'for') {
           continue;
         }
         // `@internal` members are library-internal seams, not public API.
@@ -494,7 +498,8 @@ void main(List<String> args) {
       '${root.path}${Platform.pathSeparator}tool${Platform.pathSeparator}api_inventory.txt';
   final update = args.contains('--update');
 
-  final inventory = publicInventory(Directory(root.path), 'lib/localpocket.dart');
+  final inventory =
+      publicInventory(Directory(root.path), 'lib/localpocket.dart');
   final buffer = StringBuffer()
     ..writeln('# LocalPocket public API inventory (barrel-reachable names).')
     ..writeln('# Format: <file>::<Declaration>[.<member>] — sorted; regenerate')
@@ -520,10 +525,8 @@ void main(List<String> args) {
   }
   final existing = goldenFile.readAsStringSync().replaceAll('\r\n', '\n');
   if (existing != generated) {
-    final existingNames = existing
-        .split('\n')
-        .where((l) => l.contains('::'))
-        .toSet();
+    final existingNames =
+        existing.split('\n').where((l) => l.contains('::')).toSet();
     final currentNames = inventory.toSet();
     final added = currentNames.difference(existingNames).toList()..sort();
     final removed = existingNames.difference(currentNames).toList()..sort();

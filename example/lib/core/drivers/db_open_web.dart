@@ -5,8 +5,10 @@ import 'package:localpocket/localpocket.dart';
 Future<LocalPocket> openPlatformDb(
   List<StoreDef<Object?>> stores, {
   EncryptionConfig? encryption,
-}) => LocalPocket.open(LocalPocketOptions(
-  path: 'localpocket_demo',
-  stores: stores,
-  encryption: encryption,
-));
+}) => LocalPocket.open(
+  LocalPocketOptions(
+    path: 'localpocket_demo',
+    stores: stores,
+    encryption: encryption,
+  ),
+);

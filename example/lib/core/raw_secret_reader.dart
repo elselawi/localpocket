@@ -8,13 +8,10 @@ import 'schemas.dart';
 /// transparently, so this returns the plaintext and the encryption page
 /// proves the round-trip decryption succeeded.
 Future<Object?> readRawSecret(LocalPocket db) async {
-  final page = await db.store(PlaygroundSecrets.store).query(
-        QuerySpec(
-          where: [PlaygroundSecrets.label.eq('API key')],
-          limit: 1,
-        ),
+  final page = await db
+      .store(PlaygroundSecrets.store)
+      .query(
+        QuerySpec(where: [PlaygroundSecrets.label.eq('API key')], limit: 1),
       );
-  return page.items.isEmpty
-      ? null
-      : page.items.first(PlaygroundSecrets.secret);
+  return page.items.isEmpty ? null : page.items.first(PlaygroundSecrets.secret);
 }

@@ -30,11 +30,11 @@ Future<void> main(List<String> args) async {
 
   final corpus = corpusDir.existsSync()
       ? (corpusDir
-              .listSync()
-              .whereType<File>()
-              .where((f) => f.path.endsWith('.dart.template'))
-              .toList()
-            ..sort((a, b) => a.path.compareTo(b.path)))
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart.template'))
+          .toList()
+        ..sort((a, b) => a.path.compareTo(b.path)))
       : <File>[];
   if (corpus.isEmpty) {
     stderr.writeln('FAIL: compile-fail corpus is empty (${corpusDir.path}).');
@@ -94,10 +94,7 @@ Future<void> main(List<String> args) async {
 
 Set<String> _expectedErrors(String source) => RegExp(
       r'//\s*expect-error:\s*([A-Za-z_][A-Za-z0-9_]*)',
-    )
-        .allMatches(source)
-        .map((m) => m.group(1)!)
-        .toSet();
+    ).allMatches(source).map((m) => m.group(1)!).toSet();
 
 /// Extracts the analyzer error codes from `--format machine` output.
 /// Machine lines look like: `SEVERITY|TYPE|ERROR_CODE|...`.

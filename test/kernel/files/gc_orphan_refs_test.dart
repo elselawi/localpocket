@@ -46,7 +46,8 @@ void main() {
 
       // Out-of-band record deletion (bypassing purge's own ref release):
       // the ref now points at a record that no longer exists.
-      await pocket.maintenance.traceExecute('DELETE FROM widgets WHERE id = ?', [recId]);
+      await pocket.maintenance
+          .traceExecute('DELETE FROM widgets WHERE id = ?', [recId]);
 
       await pocket.files.gc(blobGrace: Duration.zero);
 

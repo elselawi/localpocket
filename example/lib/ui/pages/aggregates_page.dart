@@ -40,8 +40,7 @@ class _AggregatesPageState extends State<AggregatesPage> {
       final min = await store.min(PlaygroundMetrics.value);
       final max = await store.max(PlaygroundMetrics.value);
       final avg = await store.avg(PlaygroundMetrics.value);
-      final distinctLabel =
-          await store.countDistinct(PlaygroundMetrics.label);
+      final distinctLabel = await store.countDistinct(PlaygroundMetrics.label);
       final distincts = await store.distinct(PlaygroundMetrics.label);
       sw.stop();
       setState(() {
@@ -153,10 +152,9 @@ class _AggregatesPageState extends State<AggregatesPage> {
         children: [
           Text(
             label,
-            style: Theme.of(context)
-                .textTheme
-                .labelSmall
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 2),
           Text(value, style: Theme.of(context).textTheme.titleMedium),

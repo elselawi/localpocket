@@ -182,8 +182,10 @@ void main() {
     var compiled = QueryBuilder.compileOnly(widgets);
     compiled = shape(compiled);
     final expected = await native.ids();
-    final res = await executeCompiledQuery(pocket,
-        (sql, args) => pocket.maintenance.traceQuery(sql, args), compiled.compileIdsPlan());
+    final res = await executeCompiledQuery(
+        pocket,
+        (sql, args) => pocket.maintenance.traceQuery(sql, args),
+        compiled.compileIdsPlan());
     expect(res['ids'], expected);
   }
 
@@ -272,8 +274,10 @@ void main() {
           .fetch();
       final compiled = SearchBuilder.compileOnly(articles, 'database')
         ..limit(10);
-      final res = await executeCompiledQuery(pocket,
-          (sql, args) => pocket.maintenance.traceQuery(sql, args), compiled.compilePlan());
+      final res = await executeCompiledQuery(
+          pocket,
+          (sql, args) => pocket.maintenance.traceQuery(sql, args),
+          compiled.compilePlan());
       final results = (res['results'] as List)
           .map((r) => SearchResult(
               id: (r as Map)['id'] as String,

@@ -232,8 +232,8 @@ void main() {
           whereArgs: ['widgets', hiddenId]);
 
       // Execute compact(olderThan: 90 days)
-      final compacted = await pocket.maintenance.compact('widgets',
-          olderThan: const Duration(days: 90), nowMs: now);
+      final compacted = await pocket.maintenance
+          .compact('widgets', olderThan: const Duration(days: 90), nowMs: now);
       expect(compacted, 1,
           reason: 'Only the single qualifying row must be compacted');
 

@@ -43,9 +43,7 @@ class _SearchPageState extends State<SearchPage> {
     final sw = Stopwatch()..start();
     try {
       final store = db.store(PlaygroundTasks.store);
-      final ranked = await store.search(
-        SearchSpec(term: term, limit: 10),
-      );
+      final ranked = await store.search(SearchSpec(term: term, limit: 10));
       final rows = <Map<String, Object?>>[];
       for (final hit in ranked) {
         final rec = await store.get(hit.id);

@@ -166,8 +166,8 @@ void main() {
     await seedCleanArchivedRow(recent, clock - 1000);
 
     // No explicit nowMs: the cutoff must come from the injected clock.
-    final removed =
-        await pocket.maintenance.compact('widgets', olderThan: const Duration(days: 1));
+    final removed = await pocket.maintenance
+        .compact('widgets', olderThan: const Duration(days: 1));
     expect(removed, 1,
         reason: 'only the row older than clock - 1 day is compacted');
     expect(await pocket.collection('widgets').get(old), isNull);
