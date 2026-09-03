@@ -412,10 +412,10 @@ void main() {
           StreamedHttpResponse(200, const {}, controller.stream));
       await rt.start();
 
-      // Valid id/updated; no store, non-map data, and mixed-type attachments
-      // entries fall back to their defaults / are filtered.
+      // Absent optional fields fall back to their defaults (projected sweep
+      // responses legitimately omit them).
       const text = '$handshake'
-          'event:data\ndata:{"record":{"id":"r1","updated":"2026-08-15 10:00:00.000Z","data":"nope","imgs":[1,2,"ok.png"]},"action":"update"}\n\n';
+          'event:data\ndata:{"record":{"id":"r1","updated":"2026-08-15 10:00:00.000Z"},"action":"update"}\n\n';
       controller.add(utf8.encode(text));
       await controller.close();
       await Future<void>.delayed(const Duration(milliseconds: 60));
@@ -426,9 +426,34 @@ void main() {
       expect(events.single.record.store, '',
           reason: 'an absent store field tolerates to empty');
       expect(events.single.record.data, isEmpty,
-          reason: 'a non-map data field tolerates to empty');
-      expect(events.single.record.attachments, ['ok.png'],
-          reason: 'non-string attachments entries filtered');
+          reason: 'an absent data field tolerates to empty');
+      expect(events.single.record.attachments, isEmpty,
+          reason: 'absent attachments tolerate to empty');
+    });
+
+    test('a present-but-wrong-typed field is dropped, not defaulted', () async {
+      final fake = FakeTransport();
+      final events = <PbRealtimeEvent>[];
+      final rt = realtime(fake, onEvent: events.add);
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      await rt.start();
+
+      // data is present but not an object and imgs is present but has
+      // non-string entries: the strict record parser rejects the frame —
+      // silently defaulting it would make a misconfigured store field drop
+      // every realtime event while realtime looks healthy.
+      const text = '$handshake'
+          'event:data\ndata:{"record":{"id":"r1","updated":"2026-08-15 10:00:00.000Z","data":"nope"},"action":"update"}\n\n'
+          'event:data\ndata:{"record":{"id":"r2","updated":"2026-08-15 10:00:00.000Z","imgs":[1,2,"ok.png"]},"action":"update"}\n\n';
+      controller.add(utf8.encode(text));
+      await controller.close();
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await rt.stop();
+
+      expect(events, isEmpty,
+          reason: 'wrong-typed record fields never normalize into defaults');
     });
 
     test('event actions outside create/update/delete still delivered',

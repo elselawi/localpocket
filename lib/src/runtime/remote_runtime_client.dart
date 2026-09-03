@@ -45,6 +45,11 @@ final class RemoteRuntimeClient implements RuntimeClient {
   /// decoder bugs alike) is contained here so one malformed event can never
   /// break event delivery for well-formed successors.
   void handleWorkerEvent(Map<Object?, Object?> event) {
+    // Events must never be injected into a closed controller: add/addError
+    // on a closed broadcast controller throws. The teardown window between
+    // worker death and this runtime's close() is exactly when strays arrive.
+    // The method is synchronous, so a single guard covers every injection.
+    if (_events.isClosed) return;
     final map = _stringKeyed(event);
     if (map['op'] != wire.WireOp.contractEvent) return;
     // Defense-in-depth: a stale worker asset with a request-compatible but
@@ -59,7 +64,16 @@ final class RemoteRuntimeClient implements RuntimeClient {
       return;
     }
     final encoded = map['event'];
-    if (encoded is! Map) return;
+    if (encoded is! Map) {
+      // A shape change with a matching version is exactly the failure the
+      // version check exists to prevent — surface it instead of silently
+      // dead-ending every watch/sync stream. (Only the controller being
+      // closed short-circuits here; the method is synchronous so the top
+      // guard covers the whole body.)
+      _events.addError(wire.ProtocolEnvelopeException(
+          'Malformed contract event envelope: "event" is not a map.'));
+      return;
+    }
     try {
       _events.add(ContractCodec.decodeEvent(_stringKeyed(encoded)));
     } on Object {

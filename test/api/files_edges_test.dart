@@ -90,7 +90,7 @@ void main() {
           ),
           allowVolatileBlobs: true,
         ),
-        throwsA(isA<StateError>()),
+        throwsA(isA<ValidationException>()),
       );
       // The kernel must not retain the partial upload as a visible ref.
       expect(await tasks.files.list(recordId: id), isEmpty);
@@ -109,6 +109,8 @@ void main() {
           source: FileSource.stream(broken(), name: 'broken.bin'),
           allowVolatileBlobs: true,
         ),
+        // The source stream's own failure propagates as-is; only the size
+        // mismatch is the facade's typed validation error.
         throwsA(isA<StateError>()),
       );
       expect(await tasks.files.list(recordId: id), isEmpty,

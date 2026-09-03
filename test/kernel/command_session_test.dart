@@ -500,7 +500,7 @@ void main() {
           stores: [drifted.toJson()],
           manifestFingerprints: const {},
         )),
-        throwsStateError,
+        throwsA(isA<SchemaRegistrationError>()),
       );
     });
 
@@ -516,7 +516,7 @@ void main() {
           stores: [drifted.toJson()],
           manifestFingerprints: {'other-store': 'mismatched'},
         )),
-        throwsStateError,
+        throwsA(isA<SchemaRegistrationError>()),
       );
     });
   });

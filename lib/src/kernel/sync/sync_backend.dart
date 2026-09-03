@@ -103,6 +103,16 @@ class DuplicateIdError extends SyncError {
   DuplicateIdError([super.message = 'duplicate id']);
 }
 
+/// {@template localpocket.sync_identity_error}
+/// Sync start refused: no stable per-account identity is available. Sharing
+/// one sync scope across accounts would silently bleed cursors and
+/// watermarks, so the backend fails loudly instead.
+/// {@endtemplate}
+class SyncIdentityError extends SyncError {
+  /// {@macro localpocket.sync_identity_error}
+  SyncIdentityError([super.message = 'missing sync identity']);
+}
+
 /// {@template localpocket.batch_failed_error}
 /// A transactional batch failed as a whole (poison item).
 /// {@endtemplate}

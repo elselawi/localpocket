@@ -34,6 +34,13 @@ enum AccessState {
 
   /// Excluded from normal reads (e.g. the remote deleted it).
   hidden,
+
+  /// Locally purged (compacted): the domain row is gone but the remote
+  /// record still exists. The sweep treats the record as KNOWN — it does
+  /// not re-fetch it while the remote copy is unchanged — so compacted
+  /// rows cannot resurrect on bucket rotation. The marker is reclaimed by
+  /// the sweep's stale-hidden GC once `purgeHiddenAfter` elapses.
+  purged,
 }
 
 /// What an `lp_outbox` op does to the remote record.

@@ -389,6 +389,53 @@ void main() {
       expect(received, isEmpty,
           reason: 'a version-skewed event is never decoded');
     });
+
+    test('events arriving after close are ignored, never injected', () async {
+      final client = RemoteRuntimeClient(
+          transport: (envelope) async => {
+                'v': webProtocolVersion,
+                'i': envelope['i'],
+                'r': {
+                  'tag': 'health',
+                  'result': {
+                    'tag': 'health',
+                    'payload': <String, String>{},
+                  }
+                },
+              });
+      final errors = <Object>[];
+      final received = <Event>[];
+      final sub = client.events
+          .listen(received.add, onError: errors.add, cancelOnError: false);
+      addTearDown(sub.cancel);
+
+      await client.close();
+      // Stray envelopes arriving in the teardown window must be dropped (the
+      // controller is closed) rather than throwing a StateError from
+      // add/addError on a closed broadcast controller.
+      client.handleWorkerEvent({
+        'v': webProtocolVersion + 1,
+        'op': WireOp.contractEvent,
+        'event': {'tag': 'committedChange', 'payload': <String, Object?>{}},
+      });
+      client.handleWorkerEvent({
+        'v': webProtocolVersion,
+        'op': WireOp.contractEvent,
+        'event': {
+          'tag': 'committedChange',
+          'payload': encodeWireValue({
+            'store': 's',
+            'id': 'i',
+            'origin': 'local',
+            'action': 'create',
+            'changedFields': ['name'],
+          }),
+        },
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(received, isEmpty, reason: 'nothing is delivered after close');
+      expect(errors, isEmpty, reason: 'no error is injected after close');
+    });
   });
 }
 

@@ -38,7 +38,7 @@ final class _SystemFieldDef<S, T> extends FieldDef<S, T> {
   _SystemFieldDef(super.owner, super.name) : super(required: false);
 
   @override
-  Field toField() => throw StateError(
+  Field toField() => throw SchemaRegistrationError(
       'System field "$name" is not part of the schema fields list; the '
       'engine owns the "$name" column.');
 }
@@ -296,7 +296,8 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   late final FieldDef<S, bool> archived =
       _SystemFieldDef<S, bool>(this as S, 'archived');
 
-  /// Verifies the definition and throws a [StateError] on the first
+  /// Verifies the definition and throws a [SchemaRegistrationError] on the
+  /// first
   /// inconsistency:
   ///
   /// - a descriptor created through [schema] but **omitted from [fields]** —
@@ -350,7 +351,7 @@ abstract base class StoreDef<S extends StoreDef<S>> {
       final isRegistered = registered.contains(created) ||
           (counterpart != null && registered.contains(counterpart));
       if (!isRegistered) {
-        throw StateError(
+        throw SchemaRegistrationError(
             'Store "$name": field "${created.name}" was created but is '
             'missing from the fields list. Every declared field must be '
             'listed in fields.');
@@ -359,13 +360,14 @@ abstract base class StoreDef<S extends StoreDef<S>> {
     final seen = <String>{};
     for (final fd in fs) {
       if (!identical(fd.owner, this)) {
-        throw StateError(
+        throw SchemaRegistrationError(
             'Store "$name": field "${fd.name}" is not owned by this store '
             '(owner is ${fd.owner.runtimeType}). Declare fields with this '
-            "store's schema. factory.");
+            "store's schema factory.");
       }
       if (!seen.add(fd.name)) {
-        throw StateError('Store "$name": duplicate field "${fd.name}".');
+        throw SchemaRegistrationError(
+            'Store "$name": duplicate field "${fd.name}".');
       }
     }
   }

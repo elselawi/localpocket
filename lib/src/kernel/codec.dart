@@ -65,7 +65,14 @@ KindViolation? fieldKindViolation(Field f, Object? value) {
     case FieldKind.date:
       return value is! int ? KindViolation.intExpected : null;
     case FieldKind.real:
-      return value is! num ? KindViolation.numberExpected : null;
+      if (value is! num) return KindViolation.numberExpected;
+      // Non-finite reals cannot be persisted losslessly: canonical JSON has
+      // no NaN/Infinity literal, so a NaN `real` would store bytes that fail
+      // every later jsonDecode and dead-letter as corrupt. Reject here.
+      if (value is double && !value.isFinite) {
+        return KindViolation.numberExpected;
+      }
+      return null;
     case FieldKind.bool:
       return value is! bool ? KindViolation.boolExpected : null;
     case FieldKind.json:
@@ -200,7 +207,23 @@ Map<String, Object?> decodeDbRow(
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
 }) {
-  final logical = <String, Object?>{'id': dbRow['id']};
+  final logical = <String, Object?>{};
+  // Extra keys are merged FIRST so a declared field (or `id`/`archived`)
+  // promoted from an older schema revision's extra column always decodes
+  // from its typed physical column — the declared column wins, never the
+  // stale extra copy. Reserved engine columns never enter the logical row
+  // from extra.
+  final extra = dbRow['extra'];
+  if (extra is String && extra.isNotEmpty) {
+    final parsed = jsonDecode(extra);
+    if (parsed is Map) {
+      for (final entry in Map<String, Object?>.from(parsed).entries) {
+        if (Field.reservedColumns.contains(entry.key)) continue;
+        logical[entry.key] = entry.value;
+      }
+    }
+  }
+  logical['id'] = dbRow['id'];
   for (final f in schema.fields) {
     logical[f.name] = _decodeStoredValue(f, dbRow[f.name],
         cipher: cipher,
@@ -209,13 +232,6 @@ Map<String, Object?> decodeDbRow(
         recordId: (dbRow['id'] as String?) ?? '');
   }
   logical['archived'] = dbRow['archived'] == 1;
-  final extra = dbRow['extra'];
-  if (extra is String && extra.isNotEmpty) {
-    final parsed = jsonDecode(extra);
-    if (parsed is Map) {
-      logical.addAll(Map<String, Object?>.from(parsed));
-    }
-  }
   return logical;
 }
 
@@ -338,8 +354,17 @@ Object? _decodeStoredValue(
           'Corrupt $store row: encrypted field "${f.name}" must be TEXT '
           'ciphertext but is ${stored.runtimeType}.');
     }
-    final plainStr = utf8.decode(fc.decrypt(base64Decode(stored),
-        aad: fieldAad(store, f.name, recordId)));
+    String plainStr;
+    try {
+      plainStr = utf8.decode(fc.decrypt(base64Decode(stored),
+          aad: fieldAad(store, f.name, recordId)));
+    } catch (e) {
+      // Corrupt ciphertext (bad base64 or a failed auth check) must surface
+      // as a typed storage error, not a raw FormatException from get().
+      throw StorageError(
+          'Corrupt $store row: encrypted field "${f.name}" failed to decrypt '
+          '($e).');
+    }
     return switch (f.kind) {
       FieldKind.bool => plainStr == '1' || plainStr == 'true',
       FieldKind.int || FieldKind.date => int.parse(plainStr),

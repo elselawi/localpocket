@@ -28,25 +28,25 @@ SyncConfig testConfig({
   Duration? connectivitySettle,
   Duration? purgeHiddenAfter,
   int Function()? now,
-}) => SyncConfig(
-    maxPage: maxPage,
-    maxPagesPerPass: maxPagesPerPass,
-    rewind: rewind ?? const Duration(seconds: 5),
-    sweepInterval: sweepInterval ?? const Duration(days: 365),
-    syncInterval: const Duration(days: 365),
-    pushDebounce: pushDebounce,
-    connectivitySettle: connectivitySettle ?? Duration.zero,
-    maxBatch: maxBatch,
-    maxAttempts: maxAttempts,
-    backoffBase: backoffBase,
-    backoffCap: const Duration(minutes: 5),
-    jitter: jitter ?? (_) => 1.0,
-    purgeHiddenAfter: purgeHiddenAfter,
-    now: now,
-  );
+}) =>
+    SyncConfig(
+      maxPage: maxPage,
+      maxPagesPerPass: maxPagesPerPass,
+      rewind: rewind ?? const Duration(seconds: 5),
+      sweepInterval: sweepInterval ?? const Duration(days: 365),
+      syncInterval: const Duration(days: 365),
+      pushDebounce: pushDebounce,
+      connectivitySettle: connectivitySettle ?? Duration.zero,
+      maxBatch: maxBatch,
+      maxAttempts: maxAttempts,
+      backoffBase: backoffBase,
+      backoffCap: const Duration(minutes: 5),
+      jitter: jitter ?? (_) => 1.0,
+      purgeHiddenAfter: purgeHiddenAfter,
+      now: now,
+    );
 
 class EngineHarness {
-
   EngineHarness(this.pocket, this.mock, this.engine);
   final LocalPocket pocket;
   final MockSyncBackend mock;

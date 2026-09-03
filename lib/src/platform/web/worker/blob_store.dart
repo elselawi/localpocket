@@ -8,6 +8,16 @@ import 'package:web/web.dart' show DOMException, FileSystemDirectoryHandle;
 
 import '../../../kernel/files/blob_store.dart';
 
+/// Default ceiling for ONE blob (bytes), enforced mid-stream during [put] so
+/// an unbounded or lying source stream can never OOM the worker. Mirrors the
+/// worker's per-upload-session ceiling.
+const int defaultWebMaxBlobBytes = 268435456; // 256 MiB
+
+/// Default ceiling for the aggregate volatile (in-memory) fallback (bytes).
+/// The fallback is only used when OPFS is unavailable; bounding it keeps a
+/// long-lived memory-only worker from growing without bound.
+const int defaultWebVolatileCapBytes = 134217728; // 128 MiB
+
 /// {@template localpocket.web_blob_store}
 /// Web [BlobStore] backed by async OPFS, with an in-memory fallback when OPFS
 /// is unavailable. Uses the same worker-safe OPFS interop (`storageManager` →
@@ -29,14 +39,27 @@ class WebBlobStore extends BlobStore {
   /// tests to inject a pure-Dart backend and bypass the `storageManager` probe
   /// (which returns `null` under the VM); production callers leave it unset.
   ///
+  /// [maxBlobBytes] caps a single blob (enforced mid-stream so oversized
+  /// content is rejected before it is buffered); [volatileCapBytes] bounds
+  /// the aggregate in-memory fallback.
+  ///
   /// {@macro localpocket.web_blob_store}
   WebBlobStore({
     String rootPrefix = 'localpocket_blobs',
+    this.maxBlobBytes = defaultWebMaxBlobBytes,
+    this.volatileCapBytes = defaultWebVolatileCapBytes,
     @visibleForTesting this.opfsDir,
   }) : _rootPrefix = rootPrefix;
 
+  /// Ceiling for one blob's byte count; see [defaultWebMaxBlobBytes].
+  final int maxBlobBytes;
+
+  /// Ceiling for the aggregate volatile fallback byte count.
+  final int volatileCapBytes;
+
   final String _rootPrefix;
   final Map<String, Uint8List> _memoryFallback = {};
+  int _volatileBytes = 0;
 
   /// Test seam: use this backend directly instead of probing
   /// `navigator.storage`. See [WebBlobStore.new].
@@ -47,6 +70,15 @@ class WebBlobStore extends BlobStore {
   /// the worker's lifetime — a context that loses OPFS cannot regain it, so a
   /// cached `false` is stable. Ignored when [opfsDir] is set.
   bool? _opfsAvailable;
+
+  /// Set once OPFS has been probed available but has since failed to resolve
+  /// or operate, so [isDurable] stops claiming a durability the store no
+  /// longer has.
+  bool _opfsUnavailable = false;
+
+  /// The resolved OPFS backend, cached after the first successful resolution
+  /// so each subsequent operation skips the redundant directory probe.
+  OpfsDir? _opfsDir;
 
   /// Probes whether the OPFS root for this store's blobs is reachable.
   Future<bool> _probeOpfs() async {
@@ -61,33 +93,52 @@ class WebBlobStore extends BlobStore {
     }
   }
 
-  /// Returns the cached OPFS availability, probing on first use.
-  Future<bool> _isOpfsAvailable() async =>
-      _opfsAvailable ??= await _probeOpfs();
+  /// Returns the cached OPFS availability, probing on first use. A store that
+  /// has degraded (probe succeeded but resolution/operation failed) reports
+  /// unavailable from then on.
+  Future<bool> _isOpfsAvailable() async {
+    if (_opfsUnavailable) return false;
+    return _opfsAvailable ??= await _probeOpfs();
+  }
 
   /// Returns the OPFS backend directory, or `null` when OPFS is unavailable
   /// (callers fall back to [_memoryFallback]). The [opfsDir] test seam is
-  /// returned directly, skipping the probe.
+  /// returned directly, skipping the probe. The resolved directory is cached;
+  /// a resolution failure after a successful probe is remembered so
+  /// [isDurable] cannot keep claiming durability for a store that silently
+  /// degraded to memory.
   Future<OpfsDir?> _getOpfsDir() async {
     final seam = opfsDir;
     if (seam != null) return seam;
+    final cached = _opfsDir;
+    if (cached != null) return cached;
     if (!await _isOpfsAvailable()) return null;
     try {
       final storage = storageManager;
       if (storage == null) return null;
       final root = await storage.directory;
-      return _RealOpfsDir(await root.getDirectory(_rootPrefix, create: true));
+      final dir =
+          _RealOpfsDir(await root.getDirectory(_rootPrefix, create: true));
+      _opfsDir = dir;
+      return dir;
     } catch (_) {
+      _opfsUnavailable = true;
       return null;
     }
   }
 
   /// Whether blob bytes are persisted to OPFS. `false` means bytes live only
   /// in the volatile in-memory fallback, which disappears when the worker
-  /// terminates or reloads. Reports backend durability — the app can surface
-  /// this to users or gate `attach` behind `allowVolatileBlobs`.
+  /// terminates or reloads. Reports the STORE'S CURRENT backend — once OPFS
+  /// has been probed but cannot actually be used, this reports `false` rather
+  /// than a stale probe result. The app can surface this to users or gate
+  /// `attach` behind `allowVolatileBlobs`.
   @override
-  Future<bool> get isDurable => _isOpfsAvailable();
+  Future<bool> get isDurable async {
+    final seam = opfsDir;
+    if (seam != null) return true;
+    return await _getOpfsDir() != null;
+  }
 
   @override
   Future<String> put(
@@ -103,17 +154,46 @@ class WebBlobStore extends BlobStore {
       expectedSha256: expectedSha256,
       expectedSize: expectedSize,
       key: key,
+      maxBytes: maxBlobBytes,
     );
     final data = builder.takeBytes();
 
     final opfs = await _getOpfsDir();
     if (opfs != null) {
-      await opfs.write(result.hash, data);
+      // Publish in two steps: stage under a `tmp_` name (each write is
+      // verified after it lands), promote to the final content-addressed
+      // name, then drop the staging entry. A quota failure or crash between
+      // staging and promote leaves only a `tmp_` file that [cleanTmp]
+      // removes — never corrupt bytes under the hash itself.
+      final staged = 'tmp_${result.hash}';
+      try {
+        await opfs.write(staged, data);
+        await opfs.write(result.hash, data);
+      } finally {
+        try {
+          await opfs.remove(staged);
+        } catch (_) {
+          // Best-effort: a leftover tmp_ file is reclaimed by cleanTmp.
+        }
+      }
     } else {
-      _memoryFallback[result.hash] = data;
+      _putVolatile(result.hash, data);
     }
 
     return result.hash;
+  }
+
+  /// Stores [data] in the volatile in-memory fallback, refusing once the
+  /// aggregate byte cap is reached so the fallback stays bounded.
+  void _putVolatile(String hash, Uint8List data) {
+    if (_volatileBytes + data.length > volatileCapBytes) {
+      throw BlobStorageException(
+          StateError('volatile blob memory cap exceeded: would reach '
+              '${_volatileBytes + data.length} of $volatileCapBytes bytes'),
+          hash);
+    }
+    _memoryFallback[hash] = data;
+    _volatileBytes += data.length;
   }
 
   @override
@@ -145,7 +225,8 @@ class WebBlobStore extends BlobStore {
   @override
   Future<void> delete(String hash) async {
     BlobStore.validateHash(hash);
-    _memoryFallback.remove(hash);
+    final removed = _memoryFallback.remove(hash);
+    if (removed != null) _volatileBytes -= removed.length;
 
     final opfs = await _getOpfsDir();
     if (opfs != null) {
@@ -259,8 +340,42 @@ class _RealOpfsDir implements OpfsDir {
   Future<void> write(String name, Uint8List bytes) async {
     final fileHandle = await _handle.openFile(name, create: true);
     final writable = await fileHandle.createWritable().toDart;
-    await writable.write(bytes.buffer.toJS).toDart;
-    await writable.close().toDart;
+    try {
+      await writable.write(bytes.buffer.toJS).toDart;
+      await writable.close().toDart;
+    } catch (e) {
+      // Never leave a half-written entry behind: abort the writable
+      // best-effort, then surface the original failure typed (a real storage
+      // failure, not an absence).
+      try {
+        await writable.abort().toDart;
+      } catch (_) {}
+      throw BlobStorageException(e, name);
+    }
+    // Verify-after-write: a partial OPFS write (quota, interrupted close)
+    // must never publish corrupt bytes under a content-addressed name. Re-open
+    // and confirm the persisted length; on mismatch delete the entry and fail.
+    try {
+      final check = await _handle.openFile(name);
+      final file = await check.getFile().toDart;
+      if (file.size != bytes.length) {
+        try {
+          await _handle.remove(name);
+        } catch (_) {}
+        throw BlobStorageException(
+            StateError('write verification failed: persisted ${file.size} of '
+                '${bytes.length} bytes'),
+            name);
+      }
+    } on BlobStorageException {
+      rethrow;
+    } catch (e) {
+      // Could not re-open for verification: the entry is unreliable.
+      try {
+        await _handle.remove(name);
+      } catch (_) {}
+      throw BlobStorageException(e, name);
+    }
   }
 
   @override

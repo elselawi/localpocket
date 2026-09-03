@@ -1,5 +1,58 @@
 ## Unreleased
 
+- **The kernel hub no longer uses `part`-libraries.** Every kernel service —
+  the hub, the command dispatcher, the mutation/read/file services, and
+  `KernelContext` — is a real library receiving its dependencies explicitly;
+  a structural test machine-enforces that no `part` directive exists under
+  the kernel layer. Pure internal refactor: no behavior change.
+
+- **Correctness and lifecycle hardening across the engine and web layers.**
+  Highlights:
+  - **Declared `unique: true` indexes now actually enforce uniqueness.**
+    The `id` tie-breaker is no longer appended to UNIQUE indexes, so an
+    `IndexSpec(['email'], unique: true)` rejects duplicates instead of never
+    firing (use a declared unique index or `uniqueWhenActive` for
+    per-record uniqueness, as before).
+  - **Sync writes and conflict resolution are safer**: `compact()` no longer
+    lets purged/compacted rows be resurrected by the next visibility sweep;
+    FTS content is rebuilt through the same normalizer after a destructive
+    migration (search parity no longer silently breaks); removing a file
+    that was never uploaded no longer queues a bogus remote delete that
+    retried forever.
+  - **Transaction failures surface instead of hanging**: a transaction that
+    fails to start delivers the error to the caller (no more wedged sessions
+    until the idle sweeper), and a failed `BEGIN`/rollback never leaves the
+    single connection silently unusable.
+  - **`close()` is idempotent and always tears the runtime down**, even when
+    the platform's on-close hook throws; watch streams end after `close()`,
+    and a watch whose refresh keeps failing cancels itself instead of
+    leaking the kernel subscription.
+  - **Web open rejects what it cannot honor**: a non-null `now` clock, a
+    caller-provided `blobStore`, and any sync-backend factory instance other
+    than the worker's own canonical one now fail the open with a typed error
+    (previously they were silently ignored on the web path).
+  - **Web blob storage is bounded and self-verifying**: one blob is capped
+    mid-stream, writes are verified after landing (a partial write is
+    deleted, never published), crash leftovers are reclaimed, and the
+    volatile in-memory fallback has an aggregate cap; `isDurable` reports the
+    store's actual current backend rather than a stale probe.
+  - **Sync growth is bounded**: quarantined records stop being re-fetched
+    once the attempt budget is exhausted, repeated quarantines keep one
+    dead-letter audit row per record instead of accumulating, `runMaintenance`
+    garbage-collects finished op-queue rows and expired dead-letter entries,
+    and the engine's debug-action log is a capped ring.
+  - **Unexpected background sync failures are contained**: an error that
+    escapes a background cycle is recorded into the engine status (with a
+    backoff transition) instead of surfacing as an unhandled zone error;
+    `syncNow()` still propagates to its caller.
+  - **Store and field registration is stricter**: store names carrying quote
+    characters or the reserved `sqlite_`/`lp_` prefixes, fields named after
+    SQLite's implicit `rowid` (`rowid`/`_rowid_`/`oid`), and empty FTS
+    declarations are rejected at registration with typed errors; non-finite
+    real values are rejected at the write boundary (they could not be
+    persisted losslessly); corrupt encrypted cells surface as typed storage
+    errors instead of raw `FormatException`s.
+
 - **Robustness sweep across the wire, engine, and adapter boundaries.**
   Highlights:
   - **Wire decoders are strict about present-but-wrong-typed values**

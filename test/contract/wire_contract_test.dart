@@ -266,6 +266,31 @@ void main() {
         throwsA(isA<WireException>()),
       );
     });
+
+    test('list element failures name the failing index', () {
+      const request =
+          SearchRequest(store: 's', spec: SearchSpecData(term: 'x'));
+      expect(
+        () => ContractCodec.decodeResult(
+          request,
+          {
+            'tag': 'searchHits',
+            'payload': encodeWireValue({
+              'hits': [
+                {'store': 's', 'id': 'a', 'score': 1.0},
+                'not-a-hit',
+              ],
+            }),
+          },
+        ),
+        throwsA(isA<WireException>().having(
+          (e) => e.message,
+          'message',
+          contains('hits[1]'),
+        )),
+        reason: 'AGENTS gotcha: list decode errors name the failing index',
+      );
+    });
   });
 
   group('event round-trips', () {
@@ -277,6 +302,46 @@ void main() {
         expect(decoded.toJson(), sample.toJson());
       });
     }
+
+    test('committed record payloads are wire-encoded, never re-interpreted',
+        () {
+      // A user JSON-object may legitimately carry the reserved tag key; the
+      // event encode side must escape it exactly like requests/results, so
+      // the decode side reconstructs the user's data instead of mistaking
+      // it for a tagged wrapper.
+      const escapedUserMap = {
+        '__lp_t': 'map',
+        'v': {'x': 1}
+      };
+      final at = DateTime.utc(2026, 9, 1, 8, 0);
+      final bytes = Uint8List.fromList(const [9, 8, 7]);
+      final event = CommittedChange(
+        store: 's',
+        id: 'abc123',
+        origin: ChangeOrigin.local,
+        action: ChangeAction.update,
+        oldRecord: null,
+        newRecord: {
+          'id': 'abc123',
+          'meta': escapedUserMap,
+          'at': at,
+          'blob': bytes,
+        },
+        changedFields: const {'meta'},
+      );
+
+      final wire = ContractCodec.encodeEvent(event);
+      // The escape survives the encode: the reserved-tag object is wrapped,
+      // not treated as already-encoded.
+      final payload = wire['payload']! as Map;
+      final meta = (payload['newRecord']! as Map)['meta']! as Map;
+      expect(meta['__lp_t'], 'map', reason: 'the escape must be wrapped once');
+
+      final decoded = ContractCodec.decodeEvent(wire) as CommittedChange;
+      expect(decoded.newRecord!['meta'], escapedUserMap);
+      expect(decoded.newRecord!['at'], at);
+      expect(decoded.newRecord!['blob'], bytes);
+    });
 
     test('unknown events fail', () {
       expect(
@@ -371,6 +436,15 @@ void main() {
               'reconstructed into a DateTime');
       expect((decoded['row'] as Map)['__lp_t'], 'datetime');
       expect((decoded['row'] as Map)['v'], 1700000000000);
+    });
+
+    test('non-string map keys on a decode payload fail typed', () {
+      // The encode side stringifies keys; a decode payload with non-string
+      // keys is foreign or truncated. Silent key-dropping loses data.
+      expect(
+        () => decodeWireValue(<Object?, Object?>{1: 'a'}),
+        throwsA(isA<WireException>()),
+      );
     });
 
     test('non-representable values are rejected', () {

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:localpocket/src/api/api.dart';
+import 'package:localpocket/src/kernel/errors.dart'
+    show ConflictNotFoundException;
 import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
 import 'package:localpocket/src/kernel/local_pocket.dart' as kernel
     show KernelDatabase;
@@ -102,8 +104,7 @@ void main() {
     test('resolve on an unknown conflict fails typed', () async {
       await expectLater(
         db.store(Tasks.store).conflicts.resolve('nope', merged: const []),
-        throwsA(isA<StateError>()
-            .having((e) => e.message, 'message', contains('No conflict'))),
+        throwsA(isA<ConflictNotFoundException>()),
       );
     });
 

@@ -32,7 +32,8 @@ import 'package:localpocket/src/kernel/sync/sync_backend.dart'
         ProtocolError,
         DuplicateIdError,
         BatchFailedError,
-        RemoteVersionConflict;
+        RemoteVersionConflict,
+        SyncIdentityError;
 
 // The typed error hierarchy crosses the boundary via the error codec, so it
 // is part of the contract surface; sync status models back the status/report

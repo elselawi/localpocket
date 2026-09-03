@@ -623,7 +623,7 @@ final class FileChunkEvent extends Event {
   @override
   Map<String, Object?> toJson() => {
         'stream': stream,
-        'chunk': encodeWireValue(chunk),
+        'chunk': chunk,
         'last': last,
         if (error != null) 'error': error,
       };

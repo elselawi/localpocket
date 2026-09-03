@@ -25,7 +25,8 @@ import '../../support/helpers.dart';
 /// the identical in-memory fallback semantics of [MemoryBlobStore].
 void main() {
   group('WebBlobStore durability wiring (structural)', () {
-    final source = File('lib/src/platform/web/worker/blob_store.dart').readAsStringSync();
+    final source =
+        File('lib/src/platform/web/worker/blob_store.dart').readAsStringSync();
 
     test('reports durability from a cached OPFS probe', () {
       expect(source, contains('Future<bool> get isDurable'));
@@ -41,8 +42,11 @@ void main() {
       expect(source, contains('if (!await _isOpfsAvailable()) return null;'),
           reason: '_getOpfsDir short-circuits to null (=> memory fallback) '
               'when the probe fails');
-      expect(source, contains('_memoryFallback[result.hash] = data;'),
-          reason: 'put() writes bytes only to memory when no OPFS dir exists');
+      expect(source, contains('_putVolatile(result.hash, data);'),
+          reason: 'put() routes to the volatile fallback only when no OPFS '
+              'dir exists');
+      expect(source, contains('_memoryFallback[hash] = data;'),
+          reason: 'the fallback write is the only place bytes go to memory');
       expect(source, contains('_memoryFallback.containsKey(hash)'),
           reason: 'open()/exists()/size() serve bytes from the fallback');
     });
@@ -121,8 +125,8 @@ void main() {
       final rec = generateRecordId();
       await pocket.collection('widgets').put({'id': rec, 'name': 'w'});
 
-      final ref = await pocket.files.attach(
-          store: 'widgets', recordId: rec, bytes: Stream.value([7, 8]));
+      final ref = await pocket.files
+          .attach(store: 'widgets', recordId: rec, bytes: Stream.value([7, 8]));
       expect(ref.state, 'pending_upload');
     });
   });

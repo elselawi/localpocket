@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:localpocket/src/kernel/query/query_builder/query_builder.dart';
 import 'package:localpocket/src/kernel/query/search_builder/search_builder.dart';
+import 'package:meta/meta.dart';
 import 'package:sqlite3/common.dart' show SqliteException;
 import 'database_adapter.dart';
 
@@ -15,11 +16,10 @@ import 'ids.dart';
 import 'local_pocket.dart';
 import 'schema.dart';
 import 'transaction.dart';
+import 'transaction_coordinator.dart';
 import 'watch.dart';
 import '../kernel/sync/outbox.dart';
 import '../kernel/sync/sync_tables.dart';
-
-part 'mutation_service.dart';
 
 /// What kind of local mutation is being applied.
 enum MutationAction {
@@ -102,7 +102,7 @@ class Collection with ChangeBusAwareStore {
   Future<void> put(Map<String, Object?> record,
       {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) {
-      return _mutate(MutationAction.createOrUpdate, record: record);
+      return mutateDirect(MutationAction.createOrUpdate, record: record);
     }
     return _pocket.transaction((tx) => tx.collection(name).put(record),
         durability: durability);
@@ -118,7 +118,7 @@ class Collection with ChangeBusAwareStore {
   Future<void> upsert(Map<String, Object?> record,
       {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) {
-      return _mutate(MutationAction.createOrUpdateMerge, record: record);
+      return mutateDirect(MutationAction.createOrUpdateMerge, record: record);
     }
     return _pocket.transaction((tx) => tx.collection(name).upsert(record),
         durability: durability);
@@ -130,7 +130,7 @@ class Collection with ChangeBusAwareStore {
   /// sequentially (last write wins), matching repeated `put` calls.
   Future<void> putAll(List<Map<String, Object?>> records,
       {DurabilityClass durability = DurabilityClass.normal}) {
-    if (_tx != null) return _putAll(records);
+    if (_tx != null) return putAllDirect(records);
     return _pocket.transaction((tx) => tx.collection(name).putAll(records),
         durability: durability);
   }
@@ -142,7 +142,7 @@ class Collection with ChangeBusAwareStore {
   Future<void> upsertAll(List<Map<String, Object?>> records,
       {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) {
-      return _putAll(records, action: MutationAction.createOrUpdateMerge);
+      return putAllDirect(records, action: MutationAction.createOrUpdateMerge);
     }
     return _pocket.transaction((tx) => tx.collection(name).upsertAll(records),
         durability: durability);
@@ -160,7 +160,7 @@ class Collection with ChangeBusAwareStore {
   /// Throws [RecordNotFoundException] when [id] is not present locally.
   Future<void> patch(String id, Map<String, Object?> changes,
       {DurabilityClass durability = DurabilityClass.normal}) {
-    if (_tx != null) return _patch(id, changes);
+    if (_tx != null) return patchDirect(id, changes);
     return _pocket.transaction((tx) => tx.collection(name).patch(id, changes),
         durability: durability);
   }
@@ -179,16 +179,20 @@ class Collection with ChangeBusAwareStore {
   /// the first failure; earlier entries roll back with it.
   Future<void> patchAll(Map<String, Map<String, Object?>> patches,
       {DurabilityClass durability = DurabilityClass.normal}) {
-    if (_tx != null) return _patchAll(patches);
+    if (_tx != null) return patchAllDirect(patches);
     return _pocket.transaction((tx) => tx.collection(name).patchAll(patches),
         durability: durability);
   }
 
-  Future<void> _patchAll(Map<String, Map<String, Object?>> patches) async {
+  /// Internal: batched partial updates used by [MutationService.patchAll]
+  /// and the session-scoped `patchAll` wrapper; emits one coalesced
+  /// [ChangeSet] on commit.
+  @internal
+  Future<void> patchAllDirect(Map<String, Map<String, Object?>> patches) async {
     _ensureWritable();
     if (patches.isEmpty) return;
     for (final e in patches.entries) {
-      await _patch(e.key, e.value, coalesceChanges: true);
+      await patchDirect(e.key, e.value, coalesceChanges: true);
     }
     _tx!.addChange(ChangeSet(name, {for (final id in patches.keys) id}));
   }
@@ -200,7 +204,7 @@ class Collection with ChangeBusAwareStore {
   /// entirely (no remote delete exists) unless `keepUnsyncedArchives` is set.
   Future<void> archive(String id,
       {DurabilityClass durability = DurabilityClass.normal}) {
-    if (_tx != null) return _mutate(MutationAction.archive, id: id);
+    if (_tx != null) return mutateDirect(MutationAction.archive, id: id);
     return _pocket.transaction((tx) => tx.collection(name).archive(id),
         durability: durability);
   }
@@ -208,7 +212,7 @@ class Collection with ChangeBusAwareStore {
   /// Removes the archive flag from the record with [id].
   Future<void> restore(String id,
       {DurabilityClass durability = DurabilityClass.normal}) {
-    if (_tx != null) return _mutate(MutationAction.restore, id: id);
+    if (_tx != null) return mutateDirect(MutationAction.restore, id: id);
     return _pocket.transaction((tx) => tx.collection(name).restore(id),
         durability: durability);
   }
@@ -219,12 +223,15 @@ class Collection with ChangeBusAwareStore {
   /// application intentionally wants to remove local state.
   Future<void> purge(String id,
       {DurabilityClass durability = DurabilityClass.normal}) {
-    if (_tx != null) return _purge(id);
+    if (_tx != null) return purgeDirect(id);
     return _pocket.transaction((tx) => tx.collection(name).purge(id),
         durability: durability);
   }
 
-  Future<void> _purge(String id) async {
+  /// Internal: hard-delete path used by [MutationService.purge] and the
+  /// session-scoped `purge` wrapper.
+  @internal
+  Future<void> purgeDirect(String id) async {
     _ensureWritable();
     final existing = await _readLogical(id);
     final exec = _tx!.executor;
@@ -245,7 +252,10 @@ class Collection with ChangeBusAwareStore {
     }
   }
 
-  Future<void> _patch(String id, Map<String, Object?> changes,
+  /// Internal: single-record partial update used by [MutationService.patch]
+  /// and the session-scoped `patch` wrapper.
+  @internal
+  Future<void> patchDirect(String id, Map<String, Object?> changes,
       {bool coalesceChanges = false}) async {
     _ensureWritable();
     final exec = _ex;
@@ -303,7 +313,7 @@ class Collection with ChangeBusAwareStore {
       throw RecordNotFoundException('No record $name/$id to patch.');
     }
     final merged = <String, Object?>{...existing, ...changes};
-    await _mutate(MutationAction.update,
+    await mutateDirect(MutationAction.update,
         record: {'id': id, ...merged},
         id: id,
         existing: existing,
@@ -415,7 +425,10 @@ class Collection with ChangeBusAwareStore {
     }
   }
 
-  Future<void> _mutate(MutationAction action,
+  /// Internal: core mutation path (validation, payload, outbox, events)
+  /// used by [MutationService] and the public write wrappers.
+  @internal
+  Future<void> mutateDirect(MutationAction action,
       {Map<String, Object?>? record,
       String? id,
       Map<String, Object?>? existing,
@@ -582,7 +595,7 @@ class Collection with ChangeBusAwareStore {
     }
     hooks?.mutationCrashPoint?.call('after-domain-write');
 
-    await _pocket.outbox.applyLocalMutation(
+    final writeResult = await _pocket.outbox.applyLocalMutation(
       table: _table,
       exec: _ex,
       id: recordId,
@@ -598,23 +611,37 @@ class Collection with ChangeBusAwareStore {
     );
     hooks?.mutationCrashPoint?.call('after-outbox');
 
+    // The vanish path (a never-remotely-known record archived) hard-deletes
+    // the domain row inside applyLocalMutation; the event must say so instead
+    // of advertising state that never commits.
+    final vanished = writeResult.vanished;
     final ChangeAction changeAction;
-    switch (action) {
-      case MutationAction.create:
-      case MutationAction.createOrUpdate:
-      case MutationAction.createOrUpdateMerge:
-        changeAction =
-            existingRow == null ? ChangeAction.create : ChangeAction.update;
-      case MutationAction.update:
-        changeAction = ChangeAction.update;
-      case MutationAction.archive:
-        changeAction = ChangeAction.archive;
-      case MutationAction.restore:
-        changeAction = ChangeAction.restore;
+    if (vanished) {
+      changeAction = ChangeAction.purge;
+    } else {
+      switch (action) {
+        case MutationAction.create:
+        case MutationAction.createOrUpdate:
+        case MutationAction.createOrUpdateMerge:
+          changeAction =
+              existingRow == null ? ChangeAction.create : ChangeAction.update;
+        case MutationAction.update:
+          changeAction = ChangeAction.update;
+        case MutationAction.archive:
+          changeAction = ChangeAction.archive;
+        case MutationAction.restore:
+          changeAction = ChangeAction.restore;
+      }
     }
 
     final Set<String> changedFieldsSet;
-    if (action == MutationAction.archive || action == MutationAction.restore) {
+    if (vanished) {
+      changedFieldsSet = {
+        for (final k in (existingRow ?? logical).keys)
+          if (k != 'id') k,
+      };
+    } else if (action == MutationAction.archive ||
+        action == MutationAction.restore) {
       changedFieldsSet = {'archived'};
     } else if (existingRow == null) {
       changedFieldsSet = logical.keys.where((k) => k != 'id').toSet();
@@ -629,7 +656,7 @@ class Collection with ChangeBusAwareStore {
         origin: ChangeOrigin.local,
         action: changeAction,
         oldRecord: existingRow,
-        newRecord: logical,
+        newRecord: vanished ? null : logical,
         changedFields: changedFieldsSet,
       ));
     }
@@ -640,7 +667,10 @@ class Collection with ChangeBusAwareStore {
     return;
   }
 
-  Future<void> _putAll(List<Map<String, Object?>> records,
+  /// Internal: batched create/merge used by [MutationService.putAll] and
+  /// [MutationService.upsertAll].
+  @internal
+  Future<void> putAllDirect(List<Map<String, Object?>> records,
       {MutationAction action = MutationAction.createOrUpdate}) async {
     _ensureWritable();
     if (records.isEmpty) return;
@@ -739,10 +769,10 @@ class Collection with ChangeBusAwareStore {
     for (final (rid, record) in resolved) {
       final existing = existingById[rid];
       if (writtenIds.contains(rid)) {
-        await _mutate(action,
+        await mutateDirect(action,
             record: {...record, 'id': rid}, coalesceChanges: true);
       } else {
-        await _mutate(action,
+        await mutateDirect(action,
             record: {...record, 'id': rid},
             existing: existing,
             prefetchedSyncRow: existing == null ? null : srById[rid],

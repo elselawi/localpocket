@@ -389,7 +389,8 @@ void main() {
       expect(tagsOnA.length, 3, reason: 'and no duplication');
       expect(tagsOnB.length, 3);
       expect(
-          (await s.readRecord(storeN, noteId))!['data']! as Map<String, Object?>,
+          (await s.readRecord(storeN, noteId))!['data']!
+              as Map<String, Object?>,
           containsPair('tags', containsAll(['a', 'b'])));
       expect(await b.pocket.conflicts.listOpen(store: storeN), isEmpty);
       // --- SetUnionWithDeletionWinsResolver over the wire ---

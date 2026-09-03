@@ -76,7 +76,11 @@ class WebSender {
       // A timeout is not a transport failure: never reclassify it as a
       // worker-close, and never close the sender.
       rethrow;
-    } on Exception catch (e) {
+    } on Object catch (e) {
+      // Classify on `Object`: the interop layer can surface Error subclasses
+      // (a TypeError from dartify, a StateError from the channel) whose
+      // message carries the worker-closed marker. Only those are rewritten;
+      // everything else keeps its identity and propagates unchanged.
       final message = e.toString();
       if (isWorkerClosedMessage(message)) {
         markWorkerClosed();

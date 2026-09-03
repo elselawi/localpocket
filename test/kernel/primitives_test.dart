@@ -110,8 +110,7 @@ void main() {
       // Same seed => same sequence of ids.
       final seq1 = List.generate(5, (_) => generateRecordId(random: Random(7)));
       final seq2 = List.generate(5, (_) => generateRecordId(random: Random(7)));
-      expect(
-          [for (final id in seq1) id.substring(8)],
+      expect([for (final id in seq1) id.substring(8)],
           [for (final id in seq2) id.substring(8)]);
     });
 
@@ -151,8 +150,7 @@ void main() {
       final seq = List.generate(5000, (_) => generateRecordId());
       for (var i = 1; i < seq.length; i++) {
         expect(seq[i].compareTo(seq[i - 1]), isNonNegative,
-            reason:
-                'id $i (${seq[i]}) must sort at or after id ${i - 1} '
+            reason: 'id $i (${seq[i]}) must sort at or after id ${i - 1} '
                 '(${seq[i - 1]}) so B-tree inserts append in order');
       }
     });

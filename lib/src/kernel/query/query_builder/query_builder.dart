@@ -12,6 +12,7 @@ import 'package:localpocket/src/kernel/query/cursor.dart';
 import 'package:localpocket/src/kernel/query/query_builder/predicate_tree.dart';
 import 'package:localpocket/src/kernel/query/result_shaper.dart';
 import 'package:localpocket/src/kernel/query/query_builder/query_dsl.dart';
+import 'package:localpocket/src/kernel/read_service.dart';
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/kernel/sql_utils.dart';
 import 'package:localpocket/src/kernel/store.dart';

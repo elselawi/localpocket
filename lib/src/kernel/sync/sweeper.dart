@@ -162,8 +162,12 @@ class Sweeper {
       final id = r['record_id']! as String;
       if (!remoteSeen.contains(id)) {
         // Already-hidden rows are skipped: re-hiding would only churn the
-        // change bus and inflate the reported hidden count.
-        if (r['access_state'] == AccessState.hidden.name) continue;
+        // change bus and inflate the reported hidden count. Purged markers
+        // have no domain row to hide.
+        if (r['access_state'] == AccessState.hidden.name ||
+            r['access_state'] == AccessState.purged.name) {
+          continue;
+        }
         toHide.add(id);
       }
     }
@@ -172,16 +176,18 @@ class Sweeper {
       hidden += toHide.length;
     }
 
-    // Optional purge of long-hidden rows. Only clean rows are safe: dirty,
-    // in-flight, conflicted, errored, or quarantined rows hold local edits
-    // or recovery payloads that must never be silently destroyed.
+    // Optional purge of long-hidden rows and reclamation of purged
+    // (compacted) markers. Only clean rows are safe: dirty, in-flight,
+    // conflicted, errored, or quarantined rows hold local edits or recovery
+    // payloads that must never be silently destroyed.
     if (config.purgeHiddenAfter != null) {
       final purgeCutoff =
           config.now() - config.purgeHiddenAfter!.inMilliseconds;
       final staleHidden = await pocket.db.rawQuery(
-        'SELECT record_id FROM lp_sync_row WHERE store = ? AND access_state = ? '
+        'SELECT record_id FROM lp_sync_row WHERE store = ? '
+        "AND access_state IN ('hidden', 'purged') "
         "AND sync_state = 'clean' AND (last_seen_at IS NOT NULL AND last_seen_at < ?)",
-        [store, AccessState.hidden.name, purgeCutoff],
+        [store, purgeCutoff],
       );
       for (final r in staleHidden) {
         final id = r['record_id']! as String;

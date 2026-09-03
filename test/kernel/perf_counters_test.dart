@@ -22,15 +22,15 @@ void main() {
       ];
       await Future.wait(futures);
 
-        // Group commit: the 20 same-turn submissions coalesce into ONE write
-        // transaction (that is the feature — one fsync for the burst).
-        expect(perf.writeTransactions, 1);
-        expect(perf.groupCommits, 1,
+      // Group commit: the 20 same-turn submissions coalesce into ONE write
+      // transaction (that is the feature — one fsync for the burst).
+      expect(perf.writeTransactions, 1);
+      expect(perf.groupCommits, 1,
           reason: 'the burst was coalesced into a single group commit');
-        expect(perf.groupCommitMembers, 20);
-        // Group commit holds the whole burst in ONE reserved queue slot, so
-        // the queue no longer deepens under concurrency (by design).
-        expect(perf.maxQueueDepth, 1,
+      expect(perf.groupCommitMembers, 20);
+      // Group commit holds the whole burst in ONE reserved queue slot, so
+      // the queue no longer deepens under concurrency (by design).
+      expect(perf.maxQueueDepth, 1,
           reason: 'the burst shares one group-commit queue slot');
       expect(perf.rowsWritten, greaterThanOrEqualTo(20));
       expect(perf.totalWriteTransactionUs, greaterThan(0));

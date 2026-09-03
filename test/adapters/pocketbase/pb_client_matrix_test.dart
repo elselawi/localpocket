@@ -33,13 +33,15 @@ void main() {
       await expectLater(
         b.createRecord(
             id: generateRecordId(), store: 'widgets', dataJson: '{oops'),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<PayloadError>().having(
+            (e) => e.message, 'message', contains('Corrupt local payload'))),
       );
       expect(fake.sends, isEmpty, reason: 'no request for an unparseable body');
 
       await expectLater(
         b.updateRecord(id: generateRecordId(), dataJson: '["not","a","map"'),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<PayloadError>().having(
+            (e) => e.message, 'message', contains('Corrupt local payload'))),
       );
       expect(fake.sends, isEmpty,
           reason: 'updateRecord also validates before sending');
@@ -143,8 +145,7 @@ void main() {
           reason: 'record missing id/updated');
     });
 
-    test('missing/invalid attachments normalize to an empty list (never crash)',
-        () async {
+    test('absent attachments default empty; wrong-typed fail typed', () async {
       final fake = FakeTransport();
       fake.sendStatus(
           200,
@@ -167,10 +168,27 @@ void main() {
             ],
           }));
       final b = backendWith(fake);
-      final recs = await b.listChanges('widgets');
-      expect(recs[0].attachments, ['ok.png'],
-          reason: 'non-string attachments entries are filtered out');
-      expect(recs[1].attachments, isEmpty,
+      // ABSENT optional fields default (projected sweep responses omit
+      // them); a PRESENT-BUT-WRONG-TYPED field is a typed protocol error —
+      // silently filtering entries would hide a misconfigured store field.
+      await expectLater(
+          b.listChanges('widgets'), throwsA(isA<ProtocolError>()));
+
+      final absent = FakeTransport();
+      absent.sendStatus(
+          200,
+          jsonEncode({
+            'items': [
+              {
+                'id': 'r2',
+                'store': 'widgets',
+                'updated': '2026-08-15 10:00:00.000Z',
+                'data': {'id': 'r2'},
+              },
+            ],
+          }));
+      final recs = await backendWith(absent).listChanges('widgets');
+      expect(recs.single.attachments, isEmpty,
           reason: 'missing attachments -> empty');
     });
 
@@ -299,8 +317,11 @@ void main() {
       await b.listChanges('widgets',
           fromUpdated: '2026-08-15 10:00:00.000Z', fromId: 'r100', perPage: 50);
       final q = fake.sends.single.url.queryParameters;
-      expect(q['filter'],
-          "(store='widgets' && updated>='2026-08-15 10:00:00.000Z') && id>'r100'");
+      expect(
+          q['filter'],
+          "(store='widgets' && updated>='2026-08-15 10:00:00.000Z') && "
+          "(updated>'2026-08-15 10:00:00.000Z' || "
+          "(updated='2026-08-15 10:00:00.000Z' && id>'r100'))");
       expect(q['sort'], 'updated,id');
       expect(q['perPage'], '50');
       expect(q['skipTotal'], '1');

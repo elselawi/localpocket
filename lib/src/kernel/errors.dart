@@ -104,6 +104,15 @@ class SchemaTooNewError extends LocalPocketError {
   SchemaTooNewError(super.message);
 }
 
+/// {@template localpocket.conflict_not_found_exception}
+/// A conflict resolution was attempted for a record with no open conflict
+/// (or no record at all).
+/// {@endtemplate}
+class ConflictNotFoundException extends LocalPocketError {
+  /// {@macro localpocket.conflict_not_found_exception}
+  ConflictNotFoundException(super.message);
+}
+
 /// {@template localpocket.schema_registration_error}
 /// A schema declaration is invalid (reserved column, encrypted+indexed, ...).
 /// {@endtemplate}

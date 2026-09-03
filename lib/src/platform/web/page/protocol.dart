@@ -8,6 +8,7 @@ library;
 // Envelope fields are documented above; per-constant docs would add noise.
 // ignore_for_file: public_member_api_docs
 
+import '../../../contract/contract.dart' show WireException;
 import '../../../kernel/errors.dart';
 import '../../../kernel/sync/sync_backend.dart';
 
@@ -81,6 +82,9 @@ String stableWireErrorType(Object error) {
     }
     if (error is StorageError) return 'StorageError';
     if (error is RecordNotFoundException) return 'RecordNotFoundException';
+    if (error is ConflictNotFoundException) {
+      return 'ConflictNotFoundException';
+    }
     if (error is SchemaTooNewError) return 'SchemaTooNewError';
     if (error is FtsUnavailableError) return 'FtsUnavailableError';
     // Checked before SchemaRegistrationError: it is a subtype of it, so
@@ -96,6 +100,8 @@ String stableWireErrorType(Object error) {
       return 'DestructiveMigrationRefusedError';
     }
     if (error is ReadOnlyTxError) return 'ReadOnlyTxError';
+    if (error is TypedStoreMismatchError) return 'TypedStoreMismatchError';
+    if (error is FieldNotSelectedError) return 'FieldNotSelectedError';
     return 'LocalPocketError';
   }
 
@@ -111,8 +117,14 @@ String stableWireErrorType(Object error) {
     if (error is ProtocolError) return 'ProtocolError';
     if (error is DuplicateIdError) return 'DuplicateIdError';
     if (error is BatchFailedError) return 'BatchFailedError';
+    if (error is RemoteVersionConflict) return 'RemoteVersionConflict';
+    if (error is SyncIdentityError) return 'SyncIdentityError';
     return 'SyncError';
   }
+
+  // Malformed contract envelope: classified consistently across legs so a
+  // decode failure on web matches the loopback behavior.
+  if (error is WireException) return 'WireException';
 
   // Standard Dart exceptions
   if (error is ProtocolEnvelopeException) return 'ProtocolEnvelopeException';

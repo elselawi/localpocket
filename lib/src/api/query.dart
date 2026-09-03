@@ -308,10 +308,9 @@ QueryConditionOp _opByName(String name, String field) {
   for (final op in QueryConditionOp.values) {
     if (op.name == name) return op;
   }
-  throw ArgumentError.value(
-    name,
-    field,
-    'Unknown condition operator.',
+  throw ValidationException(
+    'Unknown condition operator "$name" for field "$field".',
+    field: field,
   );
 }
 

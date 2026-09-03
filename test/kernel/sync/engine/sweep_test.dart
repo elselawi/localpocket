@@ -93,6 +93,38 @@ void main() {
       expect(r!['name'], 'v2', reason: 'stale-updated re-appearance applied');
     });
 
+    test('compacted rows stay gone across bucket rotation (purged marker)',
+        () async {
+      final h = await EngineHarness.create(
+          config: testConfig(sweepInterval: Duration.zero));
+      addTearDown(h.close);
+      final id =
+          h.mock.seed(store: 'widgets', data: {'name': 'old'}, id: bucketAId());
+      await h.engine.syncNow();
+
+      // Archive locally and push so the row is archived AND clean.
+      await h.pocket.collection('widgets').archive(id);
+      await h.engine.syncNow();
+      final afterArchive = await sr(h.pocket, id);
+      expect(afterArchive!.syncState, SyncState.clean);
+
+      // Backdate last_seen and compact.
+      await h.pocket.db
+          .execute('UPDATE lp_sync_row SET last_seen_at = ?', [1000]);
+      final removed =
+          await h.pocket.compact('widgets', olderThan: Duration.zero);
+      expect(removed, 1);
+      expect(await h.pocket.collection('widgets').get(id), isNull);
+      expect((await sr(h.pocket, id))!.accessState, AccessState.purged);
+
+      // The sweep rotates over the record's bucket: the remote still lists
+      // it unchanged, and the purged marker must prevent a resurrection.
+      await h.engine.sweeper.sweepBucket('widgets', 0);
+      expect(await h.pocket.collection('widgets').get(id), isNull,
+          reason: 'a compacted row never comes back');
+      expect((await sr(h.pocket, id))!.accessState, AccessState.purged);
+    });
+
     test('updated mismatch self heals via fetch', () async {
       final h = await EngineHarness.create(
           config: testConfig(sweepInterval: Duration.zero));

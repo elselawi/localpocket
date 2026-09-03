@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:localpocket/src/kernel/errors.dart';
-import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/file_sessions.dart';
 import 'package:test/test.dart';
 
 void main() {

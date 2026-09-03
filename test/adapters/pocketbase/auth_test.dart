@@ -357,7 +357,8 @@ void main() {
           tokenProvider: _DefaultIdentityProvider(),
           stores: const []);
       addTearDown(() => unset.close());
-      expect(() => unset.scopeId, throwsStateError,
+      // The loud failure is a typed SyncError, not a raw StateError.
+      expect(() => unset.scopeId, throwsA(isA<SyncIdentityError>()),
           reason: 'a missing identity is a loud error, not a shared scope');
 
       final a = PocketBaseRawBackend(

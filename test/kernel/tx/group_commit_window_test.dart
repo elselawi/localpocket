@@ -21,10 +21,12 @@ void main() {
       );
       addTearDown(pocket.close);
 
-      final f1 = pocket.transaction(
-          (tx) => tx.collection('widgets').put(record(id: generateRecordId(), name: 'a')));
-      final f2 = pocket.transaction(
-          (tx) => tx.collection('widgets').put(record(id: generateRecordId(), name: 'b')));
+      final f1 = pocket.transaction((tx) => tx
+          .collection('widgets')
+          .put(record(id: generateRecordId(), name: 'a')));
+      final f2 = pocket.transaction((tx) => tx
+          .collection('widgets')
+          .put(record(id: generateRecordId(), name: 'b')));
       await f1;
       await f2;
 
@@ -50,14 +52,15 @@ void main() {
           tx.collection('widgets').put(record(id: id, name: 'x', qty: 1)));
       // A queued read while the window is open must flush the group instead
       // of blocking for the full 2s window.
-      final name =
-          await pocket.read((tx) async => (await tx.collection('widgets').get(id))?['name']);
+      final name = await pocket.read(
+          (tx) async => (await tx.collection('widgets').get(id))?['name']);
       await write;
       sw.stop();
 
       expect(name, 'x', reason: 'read-your-writes must hold during the window');
       expect(sw.elapsed, lessThan(const Duration(seconds: 1)),
-          reason: 'the read must flush the pending group, not wait out the window');
+          reason:
+              'the read must flush the pending group, not wait out the window');
     });
 
     test('default zero window keeps end-of-turn coalescing', () async {
@@ -69,10 +72,12 @@ void main() {
       );
       addTearDown(pocket.close);
 
-      final f1 = pocket.transaction(
-          (tx) => tx.collection('widgets').put(record(id: generateRecordId(), name: 'a')));
-      final f2 = pocket.transaction(
-          (tx) => tx.collection('widgets').put(record(id: generateRecordId(), name: 'b')));
+      final f1 = pocket.transaction((tx) => tx
+          .collection('widgets')
+          .put(record(id: generateRecordId(), name: 'a')));
+      final f2 = pocket.transaction((tx) => tx
+          .collection('widgets')
+          .put(record(id: generateRecordId(), name: 'b')));
       await f1;
       await f2;
 

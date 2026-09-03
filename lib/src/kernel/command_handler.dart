@@ -1,9 +1,35 @@
-/// Part of `local_pocket.dart` — the kernel command handler.
-///
-/// One exhaustive dispatcher from typed contract requests to named results,
-/// over the kernel services. The request hierarchy is sealed, so the
-/// compiler rejects the switch the moment a new variant lacks a case.
-part of 'local_pocket.dart';
+/// The kernel command dispatcher: one exhaustive switch from typed contract
+/// requests to named results, over the kernel services. The request hierarchy
+/// is sealed, so the compiler rejects the switch the moment a new variant
+/// lacks a case.
+library;
+
+import 'dart:async';
+import 'dart:typed_data';
+
+import '../contract/contract.dart';
+import 'capabilities.dart';
+import 'change_bus.dart';
+import 'execution_context.dart';
+import 'file_sessions.dart';
+import 'file_service.dart';
+import 'kernel_context.dart';
+import 'local_pocket.dart';
+import 'query/ir.dart';
+import 'query/query_builder/predicate_tree.dart';
+import 'query/query_builder/query_builder.dart';
+import 'query/search_builder/search_builder.dart';
+import 'schema.dart';
+import 'schema_manifest.dart';
+import 'store.dart';
+import 'read_service.dart';
+import 'database_adapter.dart' show DatabaseExecutor;
+import 'sync/conflicts.dart';
+import 'sync/engine.dart';
+import 'sync/sync_backend.dart';
+import 'transaction.dart';
+import 'transaction_coordinator.dart';
+import 'watch.dart';
 
 /// Marker used to unwind a held transaction/savepoint body on rollback.
 class _RollbackSignal implements Exception {
@@ -84,11 +110,11 @@ class KernelCommandHandler implements CommandHandler {
   final _watches = <String, StreamSubscription<dynamic>>{};
   final _fileUploads = FileUploadSessionRegistry();
   Timer? _uploadExpiryTimer;
-  final _fileDownloads = <String, _FileDownload>{};
+  final _fileDownloads = <String, FileDownloadState>{};
   SyncEngine? _syncEngine;
   _KernelTokenSource? _syncTokenSource;
-  StreamSubscription<SyncStatus>? _syncStatusSubscription;
-  SyncStatus? _lastSyncStatus;
+  StreamSubscription<SyncStatusData>? _syncStatusSubscription;
+  SyncStatusData? _lastSyncStatus;
   int _counter = 0;
 
   @override
@@ -328,10 +354,8 @@ class KernelCommandHandler implements CommandHandler {
         SyncUpdateAuthRequest(:final token) => _syncUpdateAuth(token),
         SyncSetConnectivityRequest(:final online) =>
           _syncLifecycle(() => _requireSyncEngine().setConnectivity(online)),
-        SyncStatusRequest() => Future.value(SyncStatusResult(
-            status: _lastSyncStatus == null
-                ? SyncStatusData.closed
-                : SyncStatusData.of(_lastSyncStatus!))),
+        SyncStatusRequest() => Future.value(
+            SyncStatusResult(status: _lastSyncStatus ?? SyncStatusData.closed)),
       };
 
   // -- lifecycle ------------------------------------------------------------
@@ -348,14 +372,16 @@ class KernelCommandHandler implements CommandHandler {
         final registered = context.database.requireTable(schema.name).manifest;
         final compiled = SchemaManifest.compile(schema);
         if (registered.fingerprint != compiled.fingerprint) {
-          throw StateError('Schema manifest mismatch for "${schema.name}".');
+          throw SchemaRegistrationError(
+              'Schema manifest mismatch for "${schema.name}".');
         }
       }
       final expected = fingerprints[schema.name];
       if (expected != null &&
           expected !=
               context.database.requireTable(schema.name).manifest.fingerprint) {
-        throw StateError('Schema manifest mismatch for "${schema.name}".');
+        throw SchemaRegistrationError(
+            'Schema manifest mismatch for "${schema.name}".');
       }
     }
     return const OkResult();
@@ -650,6 +676,17 @@ class KernelCommandHandler implements CommandHandler {
                 ? DurabilityClass.full
                 : DurabilityClass.normal,
           );
+    // If the transaction fails to START, `run` never executes and `ready`
+    // would never complete — the client would hang forever on begin. Route
+    // the start failure through `ready` (the client sees the typed error) and
+    // drop the dead session. A failure after `run` has completed `ready` is
+    // unaffected: it stays on `future` for _settle to observe and rethrow.
+    unawaited(session.future.catchError((Object e, StackTrace st) {
+      if (!session.ready.isCompleted) {
+        _sessions.remove(id);
+        session.ready.completeError(e, st);
+      }
+    }));
     return session.ready.future
         .then((_) => TransactionBeginResult(session: id));
   }
@@ -759,9 +796,18 @@ class KernelCommandHandler implements CommandHandler {
     // The subscription is owned by the watch registry and cancelled on
     // watch_cancel or handler close.
     // ignore: cancel_subscriptions
-    final sub = builder.watch().listen((List<Map<String, Object?>> rows) {
-      _events.add(WatchSnapshot(subscription: id, items: rows));
-    });
+    late final StreamSubscription<dynamic> sub;
+    // A refresh failure kills the watch (mirroring _watchOne) so a
+    // persistently failing query cannot leak the subscription forever.
+    sub = builder.watch().listen(
+      (List<Map<String, Object?>> rows) {
+        _events.add(WatchSnapshot(subscription: id, items: rows));
+      },
+      onError: (Object _) {
+        unawaited(sub.cancel());
+        _watches.remove(id);
+      },
+    );
     // ignore: cancel_subscriptions
     _watches[id] = sub;
     return Future.value(WatchStartedResult(subscription: id));
@@ -865,7 +911,7 @@ class KernelCommandHandler implements CommandHandler {
       refId: refId,
     );
     final id = 'f${++_counter}';
-    final download = _FileDownload(id);
+    final download = FileDownloadState(id);
     // The subscription is owned by the download registry and cancelled on
     // handler close.
     // ignore: cancel_subscriptions
@@ -951,7 +997,8 @@ class KernelCommandHandler implements CommandHandler {
     }
     final factory = context.database.syncBackendFactory;
     if (factory == null) {
-      throw StateError('No sync backend is configured for this runtime.');
+      throw ValidationException(
+          'No sync backend is configured for this runtime.');
     }
     await _stopSync();
     // The sync scope must be caller-supplied: a shared default would
@@ -983,18 +1030,18 @@ class KernelCommandHandler implements CommandHandler {
     _syncEngine = engine;
     _syncStatusSubscription = engine.status.listen((status) {
       _lastSyncStatus = status;
-      _events.add(SyncStatusEvent(status: SyncStatusData.of(status)));
+      _events.add(SyncStatusEvent(status: status));
     });
     await engine.start();
     return SyncStartResult(state: engine.state);
   }
 
   SyncEngine _requireSyncEngine() =>
-      _syncEngine ?? (throw StateError('Sync is not started.'));
+      _syncEngine ?? (throw ValidationException('Sync is not started.'));
 
   Future<Result> _syncNow() async {
     final report = await _requireSyncEngine().syncNow();
-    return SyncReportResult(report: SyncReportData.of(report));
+    return SyncReportResult(report: report);
   }
 
   Future<Result> _syncLifecycle(Future<void> Function() action) async {
@@ -1006,7 +1053,7 @@ class KernelCommandHandler implements CommandHandler {
     final tokenSource = _syncTokenSource;
     final engine = _requireSyncEngine();
     if (tokenSource == null) {
-      throw StateError('Sync is not started.');
+      throw ValidationException('Sync is not started.');
     }
     tokenSource.replace(token);
     await engine.markAuthValid();

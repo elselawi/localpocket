@@ -89,4 +89,40 @@ void main() {
     );
     expect(cancelled, isTrue);
   });
+
+  test(
+      'a second queued unregistration for the same watch does not clobber '
+      'the first', () async {
+    final tracker = WatchSubscriptionTracker();
+    final events = <String>[];
+    late Future<void> first;
+    late Future<void> second;
+
+    final registration = tracker.runRegistration(
+      watchId: 3,
+      register: () async {
+        // Two cancellations race in while the worker registration is in
+        // flight. Both must be queued (never overwriting each other) and
+        // both must eventually complete.
+        first = tracker.requestUnregistration(
+          watchId: 3,
+          unregister: () async => events.add('first-cancel'),
+        );
+        second = tracker.requestUnregistration(
+          watchId: 3,
+          unregister: () async => events.add('second-cancel'),
+        );
+        expect(tracker.isUnregistrationPending(3), isTrue);
+        await Future<void>.delayed(Duration.zero);
+      },
+      unregister: () async {},
+    );
+
+    await registration;
+    expect(events, ['first-cancel', 'second-cancel'],
+        reason: 'both queued cancels drain in order at registration teardown');
+    await first;
+    await second;
+    expect(tracker.isUnregistrationPending(3), isFalse);
+  });
 }

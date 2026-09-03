@@ -41,12 +41,33 @@ void main() {
         sweepFilter('widgets', 'z', fromId: 'zabc123'),
         "(store='widgets' && id~'z%' && id>'zabc123')",
       );
-      // Keyset continuation is appended to the pull filter too.
+      // The pull keyset is the documented (updated, id) tuple disjunction:
+      // pages sort by updated,id, so a plain id>'r01' would silently skip
+      // newer records whose id sorts below the page boundary.
       expect(
         pullPageFilter(
-            "(store='widgets' && updated>='2026-08-14 10:00:00.000Z')", 'r01'),
-        "(store='widgets' && updated>='2026-08-14 10:00:00.000Z') && id>'r01'",
+            "(store='widgets' && updated>='2026-08-14 10:00:00.000Z')",
+            '2026-08-14 10:00:00.000Z',
+            'r01'),
+        "(store='widgets' && updated>='2026-08-14 10:00:00.000Z') && "
+        "(updated>'2026-08-14 10:00:00.000Z' || "
+        "(updated='2026-08-14 10:00:00.000Z' && id>'r01'))",
       );
+    });
+
+    test('quote rejects backslash-terminated values, passes others through',
+        () {
+      // A trailing backslash is unrepresentable: PB escapes a quote ONLY
+      // after a backslash, so the backslash would escape the literal's
+      // closing quote (and doubling it keeps the second backslash adjacent
+      // to the quote). The value is rejected typed instead of emitting a
+      // malformed — potentially injectable — filter.
+      expect(() => quote('a\\'), throwsA(isA<ProtocolError>()));
+      // A backslash directly before a quote stays inside the literal: the
+      // quote's escape absorbs the pairing (`\\` literal, then `\'`).
+      expect(quote(r"a\'b"), r"'a\\'b'");
+      // A backslash before a non-quote stays literal.
+      expect(quote(r'a\b'), "'a\\b'");
     });
 
     test('quote escaping single quote backslash', () {
@@ -65,7 +86,9 @@ void main() {
       expect(quote(r'back\slash'), r"'back\slash'");
       // backslash immediately before a quote: the quote is still escaped.
       expect(quote(r"a\'b"), r"'a\\'b'");
-      expect(quote(r'end\\'), r"'end\\'");
+      // A value ENDING with a backslash is rejected (see the rejection test
+      // above): the old pin `quote(r'end\\') == "'end\\'"` encoded the bug —
+      // that emitted filter is unterminated under PB's own escape rule.
       expect(quote(r"'lead"), r"'\'lead'");
       // Round-trip under PB's rule (`\'` -> `'`, other backslashes literal).
       String pbUnescape(String s) {
@@ -81,7 +104,7 @@ void main() {
         return b.toString();
       }
 
-      for (final v in [r'back\slash', r"a\'b", r'end\\', r"'lead", r'a\\b']) {
+      for (final v in [r'back\slash', r"a\'b", r"'lead", r'a\\b']) {
         expect(pbUnescape(quote(v).substring(1, quote(v).length - 1)), v,
             reason: '"$v" round-trips under real PB escaping');
       }
@@ -101,8 +124,8 @@ void main() {
       // Empty values.
       expect(pullFilter('', ''), "(store='' && updated>='')");
       expect(sweepFilter('', ''), "(store='' && id~'%')");
-      expect(pullPageFilter("(store='s' && updated>='u')", ''),
-          "(store='s' && updated>='u') && id>''");
+      expect(pullPageFilter("(store='s' && updated>='u')", 'u', ''),
+          "(store='s' && updated>='u') && (updated>'u' || (updated='u' && id>''))");
       expect(
           sweepFilter('s', '', fromId: ''), "(store='s' && id~'%' && id>'')");
 
@@ -123,8 +146,10 @@ void main() {
 
     test('keyset boundaries for every builder', () {
       // pullPageFilter appends the tuple tie-break.
-      expect(pullPageFilter('(x)', 'abc'), "(x) && id>'abc'");
-      expect(pullPageFilter('(x)', ''), "(x) && id>''");
+      expect(pullPageFilter('(x)', 'u', 'abc'),
+          "(x) && (updated>'u' || (updated='u' && id>'abc'))");
+      expect(pullPageFilter('(x)', 'u', ''),
+          "(x) && (updated>'u' || (updated='u' && id>''))");
 
       // sweepFilter: with and without the keyset continuation.
       expect(sweepFilter('widgets', 'a'), "(store='widgets' && id~'a%')");

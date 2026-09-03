@@ -14,18 +14,19 @@ void main() {
       int version = 1,
       List<StoreMigration> migrations = const [],
       bool keepUnsyncedArchives = true,
-    }) => CollectionSchema<Object?>(
-        name: 'articles',
-        version: version,
-        keepUnsyncedArchives: keepUnsyncedArchives,
-        fields: [
-          Field.text('title', required: true),
-          Field.text('body'),
-          Field.text('tags'),
-        ],
-        fts: const FtsSpec(['title', 'body']),
-        migrations: migrations,
-      );
+    }) =>
+        CollectionSchema<Object?>(
+          name: 'articles',
+          version: version,
+          keepUnsyncedArchives: keepUnsyncedArchives,
+          fields: [
+            Field.text('title', required: true),
+            Field.text('body'),
+            Field.text('tags'),
+          ],
+          fts: const FtsSpec(['title', 'body']),
+          migrations: migrations,
+        );
 
     test('external content triggers keep index in sync', () async {
       final t = await tempDbPath();

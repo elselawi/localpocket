@@ -31,7 +31,9 @@ export 'src/api/writes.dart';
 
 // The sync attachment surfaces the engine's status/report models through the
 // same import (`PocketBaseSync.status` emits SyncStatus, `syncNow` returns a
-// SyncReport), so the public sync surface is usable from the one barrel.
+// SyncReport), so the public sync surface is usable from the one barrel. The
+// names are type aliases of the one codec-backed class per concept
+// (`SyncStatusData` / `SyncReportData` in the contract layer).
 export 'src/kernel/sync/status.dart'
     show SyncEngineState, SyncReport, SyncStatus;
 

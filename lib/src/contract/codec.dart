@@ -257,7 +257,10 @@ abstract final class ContractCodec {
           throw WireException('Malformed open payload.');
         }
         return OpenRequest(
-          stores: [for (final s in stores) _stringMap(s, 'stores')],
+          stores: [
+            for (var i = 0; i < stores.length; i++)
+              _stringMap(stores[i], 'stores[$i]')
+          ],
           manifestFingerprints: {
             for (final e in fingerprints.entries)
               e.key.toString(): _wireString(e.value, 'fingerprint'),
@@ -668,7 +671,8 @@ abstract final class ContractCodec {
         final hits = m['hits'];
         if (hits is! List) throw WireException('Malformed search payload.');
         return SearchHitsResult([
-          for (final h in hits) SearchHitData.fromJson(h),
+          for (var i = 0; i < hits.length; i++)
+            SearchHitData.fromJson(_stringMap(hits[i], 'hits[$i]')),
         ]);
       case TransactionBeginResult.tagValue:
         final session = m['session'];
@@ -697,8 +701,8 @@ abstract final class ContractCodec {
           throw WireException('Malformed conflicts payload.');
         }
         return ConflictsResult([
-          for (final c in conflicts)
-            ConflictData.fromJson(_stringMap(c, 'conflicts')),
+          for (var i = 0; i < conflicts.length; i++)
+            ConflictData.fromJson(_stringMap(conflicts[i], 'conflicts[$i]')),
         ]);
       case ConflictResult.tagValue:
         final conflict = m['conflict'];
@@ -723,7 +727,8 @@ abstract final class ContractCodec {
           throw WireException('Malformed fileRefs payload.');
         }
         return FileRefsResult([
-          for (final r in _stringMapList(refs, 'refs')) FileRefData.fromJson(r),
+          for (var i = 0; i < refs.length; i++)
+            FileRefData.fromJson(_stringMap(refs[i], 'refs[$i]')),
         ]);
       case FileOpenResult.tagValue:
         final stream = m['stream'];
@@ -773,10 +778,15 @@ abstract final class ContractCodec {
 
   // -- events ---------------------------------------------------------------
 
-  /// Encodes an event into its wire map (tag plus payload).
+  /// Encodes an event into its wire map (tag plus payload). The payload is
+  /// wrapped in [encodeWireValue] exactly like requests and results: a
+  /// committed record may legitimately contain an escaped/`__lp_t`-shaped
+  /// object or a raw `DateTime`/`Uint8List`, and the decode side runs
+  /// [decodeWireValue] — skipping the encode would re-interpret such values
+  /// (and fail JSON transports on raw typed values).
   static Map<String, Object?> encodeEvent(Event event) => {
         'tag': event.tag,
-        'payload': event.toJson(),
+        'payload': encodeWireValue(event.toJson()),
       };
 
   /// Decodes an event map into its typed variant; throws [WireException] for
@@ -832,8 +842,8 @@ abstract final class ContractCodec {
         return ConflictsSnapshot(
           subscription: subscription,
           conflicts: [
-            for (final c in conflicts)
-              ConflictData.fromJson(_stringMap(c, 'conflicts'))
+            for (var i = 0; i < conflicts.length; i++)
+              ConflictData.fromJson(_stringMap(conflicts[i], 'conflicts[$i]'))
           ],
         );
       case FileChunkEvent.tagValue:

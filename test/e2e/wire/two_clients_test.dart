@@ -230,11 +230,13 @@ void main() {
       final onState = on.mock.records.values
           .map((r) => content(r.data))
           .toList()
-        ..sort((x, y) => (x['name']! as String).compareTo(y['name']! as String));
+        ..sort(
+            (x, y) => (x['name']! as String).compareTo(y['name']! as String));
       final offState = off.mock.records.values
           .map((r) => content(r.data))
           .toList()
-        ..sort((x, y) => (x['name']! as String).compareTo(y['name']! as String));
+        ..sort(
+            (x, y) => (x['name']! as String).compareTo(y['name']! as String));
       expect(onState, offState, reason: 'identical remote state');
     }, live: false);
 

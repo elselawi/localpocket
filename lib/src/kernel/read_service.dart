@@ -1,10 +1,12 @@
-/// Part of `local_pocket.dart` — the read service.
-///
-/// A wrapper around the existing compiled-plan runner (`executeCompiledQuery`)
-/// and the one query compiler. Native and the web worker reach
-/// the SAME read path through this service; neither side owns SQL execution
-/// semantics.
-part of 'local_pocket.dart';
+/// The kernel read service: a wrapper around the compiled-plan runner
+/// (`executeCompiledQuery`) and the one query compiler. Native and the web
+/// worker reach the SAME read path through this service; neither side owns
+/// SQL execution semantics.
+library;
+
+import 'compiled_query_runner.dart';
+import 'kernel_context.dart';
+import 'query_plan.dart';
 
 /// {@template localpocket.page}
 /// The result of a paginated query.

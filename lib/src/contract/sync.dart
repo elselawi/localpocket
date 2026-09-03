@@ -6,13 +6,14 @@ part of 'contract.dart';
 // explicit: tokens cross only via [SyncUpdateAuthRequest] (never persisted or
 // logged); a rejected token surfaces as [AuthRequiredEvent].
 
-/// Wire-safe snapshot of [SyncStatus]: the engine state machine position,
-/// the pending/conflict/hidden/blocked counters, and the sync timestamps.
+/// The engine status snapshot: the state machine position, the
+/// pending/conflict/hidden/blocked counters, and the sync timestamps.
 ///
-/// {@template localpocket.sync_status_data}
+/// {@template localpocket.sync_status}
+/// Current synchronization status suitable for a status indicator.
 /// {@endtemplate}
 final class SyncStatusData {
-  /// {@macro localpocket.sync_status_data}
+  /// {@macro localpocket.sync_status}
   const SyncStatusData({
     required this.state,
     required this.pending,
@@ -36,18 +37,6 @@ final class SyncStatusData {
         lastSyncAt: _optWireDateTime(json['lastSyncAt'], 'lastSyncAt'),
         lastSuccessfulSyncAt: _optWireDateTime(
             json['lastSuccessfulSyncAt'], 'lastSuccessfulSyncAt'),
-      );
-
-  /// The snapshot of the live [SyncStatus] model.
-  factory SyncStatusData.of(SyncStatus status) => SyncStatusData(
-        state: status.state,
-        pending: status.pending,
-        conflicts: status.conflicts,
-        hidden: status.hidden,
-        blocked: status.blocked,
-        lastError: status.lastError,
-        lastSyncAt: status.lastSyncAt,
-        lastSuccessfulSyncAt: status.lastSuccessfulSyncAt,
       );
 
   /// The status reported before any sync engine has started.
@@ -82,18 +71,6 @@ final class SyncStatusData {
   /// Time of the most recent ERROR-FREE completed sync cycle.
   final DateTime? lastSuccessfulSyncAt;
 
-  /// Rebuilds the live [SyncStatus] model from this snapshot.
-  SyncStatus toSyncStatus() => SyncStatus(
-        state: state,
-        pending: pending,
-        conflicts: conflicts,
-        hidden: hidden,
-        blocked: blocked,
-        lastError: lastError,
-        lastSyncAt: lastSyncAt,
-        lastSuccessfulSyncAt: lastSuccessfulSyncAt,
-      );
-
   /// Serializes the snapshot into its wire map (DateTimes ride pre-encoded).
   Map<String, Object?> toJson() => {
         'state': state.name,
@@ -108,14 +85,15 @@ final class SyncStatusData {
       };
 }
 
-/// Wire-safe one-cycle report (pulled/swept per store, pushed, dead-letter,
-/// blocked, discarded, error flag). COMPLETE by contract: every model field
-/// survives the codec.
+/// One-cycle report (pulled/swept per store, pushed, dead-letter, blocked,
+/// discarded, error flag). COMPLETE by contract: every field survives the
+/// codec.
 ///
-/// {@template localpocket.sync_report_data}
+/// {@template localpocket.sync_report}
+/// Result of one manual/triggered sync cycle.
 /// {@endtemplate}
 final class SyncReportData {
-  /// {@macro localpocket.sync_report_data}
+  /// {@macro localpocket.sync_report}
   const SyncReportData({
     this.pulled = const {},
     this.swept = const {},
@@ -134,18 +112,8 @@ final class SyncReportData {
         deadLettered: _int(json['deadLettered']),
         blocked: _int(json['blocked']),
         discarded: _int(json['discarded']),
-        hadError: json['hadError'] == true,
-      );
-
-  /// Captures a live [SyncReport] model.
-  factory SyncReportData.of(SyncReport report) => SyncReportData(
-        pulled: report.pulled,
-        swept: report.swept,
-        pushed: report.pushed,
-        deadLettered: report.deadLettered,
-        blocked: report.blocked,
-        discarded: report.discarded,
-        hadError: report.hadError,
+        // A present wrong-typed flag must not read as an error-free cycle.
+        hadError: _optWireBool(json['hadError'], 'hadError', false),
       );
 
   /// Records pulled by store.
@@ -169,16 +137,11 @@ final class SyncReportData {
   /// Whether the cycle encountered an error.
   final bool hadError;
 
-  /// Rebuilds the live [SyncReport] model from this snapshot.
-  SyncReport toSyncReport() => SyncReport(
-        pulled: pulled,
-        swept: swept,
-        pushed: pushed,
-        deadLettered: deadLettered,
-        blocked: blocked,
-        discarded: discarded,
-        hadError: hadError,
-      );
+  @override
+  String toString() =>
+      'SyncReport(pulled: $pulled, swept: $swept, pushed: $pushed, '
+      'deadLettered: $deadLettered, blocked: $blocked, '
+      'discarded: $discarded, hadError: $hadError)';
 
   /// Serializes the report into its wire map.
   Map<String, Object?> toJson() => {
@@ -426,10 +389,7 @@ final class SyncStatusEvent extends Event {
   final SyncStatusData status;
 
   @override
-  Map<String, Object?> toJson() =>
-      // DateTimes aren't event-safe: the status map travels pre-encoded so
-      // timestamps survive the transport untouched.
-      {'status': encodeWireValue(status.toJson())};
+  Map<String, Object?> toJson() => {'status': status.toJson()};
 }
 
 /// The engine's token was rejected and no refresh produced a valid one: the

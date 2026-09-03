@@ -44,8 +44,7 @@ void main() {
       expect(got, bytes);
     });
 
-    test('a declared-length mismatch fails with an aborted session',
-        () async {
+    test('a declared-length mismatch fails with an aborted session', () async {
       final db = await LocalPocket.open(blobOptions());
       addTearDown(db.close);
       final tasks = db.store(Tasks.store);
@@ -60,9 +59,9 @@ void main() {
             name: 'blob.bin',
           ),
           field: 'imgs',
-        allowVolatileBlobs: true,
+          allowVolatileBlobs: true,
         ),
-        throwsStateError,
+        throwsA(isA<ValidationException>()),
       );
       expect(await tasks.files.list(recordId: row.id, field: 'imgs'), isEmpty);
     });

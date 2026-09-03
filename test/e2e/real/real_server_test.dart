@@ -590,7 +590,8 @@ void main() {
         id: id,
         removeNames: [remoteName],
       );
-      expect(cleared.attachments, isEmpty, reason: 'the single file is cleared');
+      expect(cleared.attachments, isEmpty,
+          reason: 'the single file is cleared');
 
       // The remote record reflects the empty list.
       final fetched = await h.backend.getRecord(id);

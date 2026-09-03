@@ -21,18 +21,19 @@ void main() {
     int nextRetryAt = 0,
     int createdAt = 0,
     String payload = '{}',
-  }) => pocket.db.insert('lp_op_queue', {
-      'op_id': opId,
-      'store': store,
-      'record_id': recordId,
-      'kind': kind.name,
-      'payload_json': payload,
-      'state': state,
-      'attempt_count': 0,
-      'next_retry_at': nextRetryAt,
-      'depends_on_op': dependsOnOp,
-      'created_at': createdAt,
-    });
+  }) =>
+      pocket.db.insert('lp_op_queue', {
+        'op_id': opId,
+        'store': store,
+        'record_id': recordId,
+        'kind': kind.name,
+        'payload_json': payload,
+        'state': state,
+        'attempt_count': 0,
+        'next_retry_at': nextRetryAt,
+        'depends_on_op': dependsOnOp,
+        'created_at': createdAt,
+      });
 
   Future<void> clearOutbox(LocalPocket pocket) =>
       pocket.db.execute('DELETE FROM lp_outbox');

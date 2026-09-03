@@ -71,6 +71,7 @@ String _localPocketErrorType(LocalPocketError error) => switch (error) {
       SchemaTooNewError() => 'SchemaTooNewError',
       StorageError() => 'StorageError',
       RecordNotFoundException() => 'RecordNotFoundException',
+      ConflictNotFoundException() => 'ConflictNotFoundException',
       StaleCursorError() => 'StaleCursorError',
       MissingLimitError() => 'MissingLimitError',
       ConflictBlockedError() => 'ConflictBlockedError',
@@ -92,6 +93,7 @@ String _syncErrorType(SyncError error) => switch (error) {
       DuplicateIdError() => 'DuplicateIdError',
       BatchFailedError() => 'BatchFailedError',
       RemoteVersionConflict() => 'RemoteVersionConflict',
+      SyncIdentityError() => 'SyncIdentityError',
     };
 
 /// Decodes a wire error into a typed error. Known kernel errors are
@@ -148,6 +150,8 @@ Object decodeError(Map<String, Object?> wire) {
       return StorageError(m);
     case 'RecordNotFoundException':
       return RecordNotFoundException(m);
+    case 'ConflictNotFoundException':
+      return ConflictNotFoundException(m);
     case 'StaleCursorError':
       return StaleCursorError(m);
     case 'MissingLimitError':
@@ -186,6 +190,8 @@ Object decodeError(Map<String, Object?> wire) {
       // The embedded remote record is not wire-encodable; the caller
       // re-fetches for the merge, so only the message crosses.
       return RemoteVersionConflict(message: m);
+    case 'SyncIdentityError':
+      return SyncIdentityError(m);
     case 'StateError':
       return StateError(m);
     case 'ArgumentError':

@@ -63,6 +63,11 @@ class DdlCompiler {
     final warnings = <String>[];
     final names = <String>{};
 
+    // Store names become SQL table names directly; validate before any DDL
+    // so a specials-bearing name fails typed instead of breaking/injecting
+    // the FTS module args or colliding with generated tables.
+    Field.validateStoreName(schema.name);
+
     for (final f in schema.fields) {
       Field.validateName(f.name);
       if (Field.reservedColumns.contains(f.name)) {
@@ -195,7 +200,9 @@ class DdlCompiler {
   List<String> _buildIndexes(CollectionSchema<Object?> schema) {
     final out = <String>[];
     for (final ix in schema.indexes) {
-      final cols = _indexColumns(ix.columns);
+      // A UNIQUE index must not carry the `id` tie-breaker: id is unique per
+      // row, so appending it would stop the constraint from ever firing.
+      final cols = _indexColumns(ix.columns, appendId: !ix.unique);
       final scope = ix.scope == IndexScope.live
           ? 'archived = 0 AND hidden = 0'
           : 'archived = 0';
@@ -229,15 +236,22 @@ class DdlCompiler {
     return out;
   }
 
-  static List<String> _indexColumns(List<String> cols) {
+  static List<String> _indexColumns(List<String> cols,
+      {required bool appendId}) {
     final result = cols.map(quote).toList();
-    if (!cols.contains('id')) result.add(quote('id'));
+    if (appendId && !cols.contains('id')) result.add(quote('id'));
     return result;
   }
 
   List<String> _buildFts(CollectionSchema<Object?> schema) {
     final fts = schema.fts;
     if (fts == null) return const [];
+    if (fts.fields.isEmpty) {
+      // An empty field list would emit invalid FTS5 DDL (no columns) and fail
+      // with a raw SqliteException at open — reject typed at registration.
+      throw SchemaRegistrationError(
+          'FTS requires at least one field to index.');
+    }
     final out = <String>[];
     final store = schema.name;
     final table = '${store}_fts';

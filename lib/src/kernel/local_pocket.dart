@@ -1,17 +1,13 @@
 /// The kernel hub: the composition root that owns the engine's services and
 /// the sealed-command dispatcher.
 ///
-/// Part-structure posture (an honest statement, not an accident): this
-/// library hosts five parts (`kernel_context`, `read_service`,
-/// `transaction_coordinator`, `file_sessions`, `command_handler`) that
-/// deliberately share the hub's private surface — they are one library by
-/// design. The rule that keeps that implicit surface bounded: every part
-/// communicates through `KernelContext` and the hub's services, and a part
-/// never grows a new command family or a new library-global. New families
-/// are owned by a service the hub composes, so promoting a part to a real
-/// library later stays a mechanical move. The dispatcher itself is one
-/// exhaustive `switch` over the sealed request family, each case a
-/// one-liner delegating to a per-family private method.
+/// Library-structure posture: every service (`kernel_context`, the mutation,
+/// read, transaction, and file-session services, and the command dispatcher)
+/// is a real library receiving [KernelContext] explicitly — none of them is
+/// a `part` of this hub, so each depends only on the dependency set it
+/// declares. The dispatcher is one exhaustive `switch` over the sealed
+/// request family, each case a one-liner delegating to a per-family private
+/// method.
 library;
 
 import 'dart:async';
@@ -21,71 +17,44 @@ import 'dart:typed_data';
 import 'package:collection/collection.dart' show ListEquality;
 import 'package:meta/meta.dart';
 import 'database_adapter.dart';
-import 'execution_context.dart';
 import 'database_factory.dart';
 
 import 'capabilities.dart';
 import 'codec.dart';
 import 'change_bus.dart';
 import 'cipher.dart';
-import 'compiled_query_runner.dart';
+import 'command_handler.dart';
 import 'ddl_compiler.dart';
 import 'fts_normalizer.dart';
+import 'kernel_context.dart';
 import 'migrator.dart';
+import 'mutation_service.dart';
 import 'perf_counters.dart';
-import 'query_plan.dart';
+import 'read_service.dart';
 import 'schema.dart';
 import 'schema_manifest.dart';
 import 'store.dart';
 import 'system_tables.dart';
 import 'transaction.dart';
-import 'watch.dart';
+import 'transaction_coordinator.dart';
 import 'write_queue.dart';
-import 'query/ir.dart';
-import 'query/query_builder/query_builder.dart';
-import 'query/query_builder/predicate_tree.dart';
-import 'query/search_builder/search_builder.dart';
-import 'sync/engine.dart';
 import 'sync/op_queue.dart';
 import 'sync/outbox.dart';
 import 'sync/conflicts.dart';
 import 'sync/sync_tables.dart';
-import 'sync/sync_backend.dart' show SyncBackendFactory, SyncTokenSource;
-import 'files/attachment_field.dart';
+import 'sync/sync_backend.dart' show SyncBackendFactory;
 import 'files/blob_store.dart';
 import 'file_service.dart';
 import '../contract/contract.dart';
 
-part 'kernel_context.dart';
-
-part 'read_service.dart';
-
-part 'transaction_coordinator.dart';
-
-part 'file_sessions.dart';
-
-part 'command_handler.dart';
-
 /// Default clock: wall-clock epoch milliseconds.
 int _defaultNow() => DateTime.now().millisecondsSinceEpoch;
 
-/// Durability class for a transaction.
-///
-/// - [normal]: `synchronous=NORMAL` (default, app-crash-safe under WAL).
-/// - [full]: `synchronous=FULL` for the local-first invariant — transactions
-///   that write domain rows + outbox intent must not lose the tail commit.
-enum DurabilityClass {
-  /// Use `synchronous=NORMAL`, which is app-crash-safe under WAL.
-  normal,
-
-  /// Use `synchronous=FULL` for commits that must survive power loss.
-  full,
-}
-
 /// {@template localpocket.test_hooks}
-/// Test-only hooks for crash injection and statement tracing.
+/// Test-only hooks for crash injection and statement tracing. Internal:
+/// carried by [KernelContext] and consumed by kernel services; not part of
+/// the public API.
 /// {@endtemplate}
-@visibleForTesting
 class TestHooks {
   /// Creates a collection of optional test hooks.
   ///
@@ -326,7 +295,10 @@ class KernelDatabase with ChangeBusAwareLP {
   /// Capabilities detected for the active SQLite connection.
   final SqliteCapabilities capabilities;
 
-  /// Serializes all operations that use the owned SQLite connection.
+  /// Serializes write-side operations that use the owned SQLite connection
+  /// (mutations, transaction sessions, maintenance). Point reads outside a
+  /// transaction run directly on the connection and are not queued — the
+  /// documented write-queue + direct-read-snapshot model.
   late final WriteQueue writeQueue;
 
   /// Performance counters for this database handle.
@@ -878,16 +850,34 @@ class KernelDatabase with ChangeBusAwareLP {
   /// Runs the complete maintenance state machine:
   /// 1. Compacts eligible archived rows across all stores
   /// 2. Prunes the outbox
-  /// 3. Executes WAL checkpointing
-  /// 4. Optimizes planner statistics
+  /// 3. Garbage-collects terminal sync bookkeeping ([gcSyncHousekeeping])
+  /// 4. Executes WAL checkpointing
+  /// 5. Optimizes planner statistics
   Future<void> runMaintenance(
-      {Duration compactOlderThan = const Duration(days: 90)}) async {
+      {Duration compactOlderThan = const Duration(days: 90),
+      Duration deadLetterRetention = const Duration(days: 90)}) async {
     for (final store in storeNames) {
       await compact(store, olderThan: compactOlderThan);
     }
     await pruneOutbox();
+    await gcSyncHousekeeping(deadLetterRetention: deadLetterRetention);
     await walCheckpoint();
     await analyze();
+  }
+
+  /// Bounds the sync bookkeeping tables that otherwise grow without bound:
+  /// removes op-queue rows that reached the terminal `done` state (their work
+  /// is complete and nothing reads them again — done rows are never blocking,
+  /// only `pending`/`failed` rows are) and prunes dead-letter audit rows older
+  /// than [deadLetterRetention].
+  Future<void> gcSyncHousekeeping(
+      {Duration deadLetterRetention = const Duration(days: 90)}) async {
+    await transaction((tx) async {
+      final exec = tx.executor;
+      await exec.delete('lp_op_queue', where: "state = 'done'");
+      final cutoff = now() - deadLetterRetention.inMilliseconds;
+      await exec.delete('lp_dead_letter', where: 'at < ?', whereArgs: [cutoff]);
+    });
   }
 
   /// Compacts synced archived rows older than [olderThan].
@@ -934,9 +924,15 @@ class KernelDatabase with ChangeBusAwareLP {
               ? decodeDbRow(schema, existingRows.first,
                   cipher: fieldCipher, cryptoProvider: cryptoProvider)
               : null;
-          await vanishRecordMetadata(exec, store, id,
-              deleteSyncAndOutbox: true);
+          await vanishRecordMetadata(exec, store, id);
+          await exec.delete('lp_outbox',
+              where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
           await exec.delete(store, where: 'id = ?', whereArgs: [id]);
+          // Leave a purged sync-row marker: the sweep must treat the record
+          // as known (never re-fetch it while the remote copy is unchanged),
+          // otherwise every compacted row resurrects on bucket rotation.
+          await exec.update('lp_sync_row', {'access_state': 'purged'},
+              where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
           tx.addChange(ChangeSet(store, {id}));
           if (existing != null) {
             final changed = existing.keys.where((k) => k != 'id').toSet();
@@ -995,180 +991,6 @@ class KernelDatabase with ChangeBusAwareLP {
     } catch (_) {}
     await db.close();
   }
-}
-
-/// {@template localpocket.__commit_group}
-/// One group-commit unit: mutations submitted in the same event-loop turn
-/// share a single SQLite transaction (one fsync). Members run under the
-/// group-level Tx; in a multi-member group each member additionally runs
-/// inside a SAVEPOINT so one failing member rolls back only itself.
-/// {@endtemplate}
-class _CommitGroup {
-  /// {@macro localpocket.__commit_group}
-  _CommitGroup(this.coordinator, this.durability);
-  final TransactionCoordinator coordinator;
-  KernelContext get context => coordinator.context;
-  final DurabilityClass durability;
-  final members = <_CommitMember>[];
-
-  /// Set once [flush] has started: later arrivals open their own group.
-  bool sealed = false;
-
-  Completer<void>? _barrier;
-  bool _barrierDone = false;
-
-  /// Takes the single-writer slot immediately (preserving submission-order
-  /// FIFO for reads and later writes) and waits for the end-of-turn barrier
-  /// before committing, so sibling mutations in the same turn (or, with a
-  /// coalescing window configured, within the window) can join.
-  void reserve() {
-    final barrier = Completer<void>();
-    _barrier = barrier;
-    unawaited(context.writeQueue.run(() async {
-      await barrier.future;
-      // Member completers already received any per-member error; swallow
-      // the queue-level rethrow so it never becomes unhandled.
-      try {
-        await flush();
-      } catch (_) {}
-    }));
-    // Timer(Duration.zero) (not scheduleMicrotask) defers past sibling
-    // awaits in the same turn so the whole burst joins the group. A positive
-    // window keeps the barrier open longer; a read or different-durability
-    // submission flushes it early.
-    final window = context.groupCommitWindow;
-    if (window > Duration.zero) {
-      Timer(window, flushEarly);
-    } else {
-      Timer.run(flushEarly);
-    }
-  }
-
-  /// Completes the barrier early (a read arrived — read-your-writes must not
-  /// wait out the window — or a different-durability submission needs its
-  /// own group). Idempotent.
-  void flushEarly() {
-    if (_barrierDone) return;
-    _barrierDone = true;
-    if (identical(coordinator._pendingGroup, this)) {
-      coordinator._pendingGroup = null;
-    }
-    _barrier?.complete();
-  }
-
-  /// Runs all joined members inside ONE write transaction. In multi-member
-  /// groups a failing member rolls back to its savepoint and completes with
-  /// the error alone; the rest commit. A solo member runs directly.
-  Future<void> flush() async {
-    sealed = true;
-    if (members.isEmpty) return;
-    final solo = members.length == 1;
-    if (!solo) {
-      context.perf.groupCommits++;
-      context.perf.groupCommitMembers += members.length;
-    }
-    // Already inside the WriteQueue slot taken by [reserve]; re-entering
-    // would deadlock on our own reserved slot.
-    final sw = Stopwatch()..start();
-    final inMemory = context.database.path == ':memory:';
-    final useFull = durability == DurabilityClass.full && !inMemory;
-    if (useFull && coordinator._synchronous != 'FULL') {
-      await context.traceExecute('PRAGMA synchronous=FULL');
-      coordinator._synchronous = 'FULL';
-    }
-    final changes = <ChangeSet>[];
-    final recordEvents = <RecordChangeEvent>[];
-    // Outcomes are surfaced only AFTER the transaction resolves: completing
-    // inside the callback would resume callers BEFORE COMMIT executes, letting
-    // them observe pre-commit state.
-    final outcomes = <(_CommitMember, Object?, Object?, StackTrace?)>[];
-    try {
-      await context.db.transaction((txn) async {
-        final tx = Tx.internal(context.database, txn, changes,
-            recordEvents: recordEvents);
-        if (solo) {
-          try {
-            final result = await tx.runInZone(() => members.single.action(tx));
-            outcomes.add((members.single, result, null, null));
-          } catch (e, st) {
-            outcomes.add((members.single, null, e, st));
-            // Right before the transaction ROLLBACKs: throw to simulate a
-            // ROLLBACK failure (disk I/O, quota) so the caller observes a
-            // failure instead of a false success.
-            context.testHooks?.rollbackCrashPoint?.call();
-            rethrow;
-          }
-        } else {
-          for (final member in members) {
-            try {
-              final result = await tx
-                  .runInZone(() => tx.transaction((m) => member.action(m)));
-              outcomes.add((member, result, null, null));
-            } catch (e, st) {
-              outcomes.add((member, null, e, st));
-            }
-          }
-        }
-        // Right before COMMIT executes: throw to simulate a COMMIT failure
-        // (OPFS quota, disk I/O, corruption) — the whole transaction rolls
-        // back and every caller observes the thrown error.
-        context.testHooks?.commitCrashPoint?.call();
-      });
-      // COMMIT has executed: now resolve every caller.
-      for (final (m, result, err, st) in outcomes) {
-        if (err != null) {
-          m.completer.completeError(err, st);
-        } else {
-          m.completer.complete(result);
-        }
-      }
-      for (final cs in changes) {
-        context.tables[cs.store]?.readCache.invalidate(cs.ids);
-        context.changeBus.emit(cs);
-      }
-      for (final event in recordEvents) {
-        context.changeBus.emitEvent(event);
-      }
-    } catch (e, st) {
-      // The transaction failed at BEGIN/COMMIT/rollback level; every
-      // member's writes roll back with it. A member whose body failed keeps
-      // its error only when that error IS the settle failure; otherwise
-      // callers must learn the settle error, not a false success.
-      for (final (m, _, err, mst) in outcomes) {
-        if (m.completer.isCompleted) continue;
-        if (err != null && identical(e, err)) {
-          m.completer.completeError(err, mst);
-        } else {
-          m.completer.completeError(e, st);
-        }
-      }
-      rethrow;
-    } finally {
-      if (useFull && coordinator._synchronous != 'NORMAL') {
-        try {
-          await context.traceExecute('PRAGMA synchronous=NORMAL');
-          coordinator._synchronous = 'NORMAL';
-        } catch (_) {}
-      }
-      context.perf.recordWriteTransaction(sw.elapsedMicroseconds);
-      // Auto-checkpointing is disabled; opportunistically bound the WAL off
-      // the writer's critical path.
-      coordinator._noteWriteCommitted();
-      // Safety net: a BEGIN-level failure unwinds before any member ran; no
-      // caller may hang on an uncompleted completer.
-      for (final member in members) {
-        if (!member.completer.isCompleted) {
-          member.completer.completeError(StateError('Group commit failed.'));
-        }
-      }
-    }
-  }
-}
-
-class _CommitMember {
-  _CommitMember(this.action);
-  final Future<dynamic> Function(Tx tx) action;
-  final completer = Completer<dynamic>();
 }
 
 /// Internal name for [KernelDatabase]; the public `LocalPocket` is the

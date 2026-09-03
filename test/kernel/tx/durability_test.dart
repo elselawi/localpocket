@@ -1,5 +1,6 @@
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/transaction_coordinator.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
@@ -27,14 +28,15 @@ void main() {
     }
 
     List<String> pragmaToggles(StatementRecorder recorder) =>
-        recorder.statements.where((s) => s.contains('PRAGMA synchronous')).toList();
+        recorder.statements
+            .where((s) => s.contains('PRAGMA synchronous'))
+            .toList();
 
     test('put with normal durability never toggles synchronous', () async {
       final (pocket, recorder) = await openFileBacked();
-      await pocket
-          .collection('widgets')
-          .put(record(id: generateRecordId(), name: 'x'),
-              durability: DurabilityClass.normal);
+      await pocket.collection('widgets').put(
+          record(id: generateRecordId(), name: 'x'),
+          durability: DurabilityClass.normal);
       expect(pragmaToggles(recorder), isEmpty,
           reason: 'normal must not raise synchronous to FULL');
     });
@@ -44,17 +46,18 @@ void main() {
       final id = generateRecordId();
       await pocket.collection('widgets').put(record(id: id, name: 'x'));
       recorder.statements.clear();
-      await pocket.collection('widgets').patch(id, {'qty': 1},
-          durability: DurabilityClass.normal);
+      await pocket
+          .collection('widgets')
+          .patch(id, {'qty': 1}, durability: DurabilityClass.normal);
       expect(pragmaToggles(recorder), isEmpty);
     });
 
     test('putAll with normal durability never toggles synchronous', () async {
       final (pocket, recorder) = await openFileBacked();
-      await pocket.collection('widgets').putAll(
-          [record(id: generateRecordId(), name: 'a'),
-           record(id: generateRecordId(), name: 'b')],
-          durability: DurabilityClass.normal);
+      await pocket.collection('widgets').putAll([
+        record(id: generateRecordId(), name: 'a'),
+        record(id: generateRecordId(), name: 'b')
+      ], durability: DurabilityClass.normal);
       expect(pragmaToggles(recorder), isEmpty);
     });
 
@@ -63,8 +66,9 @@ void main() {
       final id = generateRecordId();
       await pocket.collection('widgets').put(record(id: id, name: 'x'));
       recorder.statements.clear();
-      await pocket.collection('widgets').archive(id,
-          durability: DurabilityClass.normal);
+      await pocket
+          .collection('widgets')
+          .archive(id, durability: DurabilityClass.normal);
       expect(pragmaToggles(recorder), isEmpty);
     });
 
@@ -74,8 +78,9 @@ void main() {
       await pocket.collection('widgets').put(record(id: id, name: 'x'));
       await pocket.collection('widgets').archive(id);
       recorder.statements.clear();
-      await pocket.collection('widgets').restore(id,
-          durability: DurabilityClass.normal);
+      await pocket
+          .collection('widgets')
+          .restore(id, durability: DurabilityClass.normal);
       expect(pragmaToggles(recorder), isEmpty);
     });
 
@@ -84,8 +89,9 @@ void main() {
       final id = generateRecordId();
       await pocket.collection('widgets').put(record(id: id, name: 'x'));
       recorder.statements.clear();
-      await pocket.collection('widgets').purge(id,
-          durability: DurabilityClass.normal);
+      await pocket
+          .collection('widgets')
+          .purge(id, durability: DurabilityClass.normal);
       expect(pragmaToggles(recorder), isEmpty);
     });
 
@@ -93,23 +99,24 @@ void main() {
         () async {
       final (pocket, recorder) = await openFileBacked();
       final id = generateRecordId();
-      await pocket.collection('widgets').put(record(id: id, name: 'x'),
-          durability: DurabilityClass.normal);
+      await pocket
+          .collection('widgets')
+          .put(record(id: id, name: 'x'), durability: DurabilityClass.normal);
       recorder.statements.clear();
       // A subsequent normal write must not need to restore NORMAL: the
       // synchronous state was never raised, so no toggle pair appears.
-      await pocket.collection('widgets').patch(id, {'qty': 1},
-          durability: DurabilityClass.normal);
+      await pocket
+          .collection('widgets')
+          .patch(id, {'qty': 1}, durability: DurabilityClass.normal);
       expect(pragmaToggles(recorder), isEmpty);
     });
 
     test('full durability on the same connection restores NORMAL afterwards',
         () async {
       final (pocket, recorder) = await openFileBacked();
-      await pocket
-          .collection('widgets')
-          .put(record(id: generateRecordId(), name: 'x'),
-              durability: DurabilityClass.full);
+      await pocket.collection('widgets').put(
+          record(id: generateRecordId(), name: 'x'),
+          durability: DurabilityClass.full);
       final toggles = pragmaToggles(recorder);
       expect(toggles, contains('PRAGMA synchronous=FULL'));
       expect(toggles, contains('PRAGMA synchronous=NORMAL'));
@@ -148,7 +155,8 @@ void main() {
               'outer normal transaction governs');
     });
 
-    test('is ignored: the outer full transaction still toggles for an inner '
+    test(
+        'is ignored: the outer full transaction still toggles for an inner '
         'normal write', () async {
       final t = await tempDbPath();
       addTearDown(t.cleanup);

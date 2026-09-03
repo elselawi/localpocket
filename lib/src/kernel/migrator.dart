@@ -6,6 +6,7 @@ import 'database_adapter.dart';
 import 'codec.dart';
 import 'ddl_compiler.dart';
 import 'errors.dart';
+import 'fts_normalizer.dart';
 import 'local_pocket.dart';
 import 'schema.dart';
 import 'sql_utils.dart';
@@ -349,7 +350,19 @@ class Migrator {
     }
     if (schema.fts != null) {
       await db.execute(
-          "INSERT INTO ${DdlCompiler.quote('${schema.name}_fts')}(${DdlCompiler.quote('${schema.name}_fts')}) VALUES('rebuild')");
+          "INSERT INTO ${DdlCompiler.quote('${schema.name}_fts')}(${DdlCompiler.quote('${schema.name}_fts')}) VALUES('delete-all')");
+      // The fts5 'rebuild' command re-tokenizes RAW text and bypasses the
+      // trigger normalizers; repopulate through the same trigger expressions
+      // the live path uses so reindexed terms match query-side
+      // normalization.
+      final fts = schema.fts!;
+      final colList = fts.fields.map(DdlCompiler.quote).join(', ');
+      final selectList = fts.fields
+          .map((c) => ftsTriggerExpr(schema.name, fts.normalize, '', c))
+          .join(', ');
+      await db.execute('INSERT INTO ${DdlCompiler.quote('${schema.name}_fts')}'
+          '(rowid, $colList) SELECT rowid, $selectList FROM '
+          '${DdlCompiler.quote(schema.name)}');
     }
 
     // 8. verify

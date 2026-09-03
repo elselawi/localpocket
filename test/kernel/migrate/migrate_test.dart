@@ -485,6 +485,49 @@ void main() {
     });
 
     test(
+        'destructive rebuild repopulates FTS through the normalizer: search '
+        'parity survives the rename', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+      // é→e parity: the index (and queries) must hold normalized text.
+      const norm = FtsSpec(
+        ['name'],
+        normalize: FtsNormalization(rules: {'é': 'e'}),
+      );
+
+      final v1 =
+          await openPocket(path: t.path, stores: [widgetsSchema(fts: norm)]);
+      final id = generateRecordId();
+      await v1.collection('widgets').put(record(id: id, name: 'café'));
+      // Sanity: parity search works before the rebuild.
+      expect(await v1.collection('widgets').search('cafe').limit(10).fetch(),
+          hasLength(1));
+      await v1.close();
+
+      final v2 = widgetsSchema(
+        version: 2,
+        extraFields: [Field.text('nickname')],
+        fts: norm,
+        migrations: [
+          StoreMigration(toVersion: 2, destructive: true),
+        ],
+      );
+      final migrated = await openPocket(path: t.path, stores: [v2]);
+      addTearDown(migrated.close);
+
+      expect(await migrated.collection('widgets').query().count(), 1);
+      // The rebuilt index must hold NORMALIZED text: a parity query matches,
+      // and the raw-accented term does not (query side normalizes too).
+      expect(
+          await migrated.collection('widgets').search('cafe').limit(10).fetch(),
+          hasLength(1));
+      expect(
+          await migrated.collection('widgets').search('café').limit(10).fetch(),
+          hasLength(1),
+          reason: 'the query normalizes the term, matching the indexed e');
+    });
+
+    test(
         'additive migration of an encrypted field emits TEXT and ciphertext '
         'round-trips across reopen', () async {
       final t = await tempDbPath();

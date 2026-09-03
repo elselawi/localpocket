@@ -172,6 +172,12 @@ class Field {
   final bool required;
 
   /// Whether non-archived records must have unique values.
+  ///
+  /// The uniqueness scope is `NOT archived` — it does NOT exclude hidden
+  /// records: a record hidden by a sync sweep keeps occupying this index
+  /// until it is purged, so re-creating a record with the same value while
+  /// the hidden one exists is rejected (a declared `live`-scoped unique index
+  /// excludes hidden and would allow it). Deliberate and documented.
   final bool uniqueWhenActive;
 
   /// Whether the value is encrypted at rest.
@@ -195,12 +201,17 @@ class Field {
   );
 
   /// Engine-owned physical columns: never legal as declared field names
-  /// or extra keys.
+  /// or extra keys. `rowid`/`_rowid_`/`oid` shadow SQLite's implicit rowid —
+  /// FTS triggers' `new.rowid` would resolve to user TEXT and corrupt delete
+  /// bookkeeping — so they are reserved too.
   static const Set<String> reservedColumns = {
     'id',
     'archived',
     'hidden',
-    'extra'
+    'extra',
+    'rowid',
+    '_rowid_',
+    'oid',
   };
 
   /// Validates [name] against the strict identifier policy.
@@ -212,6 +223,29 @@ class Field {
       throw SchemaRegistrationError(
         'Field "$name" is not a valid identifier (must start with a letter '
         'or underscore and contain only letters, digits, or underscores).',
+      );
+    }
+  }
+
+  /// Validates a store (collection) name. Store names become SQL table names
+  /// and are referenced in quoted and single-quoted contexts (FTS
+  /// `content = '<name>'`, adapter `"<table>"` wrapping), so they must not
+  /// carry quote characters — a `'` or `"` would break/inject those contexts —
+  /// and must not use SQLite's or the engine's reserved prefixes. Spaces,
+  /// unicode, and empty names remain legal (they are quoted throughout the
+  /// DDL layer); only quote characters and reserved prefixes are rejected.
+  static void validateStoreName(String name) {
+    if (name.contains("'") || name.contains('"')) {
+      throw SchemaRegistrationError(
+        'Store name "$name" must not contain quote characters: a quote would '
+        'break the FTS content reference and the database adapter\'s table '
+        'quoting.',
+      );
+    }
+    if (name.startsWith('sqlite_') || name.startsWith('lp_')) {
+      throw SchemaRegistrationError(
+        'Store name "$name" uses a reserved prefix (sqlite_ is SQLite-owned, '
+        'lp_ is the engine metadata namespace).',
       );
     }
   }
@@ -288,10 +322,11 @@ class Field {
 
 /// Controls which records are included in an index.
 enum IndexScope {
-  /// Includes records that are not archived.
+  /// The default query scope: excludes archived AND hidden records.
   live,
 
-  /// Includes records regardless of their archived state.
+  /// Excludes archived records but INCLUDES hidden ones — the full
+  /// non-archived set, regardless of visibility.
   notArchived,
 }
 

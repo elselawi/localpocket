@@ -1,11 +1,17 @@
-/// Part of `local_pocket.dart` — bounded file upload sessions and download
-/// flow-control state for the command handler.
+/// Bounded file upload sessions and download flow-control state for the
+/// command handler.
 ///
 /// Uploads bound worst-case in-memory buffering (per-file, aggregate, chunk,
 /// and sliding-TTL limits, all injectable); no durable state exists until the
 /// finish request commits. Downloads track un-credited bytes so the source
 /// stream pauses when the caller's credit window fills.
-part of 'local_pocket.dart';
+library;
+
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'errors.dart';
+import 'files/attachment_field.dart';
 
 /// Maximum chunk size for bounded file uploads (256 KiB).
 const int defaultMaxUploadChunkBytes = 262144;
@@ -245,10 +251,13 @@ class FileUploadSessionRegistry {
 
 DateTime _systemClock() => DateTime.now();
 
-/// Flow-control state of one open download stream.
-class _FileDownload {
-  _FileDownload(this.id);
+/// Internal: flow-control state of one open download stream. Owned by the
+/// command handler's download registry.
+class FileDownloadState {
+  /// Creates the flow-control record for one download.
+  FileDownloadState(this.id);
 
+  /// The download stream id this state belongs to.
   final String id;
 
   /// Bytes pushed to the consumer that have not been credited back yet.

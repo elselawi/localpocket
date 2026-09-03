@@ -119,6 +119,38 @@ void main() {
               .having((e) => e.field, 'field', 'phone')));
     });
 
+    test('declared unique index compiles without the id tie-breaker', () {
+      final compiled = DdlCompiler(caps).compile(widgetsSchema(indexes: const [
+        IndexSpec(['name'])
+      ]));
+      expect(
+          compiled.indexDdl.join('\n'),
+          contains('CREATE INDEX "ix_widgets_live_name" ON "widgets" '
+              '("name", "id")'));
+
+      final unique = DdlCompiler(caps).compile(widgetsSchema(indexes: const [
+        IndexSpec(['name'], unique: true)
+      ]));
+      final ddl = unique.indexDdl.join('\n');
+      expect(
+          ddl,
+          contains('CREATE UNIQUE INDEX "ux_widgets_name" ON "widgets" '
+              '("name") WHERE'));
+      expect(ddl, isNot(contains('("name", "id")')));
+    });
+
+    test('declared unique index enforces on duplicate insert', () async {
+      final schema = widgetsSchema(indexes: const [
+        IndexSpec(['name'], unique: true)
+      ]);
+      final pocket = await openPocket(stores: [schema]);
+      addTearDown(pocket.close);
+      final col = pocket.collection('widgets');
+      await col.put(record(id: generateRecordId(), name: 'dupe'));
+      await expectLater(col.put(record(id: generateRecordId(), name: 'dupe')),
+          throwsA(isA<UniqueConstraintException>()));
+    });
+
     test('fts declaration generates external content and triggers', () async {
       final compiled = DdlCompiler(caps)
           .compile(widgetsSchema(fts: const FtsSpec(['name', 'meta'])));
@@ -342,7 +374,7 @@ void main() {
       );
     });
 
-    test('reserved system-table names fail at SQLite open', () {
+    test('reserved system-table prefixes fail typed at compile', () {
       for (final name in [
         'lp_sync_row',
         'lp_outbox',
@@ -354,9 +386,14 @@ void main() {
           version: 1,
           fields: [Field.text('a')],
         );
-        expect(openPocket(stores: [schema]),
-            throwsA(isA<sqlite.SqliteException>()),
-            reason: 'store named $name collides with a system table');
+        // A store colliding with the engine's metadata namespace is rejected
+        // at registration (typed) instead of failing with a raw
+        // SqliteException at open.
+        expect(
+            openPocket(stores: [schema]),
+            throwsA(isA<SchemaRegistrationError>().having(
+                (e) => e.message, 'message', contains('reserved prefix'))),
+            reason: 'store named $name is rejected at registration');
       }
     });
 
@@ -448,6 +485,19 @@ void main() {
           () => DdlCompiler(caps).compile(missing),
           throwsA(isA<SchemaRegistrationError>().having(
               (e) => e.message, 'message', contains('not a declared field'))));
+    });
+
+    test('FTS with no fields is rejected instead of emitting invalid DDL', () {
+      final empty = CollectionSchema<Object?>(
+        name: 't',
+        version: 1,
+        fields: [Field.text('a')],
+        fts: const FtsSpec([]),
+      );
+      expect(
+          () => DdlCompiler(caps).compile(empty),
+          throwsA(isA<SchemaRegistrationError>().having(
+              (e) => e.message, 'message', contains('at least one field'))));
     });
   });
 
@@ -554,9 +604,12 @@ void main() {
     });
 
     test(
-        'double quotes in store names are escaped, field names with quotes '
-        'are rejected', () {
-      final schema = CollectionSchema<Object?>(
+        'quote characters in store names are rejected, field names with '
+        'quotes are rejected', () {
+      // A quote in a store name would break the FTS `content = '...'`
+      // reference and the adapter's `"<table>"` wrapping, so it is rejected
+      // at registration instead of relying on escaping.
+      final badStore = CollectionSchema<Object?>(
         name: 'we"ird',
         version: 1,
         fields: [Field.text('col')],
@@ -564,14 +617,12 @@ void main() {
           IndexSpec(['col'])
         ],
       );
-      final compiled = DdlCompiler(caps).compile(schema);
-      expect(compiled.tableDdl, contains('"we""ird"'));
-      expect(compiled.tableDdl, contains('"col" TEXT'));
-      expect(compiled.indexDdl.single, contains('"col"'));
-      expect(compiled.tableDdl, isNot(contains('"we"ird"')));
+      expect(
+          () => DdlCompiler(caps).compile(badStore),
+          throwsA(isA<SchemaRegistrationError>()
+              .having((e) => e.message, 'message', contains('quote'))));
 
-      // Field names no longer smuggle quotes: the strict identifier policy
-      // rejects them at registration instead of relying on escaping.
+      // Field names reject quotes via the strict identifier policy.
       final badField = CollectionSchema<Object?>(
         name: 't',
         version: 1,

@@ -7,6 +7,7 @@ import 'package:localpocket/src/kernel/database_adapter.dart';
 import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/transaction_coordinator.dart';
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
@@ -76,7 +77,8 @@ void main() {
               reason: '${f.path} must not import http');
         }
       }
-      final txApi = await File('lib/src/kernel/transaction.dart').readAsString();
+      final txApi =
+          await File('lib/src/kernel/transaction.dart').readAsString();
       expect(txApi, isNot(contains('http')));
       expect(txApi, isNot(contains('Client')));
     });

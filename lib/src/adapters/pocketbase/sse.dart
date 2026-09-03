@@ -14,7 +14,6 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 
 import '../../kernel/sync/backoff.dart';
@@ -177,7 +176,9 @@ class PbRealtime {
         }),
       ));
 
-  static double _defaultJitter(int attempt) => 0.5 + Random().nextDouble();
+  /// Reconnect jitter, delegating to the shared sync backoff primitive so
+  /// the realtime loop can never drift from the sync engine's timing.
+  static double _defaultJitter(int attempt) => defaultBackoffJitter(attempt);
 
   Future<void> _connectOnce() async {
     var token = await client.authToken();
@@ -186,7 +187,7 @@ class PbRealtime {
       // The server revoked a token that may still be far from expiry: the
       // request path refreshes once on 401 and retries; realtime recovers
       // the same way instead of reconnecting forever with the stale token.
-      token = await client.auth.refreshNow();
+      token = await client.refreshAuthToken();
       res = await _openRealtime(token);
     }
     if (res.status != 200) {
@@ -250,6 +251,16 @@ class PbRealtime {
         if (!_sessionDone!.isCompleted) _sessionDone!.complete();
       },
     );
+    // A stop() that raced in after the earlier `_running` check but before
+    // this listener was installed would otherwise leave the freshly installed
+    // subscription live with nobody left to cancel it (stop already ran and
+    // had nothing to cancel). Re-check and bail the same way the orphan
+    // pattern above does.
+    if (!_running) {
+      await _sub!.cancel();
+      _sub = null;
+      return;
+    }
     await _sessionDone!.future;
     _sub = null;
     if (failed) {
@@ -268,7 +279,7 @@ class PbRealtime {
       if (sub.status == 401) {
         // Revoked token: refresh once and retry before the session counts as
         // failed (mirrors the request path).
-        sub = await _sendSubscribe(clientId, await client.auth.refreshNow());
+        sub = await _sendSubscribe(clientId, await client.refreshAuthToken());
       }
       if (sub.status != 204 && sub.status != 200) {
         throw HttpTransportException('realtime subscribe status ${sub.status}');
@@ -289,29 +300,12 @@ class PbRealtime {
     }
   }
 
-  RemoteRecord _parseRecord(Map<dynamic, dynamic> raw) {
-    final id = raw['id'];
-    final updated = raw['updated'];
-    // Same policy as the list path: missing id/updated is a protocol error,
-    // dropped here (the periodic pull is the backstop) — never normalized
-    // into an empty id/version that could travel through the fast path.
-    if (id is! String || updated is! String) {
-      throw ProtocolError('Realtime record missing id/updated.');
-    }
-    final store = raw[client.fieldNames.storeField];
-    final data = raw[client.fieldNames.dataField];
-    final attachments = raw[client.fieldNames.attachmentsField];
-    // `store` may be absent on projected responses, mirroring the list path.
-    return RemoteRecord(
-      id: id,
-      store: store is String ? store : '',
-      updated: updated,
-      data: data is Map ? Map<String, Object?>.from(data) : const {},
-      attachments: attachments is List
-          ? attachments.whereType<String>().toList()
-          : const [],
-    );
-  }
+  // Same parser as the list path (deduplicated, must never drift): missing
+  // id/updated is a protocol error, dropped here (the periodic pull is the
+  // backstop) — never normalized into an empty id/version that could travel
+  // through the fast path.
+  RemoteRecord _parseRecord(Map<dynamic, dynamic> raw) =>
+      PbClient.parseRecord(raw, client.fieldNames);
 }
 
 /// Incremental SSE text parser: `event:`, `data:`, `:` comments, and the

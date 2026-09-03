@@ -98,10 +98,10 @@ class SyncEngine {
   // restarted engine keeps delivering state/status events.
   StreamController<SyncEngineState> _stateController =
       StreamController<SyncEngineState>.broadcast();
-  StreamController<SyncStatus> _statusController =
-      StreamController<SyncStatus>.broadcast();
+  StreamController<SyncStatusData> _statusController =
+      StreamController<SyncStatusData>.broadcast();
 
-  /// Most recent cycle error, surfaced via [SyncStatus.lastError]. Cleared on
+  /// Most recent cycle error, surfaced via [SyncStatusData.lastError]. Cleared on
   /// the next error-free cycle.
   String? _lastError;
 
@@ -149,10 +149,10 @@ class SyncEngine {
   final Set<String> _pendingPullOnly = {};
 
   /// Cycles are chained so no two run concurrently.
-  Future<SyncReport> _cycleTail = Future.value(const SyncReport());
+  Future<SyncReportData> _cycleTail = Future.value(const SyncReportData());
 
   /// The most recent sync report produced by the engine.
-  SyncReport? lastReport;
+  SyncReportData? lastReport;
 
   /// What each trigger scheduled, for tests.
   @visibleForTesting
@@ -165,7 +165,7 @@ class SyncEngine {
   Stream<SyncEngineState> get stateChanges => _stateController.stream;
 
   /// Stream of user-facing synchronization status snapshots.
-  Stream<SyncStatus> get status => _statusController.stream;
+  Stream<SyncStatusData> get status => _statusController.stream;
 
   /// Whether [start] has been called and [stop] has not completed.
   bool get isRunning => _started;
@@ -181,7 +181,7 @@ class SyncEngine {
     // A restarted engine gets fresh streams: [stop] closed the previous ones.
     if (_stateController.isClosed || _statusController.isClosed) {
       _stateController = StreamController<SyncEngineState>.broadcast();
-      _statusController = StreamController<SyncStatus>.broadcast();
+      _statusController = StreamController<SyncStatusData>.broadcast();
     }
     _started = true;
     await _transition(SyncEngineState.opening);
@@ -285,7 +285,7 @@ class SyncEngine {
       // poison the status chain or crash the engine.
     }
     if (!_statusController.isClosed) {
-      _statusController.add(SyncStatus(
+      _statusController.add(SyncStatusData(
         state: _state,
         pending: pending,
         conflicts: conflicts,
@@ -304,7 +304,7 @@ class SyncEngine {
   @visibleForTesting
   void handleLocalWrite(ChangeSet cs) {
     if (!_started || _paused || _authInvalid || _offline) return;
-    debugActions.add('push');
+    _recordAction('push');
     _scheduleCycle(config.pushDebounce);
   }
 
@@ -321,11 +321,11 @@ class SyncEngine {
     if (!pocket.storeNames.contains(hint.store)) return;
     final rec = hint.record;
     if (rec != null && hint.kind == BackendHintKind.changed) {
-      debugActions.add('fast:${hint.store}');
+      _recordAction('fast:${hint.store}');
       _fastPathTail = _fastPathTail.then((_) => _fastPath(rec));
       return;
     }
-    debugActions.add('pull:${hint.store}');
+    _recordAction('pull:${hint.store}');
     _scheduleCycle(config.pushDebounce, stores: [hint.store]);
   }
 
@@ -351,13 +351,13 @@ class SyncEngine {
   @visibleForTesting
   void handleTimer() {
     if (!_started) return;
-    debugActions.add('cycle');
-    unawaited(_runExclusiveCycle());
+    _recordAction('cycle');
+    _runBackgroundCycle();
   }
 
   /// Manual `db.sync.now()` → full cycle, returns a report.
-  Future<SyncReport> syncNow() {
-    debugActions.add('cycle');
+  Future<SyncReportData> syncNow() {
+    _recordAction('cycle');
     return _runExclusiveCycle();
   }
 
@@ -377,9 +377,9 @@ class SyncEngine {
       _pendingFull = false;
       _pendingPullOnly.clear();
       if (full || pullOnly.isEmpty) {
-        unawaited(_runExclusiveCycle());
+        _runBackgroundCycle();
       } else {
-        unawaited(_runExclusiveCycle(pullOnly: pullOnly));
+        _runBackgroundCycle(pullOnly: pullOnly);
       }
     });
   }
@@ -392,7 +392,7 @@ class SyncEngine {
     _catchupTimer = Timer(Duration.zero, () {
       _catchupTimer = null;
       if (!_started) return;
-      unawaited(_runExclusiveCycle(pullOnly: stores));
+      _runBackgroundCycle(pullOnly: stores);
     });
   }
 
@@ -468,22 +468,46 @@ class SyncEngine {
 
   // ------------------------------------------------------------------- cycle
 
-  Future<SyncReport> _runExclusiveCycle({List<String>? pullOnly}) {
+  Future<SyncReportData> _runExclusiveCycle({List<String>? pullOnly}) {
     // A full cycle pulls every store anyway, so a pending page-limit catchup
     // would only re-pull the same store redundantly.
     if (pullOnly == null) _catchupTimer?.cancel();
     final result = _cycleTail.then((_) => _doCycle(pullOnly: pullOnly));
-    _cycleTail = result.then<SyncReport>((_) => const SyncReport(),
-        onError: (Object _) => const SyncReport());
+    _cycleTail = result.then<SyncReportData>((_) => const SyncReportData(),
+        onError: (Object _) => const SyncReportData());
     return result;
   }
 
-  Future<SyncReport> _doCycle({List<String>? pullOnly}) async {
+  /// Records one trigger action in [debugActions], capped so a long-running
+  /// app cannot grow the debug list without bound.
+  static const int _maxDebugActions = 1000;
+
+  void _recordAction(String action) {
+    debugActions.add(action);
+    if (debugActions.length > _maxDebugActions) {
+      debugActions.removeRange(0, debugActions.length - _maxDebugActions);
+    }
+  }
+
+  /// Runs a full/pull-only cycle in the background. Background cycles have no
+  /// awaiting caller, so an unexpected non-SyncError failure (a raw backend
+  /// error escaping a lane) must be recorded and reflected in status rather
+  /// than surfacing as an unhandled zone error; the periodic timer retries.
+  /// [syncNow] keeps propagating its errors to the caller.
+  void _runBackgroundCycle({List<String>? pullOnly}) {
+    unawaited(_runExclusiveCycle(pullOnly: pullOnly).then<void>((_) {},
+        onError: (Object e, StackTrace st) {
+      _lastError ??= '$e';
+      unawaited(_transition(SyncEngineState.backoff));
+    }));
+  }
+
+  Future<SyncReportData> _doCycle({List<String>? pullOnly}) async {
     final generation = _generation;
-    if (!_isCurrent(generation)) return const SyncReport();
+    if (!_isCurrent(generation)) return const SyncReportData();
     if (_paused || _authInvalid || _offline) {
       await _transition(_effectiveIdle());
-      return const SyncReport();
+      return const SyncReportData();
     }
 
     final pulled = <String, int>{};
@@ -514,7 +538,7 @@ class SyncEngine {
     }
     if (_authInvalid) {
       await _transition(SyncEngineState.authRequired);
-      lastReport = SyncReport(pulled: pulled, hadError: true);
+      lastReport = SyncReportData(pulled: pulled, hadError: true);
       return lastReport!;
     }
 
@@ -574,7 +598,7 @@ class SyncEngine {
     }
     // A stale cycle (from a previous lifecycle) must not mutate the new
     // lifecycle's status or schedule work.
-    if (!_isCurrent(generation)) return const SyncReport();
+    if (!_isCurrent(generation)) return const SyncReportData();
     // Page-limit exhaustion: catch up immediately (only when the pull made
     // progress, so a stuck store cannot busy-loop the engine).
     if (hitLimitStores.isNotEmpty) {

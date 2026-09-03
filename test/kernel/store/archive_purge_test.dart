@@ -75,6 +75,33 @@ void main() {
       expect(await pocket.outbox.readSyncRow(pocket.db, 'widgets', id), isNull);
     });
 
+    test('vanish emits a purge event, never a phantom archive', () async {
+      final pocket = await openPocket();
+      addTearDown(pocket.close);
+      final col = pocket.collection('widgets');
+      final id = generateRecordId();
+      await col.put(record(id: id, name: 'unsynced'));
+
+      final events = <RecordChangeEvent>[];
+      final sub = col.events.listen(events.add);
+      addTearDown(sub.cancel);
+
+      await col.archive(id);
+      for (var i = 0; i < 8; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      final mine = events.where((e) => e.id == id).toList();
+      expect(mine, hasLength(1));
+      final event = mine.single;
+      // The row was hard-deleted; the event must not advertise an archived
+      // record that never commits.
+      expect(event.action, ChangeAction.purge);
+      expect(event.oldRecord, isNotNull);
+      expect(event.newRecord, isNull);
+      expect(await col.get(id), isNull);
+    });
+
     test('keepUnsyncedArchives preserves an archived unsynced create',
         () async {
       final pocket =

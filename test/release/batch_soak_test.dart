@@ -173,7 +173,6 @@ Future<void> _drainAll(EngineHarness h) async {
 }
 
 class _PoisoningMockSyncBackend extends MockSyncBackend {
-
   _PoisoningMockSyncBackend(this.poisonIds) {
     batchEnabled = true;
   }
@@ -191,7 +190,6 @@ class _PoisoningMockSyncBackend extends MockSyncBackend {
 }
 
 class _RateLimitingMockSyncBackend extends MockSyncBackend {
-
   _RateLimitingMockSyncBackend(this.onAction);
   final void Function() onAction;
 

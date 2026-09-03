@@ -203,7 +203,8 @@ void main() {
       await sub.cancel();
     });
 
-    test('onFieldTransition catches specific state change like done: false -> true',
+    test(
+        'onFieldTransition catches specific state change like done: false -> true',
         () async {
       await db.collection('tasks').put({
         'id': 'task00000000001',
@@ -218,7 +219,9 @@ void main() {
           .listen(transitions.add);
 
       // Mutate something else -> not emitted
-      await db.collection('tasks').patch('task00000000001', {'title': 'Updated'});
+      await db
+          .collection('tasks')
+          .patch('task00000000001', {'title': 'Updated'});
 
       // Complete the task -> emitted!
       await db.collection('tasks').patch('task00000000001', {'done': true});
@@ -234,10 +237,13 @@ void main() {
       await sub.cancel();
     });
 
-    test('convenience filters onLocal and onFieldChange work across collections',
+    test(
+        'convenience filters onLocal and onFieldChange work across collections',
         () async {
       final localTaskChanges = <RecordChangeEvent>[];
-      final sub = db.onLocal(store: 'tasks', field: 'done').listen(localTaskChanges.add);
+      final sub = db
+          .onLocal(store: 'tasks', field: 'done')
+          .listen(localTaskChanges.add);
 
       await db.collection('tasks').put({
         'id': 'task00000000001',
@@ -284,7 +290,8 @@ void main() {
       await sub.cancel();
     });
 
-    test('rolled-back transaction or savepoint drops buffered events', () async {
+    test('rolled-back transaction or savepoint drops buffered events',
+        () async {
       final events = <RecordChangeEvent>[];
       final sub = db.events.listen(events.add);
 
@@ -301,7 +308,8 @@ void main() {
       } catch (_) {}
 
       await Future<void>.delayed(Duration.zero);
-      expect(events, isEmpty, reason: 'rolled-back transaction emits no events');
+      expect(events, isEmpty,
+          reason: 'rolled-back transaction emits no events');
 
       // Nested savepoint rollback
       await db.transaction((tx) async {

@@ -167,12 +167,18 @@ final class QueryConditionData {
     final op =
         QueryConditionOp.values.where((o) => o.name == opName).firstOrNull;
     if (op == null) throw WireException('Unknown query operator: $opName');
+    // A present-but-wrong-typed `values` would turn an `inValues` membership
+    // filter into a null condition (an unfiltered query); reject typed.
+    final valuesRaw = m['values'];
+    if (valuesRaw != null && valuesRaw is! List) {
+      throw WireException('Query condition "values" must be a list.');
+    }
     return QueryConditionData(
       field,
       op,
       value: decodeWireValue(m['value']),
-      values: m['values'] is List
-          ? [for (final v in m['values'] as List) decodeWireValue(v)]
+      values: valuesRaw is List
+          ? [for (final v in valuesRaw) decodeWireValue(v)]
           : null,
     );
   }
@@ -349,7 +355,8 @@ final class QueryOrderTermData {
     final m = raw.map((k, v) => MapEntry(k.toString(), v));
     final field = m['field'];
     if (field is! String) throw WireException('Malformed order term.');
-    return QueryOrderTermData(field, desc: m['desc'] == true);
+    return QueryOrderTermData(field,
+        desc: _optWireBool(m['desc'], 'desc', false));
   }
 }
 
@@ -411,13 +418,13 @@ final class SearchSpecData {
     final m = raw.map((k, v) => MapEntry(k.toString(), v));
     final term = m['term'];
     if (term is! String) throw WireException('Malformed search term.');
-    final limit = m['limit'];
     return SearchSpecData(
       term: term,
-      limit: limit is int ? limit : null,
-      all: m['all'] == true,
-      includeArchived: m['includeArchived'] == true,
-      includeHidden: m['includeHidden'] == true,
+      limit: m['limit'] == null ? null : _wireInt(m['limit'], 'limit'),
+      all: _optWireBool(m['all'], 'all', false),
+      includeArchived:
+          _optWireBool(m['includeArchived'], 'includeArchived', false),
+      includeHidden: _optWireBool(m['includeHidden'], 'includeHidden', false),
     );
   }
 }

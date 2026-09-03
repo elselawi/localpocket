@@ -5,7 +5,7 @@ import 'package:localpocket/src/kernel/schema.dart';
 import 'package:test/test.dart';
 
 import 'package:localpocket/src/kernel/fts_normalizer.dart'
-  show ftsNormalizerName;
+    show ftsNormalizerName;
 
 void main() {
   group('FtsSpec fuzzy + normalize', () {
@@ -40,14 +40,17 @@ void main() {
       expect(fuzzyJson['fuzzy'], isTrue);
       expect(fuzzyJson.containsKey('normalize'), isFalse);
       // A rules-only spec omits fuzzy.
-      final normJson = const FtsSpec(['t'],
-          normalize: FtsNormalization(rules: {'a': 'b'})).toJson();
+      final normJson =
+          const FtsSpec(['t'], normalize: FtsNormalization(rules: {'a': 'b'}))
+              .toJson();
       expect(normJson.containsKey('fuzzy'), isFalse);
       expect((normJson['normalize'] as Map)['rules'], {'a': 'b'});
     });
 
     test('legacy JSON (fields only) parses with defaults', () {
-      final spec = FtsSpec.fromJson({'fields': ['title']});
+      final spec = FtsSpec.fromJson({
+        'fields': ['title']
+      });
       expect(spec.fuzzy, isFalse);
       expect(spec.hasNormalization, isFalse);
     });
@@ -119,8 +122,7 @@ void main() {
     test('FtsSpec missing fields / wrong types raise StorageError', () {
       expect(() => FtsSpec.fromJson(<String, Object?>{}),
           throwsA(isA<StorageError>()));
-      expect(
-          () => FtsSpec.fromJson({'fields': 'not-a-list'}),
+      expect(() => FtsSpec.fromJson({'fields': 'not-a-list'}),
           throwsA(isA<StorageError>()));
     });
 
@@ -194,9 +196,8 @@ void main() {
       expect(base, isNot(equals(FtsNormalization(rules: {'إ': 'ا'}))));
       expect(base, isNot(equals(FtsNormalization(rules: {'أ': 'آ'}))));
       expect(base, isNot(equals(const FtsNormalization())));
-      expect(base.hashCode,
-          isNot(equals(const FtsNormalization().hashCode)));
-        expect(base, isNot(equals(Object())),
+      expect(base.hashCode, isNot(equals(const FtsNormalization().hashCode)));
+      expect(base, isNot(equals(Object())),
           reason: 'non-FtsNormalization operands are never equal');
       expect(base, equals(FtsNormalization(rules: {'أ': 'ا'})),
           reason: 'identical-content instances are equal');
@@ -207,8 +208,7 @@ void main() {
       expect(n, equals(const FtsNormalization()));
       expect(n.hashCode, const FtsNormalization().hashCode);
       expect(n.toString(), 'FtsNormalization(0 rules)');
-      expect(
-          FtsNormalization(rules: {'أ': 'ا'}).toString(),
+      expect(FtsNormalization(rules: {'أ': 'ا'}).toString(),
           'FtsNormalization(1 rules)');
     });
 
@@ -218,8 +218,8 @@ void main() {
           normalize: FtsNormalization(rules: {'أ': 'ا', 'ة': 'ه'}));
       // This mirrors exactly what lp_stores.definition_json does.
       final encoded = jsonEncode(spec.toJson());
-      final decoded =
-          FtsSpec.fromJson((jsonDecode(encoded) as Map).cast<String, Object?>());
+      final decoded = FtsSpec.fromJson(
+          (jsonDecode(encoded) as Map).cast<String, Object?>());
       expect(decoded, equals(spec));
       expect(decoded.fuzzy, isTrue);
       expect(decoded.normalize.rules, spec.normalize.rules);

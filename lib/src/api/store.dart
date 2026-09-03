@@ -21,6 +21,7 @@ import 'files.dart';
 import 'local_pocket.dart' show LocalPocket;
 import 'query.dart';
 import 'row.dart';
+import 'watch_runtime.dart';
 
 /// {@template localpocket.store}
 /// Typed CRUD, queries, search, and watches for one store.
@@ -188,7 +189,8 @@ final class Store<S extends StoreDef<S>> {
   }
 
   /// Counts the distinct values of [field] among the records matching
-  /// [where].
+  /// [where]. Unlike [distinct], counting never materializes the values, so
+  /// omitting [limit] returns an exact, uncapped count.
   Future<int> countDistinct(
     FieldDef<S, Object?> field, {
     List<Cond<S>> where = const [],
@@ -206,7 +208,8 @@ final class Store<S extends StoreDef<S>> {
   }
 
   /// The distinct values of [field]. [limit] caps the scan; without it the
-  /// kernel applies its default cap for unbounded distinct scans.
+  /// kernel applies its built-in 1000-value cap (returning values is
+  /// memory-bounded, unlike [countDistinct], which counts exactly).
   Future<List<Object?>> distinct(
     FieldDef<S, Object?> field, {
     int? limit,
@@ -315,67 +318,22 @@ final class Store<S extends StoreDef<S>> {
       );
     }
     final data = lowerQuerySpec(spec, def, requireLimit: true);
-    // The stream's owner controls the controller's lifetime (torn down on
-    // cancel; the kernel-side watch dies with it).
-    // ignore: close_sinks
-    late final StreamController<List<Row<S>>> controller;
-    StreamSubscription<Event>? events;
-    String? subscription;
-    var cancelled = false;
-
-    Future<void> cancel() async {
-      cancelled = true;
-      await events?.cancel();
-      final id = subscription;
-      if (id != null) {
-        subscription = null;
-        try {
-          await _runtime.send(WatchCancelRequest(subscription: id));
-        } catch (_) {
-          // The runtime may already be closed; the watch is dead either way.
-        }
-      }
-    }
-
-    controller = StreamController<List<Row<S>>>(
-      // The controller lives as long as the subscription; torn down in
-      // onCancel.
-      // ignore: close_sinks
-      onListen: () async {
-        final started =
-            await _runtime.send(WatchRequest(store: name, spec: data));
-        if (cancelled) {
-          // Cancelled while the request was in flight: the kernel already
-          // registered the subscription, so it must be torn down explicitly
-          // or it would keep re-querying on every store change forever.
-          try {
-            await _runtime
-                .send(WatchCancelRequest(subscription: started.subscription));
-          } catch (_) {
-            // The runtime may already be closed; the watch dies with it.
-          }
-          return;
-        }
-        subscription = started.subscription;
-        events = _runtime.events.listen(
-          (event) {
-            if (event is WatchSnapshot && event.subscription == subscription) {
-              controller.add([
-                // Projection enforcement matches _page: reading a field
-                // excluded by the spec's projection throws the same typed
-                // error on watch rows as on query rows.
-                for (final row in event.items)
-                  Row<S>(def, row, projected: projectedOf(spec)),
-              ]);
-            }
-          },
-          onError: controller.addError,
-          cancelOnError: false,
-        );
-      },
-      onCancel: cancel,
+    final projected = projectedOf(spec);
+    return runtimeWatch<Row<S>>(
+      start: () => _send(WatchRequest(store: name, spec: data)),
+      send: _send,
+      events: _runtime.events,
+      ensureOpen: _ensureOpen,
+      matches: (event, id) =>
+          event is WatchSnapshot && event.subscription == id,
+      emit: (event) => [
+        // Projection enforcement matches _page: reading a field excluded by
+        // the spec's projection throws the same typed error on watch rows as
+        // on query rows.
+        for (final row in (event as WatchSnapshot).items)
+          Row<S>(def, row, projected: projected),
+      ],
     );
-    return controller.stream;
   }
 
   /// Committed changes to this store: one notification per committed record
@@ -510,30 +468,31 @@ final class Store<S extends StoreDef<S>> {
     required bool allowId,
   }) {
     final record = <String, Object?>{};
+    // The write family is sealed: the switch is compiler-exhaustive, so a
+    // new variant cannot silently drop its writes.
     for (final write in writes) {
-      if (write is FieldWrite<S>) {
-        _checkOwner(write.owner, write.name);
-        record[write.name] = write.encoded;
-      } else if (write is IdWrite<S>) {
-        if (!allowId) {
-          throw ArgumentError.value(
-            write.id,
-            'writes',
-            'Record ids are immutable: put/putAll assign them, '
-                'patch/patchAll cannot change them.',
-          );
-        }
-        if (record.containsKey('id')) {
-          throw ArgumentError.value(
-            write.id,
-            'writes',
-            'Duplicate id write in one record.',
-          );
-        }
-        record['id'] = write.id;
-      } else if (write is ExtraWrite<S>) {
-        _validateExtraKey(write.key);
-        record[write.key] = write.value;
+      switch (write) {
+        case FieldWrite<S>():
+          _checkOwner(write.owner, write.name);
+          record[write.name] = write.encoded;
+        case IdWrite<S>():
+          if (!allowId) {
+            throw ValidationException(
+              'Record ids are immutable: put/putAll assign them, '
+              'patch/patchAll cannot change them.',
+              field: 'writes',
+            );
+          }
+          if (record.containsKey('id')) {
+            throw ValidationException(
+              'Duplicate id write in one record.',
+              field: 'writes',
+            );
+          }
+          record['id'] = write.id;
+        case ExtraWrite<S>():
+          _validateExtraKey(write.key);
+          record[write.key] = write.value;
       }
     }
     return record;

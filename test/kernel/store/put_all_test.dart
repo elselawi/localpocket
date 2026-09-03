@@ -480,8 +480,7 @@ void main() {
       expect(pocket.perf.rowsWritten - rowsBefore, 0,
           reason: 'no rows written');
       final outboxRows = await pocket.db.rawQuery(
-          'SELECT COUNT(*) AS c FROM lp_outbox WHERE store = ?',
-          ['widgets']);
+          'SELECT COUNT(*) AS c FROM lp_outbox WHERE store = ?', ['widgets']);
       expect(outboxRows.first['c'], 0, reason: 'no outbox rows queued');
     });
 
@@ -494,8 +493,9 @@ void main() {
 
       await pocket.transaction((tx) async {
         await tx.collection('widgets').putAll(const []);
-        await tx.collection('widgets').put(record(
-            id: generateRecordId(), name: 'sibling'));
+        await tx
+            .collection('widgets')
+            .put(record(id: generateRecordId(), name: 'sibling'));
       });
 
       await Future<void>.delayed(const Duration(milliseconds: 50));
