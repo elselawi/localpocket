@@ -21,6 +21,7 @@ import 'files.dart';
 import 'local_pocket.dart' show LocalPocket;
 import 'query.dart';
 import 'row.dart';
+import 'watch_runtime.dart';
 
 /// {@template localpocket.store}
 /// Typed CRUD, queries, search, and watches for one store.
@@ -315,67 +316,22 @@ final class Store<S extends StoreDef<S>> {
       );
     }
     final data = lowerQuerySpec(spec, def, requireLimit: true);
-    // The stream's owner controls the controller's lifetime (torn down on
-    // cancel; the kernel-side watch dies with it).
-    // ignore: close_sinks
-    late final StreamController<List<Row<S>>> controller;
-    StreamSubscription<Event>? events;
-    String? subscription;
-    var cancelled = false;
-
-    Future<void> cancel() async {
-      cancelled = true;
-      await events?.cancel();
-      final id = subscription;
-      if (id != null) {
-        subscription = null;
-        try {
-          await _runtime.send(WatchCancelRequest(subscription: id));
-        } catch (_) {
-          // The runtime may already be closed; the watch is dead either way.
-        }
-      }
-    }
-
-    controller = StreamController<List<Row<S>>>(
-      // The controller lives as long as the subscription; torn down in
-      // onCancel.
-      // ignore: close_sinks
-      onListen: () async {
-        final started =
-            await _runtime.send(WatchRequest(store: name, spec: data));
-        if (cancelled) {
-          // Cancelled while the request was in flight: the kernel already
-          // registered the subscription, so it must be torn down explicitly
-          // or it would keep re-querying on every store change forever.
-          try {
-            await _runtime
-                .send(WatchCancelRequest(subscription: started.subscription));
-          } catch (_) {
-            // The runtime may already be closed; the watch dies with it.
-          }
-          return;
-        }
-        subscription = started.subscription;
-        events = _runtime.events.listen(
-          (event) {
-            if (event is WatchSnapshot && event.subscription == subscription) {
-              controller.add([
-                // Projection enforcement matches _page: reading a field
-                // excluded by the spec's projection throws the same typed
-                // error on watch rows as on query rows.
-                for (final row in event.items)
-                  Row<S>(def, row, projected: projectedOf(spec)),
-              ]);
-            }
-          },
-          onError: controller.addError,
-          cancelOnError: false,
-        );
-      },
-      onCancel: cancel,
+    final projected = projectedOf(spec);
+    return runtimeWatch<Row<S>>(
+      start: () => _send(WatchRequest(store: name, spec: data)),
+      send: _send,
+      events: _runtime.events,
+      ensureOpen: _ensureOpen,
+      matches: (event, id) =>
+          event is WatchSnapshot && event.subscription == id,
+      emit: (event) => [
+        // Projection enforcement matches _page: reading a field excluded by
+        // the spec's projection throws the same typed error on watch rows as
+        // on query rows.
+        for (final row in (event as WatchSnapshot).items)
+          Row<S>(def, row, projected: projected),
+      ],
     );
-    return controller.stream;
   }
 
   /// Committed changes to this store: one notification per committed record

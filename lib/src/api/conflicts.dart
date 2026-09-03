@@ -16,6 +16,7 @@ import '../kernel/sync/conflicts.dart' show remoteDeletedKey;
 import '../schema/store_def.dart';
 import '../api/writes.dart';
 import 'row.dart';
+import 'watch_runtime.dart';
 
 /// {@template localpocket.conflict}
 /// One immutable open conflict snapshot for a store.
@@ -153,50 +154,18 @@ final class StoreConflicts<S extends StoreDef<S>> {
   /// conflicts are added, resolved, or modified. The kernel mints the
   /// subscription and emits [ConflictsSnapshot] events on the shared runtime
   /// stream; the current list arrives with the first snapshot.
-  Stream<List<Conflict<S>>> watch() {
-    _ensureOpen();
-    // ignore: close_sinks
-    late final StreamController<List<Conflict<S>>> controller;
-    StreamSubscription<Event>? events;
-    String? subscription;
-    var cancelled = false;
-
-    Future<void> cancel() async {
-      cancelled = true;
-      await events?.cancel();
-      final id = subscription;
-      if (id != null) {
-        subscription = null;
-        try {
-          await _runtime.send(WatchCancelRequest(subscription: id));
-        } catch (_) {
-          // The runtime may already be closed; the watch is dead either way.
-        }
-      }
-    }
-
-    controller = StreamController<List<Conflict<S>>>(
-      onListen: () async {
-        final started = await _runtime.send(ConflictsWatchRequest(store: name));
-        if (cancelled) return;
-        subscription = started.subscription;
-        events = _runtime.events.listen(
-          (event) {
-            if (event is ConflictsSnapshot &&
-                event.subscription == subscription) {
-              controller.add([
-                for (final c in event.conflicts) Conflict<S>.fromData(def, c),
-              ]);
-            }
-          },
-          onError: controller.addError,
-          cancelOnError: false,
-        );
-      },
-      onCancel: cancel,
-    );
-    return controller.stream;
-  }
+  Stream<List<Conflict<S>>> watch() => runtimeWatch<Conflict<S>>(
+        start: () => _send(ConflictsWatchRequest(store: name)),
+        send: _send,
+        events: _runtime.events,
+        ensureOpen: _ensureOpen,
+        matches: (event, id) =>
+            event is ConflictsSnapshot && event.subscription == id,
+        emit: (event) => [
+          for (final c in (event as ConflictsSnapshot).conflicts)
+            Conflict<S>.fromData(def, c),
+        ],
+      );
 
   /// Resolves the open conflict for [id] with an application-selected merged
   /// document.

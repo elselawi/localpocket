@@ -85,6 +85,7 @@ final class LocalPocket {
   final RuntimeClient _runtime;
   final Future<void> Function()? _onClose;
   bool _closed = false;
+  Future<void>? _closing;
 
   /// The engine's capabilities as observed at open time.
   Future<EngineCapabilities> get capabilities async {
@@ -216,17 +217,23 @@ final class LocalPocket {
   /// Closes the database. Subsequent sends fail with a `StateError`; live
   /// event and watch streams end. The platform opener's onClose hook (web:
   /// flush OPFS via the worker connection) runs after the close command.
-  Future<void> close() async {
-    if (_closed) return;
+  ///
+  /// Concurrent calls coalesce: every caller awaits the same in-flight close,
+  /// and a repeat after completion returns that same completed future. If the
+  /// onClose hook throws, the runtime teardown still runs; the first error is
+  /// what surfaces.
+  Future<void> close() => _closing ??= _closeOnce();
+
+  Future<void> _closeOnce() async {
     try {
       await _send(const CloseRequest());
     } finally {
       _closed = true;
-      final onClose = _onClose;
-      if (onClose != null) {
-        await onClose();
+      try {
+        await _onClose?.call();
+      } finally {
+        await _runtime.close();
       }
-      await _runtime.close();
     }
   }
 

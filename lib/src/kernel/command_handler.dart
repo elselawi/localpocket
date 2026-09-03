@@ -650,6 +650,17 @@ class KernelCommandHandler implements CommandHandler {
                 ? DurabilityClass.full
                 : DurabilityClass.normal,
           );
+    // If the transaction fails to START, `run` never executes and `ready`
+    // would never complete — the client would hang forever on begin. Route
+    // the start failure through `ready` (the client sees the typed error) and
+    // drop the dead session. A failure after `run` has completed `ready` is
+    // unaffected: it stays on `future` for _settle to observe and rethrow.
+    unawaited(session.future.catchError((Object e, StackTrace st) {
+      if (!session.ready.isCompleted) {
+        _sessions.remove(id);
+        session.ready.completeError(e, st);
+      }
+    }));
     return session.ready.future
         .then((_) => TransactionBeginResult(session: id));
   }
