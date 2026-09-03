@@ -220,6 +220,54 @@ void main() {
         throwsA(isA<WireException>()),
         reason: 'a gc request without both grace windows fails typed',
       );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'txSavepoint',
+          'payload': encodeWireValue({'txId': 7}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a savepoint without a name fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'watchCancel',
+          'payload': encodeWireValue({'subscription': 7}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a watch cancel without a string subscription fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'compact',
+          'payload': encodeWireValue({'aggressive': 'very'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a compact without a bool flag fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'runMaintenance',
+          'payload': encodeWireValue({'preserveBlobCacheMs': 'lots'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a maintenance run without an int window fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'conflictsResolve',
+          'payload': encodeWireValue({'conflictId': 7}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a conflict resolve without a string id fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeRequest({
+          'tag': 'fileEnforceStorageCap',
+          'payload': encodeWireValue({'maxTotalBytes': 'big'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a storage-cap enforcement without an int cap fails typed',
+      );
     });
   });
 
@@ -264,6 +312,80 @@ void main() {
           },
         ),
         throwsA(isA<WireException>()),
+      );
+      Request<Result> requestFor(String tag) =>
+          ContractCodec.requestSamples.singleWhere((r) => r.tag == tag);
+      Map<String, Object?> malformed(
+              String tag, Map<String, Object?> payload) =>
+          {
+            'tag': tag,
+            'payload': encodeWireValue(payload),
+          };
+      expect(
+        () => ContractCodec.decodeResult(requestFor('watch'), {
+          'tag': 'watchStarted',
+          'payload': encodeWireValue({'subscription': 7}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a watch start without a string subscription fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeResult(requestFor('pruneOutbox'),
+            malformed('pruneOutbox', {'removed': 'many'})),
+        throwsA(isA<WireException>()),
+        reason: 'a prune report without an int count fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeResult(
+            requestFor('compact'), malformed('compact', {'removed': 'many'})),
+        throwsA(isA<WireException>()),
+        reason: 'a compact report without an int count fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeResult(requestFor('conflictsList'), {
+          'tag': 'conflicts',
+          'payload': encodeWireValue({'conflicts': 'none'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a conflicts list without a list fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeResult(requestFor('fileBeginUpload'),
+            malformed('fileUploadSession', {'session': 7})),
+        throwsA(isA<WireException>()),
+        reason: 'an upload session result without a string id fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeResult(requestFor('filesList'), {
+          'tag': 'fileRefs',
+          'payload': encodeWireValue({'refs': 'none'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a file refs result without a list fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeResult(
+            requestFor('fileOpen'), malformed('fileOpen', {'stream': 7})),
+        throwsA(isA<WireException>()),
+        reason: 'a file open result without a string stream id fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeResult(requestFor('fileEnforceStorageCap'),
+            malformed('fileCap', {'evicted': 'many'})),
+        throwsA(isA<WireException>()),
+        reason: 'a file cap result without an int count fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeResult(
+            requestFor('syncStart'), malformed('syncStart', {'state': 0})),
+        throwsA(isA<WireException>()),
+        reason: 'a sync start result without a state name fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeResult(requestFor('syncStatus'),
+            malformed('syncStatus', {'status': 'bad'})),
+        throwsA(isA<WireException>()),
+        reason: 'a sync status result without a status map fails typed',
       );
     });
 
@@ -400,6 +522,41 @@ void main() {
         }),
         throwsA(isA<WireException>()),
         reason: 'a file chunk event without binary bytes fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeEvent({
+          'tag': 'watchSnapshot',
+          'payload': encodeWireValue({'subscription': 'w1'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a watch snapshot without an items list fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeEvent({
+          'tag': 'conflictsSnapshot',
+          'payload': encodeWireValue({'subscription': 'w1'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a conflicts snapshot without a conflicts list fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeEvent({
+          'tag': 'conflictsSnapshot',
+          'payload': encodeWireValue({
+            'subscription': 'w1',
+            'conflicts': ['not-a-conflict'],
+          }),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a malformed conflict inside the snapshot fails typed',
+      );
+      expect(
+        () => ContractCodec.decodeEvent({
+          'tag': 'syncStatusEvent',
+          'payload': encodeWireValue({'status': 'bad'}),
+        }),
+        throwsA(isA<WireException>()),
+        reason: 'a sync status event without a status map fails typed',
       );
     });
   });

@@ -173,4 +173,41 @@ void main() {
       );
     });
   });
+
+  group('raw option + cipher-requirement helpers', () {
+    test('rawOpenOption reads a single raw key without validation', () {
+      expect(rawOpenOption(null, 'fieldCipher'), isNull);
+      // Missing key -> null. Present wrong-typed values are returned as-is:
+      // validation is the envelope parser's job.
+      expect(rawOpenOption(const {}, 'fieldCipher'), isNull);
+      expect(rawOpenOption({'fieldCipher': 42}, 'fieldCipher'), 42);
+      // Not-a-map data yields null (no throw) — the raw reader never
+      // turns a bad additionalData shape into a crash of its own.
+      expect(rawOpenOption('junk', 'fieldCipher'), isNull);
+    });
+
+    test('hasEncryptedFieldsWithoutCipher follows the cipher argument',
+        () async {
+      final encrypted = CollectionSchema<Object?>(
+        name: 'secrets',
+        version: 1,
+        fields: [Field.text('secret', encrypted: true)],
+      );
+      final plain = widgetsSchema();
+
+      // No cipher + any encrypted field is a rejection.
+      expect(hasEncryptedFieldsWithoutCipher([encrypted], null), isTrue);
+      // A cipher short-circuits true regardless of stores.
+      expect(
+        hasEncryptedFieldsWithoutCipher(
+          [encrypted],
+          AesGcmFieldCipher(Uint8List.fromList(List.filled(32, 7))),
+        ),
+        isFalse,
+      );
+      // No encrypted fields never requires a cipher.
+      expect(hasEncryptedFieldsWithoutCipher([plain], null), isFalse);
+      expect(hasEncryptedFieldsWithoutCipher(const [], null), isFalse);
+    });
+  });
 }

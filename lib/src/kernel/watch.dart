@@ -209,13 +209,6 @@ abstract class CoalescedWatcher<T> {
     _sub = pocket.changes.listen(_onChange);
   }
 
-  /// Fetches and caches the initial snapshot used for future change detection.
-  Future<T> initial() async {
-    final data = await fetchSnapshot();
-    _digest = computeDigest(data);
-    return data;
-  }
-
   void _onChange(ChangeSet cs) {
     if (!shouldInvalidate(cs)) return;
     if (_running) {

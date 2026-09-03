@@ -304,6 +304,81 @@ void main() {
       );
     });
 
+    test('a non-map reply payload is a malformed reply, not a crash', () async {
+      // A non-map reply body is caught by the runtime's own map check before
+      // any cast can crash — surfaced typed, never a TypeError.
+      final client = RemoteRuntimeClient(
+          transport: (envelope) async => {
+                'v': webProtocolVersion,
+                'i': envelope['i'],
+                'r': 'not-a-map',
+              });
+      await expectLater(
+        client.send(const HealthRequest()),
+        throwsA(isA<ProtocolEnvelopeException>().having(
+            (e) => e.message, 'message', contains('Malformed contract reply'))),
+      );
+    });
+
+    test(
+        'a reply whose result is not a map is a malformed reply, '
+        'never a cast crash', () async {
+      final client = RemoteRuntimeClient(
+          transport: (envelope) async => {
+                'v': webProtocolVersion,
+                'i': envelope['i'],
+                'r': {'tag': 'health', 'result': 'not-a-map'},
+              });
+      await expectLater(
+        client.send(const HealthRequest()),
+        throwsA(isA<ProtocolEnvelopeException>().having((e) => e.message,
+            'message', contains('requires a "result" or "error" map'))),
+      );
+    });
+
+    test('a non-contract event op is ignored, never decoded', () async {
+      final client = RemoteRuntimeClient(
+          transport: (envelope) async => {
+                'v': webProtocolVersion,
+                'i': envelope['i'],
+                'r': {
+                  'tag': 'health',
+                  'result': {
+                    'tag': 'health',
+                    'payload': <String, String>{},
+                  }
+                },
+              });
+      final received = <Event>[];
+      final errors = <Object>[];
+      final sub = client.events
+          .listen(received.add, onError: errors.add, cancelOnError: false);
+      addTearDown(sub.cancel);
+
+      // A foreign family sharing the sink (not yet cut over to the contract
+      // vocabulary) must be quietly skipped — it is not an error, just not
+      // ours.
+      client.handleWorkerEvent({
+        'v': webProtocolVersion,
+        'op': 'someOtherFamily',
+        'event': {'anything': 'goes'},
+      });
+      // And a contract-op envelope whose "event" payload is not a map is a
+      // protocol problem, surfaced loudly instead of silently dead-ending.
+      client.handleWorkerEvent({
+        'v': webProtocolVersion,
+        'op': WireOp.contractEvent,
+        'event': 'not-a-map',
+      });
+      await _waitFor(() => errors.isNotEmpty);
+      expect(
+          errors.single,
+          isA<ProtocolEnvelopeException>().having(
+              (e) => e.message, 'message', contains('"event" is not a map')));
+      expect(received, isEmpty,
+          reason: 'the non-contract op was ignored, not decoded');
+    });
+
     test('a malformed event is dropped and the stream keeps delivering',
         () async {
       final client = RemoteRuntimeClient(
@@ -437,6 +512,40 @@ void main() {
       expect(errors, isEmpty, reason: 'no error is injected after close');
     });
   });
+
+  group('direct runtime correlation', () {
+    test('a result family that does not answer the request fails typed',
+        () async {
+      // The direct runtime dispatches in-process; the correlation check is
+      // the last line of defense against a handler returning the wrong
+      // family (e.g. a codec or kernel wiring bug).
+      final lyingHandler =
+          _FixedResultHandler(const HealthResult(ok: true, sqliteVersion: '3'));
+      final client = LocalRuntimeClient(lyingHandler);
+      await expectLater(
+        client.send(GetRequest(store: 's', id: 'i')),
+        throwsA(isA<WireException>().having(
+            (e) => e.message, 'message', contains('does not answer request'))),
+      );
+    });
+  });
+}
+
+/// A handler that always answers with [result], regardless of the request —
+/// deliberately mis-correlated to exercise the runtime's correlation check.
+final class _FixedResultHandler implements CommandHandler {
+  _FixedResultHandler(this.result);
+
+  final Result result;
+
+  @override
+  Future<Result> handle(Request request) async => result;
+
+  @override
+  Stream<Event> get events => const Stream<Event>.empty();
+
+  @override
+  Future<void> close() async {}
 }
 
 Future<void> _waitFor(bool Function() predicate,

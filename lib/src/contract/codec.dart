@@ -1,49 +1,5 @@
 part of 'contract.dart';
 
-/// {@template localpocket.wire_request}
-/// One wire-level request envelope: a stable tag plus its typed payload.
-/// {@endtemplate}
-final class WireRequest {
-  /// {@macro localpocket.wire_request}
-  const WireRequest({required this.tag, required this.payload});
-
-  /// Stable wire tag naming the request variant.
-  final String tag;
-
-  /// The typed payload of the request.
-  final Map<String, Object?> payload;
-}
-
-/// One wire-level result envelope; decoding verifies the tag matches the
-/// expected result family.
-///
-/// {@template localpocket.wire_result}
-/// {@endtemplate}
-final class WireResult {
-  /// {@macro localpocket.wire_result}
-  const WireResult({required this.tag, required this.payload});
-
-  /// Stable wire tag naming the result variant.
-  final String tag;
-
-  /// The typed payload of the result.
-  final Map<String, Object?> payload;
-}
-
-/// {@template localpocket.wire_event}
-/// One wire-level event envelope.
-/// {@endtemplate}
-final class WireEvent {
-  /// {@macro localpocket.wire_event}
-  const WireEvent({required this.tag, required this.payload});
-
-  /// Stable wire tag naming the event variant.
-  final String tag;
-
-  /// The typed payload of the event.
-  final Map<String, Object?> payload;
-}
-
 /// Exhaustive codecs for the contract. Encoding is compiler-exhaustive over the
 /// sealed hierarchies; decoding validates every payload and rejects unknown
 /// tags, missing fields, and wrong types with [WireException].
@@ -223,14 +179,6 @@ abstract final class ContractCodec {
         'tag': request.tag,
         'payload': encodeWireValue(request.toJson()),
       };
-
-  /// Wraps a request into its wire envelope.
-  static WireRequest encodeRequestEnvelope(Request request) {
-    final m = encodeRequest(request);
-    return WireRequest(
-        tag: m['tag']! as String,
-        payload: m['payload']! as Map<String, Object?>);
-  }
 
   /// Decodes a request map (or envelope payload) into its typed variant;
   /// throws [WireException] for unknown tags or malformed payloads.

@@ -185,6 +185,35 @@ void main() {
       );
     });
   });
+
+  group('query predicate backstops', () {
+    late LocalPocket db;
+
+    setUp(() async {
+      db = await LocalPocket.open(LocalPocketOptions(
+          path: ':memory:', stores: [Alpha.store, Beta.store]));
+    });
+    tearDown(() => db.close());
+
+    test('an unknown condition operator fails with the field named', () async {
+      // A dynamic cast (e.g. from serialized specs) can hand a bogus
+      // operator string to the lowerer; it must fail typed with the field.
+      final cond = FieldCond<Alpha>(
+        Alpha.store,
+        Alpha.title.name,
+        'explode',
+        ['x'],
+      );
+      await expectLater(
+        db.store(Alpha.store).query(QuerySpec<Alpha>(
+              where: [cond],
+              limit: 5,
+            )),
+        throwsA(isA<ValidationException>().having((e) => e.message, 'message',
+            allOf(contains('explode'), contains('name')))),
+      );
+    });
+  });
 }
 
 /// Declares two fields but lists only one in `fields`.

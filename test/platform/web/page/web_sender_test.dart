@@ -222,6 +222,24 @@ void main() {
       );
     });
 
+    test('a response whose id answers a different request fails typed',
+        () async {
+      // A stale/crossed reply must never be decoded against the wrong call:
+      // correlation is checked before anything else looks at the payload.
+      final sender = WebSender(
+        transport: (_) async => {
+          'v': webProtocolVersion,
+          'i': 999,
+          'r': {'ok': true},
+        },
+      );
+      await expectLater(
+        sender.send(WireOp.open),
+        throwsA(isA<ProtocolEnvelopeException>().having((e) => e.message,
+            'message', contains('does not match request id'))),
+      );
+    });
+
     test('a wire error response decodes to its typed exception via decodeError',
         () async {
       final sender = WebSender(

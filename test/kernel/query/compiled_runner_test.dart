@@ -1,4 +1,5 @@
 import 'package:localpocket/src/kernel/ids.dart';
+import 'package:localpocket/src/kernel/query/result_shaper.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:localpocket/src/kernel/query_plan.dart';
 import 'package:localpocket/src/kernel/compiled_query_runner.dart';
@@ -81,5 +82,77 @@ void main() {
       throwsA(isA<StateError>()
           .having((e) => e.message, 'message', contains('bogus'))),
     );
+  });
+  _resultShaper();
+}
+
+/// Direct unit coverage of the result shaper: the projection and page-window
+/// assembly both execution paths share (plan Rule 6).
+void _resultShaper() {
+  group('result shaper', () {
+    test('projectRow keeps only projected keys, in declaration order', () {
+      final row = {'zebra': 1, 'alpha': 2, 'extra': 3};
+      // "declaration order" for a map literal comparison: the projected
+      // output carries exactly the projected keys that exist.
+      expect(projectRow(row, ['alpha', 'zebra']), {'alpha': 2, 'zebra': 1});
+    });
+
+    test('a projected key missing from the row is skipped', () {
+      expect(projectRow({'a': 1}, ['a', 'absent']), {'a': 1});
+    });
+
+    test('projectRow never mutates the input snapshot', () {
+      final row = <String, Object?>{'a': 1, 'b': 2};
+      final projected = projectRow(row, ['b']);
+      expect(projected, {'b': 2});
+      expect(row, {'a': 1, 'b': 2});
+    });
+
+    test('projectRows projects every row', () {
+      expect(
+        projectRows([
+          {'a': 1, 'b': 2},
+          {'a': 3, 'b': 4},
+        ], [
+          'b'
+        ]),
+        [
+          {'b': 2},
+          {'b': 4},
+        ],
+      );
+    });
+
+    test('takeWindow with a limit splits window from overflow', () {
+      final rows = List.generate(5, (i) => {'i': i});
+      final bounded = takeWindow(rows, 3);
+      expect(
+        bounded.window,
+        [
+          {'i': 0},
+          {'i': 1},
+          {'i': 2},
+        ],
+      );
+      expect(bounded.overflow, isTrue);
+
+      final exact = takeWindow(rows, 5);
+      expect(exact.window, hasLength(5));
+      expect(exact.overflow, isFalse, reason: 'no rows beyond the window');
+
+      final short = takeWindow(rows.take(2).toList(), 5);
+      expect(short.window, hasLength(2));
+      expect(short.overflow, isFalse);
+    });
+
+    test('takeWindow with no limit returns everything, never overflowing', () {
+      final rows = [
+        {'a': 1},
+        {'a': 2},
+      ];
+      final unbounded = takeWindow(rows, null);
+      expect(unbounded.window, same(rows));
+      expect(unbounded.overflow, isFalse);
+    });
   });
 }

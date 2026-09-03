@@ -288,5 +288,59 @@ void main() {
             'b': [1, 2, null]
           });
     });
+
+    group('byte-count helpers', () {
+      test('utf8BytesOf matches dart:convert utf8.encode across widths', () {
+        const samples = <String>[
+          '', // empty
+          'ascii',
+          'héllo', // 2-byte code points
+          '名前', // 3-byte code points
+          '🎉', // 4-byte code point (surrogate pair)
+          'aé名\ud83d\ude00', // one of every width (surrogate pair)
+        ];
+        for (final s in samples) {
+          expect(utf8BytesOf(s), utf8.encode(s).length, reason: 'for "$s"');
+        }
+      });
+
+      test('canonicalizeInto reports the exact byte length written', () {
+        for (final v in <Object?>[
+          null,
+          true,
+          false,
+          42,
+          1.5,
+          'héllo 🎉',
+          [1, 'x', null],
+          {'b': 1, 'a': '名'},
+        ]) {
+          final out = StringBuffer();
+          final bytes = canonicalizeInto(out, v);
+          expect(out.toString(), canonicalize(v));
+          expect(bytes, utf8.encode(out.toString()).length,
+              reason: 'for ${canonicalize(v)}');
+        }
+      });
+
+      test('utf8ByteLength counts the buffer content exactly', () {
+        final out = StringBuffer()..write('héllo 🎉');
+        expect(utf8ByteLength(out), utf8.encode(out.toString()).length);
+      });
+    });
+
+    group('nested unsupported values', () {
+      test('unsupported objects inside containers name the runtime type', () {
+        expect(
+            () => canonicalize({
+                  'ok': [DateTime.now()]
+                }),
+            throwsA(isA<ArgumentError>()));
+        expect(
+            () => canonicalize([Object()]),
+            throwsA(isA<ArgumentError>().having(
+                (e) => e.message.toString(), 'message', contains('Object'))));
+      });
+    });
   });
 }

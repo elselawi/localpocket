@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:localpocket/src/kernel/write_queue.dart';
 import 'package:test/test.dart';
 
@@ -66,6 +68,48 @@ void main() {
 
       results.add('done');
       expect(results, ['done']);
+    });
+  });
+
+  group('WriteQueue depth reporting', () {
+    test('depth counts submitted-but-unfinished actions', () async {
+      final q = WriteQueue();
+      expect(q.depth, 0, reason: 'an idle queue is empty');
+
+      final gate = Completer<void>();
+      final first = q.run(() => gate.future);
+      var secondSubmitted = 0;
+      final second = q.run(() async => secondSubmitted++);
+      expect(q.depth, 2, reason: 'both actions are queued');
+
+      gate.complete();
+      await first;
+      expect(await second, 0, reason: 'post-increment yields the prior value');
+      expect(secondSubmitted, 1);
+      expect(q.depth, 0, reason: 'a drained queue is empty again');
+    });
+
+    test('onQueueDepthChanged observes every enqueue and completion', () async {
+      final depths = <int>[];
+      final q = WriteQueue(onQueueDepthChanged: depths.add);
+
+      await q.run(() async => 'only');
+      expect(depths, [1, 0]);
+    });
+
+    test('a throwing observer never breaks queue progress', () async {
+      final q = WriteQueue(
+          onQueueDepthChanged: (_) => throw StateError('observer boom'));
+
+      final first = q.run(() async => throw StateError('action boom'));
+      final order = <String>[];
+      final second = q.run(() async => order.add('b'));
+
+      await expectLater(first, throwsA(isA<StateError>()));
+      await second;
+      expect(order, ['b'],
+          reason: 'the throwing observer must not poison the chain');
+      expect(q.depth, 0);
     });
   });
 }
