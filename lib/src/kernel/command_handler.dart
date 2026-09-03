@@ -31,15 +31,21 @@ import 'transaction.dart';
 import 'transaction_coordinator.dart';
 import 'watch.dart';
 
+/// {@template localpocket.__rollback_signal}
 /// Marker used to unwind a held transaction/savepoint body on rollback.
+/// {@endtemplate}
 class _RollbackSignal implements Exception {
+  /// {@macro localpocket.__rollback_signal}
   const _RollbackSignal();
 }
 
+/// {@template localpocket.__kernel_token_source}
 /// Minimal runtime-owned token source; the caller refreshes via the
 /// auth-update command. The value is never persisted or logged, and no
 /// identity is fabricated (sync start requires an explicit one).
+/// {@endtemplate}
 final class _KernelTokenSource implements SyncTokenSource {
+  /// {@macro localpocket.__kernel_token_source}
   _KernelTokenSource(this._value);
   String? _value;
 
@@ -52,8 +58,11 @@ final class _KernelTokenSource implements SyncTokenSource {
   String? get identity => null;
 }
 
+/// {@template localpocket.__tx_session}
 /// A held-open interactive transaction.
+/// {@endtemplate}
 class _TxSession {
+  /// {@macro localpocket.__tx_session}
   _TxSession(this.id, this.readOnly);
 
   final String id;
@@ -70,8 +79,11 @@ class _TxSession {
   DateTime lastActivity = DateTime.now();
 }
 
+/// {@template localpocket.__savepoint_session}
 /// A held-open savepoint within a transaction.
+/// {@endtemplate}
 class _SavepointSession {
+  /// {@macro localpocket.__savepoint_session}
   _SavepointSession(this.name);
   final String name;
   final Completer<void> release = Completer<void>();
@@ -81,11 +93,15 @@ class _SavepointSession {
   late final Future<void> future;
 }
 
+/// {@template localpocket.kernel_command_handler}
 /// The kernel-side command dispatcher.
+/// {@endtemplate}
 class KernelCommandHandler implements CommandHandler {
   /// Creates the dispatcher. [downloadSessionTtl] bounds the idle lifetime
   /// of open file-download sessions (see [defaultDownloadSessionTtl]).
   /// Internal: constructed by [KernelDatabase].
+  ///
+  /// {@macro localpocket.kernel_command_handler}
   KernelCommandHandler(this.context,
       {this.downloadSessionTtl = defaultDownloadSessionTtl}) {
     // One envelope per affected record; the change bus guarantees nothing

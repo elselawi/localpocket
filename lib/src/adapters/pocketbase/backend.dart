@@ -15,6 +15,7 @@ import 'pb_client.dart';
 import 'sse.dart';
 import 'transport.dart';
 
+/// {@template localpocket.p_b_backend}
 /// {@template localpocket.pocket_base_backend}
 /// PocketBase implementation of [SyncBackend].
 ///
@@ -37,6 +38,7 @@ import 'transport.dart';
 /// writes, so concurrent edits resolve last-write-wins on the server; the
 /// client-side 3-way merge only protects time-serialized pushes. Strict
 /// optimistic concurrency must be enforced server-side.
+/// {@endtemplate}
 /// {@endtemplate}
 abstract base class PBBackend implements SyncBackend {
   /// Creates a PocketBase synchronization backend.
@@ -400,8 +402,10 @@ abstract base class PBBackend implements SyncBackend {
       _client.pushBatch(ops);
 }
 
+/// {@template localpocket.pocket_base_raw_backend}
 /// PocketBase backend with its realtime/SSE layer exposed for raw probing
 /// (tests and tooling); regular clients use [PocketBaseBackend].
+/// {@endtemplate}
 final class PocketBaseRawBackend extends PBBackend {
   /// Creates a PocketBase synchronization backend.
   ///
@@ -428,12 +432,16 @@ final class PocketBaseRawBackend extends PBBackend {
   List<String> get storeNames => stores;
 }
 
+/// {@template localpocket.pocket_base_sync_backend_factory}
 /// Runtime-facing sync backend factory: the kernel's sync start builds its
 /// engine backend through this seam and releases adapter state (realtime
 /// connection, HTTP client) through [dispose]. Keeps the adapter layer out
 /// of the runtime's import graph (R1/R3).
+/// {@endtemplate}
 class PocketBaseSyncBackendFactory implements SyncBackendFactory {
   /// Creates the PocketBase backend factory.
+  ///
+  /// {@macro localpocket.pocket_base_sync_backend_factory}
   const PocketBaseSyncBackendFactory({this.fieldNames = const PbFieldNames()});
 
   /// Wire-field configuration every backend created by this factory uses.
@@ -469,10 +477,13 @@ class PocketBaseSyncBackendFactory implements SyncBackendFactory {
   }
 }
 
+/// {@template localpocket.__source_token_provider}
 /// Bridges the runtime-owned token source onto the adapter's
 /// [TokenProvider]: the current value is always read fresh, so an auth
 /// update crosses without rebuilding the backend.
+/// {@endtemplate}
 final class _SourceTokenProvider implements TokenProvider {
+  /// {@macro localpocket.__source_token_provider}
   _SourceTokenProvider(this._source);
 
   final SyncTokenSource _source;

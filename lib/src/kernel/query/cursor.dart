@@ -16,9 +16,13 @@ import '../query_plan.dart' show queryCompilerVersion;
 /// identity semantics change.
 const int queryIrVersion = 1;
 
+/// {@template localpocket.keyset_cursor_codec}
 /// Mints and validates keyset cursor tokens for one query shape.
+/// {@endtemplate}
 final class KeysetCursorCodec {
   /// Creates a codec bound to one store/schema/sort/shape identity.
+  ///
+  /// {@macro localpocket.keyset_cursor_codec}
   const KeysetCursorCodec({
     required this.store,
     required this.schemaVersion,
@@ -113,8 +117,11 @@ final class KeysetCursorCodec {
   }
 }
 
+/// {@template localpocket.__string_list_equality}
 /// Element-wise string-list equality (same order, same length).
+/// {@endtemplate}
 class _StringListEquality {
+  /// {@macro localpocket.__string_list_equality}
   const _StringListEquality();
 
   bool equals(List<String> a, List<String> b) {

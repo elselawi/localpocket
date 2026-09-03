@@ -1,3 +1,4 @@
+/// {@template localpocket.pb_field_names}
 /// PocketBase wire-field configuration.
 ///
 /// Existing PB deployments may rename the data collection and its fields, so
@@ -5,8 +6,11 @@
 /// client and realtime parser; the kernel never sees them (it speaks only the
 /// generic `RemoteRecord` vocabulary). Defaults match the shipped deployment:
 /// collection `data` with fields `store`, `data`, and the `imgs` file field.
+/// {@endtemplate}
 final class PbFieldNames {
   /// Creates a wire-field configuration.
+  ///
+  /// {@macro localpocket.pb_field_names}
   const PbFieldNames({
     this.collection = 'data',
     this.storeField = 'store',

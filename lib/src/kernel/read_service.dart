@@ -47,9 +47,13 @@ class Page {
   final bool hasPrev;
 }
 
+/// {@template localpocket.read_service}
 /// The kernel read owner: query execution and result shaping.
+/// {@endtemplate}
 class ReadService {
   /// Internal: constructed by [KernelDatabase].
+  ///
+  /// {@macro localpocket.read_service}
   ReadService(this.context);
 
   /// The shared kernel dependencies.

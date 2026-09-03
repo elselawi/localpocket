@@ -13,10 +13,14 @@ import '../schema/store_def.dart';
 import 'store.dart';
 
 /// {@template localpocket.transaction}
+/// {@template localpocket.transaction}
 /// One open interactive transaction session.
+/// {@endtemplate}
 /// {@endtemplate}
 final class Transaction {
   /// Internal: created by the runtime when a transaction begins.
+  ///
+  /// {@macro localpocket.transaction}
   Transaction.internal({
     required RuntimeClient runtime,
     required this.session,

@@ -43,9 +43,13 @@ const int defaultFileDownloadWindowBytes = 1048576;
 /// the teardown, and teardown failures are contained.
 const Duration defaultDownloadSessionTtl = Duration(minutes: 30);
 
+/// {@template localpocket.file_upload_session}
 /// An active bounded-chunk upload session.
+/// {@endtemplate}
 class FileUploadSession {
   /// Creates an upload session record.
+  ///
+  /// {@macro localpocket.file_upload_session}
   FileUploadSession({
     required this.sessionId,
     required this.store,
@@ -94,12 +98,16 @@ class FileUploadSession {
   DateTime expiresAt;
 }
 
+/// {@template localpocket.file_upload_session_registry}
 /// Registry that manages upload sessions and guarantees memory cleanup on
 /// session error, abort, or completion.
+/// {@endtemplate}
 class FileUploadSessionRegistry {
   /// Creates a bounded upload registry. Every limit is constructor-injectable
   /// so tests and embedders can tune the memory envelope without touching the
   /// production defaults.
+  ///
+  /// {@macro localpocket.file_upload_session_registry}
   FileUploadSessionRegistry({
     this.maxConcurrentUploads = defaultMaxConcurrentUploads,
     this.maxFileBytes = defaultMaxUploadFileBytes,
@@ -257,10 +265,14 @@ class FileUploadSessionRegistry {
 
 DateTime _systemClock() => DateTime.now();
 
+/// {@template localpocket.file_download_state}
 /// Internal: flow-control state of one open download stream. Owned by the
 /// command handler's download registry.
+/// {@endtemplate}
 class FileDownloadState {
   /// Creates the flow-control record for one download.
+  ///
+  /// {@macro localpocket.file_download_state}
   FileDownloadState(this.id);
 
   /// The download stream id this state belongs to.

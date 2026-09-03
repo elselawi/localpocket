@@ -25,11 +25,15 @@ import 'migrator.dart';
 import 'schema.dart';
 import 'schema_manifest.dart';
 
+/// {@template localpocket.schema_service}
 /// The kernel schema owner. The per-store registry map itself stays on the
 /// hub (bindings resolve through it); this service owns everything that
 /// happens to a schema between submission and a registered [StoreTable].
+/// {@endtemplate}
 class SchemaService {
   /// Internal: constructed by [KernelDatabase].
+  ///
+  /// {@macro localpocket.schema_service}
   SchemaService(this.context);
 
   /// The shared kernel dependencies.

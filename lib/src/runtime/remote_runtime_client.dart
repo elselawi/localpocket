@@ -5,6 +5,7 @@ import '../platform/web/page/protocol.dart' as wire;
 import '../platform/web/page/web_sender.dart';
 import 'runtime_client.dart';
 
+/// {@template localpocket.remote_runtime_client}
 /// The remote runtime: the typed contract carried over the worker transport.
 ///
 /// Sends are [ContractCodec] envelopes answered by the worker's kernel;
@@ -12,10 +13,13 @@ import 'runtime_client.dart';
 /// in the page's `WebSender`. Application failures reconstruct as typed
 /// kernel errors via the contract error codec; transport failures surface as
 /// the sender's typed exceptions.
+/// {@endtemplate}
 final class RemoteRuntimeClient implements RuntimeClient {
   /// Creates a remote runtime over [transport], which sends one wire envelope
   /// map and resolves with the raw response map. [onWorkerClosed] fires once
   /// when the worker is gone; [requestTimeout] bounds each send.
+  ///
+  /// {@macro localpocket.remote_runtime_client}
   RemoteRuntimeClient({
     required Future<Object?> Function(Map<String, Object?> envelope) transport,
     void Function()? onWorkerClosed,

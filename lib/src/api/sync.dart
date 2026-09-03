@@ -42,6 +42,7 @@ final class PocketBaseSyncOptions {
 }
 
 /// {@template localpocket.pocket_base_sync}
+/// {@template localpocket.pocket_base_sync}
 /// One synchronization host for a [LocalPocket].
 ///
 /// Obtain one through `db.attachPocketBaseSync(...)`. [start] owns the
@@ -50,8 +51,11 @@ final class PocketBaseSyncOptions {
 /// snapshots and [authRequired] fires when the backend reports the token is
 /// no longer accepted — fetch a fresh one and push it with [updateAuth].
 /// {@endtemplate}
+/// {@endtemplate}
 final class PocketBaseSync {
   /// Internal: created by the attachment on the database.
+  ///
+  /// {@macro localpocket.pocket_base_sync}
   PocketBaseSync.internal(this._runtime, this._options);
 
   final RuntimeClient _runtime;

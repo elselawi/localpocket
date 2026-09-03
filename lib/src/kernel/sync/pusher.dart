@@ -17,9 +17,13 @@ import 'sync_config.dart';
 import 'sync_store.dart';
 import 'sync_tables.dart';
 
+/// {@template localpocket.push_report}
 /// Result of one push cycle: per-outcome counters.
+/// {@endtemplate}
 class PushReport {
   /// Creates a push result with zero counts by default.
+  ///
+  /// {@macro localpocket.push_report}
   const PushReport({
     this.pushed = 0,
     this.deadLettered = 0,

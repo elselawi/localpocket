@@ -22,11 +22,15 @@ enum DurabilityClass {
   full,
 }
 
+/// {@template localpocket.transaction_coordinator}
 /// The transaction owner. Every transaction entry point on the kernel
 /// database delegates here; the coordinator receives the shared
 /// [KernelContext] explicitly — never the public facade.
+/// {@endtemplate}
 class TransactionCoordinator {
   /// Creates a coordinator over the shared kernel dependencies.
+  ///
+  /// {@macro localpocket.transaction_coordinator}
   TransactionCoordinator(this.context);
 
   /// The shared kernel dependencies.

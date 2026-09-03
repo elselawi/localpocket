@@ -19,6 +19,7 @@ import 'row.dart';
 import 'watch_runtime.dart';
 
 /// {@template localpocket.conflict}
+/// {@template localpocket.conflict}
 /// One immutable open conflict snapshot for a store.
 ///
 /// The shared [base] plus the [local] and [remote] documents at detection
@@ -27,8 +28,11 @@ import 'watch_runtime.dart';
 /// typed [Row]s over the store's descriptors, so field reads are strictly
 /// typed.
 /// {@endtemplate}
+/// {@endtemplate}
 final class Conflict<S extends StoreDef<S>> {
   /// Internal: built by the typed layer from the wire snapshot.
+  ///
+  /// {@macro localpocket.conflict}
   Conflict.internal({
     required this.def,
     required this.store,
@@ -45,6 +49,8 @@ final class Conflict<S extends StoreDef<S>> {
   /// Maps the contract's wire snapshot onto the typed view. Conflict
   /// documents carry no system columns, so the [Row]s are enriched with
   /// `id: recordId` and archive state stays absent.
+  ///
+  /// {@macro localpocket.conflict}
   factory Conflict.fromData(S def, ConflictData data) => Conflict.internal(
         def: def,
         store: data.store,
@@ -100,14 +106,18 @@ final class Conflict<S extends StoreDef<S>> {
 }
 
 /// {@template localpocket.store_conflicts}
+/// {@template localpocket.store_conflicts}
 /// Conflict listing, watching, and resolution for one store.
 ///
 /// Obtain one from `store.conflicts`. Every method sends one typed command
 /// through the runtime; the same surface behaves identically on native and
 /// web.
 /// {@endtemplate}
+/// {@endtemplate}
 final class StoreConflicts<S extends StoreDef<S>> {
   /// Internal: created by the store's `conflicts` getter.
+  ///
+  /// {@macro localpocket.store_conflicts}
   StoreConflicts.internal({
     required RuntimeClient runtime,
     required this.def,

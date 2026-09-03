@@ -11,9 +11,13 @@ import 'kernel_context.dart';
 import 'local_pocket.dart' show TestHooks;
 import 'sync/sync_tables.dart' show SyncState, vanishRecordMetadata;
 
+/// {@template localpocket.maintenance_service}
 /// The kernel maintenance owner.
+/// {@endtemplate}
 class MaintenanceService {
   /// Internal: constructed by [KernelDatabase].
+  ///
+  /// {@macro localpocket.maintenance_service}
   MaintenanceService(this.context);
 
   /// The shared kernel dependencies.

@@ -11,6 +11,7 @@ import '../schema/field_def.dart';
 import '../schema/store_def.dart';
 
 /// {@template localpocket.row}
+/// {@template localpocket.row}
 /// One immutable typed record snapshot.
 ///
 /// - `row(Tasks.title)` (or `row.get(Tasks.title)`) returns the field's
@@ -23,6 +24,7 @@ import '../schema/store_def.dart';
 ///   [ValidationException] naming the field — never a silent wrong-typed
 ///   value.
 /// {@endtemplate}
+/// {@endtemplate}
 final class Row<S extends StoreDef<S>> {
   /// Creates a row snapshot over [map]. The map is copied: later mutations
   /// to the caller's map are invisible to the row.
@@ -30,6 +32,8 @@ final class Row<S extends StoreDef<S>> {
   /// [projected], when non-null, is the set of field names included by a
   /// `select` projection; reading outside it throws
   /// [FieldNotSelectedError].
+  ///
+  /// {@macro localpocket.row}
   Row(this.def, Map<String, Object?> map, {Set<String>? projected})
       : _map = _copyMap(map),
         _projected = projected == null ? null : Set<String>.of(projected);

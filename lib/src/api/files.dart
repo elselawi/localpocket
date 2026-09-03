@@ -90,6 +90,7 @@ final class FileRef {
   String toString() => 'FileRef($refId, $store/$recordId/$field, $state)';
 }
 
+/// {@template localpocket.file_source}
 /// A bounded attachment source: the bytes to attach plus the optional
 /// declared length and display name.
 ///
@@ -98,12 +99,15 @@ final class FileRef {
 /// whose actual size disagrees with the declared one, before the finish
 /// request is sent). The [bytes] variant wraps an in-memory byte list and
 /// always knows its length.
+/// {@endtemplate}
 final class FileSource {
   const FileSource._(this._chunks, {this.length, this.name});
 
   /// A stream-backed source. [length] is the declared byte count, used to
   /// begin the upload session; when omitted the bytes are collected first so
   /// the session can be opened with the true size.
+  ///
+  /// {@macro localpocket.file_source}
   factory FileSource.stream(
     Stream<List<int>> chunks, {
     int? length,
@@ -112,6 +116,8 @@ final class FileSource {
       FileSource._(chunks, length: length, name: name);
 
   /// A byte-list source.
+  ///
+  /// {@macro localpocket.file_source}
   factory FileSource.bytes(List<int> bytes, {String? name}) =>
       FileSource._(Stream.value(List<int>.of(bytes)),
           length: bytes.length, name: name);
@@ -129,6 +135,7 @@ final class FileSource {
 }
 
 /// {@template localpocket.files}
+/// {@template localpocket.files}
 /// File attachments and blob lifecycle for one store.
 ///
 /// Obtain one from `store.files`. Every method sends one typed command (or,
@@ -139,8 +146,11 @@ final class FileSource {
 /// record-first dependency so an owning record synchronizes before its
 /// attachment.
 /// {@endtemplate}
+/// {@endtemplate}
 final class Files<S extends StoreDef<S>> {
   /// Internal: created by the store's `files` getter.
+  ///
+  /// {@macro localpocket.files}
   Files.internal({
     required RuntimeClient runtime,
     required this.def,

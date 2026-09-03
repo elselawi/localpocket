@@ -24,6 +24,7 @@ import 'row.dart';
 import 'watch_runtime.dart';
 
 /// {@template localpocket.store}
+/// {@template localpocket.store}
 /// Typed CRUD, queries, search, and watches for one store.
 ///
 /// Obtain one from `db.store(Tasks.store)`. Inside a transaction,
@@ -31,8 +32,11 @@ import 'watch_runtime.dart';
 /// requests carry the session id and the dispatcher routes them to the
 /// session's executor, so its reads see its own uncommitted writes.
 /// {@endtemplate}
+/// {@endtemplate}
 final class Store<S extends StoreDef<S>> {
   /// Internal: created by the database facade (or a transaction view).
+  ///
+  /// {@macro localpocket.store}
   Store.internal({
     required RuntimeClient runtime,
     required this.def,

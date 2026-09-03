@@ -55,9 +55,12 @@ Future<void> closeWebResources({
   await disposePageResources();
 }
 
+/// {@template localpocket.__deferred_unregistration}
 /// A queued unregistration: the captured worker-cancel callback plus the
 /// completer that resolves the requester's future once the callback ran.
+/// {@endtemplate}
 class _DeferredUnregistration {
+  /// {@macro localpocket.__deferred_unregistration}
   _DeferredUnregistration(this.unregister);
 
   final Future<void> Function() unregister;

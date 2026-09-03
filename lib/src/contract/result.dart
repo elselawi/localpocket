@@ -1,7 +1,10 @@
 part of 'contract.dart';
 
+/// {@template localpocket.result}
 /// Base of every named runtime result.
+/// {@endtemplate}
 sealed class Result {
+  /// {@macro localpocket.result}
   const Result();
 
   /// Stable wire tag, independent of Dart class names or minification.

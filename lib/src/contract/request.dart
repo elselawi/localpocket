@@ -1,8 +1,11 @@
 part of 'contract.dart';
 
+/// {@template localpocket.request}
 /// Base of every runtime command. [R] is the result family it must be answered
 /// with; runtimes verify the correlation so a result can't be mispaired.
+/// {@endtemplate}
 sealed class Request<R extends Result> {
+  /// {@macro localpocket.request}
   const Request();
 
   /// Stable wire tag, independent of Dart class names or minification.

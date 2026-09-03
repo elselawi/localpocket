@@ -1,5 +1,6 @@
 import 'database_adapter.dart';
 
+/// {@template localpocket.execution_context}
 /// An explicit execution context.
 ///
 /// Every operation that can run inside a transaction receives one. A context
@@ -8,13 +9,18 @@ import 'database_adapter.dart';
 /// outer executor can never be selected by an accidental fallback: every
 /// context — root or transaction — carries its own executor, and a store
 /// obtained from a transaction permanently carries that context (plan Rule 5).
+/// {@endtemplate}
 final class ExecutionContext {
   /// Creates the root (outer-database) context.
+  ///
+  /// {@macro localpocket.execution_context}
   const ExecutionContext.root(this.executor)
       : kind = ExecutionContextKind.root,
         readOnly = false;
 
   /// Creates a context bound to a transaction's executor.
+  ///
+  /// {@macro localpocket.execution_context}
   const ExecutionContext.transaction({
     required this.executor,
     required this.readOnly,

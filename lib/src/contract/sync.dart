@@ -6,11 +6,13 @@ part of 'contract.dart';
 // explicit: tokens cross only via [SyncUpdateAuthRequest] (never persisted or
 // logged); a rejected token surfaces as [AuthRequiredEvent].
 
+/// {@template localpocket.sync_status_data}
 /// The engine status snapshot: the state machine position, the
 /// pending/conflict/hidden/blocked counters, and the sync timestamps.
 ///
 /// {@template localpocket.sync_status}
 /// Current synchronization status suitable for a status indicator.
+/// {@endtemplate}
 /// {@endtemplate}
 final class SyncStatusData {
   /// {@macro localpocket.sync_status}
@@ -27,6 +29,8 @@ final class SyncStatusData {
 
   /// Decodes from its wire map; a present-but-wrong-typed value is rejected
   /// instead of silently reading as "never synced".
+  ///
+  /// {@macro localpocket.sync_status_data}
   factory SyncStatusData.fromJson(Map<String, Object?> json) => SyncStatusData(
         state: _engineState(json['state']),
         pending: _int(json['pending']),
@@ -85,12 +89,14 @@ final class SyncStatusData {
       };
 }
 
+/// {@template localpocket.sync_report_data}
 /// One-cycle report (pulled/swept per store, pushed, dead-letter, blocked,
 /// discarded, error flag). COMPLETE by contract: every field survives the
 /// codec.
 ///
 /// {@template localpocket.sync_report}
 /// Result of one manual/triggered sync cycle.
+/// {@endtemplate}
 /// {@endtemplate}
 final class SyncReportData {
   /// {@macro localpocket.sync_report}
@@ -105,6 +111,8 @@ final class SyncReportData {
   });
 
   /// Decodes a report from its wire map.
+  ///
+  /// {@macro localpocket.sync_report_data}
   factory SyncReportData.fromJson(Map<String, Object?> json) => SyncReportData(
         pulled: _intMap(json['pulled']),
         swept: _intMap(json['swept']),

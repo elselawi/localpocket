@@ -7,9 +7,13 @@ library;
 import 'kernel_context.dart';
 import 'store.dart';
 
+/// {@template localpocket.mutation_service}
 /// The kernel mutation owner.
+/// {@endtemplate}
 class MutationService {
   /// Internal: constructed by [KernelDatabase].
+  ///
+  /// {@macro localpocket.mutation_service}
   MutationService(this.context);
 
   /// The shared kernel dependencies.

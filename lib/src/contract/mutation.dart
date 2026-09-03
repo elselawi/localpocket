@@ -1,8 +1,11 @@
 part of 'contract.dart';
 
+/// {@template localpocket.mutation}
 /// A typed mutation command for one store. Records stay the wire-safe data
 /// language; the typed write layer lowers its writes into these variants.
+/// {@endtemplate}
 sealed class Mutation {
+  /// {@macro localpocket.mutation}
   const Mutation();
 }
 

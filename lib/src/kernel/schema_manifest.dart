@@ -13,6 +13,7 @@ const int kQueryCompilerVersion = queryCompilerVersion;
 /// at open.
 const int schemaManifestFormatVersion = 1;
 
+/// {@template localpocket.schema_manifest}
 /// Immutable, versioned, wire-safe schema description.
 ///
 /// The manifest contains EVERY behavior-affecting value of a store: ordered
@@ -25,6 +26,7 @@ const int schemaManifestFormatVersion = 1;
 ///
 /// The [fingerprint] is computed over canonical serialized bytes of the
 /// complete manifest — never over an incomplete legacy object.
+/// {@endtemplate}
 final class SchemaManifest {
   const SchemaManifest._({
     required this.formatVersion,
@@ -37,6 +39,8 @@ final class SchemaManifest {
 
   /// Compiles the manifest for [schema] and collects every unsupported
   /// executable feature. Pure — no database access.
+  ///
+  /// {@macro localpocket.schema_manifest}
   factory SchemaManifest.compile(CollectionSchema<Object?> schema) {
     final definition = _completeDefinitionJson(schema);
     final unsupported = <String>[];
@@ -68,6 +72,8 @@ final class SchemaManifest {
 
   /// Parses a manifest from its wire/persisted form. Malformed input and
   /// newer format versions fail with typed errors — never a raw cast.
+  ///
+  /// {@macro localpocket.schema_manifest}
   factory SchemaManifest.fromJson(Object? raw) {
     if (raw is! Map) {
       throw SchemaRegistrationError('Malformed schema manifest: not an object');

@@ -21,7 +21,9 @@ import 'cursor.dart' show queryIrVersion;
 
 export 'cursor.dart' show queryIrVersion;
 
+/// {@template localpocket.query_i_r}
 /// The kernel's versioned query IR.
+/// {@endtemplate}
 final class QueryIR {
   const QueryIR._({
     required this.store,
@@ -32,6 +34,8 @@ final class QueryIR {
   /// Compiles one read into the kernel IR. Throws [ArgumentError] when the
   /// description cannot name a valid read — the kernel never lowers a
   /// partially-specified IR.
+  ///
+  /// {@macro localpocket.query_i_r}
   factory QueryIR.compile({
     required String store,
     required QuerySpecData spec,

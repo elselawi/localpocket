@@ -20,11 +20,13 @@ import 'sync.dart';
 import 'transaction.dart';
 
 /// {@template localpocket.local_pocket}
+/// {@template localpocket.local_pocket}
 /// A local-first database with PocketBase sync.
 ///
 /// Open one with [LocalPocket.open], obtain typed stores with
 /// `db.store(Tasks.store)`, run interactive transactions with
 /// [transaction] and [read], and listen for committed facts on [changes].
+/// {@endtemplate}
 /// {@endtemplate}
 final class LocalPocket {
   /// Binds the facade to an already-running runtime (library-internal seam:
@@ -33,6 +35,8 @@ final class LocalPocket {
   /// [onClose] runs after the close command so the platform opener can tear
   /// down its own resources — on web it disposes the worker connection to
   /// flush OPFS, without which committed blob data can be lost.
+  ///
+  /// {@macro localpocket.local_pocket}
   LocalPocket.internal(this._runtime, {Future<void> Function()? onClose})
       : _onClose = onClose;
 

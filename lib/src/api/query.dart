@@ -86,13 +86,17 @@ final class SearchSpec<S extends StoreDef<S>> {
 }
 
 /// {@template localpocket.cursor}
+/// {@template localpocket.cursor}
 /// An opaque continuation token minted by the kernel for one page of one
 /// query shape. It is meaningful only to the same store, order, and scope it
 /// was minted under — replaying it against a different shape fails with
 /// [StaleCursorError].
 /// {@endtemplate}
+/// {@endtemplate}
 final class Cursor<S extends StoreDef<S>> {
   /// Internal constructor; callers receive cursors from page results.
+  ///
+  /// {@macro localpocket.cursor}
   const Cursor.internal(this._token);
 
   /// The opaque kernel-minted token.
@@ -157,11 +161,15 @@ final class Page<S extends StoreDef<S>> {
 }
 
 /// {@template localpocket.search_hit}
+/// {@template localpocket.search_hit}
 /// One full-text search hit: the record id, its relevance score, and a lazy
 /// typed fetch of the record.
 /// {@endtemplate}
+/// {@endtemplate}
 final class SearchHit<S extends StoreDef<S>> {
   /// Internal constructor; the typed layer mints hits from search results.
+  ///
+  /// {@macro localpocket.search_hit}
   SearchHit.internal(this.id, this.score, this._fetchRow);
 
   /// The record id.

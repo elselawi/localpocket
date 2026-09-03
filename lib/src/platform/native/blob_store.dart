@@ -5,13 +5,17 @@ import 'package:path/path.dart' as p;
 
 import '../../kernel/files/blob_store.dart';
 
+/// {@template localpocket.native_blob_store}
 /// Native filesystem implementation of [BlobStore].
 ///
 /// Layout:
 /// `{rootDir}/blobs/{h[0:2]}/{sha256}`
 /// `{rootDir}/tmp/{uuid}`
+/// {@endtemplate}
 class NativeBlobStore extends BlobStore {
   /// Creates a native blob store rooted at [rootDir].
+  ///
+  /// {@macro localpocket.native_blob_store}
   NativeBlobStore(this.rootDir) {
     Directory(_blobsDir).createSync(recursive: true);
     Directory(_tmpDir).createSync(recursive: true);

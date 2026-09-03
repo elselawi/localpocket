@@ -1,7 +1,10 @@
 part of 'contract.dart';
 
+/// {@template localpocket.event}
 /// Base of every asynchronous runtime notification.
+/// {@endtemplate}
 sealed class Event {
+  /// {@macro localpocket.event}
   const Event();
 
   /// Stable wire tag, independent of Dart class names or minification.

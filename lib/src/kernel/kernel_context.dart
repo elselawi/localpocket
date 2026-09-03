@@ -30,9 +30,13 @@ import 'write_queue.dart' show WriteQueue;
 /// hold the sole queue slot forever and wedge the whole database.
 const Duration defaultTxSessionTtl = Duration(minutes: 5);
 
+/// {@template localpocket.kernel_context}
 /// The shared dependency set every kernel service receives.
+/// {@endtemplate}
 final class KernelContext {
   /// Internal: constructed by [KernelDatabase].
+  ///
+  /// {@macro localpocket.kernel_context}
   KernelContext({
     required this.database,
     required this.db,

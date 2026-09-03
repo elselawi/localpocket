@@ -16,10 +16,14 @@ abstract interface class RuntimeClient {
   Future<void> close();
 }
 
+/// {@template localpocket.local_runtime_client}
 /// Direct runtime: calls the kernel handler in-process; requests travel
 /// as-is, unserialized.
+/// {@endtemplate}
 final class LocalRuntimeClient implements RuntimeClient {
   /// Creates a direct client over [handler].
+  ///
+  /// {@macro localpocket.local_runtime_client}
   LocalRuntimeClient(this._handler);
 
   final CommandHandler _handler;
@@ -38,12 +42,16 @@ final class LocalRuntimeClient implements RuntimeClient {
   Future<void> close() => _handler.close();
 }
 
+/// {@template localpocket.loopback_runtime_client}
 /// Loopback runtime: exercises the REAL wire contract on the VM — every
 /// command is encode/decode round-tripped through [ContractCodec] with tag
 /// correlation. The cheap conformance harness keeping native and remote
 /// runtimes honest.
+/// {@endtemplate}
 final class LoopbackRuntimeClient implements RuntimeClient {
   /// Creates a loopback client over [handler].
+  ///
+  /// {@macro localpocket.loopback_runtime_client}
   LoopbackRuntimeClient(this._handler);
 
   final CommandHandler _handler;
