@@ -250,6 +250,16 @@ class PbRealtime {
         if (!_sessionDone!.isCompleted) _sessionDone!.complete();
       },
     );
+    // A stop() that raced in after the earlier `_running` check but before
+    // this listener was installed would otherwise leave the freshly installed
+    // subscription live with nobody left to cancel it (stop already ran and
+    // had nothing to cancel). Re-check and bail the same way the orphan
+    // pattern above does.
+    if (!_running) {
+      await _sub!.cancel();
+      _sub = null;
+      return;
+    }
     await _sessionDone!.future;
     _sub = null;
     if (failed) {

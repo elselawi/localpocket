@@ -51,22 +51,24 @@ final class LocalPocketDatabaseController extends DatabaseController {
     final db = DirectSqliteDatabase(rawDb);
     var handedToPocket = false;
 
-    // Wire destructive-migration backup hooks to OPFS. sqlite3_web persists
-    // each database under `drift_db/<name>`; VACUUM INTO writes the `.bak`
-    // there. `backupDbName` carries the original DB name (the in-worker path
-    // is the fixed `/database`).
-    final rawBackupDbName =
-        rawOpenOption(additionalData?.dartify(), 'backupDbName');
-    if (rawBackupDbName != null && rawBackupDbName is! String) {
-      throw ProtocolEnvelopeException('"backupDbName" must be a string.');
-    }
-    final backupDbName = rawBackupDbName as String? ?? path;
-    db.backupFileExists =
-        (backupPath) => _opfsFileExists(backupDbName, backupPath);
-    db.backupFileDeleter =
-        (backupPath) => _removeOpfsFile(backupDbName, backupPath);
-
     try {
+      // Wire destructive-migration backup hooks to OPFS. sqlite3_web
+      // persists each database under `drift_db/<name>`; VACUUM INTO writes
+      // the `.bak` there. `backupDbName` carries the original DB name (the
+      // in-worker path is the fixed `/database`). Validated INSIDE the
+      // cleanup try so a malformed name still closes the raw handle in the
+      // catch below instead of leaking a pinned OPFS database.
+      final rawBackupDbName =
+          rawOpenOption(additionalData?.dartify(), 'backupDbName');
+      if (rawBackupDbName != null && rawBackupDbName is! String) {
+        throw ProtocolEnvelopeException('"backupDbName" must be a string.');
+      }
+      final backupDbName = rawBackupDbName as String? ?? path;
+      db.backupFileExists =
+          (backupPath) => _opfsFileExists(backupDbName, backupPath);
+      db.backupFileDeleter =
+          (backupPath) => _removeOpfsFile(backupDbName, backupPath);
+
       // Assert journal mode TRUNCATE immediately after open.
       rawDb.execute('PRAGMA journal_mode=TRUNCATE');
       final mode = rawDb.select('PRAGMA journal_mode').first.columnAt(0);

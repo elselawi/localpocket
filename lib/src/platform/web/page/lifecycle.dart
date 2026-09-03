@@ -69,7 +69,11 @@ class _DeferredUnregistration {
 /// worker boundary to prevent watcher leaks on early subscription cancellation.
 class WatchSubscriptionTracker {
   final Set<int> _inFlightRegistrations = {};
-  final Map<int, _DeferredUnregistration> _deferredUnregistrations = {};
+
+  /// One or more queued unregistrations per watchId: a second cancellation
+  /// arriving while registration is in flight must not clobber the first —
+  /// each requester gets its own completer, drained in order at teardown.
+  final Map<int, List<_DeferredUnregistration>> _deferredUnregistrations = {};
 
   /// Runs [register] while tracking [watchId] as in-flight. If an unregistration
   /// request occurred while [register] was awaiting, the callback captured by
@@ -84,14 +88,25 @@ class WatchSubscriptionTracker {
       await register();
     } finally {
       _inFlightRegistrations.remove(watchId);
-      final deferred = _deferredUnregistrations.remove(watchId);
-      if (deferred != null) {
-        try {
-          await deferred.unregister();
-          deferred.completer.complete();
-        } catch (e, st) {
-          deferred.completer.completeError(e, st);
-          rethrow;
+      final queued = _deferredUnregistrations.remove(watchId);
+      if (queued != null) {
+        Object? firstError;
+        StackTrace? firstStack;
+        // Drain every queued cancellation in order. Each requester's future
+        // must resolve (success or error) so none of them hangs, and a throw
+        // in one unregister must never orphan its successors.
+        for (final deferred in queued) {
+          try {
+            await deferred.unregister();
+            deferred.completer.complete();
+          } catch (e, st) {
+            firstError ??= e;
+            firstStack ??= st;
+            deferred.completer.completeError(e, st);
+          }
+        }
+        if (firstError != null) {
+          Error.throwWithStackTrace(firstError, firstStack!);
         }
       }
     }
@@ -108,7 +123,7 @@ class WatchSubscriptionTracker {
   }) async {
     if (_inFlightRegistrations.contains(watchId)) {
       final deferred = _DeferredUnregistration(unregister);
-      _deferredUnregistrations[watchId] = deferred;
+      _deferredUnregistrations.putIfAbsent(watchId, () => []).add(deferred);
       return deferred.completer.future;
     }
     await unregister();

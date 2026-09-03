@@ -186,6 +186,7 @@ abstract class CoalescedWatcher<T> {
   Timer? _timer;
   bool _running = false;
   bool _dirty = false;
+  bool _disposed = false;
   String? _digest;
 
   /// Decides if this change affects this watcher.
@@ -226,10 +227,14 @@ abstract class CoalescedWatcher<T> {
   }
 
   Future<void> _refresh() async {
+    if (_disposed) return;
     _running = true;
     pocket.perf.watchRefreshes++;
     try {
       final data = await fetchSnapshot();
+      // A cancel raced in while the snapshot fetch was in flight: the
+      // controller is closed (or closing), so never emit on it.
+      if (_disposed) return;
       final digest = computeDigest(data);
       if (digest != _digest) {
         _digest = digest;
@@ -237,10 +242,15 @@ abstract class CoalescedWatcher<T> {
         onEmit(data);
       }
     } catch (e, stack) {
-      onError(e, stack);
+      // onError must not run on a closed controller (addError would throw
+      // again, escaping as a zone error when scheduled by the coalesce
+      // timer); drop the error once the watcher is disposed.
+      if (!_disposed) {
+        onError(e, stack);
+      }
     } finally {
       _running = false;
-      if (_dirty) {
+      if (!_disposed && _dirty) {
         _dirty = false;
         _timer?.cancel();
         _timer = Timer(coalesceWindow, _refresh);
@@ -250,7 +260,9 @@ abstract class CoalescedWatcher<T> {
 
   /// Stops the watcher and cancels any queued refresh timers.
   void dispose() {
+    _disposed = true;
     _timer?.cancel();
+    _dirty = false;
     unawaited(_sub?.cancel());
   }
 }

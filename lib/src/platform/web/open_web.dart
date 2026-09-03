@@ -72,20 +72,6 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   );
 
   RemoteRuntimeClient? runtimeRef;
-  final webSqlite = WebSqlite.open(
-    workers: DedicatedOnlyConnector(workerResolved.url),
-    wasmModule: wasmResolved.url,
-    handleCustomRequest: (raw) async {
-      if (raw != null) {
-        final value = raw.dartify();
-        // Events cannot arrive before the runtime exists (they ride the
-        // lazily-created event subscription), but an early worker→page
-        // message must not touch an uninitialized variable.
-        if (value is Map) runtimeRef?.handleWorkerEvent(value);
-      }
-      return null;
-    },
-  );
   Future<void> Function()? disposeConnected;
 
   // The worker resolves this database's OPFS directory from the original
@@ -99,6 +85,24 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   };
 
   try {
+    // Constructing the sqlite3_web factory can itself throw (an interop
+    // failure building the connector); it sits INSIDE the cleanup try so a
+    // failed open still releases the fetched worker/wasm blob URLs below —
+    // they pin asset bytes for the page's lifetime otherwise.
+    final webSqlite = WebSqlite.open(
+      workers: DedicatedOnlyConnector(workerResolved.url),
+      wasmModule: wasmResolved.url,
+      handleCustomRequest: (raw) async {
+        if (raw != null) {
+          final value = raw.dartify();
+          // Events cannot arrive before the runtime exists (they ride the
+          // lazily-created event subscription), but an early worker→page
+          // message must not touch an uninitialized variable.
+          if (value is Map) runtimeRef?.handleWorkerEvent(value);
+        }
+        return null;
+      },
+    );
     final connectResult = await webSqlite.connectToRecommended(
       options.path,
       additionalOptions: openArgs.jsify(),

@@ -99,6 +99,28 @@ void main() {
     });
 
     test(
+        'an Error-subclass transport failure carrying a closed marker is '
+        'classified as worker-closed too', () async {
+      var closedCallback = 0;
+      // dart:js_interop can surface Errors (a TypeError/StateError wrapping
+      // the upstream closed message); classification must catch `Object`, not
+      // just `Exception`.
+      final transportError =
+          StateError('Channel to database worker is closed (interop failure)');
+      final sender = WebSender(
+        transport: (_) async => throw transportError,
+        onWorkerClosed: () => closedCallback++,
+      );
+      await expectLater(
+        sender.send(WireOp.open),
+        throwsA(isA<DatabaseWorkerClosedException>()),
+      );
+      expect(sender.isClosed, isTrue,
+          reason: 'the closed marker on an Error still marks the sender');
+      expect(closedCallback, 1);
+    });
+
+    test(
         'non-closed transport errors are rethrown as-is and do not mark closed',
         () async {
       var closedCallback = 0;
