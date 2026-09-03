@@ -3,6 +3,7 @@
 /// mapping. Raw JSON in, typed errors out.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import '../../kernel/sync/sync_backend.dart';
@@ -10,6 +11,12 @@ import 'auth.dart';
 import 'field_names.dart';
 import 'filter_builder.dart';
 import 'transport.dart';
+
+/// Default per-chunk idleness bound for streamed downloads: the timer resets
+/// on EVERY received chunk, so a slow-but-flowing transfer of any size
+/// completes, while a body that stalls mid-stream fails typed instead of
+/// hanging forever. The header fetch keeps the transport request timeout.
+const Duration defaultDownloadChunkIdle = Duration(minutes: 2);
 
 /// {@template localpocket.pb_client}
 /// Low-level PocketBase wire client for records, batches, and files.
@@ -22,6 +29,7 @@ class PbClient {
       {required this.transport,
       required this.baseUrl,
       required this.auth,
+      this.downloadChunkIdle = defaultDownloadChunkIdle,
       this.fieldNames = const PbFieldNames()});
 
   /// HTTP transport used for all requests.
@@ -32,6 +40,10 @@ class PbClient {
 
   /// Authentication manager used to inject and refresh bearer tokens.
   final AuthManager auth;
+
+  /// Per-chunk idleness bound applied to streamed downloads (see
+  /// [defaultDownloadChunkIdle]); injectable for tests.
+  final Duration downloadChunkIdle;
 
   /// The wire-field configuration: collection and record field names.
   final PbFieldNames fieldNames;
@@ -218,7 +230,65 @@ class PbClient {
       } catch (_) {}
       throw _mapError(HttpResponse(response.status, response.headers, ''), uri);
     }
-    return response.stream;
+    return _chunkIdleGuarded(response.stream);
+  }
+
+  /// Guards a body stream with per-chunk idleness: each received chunk
+  /// re-arms the window; a silent window longer than
+  /// [defaultDownloadChunkIdle] fails the stream with [TransientNetworkError]
+  /// so the file lane retries it like any transient failure. Zero disables
+  /// the guard.
+  ///
+  /// Bounded bytes so the error cannot be misread as "huge download": the
+  /// total duration is never capped — only idleness is.
+  Stream<List<int>> _chunkIdleGuarded(Stream<List<int>> source,
+      {Duration? chunkIdle}) {
+    final idle = chunkIdle ?? downloadChunkIdle;
+    if (idle <= Duration.zero) return source;
+    late StreamController<List<int>> out;
+    Timer? timer;
+    StreamSubscription<List<int>>? sub;
+
+    void rearm() {
+      timer?.cancel();
+      timer = Timer(idle, () {
+        out.addError(
+            TransientNetworkError('download stalled: no chunk within $idle'));
+        unawaited(out.close());
+        unawaited(sub?.cancel());
+      });
+    }
+
+    out = StreamController<List<int>>(
+      onListen: () {
+        rearm();
+        sub = source.listen(
+          (chunk) {
+            rearm();
+            out.add(chunk);
+          },
+          onError: (Object e, StackTrace st) {
+            timer?.cancel();
+            out.addError(e, st);
+          },
+          onDone: () {
+            timer?.cancel();
+            unawaited(out.close());
+          },
+        );
+      },
+      onPause: () => sub?.pause(),
+      onResume: () {
+        sub?.resume();
+        rearm();
+      },
+      onCancel: () {
+        timer?.cancel();
+        return sub?.cancel();
+      },
+      sync: true,
+    );
+    return out.stream;
   }
 
   // ---------------------------------------------------------------- batch --

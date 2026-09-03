@@ -52,6 +52,8 @@ abstract base class PBBackend implements SyncBackend {
     String? realtimeCollection,
     HttpTransport? transport,
     this.fieldNames = const PbFieldNames(),
+    this.realtimeStallTimeout = defaultRealtimeStallTimeout,
+    this.downloadChunkIdle = defaultDownloadChunkIdle,
   })  : _explicitRealtimeCollection = realtimeCollection,
         transport = transport ?? PackageHttpTransport() {
     _auth = AuthManager(tokenProvider);
@@ -59,6 +61,7 @@ abstract base class PBBackend implements SyncBackend {
         transport: this.transport,
         baseUrl: baseUrl,
         auth: _auth,
+        downloadChunkIdle: downloadChunkIdle,
         fieldNames: fieldNames);
   }
 
@@ -98,6 +101,14 @@ abstract base class PBBackend implements SyncBackend {
   /// from [TokenProvider.identity]; when both are null, [scopeId] throws so
   /// sync state is never shared across accounts.
   final String? identity;
+
+  /// Read-idle window the realtime session must be kept alive within (see
+  /// [defaultRealtimeStallTimeout]); injectable for tests.
+  final Duration realtimeStallTimeout;
+
+  /// Per-chunk idleness bound for streamed downloads (see
+  /// [defaultDownloadChunkIdle]); injectable for tests.
+  final Duration downloadChunkIdle;
 
   /// Remote collection the realtime client subscribes to (PB realtime is
   /// per-collection). Defaults to [PbFieldNames.collection].
@@ -177,6 +188,7 @@ abstract base class PBBackend implements SyncBackend {
       client: _client,
       collectionNames: [effectiveCollection],
       backoffBase: const Duration(milliseconds: 200),
+      stallTimeout: realtimeStallTimeout,
       onGapClosed: _onGapClosed,
       onEvent: _onRealtimeEvent,
     );
@@ -404,6 +416,8 @@ final class PocketBaseRawBackend extends PBBackend {
     super.realtimeDebounce,
     super.transport,
     super.fieldNames,
+    super.realtimeStallTimeout,
+    super.downloadChunkIdle,
     this.stores = const [],
   });
 

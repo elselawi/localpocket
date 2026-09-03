@@ -21,6 +21,12 @@ import '../../kernel/sync/sync_backend.dart';
 import 'pb_client.dart';
 import 'transport.dart';
 
+/// Default read-idle window for a realtime session. PocketBase sends SSE
+/// keepalive comments frequently, so no healthy connection ever runs this
+/// quiet; the value stays generous so a proxy tightening (not loosening)
+/// its cadence cannot false-positive.
+const Duration defaultRealtimeStallTimeout = Duration(minutes: 2);
+
 /// {@template localpocket.pb_realtime_event}
 /// A parsed realtime event carrying the full embedded record.
 /// {@endtemplate}
@@ -62,6 +68,7 @@ class PbRealtime {
     required this.onEvent,
     this.backoffBase = const Duration(milliseconds: 200),
     this.backoffCap = const Duration(minutes: 5),
+    this.stallTimeout = defaultRealtimeStallTimeout,
     Duration Function(int attempt)? delayFor,
     double Function(int attempt)? jitter,
   })  : jitter = jitter ?? _defaultJitter,
@@ -86,6 +93,12 @@ class PbRealtime {
   /// Upper bound for the exponential reconnect backoff (default 5 minutes).
   final Duration backoffCap;
 
+  /// Read-idle window for one realtime session: when no bytes arrive within
+  /// this window (no keepalive comments, no frames, no FIN), the half-open
+  /// connection is torn down and the attempt counts as a FAILURE for backoff
+  /// — a stalled session is not a graceful close. Disable with zero.
+  final Duration stallTimeout;
+
   /// Jitter source, `0.5..1.5` (default uniform). Inject for determinism.
   final double Function(int attempt) jitter;
 
@@ -103,6 +116,7 @@ class PbRealtime {
 
   bool _running = false;
   StreamSubscription<List<int>>? _sub;
+  Timer? _stallWatch;
   Completer<void>? _sessionDone;
   Future<void> _frameTail = Future.value();
   int _connectCount = 0;
@@ -128,6 +142,8 @@ class PbRealtime {
   /// Stops the realtime connection loop and cancels any active subscription.
   Future<void> stop() async {
     _running = false;
+    _stallWatch?.cancel();
+    _stallWatch = null;
     await _sub?.cancel();
     _sub = null;
     final session = _sessionDone;
@@ -203,11 +219,26 @@ class PbRealtime {
     _connectCount++;
     _sessionDone = Completer<void>();
 
+    // Read-idleness watchdog: every received byte re-arms the window; the
+    // timer itself tears down the half-open session. The post-await check
+    // rethrows the failure so the loop's backoff treats a stall as a failed
+    // connect, never a graceful close.
+    void idleWatch() {
+      if (stallTimeout <= Duration.zero) return;
+      _stallWatch?.cancel();
+      _stallWatch = Timer(stallTimeout, () {
+        if (!_running) return;
+        unawaited(_sub?.cancel());
+        if (!_sessionDone!.isCompleted) _sessionDone!.complete();
+      });
+    }
+
     final parser = _SseParser();
     var handshaken = false;
     var failed = false;
     _sub = res.stream.listen(
       (chunk) {
+        idleWatch();
         final frames = parser.feed(chunk);
         for (final f in frames) {
           // Serialized so the subscribe POST always precedes event
@@ -245,9 +276,11 @@ class PbRealtime {
         }
       },
       onDone: () {
+        _stallWatch?.cancel();
         if (!_sessionDone!.isCompleted) _sessionDone!.complete();
       },
       onError: (Object _) {
+        _stallWatch?.cancel();
         if (!_sessionDone!.isCompleted) _sessionDone!.complete();
       },
     );
@@ -262,6 +295,8 @@ class PbRealtime {
       return;
     }
     await _sessionDone!.future;
+    _stallWatch?.cancel();
+    _stallWatch = null;
     _sub = null;
     if (failed) {
       // The subscribe POST never succeeded, so count this attempt as a

@@ -35,6 +35,7 @@ void main() {
       void Function()? onGapClosed,
       Duration backoffBase = const Duration(seconds: 10),
       Duration backoffCap = const Duration(minutes: 5),
+      Duration? stallTimeout,
       Duration Function(int attempt)? delayFor,
       double Function(int attempt)? jitter}) {
     final client = PbClient(
@@ -47,6 +48,7 @@ void main() {
       collectionNames: const ['data'],
       backoffBase: backoffBase,
       backoffCap: backoffCap,
+      stallTimeout: stallTimeout ?? defaultRealtimeStallTimeout,
       delayFor: delayFor,
       jitter: jitter ?? (_) => 1.0,
       onGapClosed: onGapClosed ?? () {},
@@ -541,6 +543,92 @@ void main() {
       await rt.stop();
       expect(events.single.record.id, 'good',
           reason: 'only the well-formed event was delivered');
+    });
+  });
+
+  group('read-idle stall watchdog', () {
+    test('a silent session is torn down and count as a failed connect',
+        () async {
+      final fake = FakeTransport();
+      final gaps = <int>[];
+      final rt = realtime(fake,
+          onEvent: (_) {},
+          onGapClosed: () => gaps.add(1),
+          backoffBase: const Duration(milliseconds: 40),
+          stallTimeout: const Duration(milliseconds: 60));
+      final first = StreamController<List<int>>();
+      final second = StreamController<List<int>>();
+      fake.streamResponse(StreamedHttpResponse(200, const {}, first.stream));
+      fake.streamResponse(StreamedHttpResponse(200, const {}, second.stream));
+      await rt.start();
+      // Handshake keeps the session honest but then nothing arrives at all
+      // (half-open connection: no keepalives, no frames, no FIN).
+      first.add(utf8.encode(handshake));
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(rt.connectCount, 1);
+
+      // The watchdog tears down the silent session and the loop reconnects.
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      expect(rt.connectCount, 2,
+          reason: 'a stalled session reconnects instead of hanging forever');
+      expect(gaps, hasLength(1),
+          reason: 'reconnect still reports the gap for a full re-pull');
+      await first.close();
+      await rt.stop();
+    });
+
+    test('a session with periodic keepalives never triggers the watchdog',
+        () async {
+      final fake = FakeTransport();
+      final rt = realtime(fake,
+          onEvent: (_) {}, stallTimeout: const Duration(milliseconds: 80));
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      await rt.start();
+      controller.add(utf8.encode(handshake));
+      // Keepalive comment lines arrive every 30 ms — well inside the window —
+      // for several windows' worth of time.
+      for (var i = 0; i < 6; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        controller.add(utf8.encode(': keepalive\n\n'));
+      }
+      await controller.close();
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await rt.stop();
+      expect(rt.connectCount, 1,
+          reason: 'chunk traffic re-arms the idle window; no false stall');
+    });
+
+    test('a stalled session never reports a closed gap', () async {
+      final fake = FakeTransport();
+      final gaps = <int>[];
+      final rt = realtime(fake,
+          onEvent: (_) {},
+          onGapClosed: () => gaps.add(1),
+          backoffBase: const Duration(seconds: 10),
+          stallTimeout: const Duration(milliseconds: 40));
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      await rt.start();
+      await Future<void>.delayed(const Duration(milliseconds: 160));
+      await rt.stop();
+      expect(gaps, isEmpty,
+          reason: 'a stall is a failure for backoff, not a gap close');
+    });
+
+    test('zero disables the watchdog', () async {
+      final fake = FakeTransport();
+      final rt = realtime(fake, onEvent: (_) {}, stallTimeout: Duration.zero);
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      await rt.start();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(rt.connectCount, 1, reason: 'the watchdog never armed');
+      await controller.close();
+      await rt.stop();
     });
   });
 

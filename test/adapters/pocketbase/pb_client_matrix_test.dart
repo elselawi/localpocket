@@ -15,12 +15,13 @@ import '../../support/pb_helpers.dart';
 /// cardinality, all driven through [PocketBaseRawBackend] over a fake transport.
 void main() {
   PocketBaseRawBackend backendWith(FakeTransport fake,
-      {TestTokenProvider? tokens}) {
+      {TestTokenProvider? tokens, Duration? downloadChunkIdle}) {
     final b = PocketBaseRawBackend(
       baseUrl: Uri.parse('https://pb.example.test'),
       tokenProvider: tokens ?? TestTokenProvider(),
       stores: const ['widgets'],
       transport: fake,
+      downloadChunkIdle: downloadChunkIdle ?? const Duration(milliseconds: 80),
     );
     addTearDown(b.close);
     return b;
@@ -405,6 +406,60 @@ void main() {
         b.downloadFile(recordId: 'r', filename: 'f.png'),
         throwsA(isA<StateError>()),
       );
+    });
+
+    test('downloadFile fails typed when the body stalls mid-stream', () async {
+      final fake = FakeTransport();
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      final b = backendWith(fake,
+          downloadChunkIdle: const Duration(milliseconds: 80));
+      final stream = await b.downloadFile(recordId: 'r', filename: 'f.png');
+      final collected = <int>[];
+      // ignore: cancel_subscriptions
+      final sub = stream.listen(collected.addAll);
+      controller.add([1, 2, 3]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(collected, [1, 2, 3]);
+
+      // No further bytes ever arrive: the idleness bound fails the stream
+      // typed so the file lane retries, instead of hanging forever.
+      await expectLater(
+        sub.asFuture<void>(),
+        throwsA(isA<TransientNetworkError>()),
+      );
+      await controller.close();
+    });
+
+    test('downloadFile completes a slow-but-flowing stream of any size',
+        () async {
+      final fake = FakeTransport();
+      final controller = StreamController<List<int>>();
+      fake.streamResponse(
+          StreamedHttpResponse(200, const {}, controller.stream));
+      final b = PocketBaseRawBackend(
+        baseUrl: Uri.parse('https://pb.example.test'),
+        tokenProvider: TestTokenProvider(),
+        stores: const ['widgets'],
+        transport: fake,
+        downloadChunkIdle: const Duration(milliseconds: 60),
+      );
+      addTearDown(b.close);
+      final stream = await b.downloadFile(recordId: 'r', filename: 'f.png');
+      final collected = <int>[];
+      final done =
+          stream.listen(collected.addAll, cancelOnError: true).asFuture<void>();
+      // Chunks trickling in every 25 ms — inside the window — for a total
+      // transfer much longer than the idleness bound.
+      for (var i = 0; i < 6; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+        controller.add([i]);
+      }
+      await controller.close();
+      await done;
+      expect(collected, [0, 1, 2, 3, 4, 5],
+          reason: 'per-chunk idleness never caps total transfer time');
     });
 
     test('multipart fields for data/keep/remove and the auth header', () async {
