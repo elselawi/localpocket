@@ -210,3 +210,7 @@ references in code comments.
   don't delete it.
 - Add tests to the relevant EXISTING file; a new test file needs a new
   directory justification.
+
+## Dart/Flutter tooling
+
+See ./.github/copilot-instructions.md — required tool usage for Dart code in this repo (semantic refactoring, analysis, quality gate).
