@@ -34,7 +34,6 @@ dependencies:
 
 ### Step 1: Store & Schema
 
-<!-- localpocket-compile: typed-readme -->
 ```dart
 import 'package:localpocket/localpocket.dart';
 
@@ -43,9 +42,18 @@ enum TaskStatus { todo, inProgress, done }
 final class Tasks extends StoreDef<Tasks> {
   // ----- start with defining store name ----- //
   // define store name and schema version
-  Tasks._() : super(name: 'tasks', version: 1);
+  Tasks._private() : super(name: 'tasks', version: 1);
   // instantiate store as a static member
-  static final Tasks store = Tasks._();
+  static final Tasks store = Tasks._private();
+
+  // Note:
+  // Please note how we are constructing the class using
+  // a private constructor (_private), accessed from static public property.
+  // One Tasks per app: the private constructor means no code outside this
+  // file can create a second instance. LocalPocket identifies stores by
+  // identity, so a look-alike definition would compile but be rejected with
+  // a store-mismatch error at open time — the private ctor makes that
+  // failure impossible instead of just unlikely.
 
   // ----- define the schema per field ----- //
   static final title = store.schema
@@ -73,7 +81,7 @@ final class Tasks extends StoreDef<Tasks> {
   static final priority = store.schema.integer('priority');
   static final done = store.schema.boolean('done');
   static final dueAt = store.schema.dateTime('due_at');
-  // refer to the table below for more field types
+  // please refer to the table below for more field types
 
   // ----- define the ordered registry ----- //
   // declares which fields exist and in
@@ -101,7 +109,6 @@ final class Tasks extends StoreDef<Tasks> {
         normalize: const FtsNormalization(rules: {'à': 'a', 'ä': 'a'}),
       );
 
-
   // if an archived record hasn't syched yet
   // true: keep it in the local store.
   // false: delete it from the local store.
@@ -115,20 +122,11 @@ final class Tasks extends StoreDef<Tasks> {
   @override
   bool get prefetchFiles => true;
 }
-
-// The compile-checked fixture assembles every marked block into one
-// program: open the database once here and let the following sections
-// (CRUD, queries, watches) use `tasks`.
-Future<void> main() async {
-  final db = await LocalPocket.open(
-    LocalPocketOptions(path: ':memory:', stores: [Tasks.store]),
-  );
-  final tasks = db.store(Tasks.store);
 ```
 
-#### Supported Typed Field Types
+#### Supported Field Types
 
-| Descriptor factory   | Typed value                         | SQLite storage        |
+| Descriptor factory   | value                               | SQLite storage        |
 | -------------------- | ----------------------------------- | --------------------- |
 | `schema.text`        | `String?` / `String` after `.req()` | `TEXT`                |
 | `schema.integer`     | `int?` / `int` after `.req()`       | `INTEGER`             |
@@ -363,9 +361,9 @@ extension TaskStore on Store<Tasks> {
 
 ```dart
 // one reusable app class that owns the database handle and the typed stores
-
 final class AppDb {
   AppDb._(this.db);
+  final LocalPocket db;
 
   // open the database with the stores this app uses
   static Future<AppDb> open(String path) async => AppDb._(
@@ -374,32 +372,28 @@ final class AppDb {
         ),
       );
 
-  final LocalPocket db;
+  Future<void> close() => db.close();
 
   // optional: add one-line accessors for each store
   Store<Tasks> get tasks => db.store(Tasks.store);
-
-  Future<void> close() => db.close();
 }
 ```
 
 Now you can use the stores in your app:
 
 ```dart
-void main() async {
   final app = await AppDb.open('path/to/mydb.db');
+  final db = app.db;
   await app.tasks.seed(['Draft it', 'Ship it', 'File taxes']);
   await app.tasks.markDone('task00000000002');
   await app.tasks.printSearch('ship');
   await app.tasks.printStats();
   await app.close();
-}
 ```
 
 You can also open the database and wire the stores to it this way:
 
 ```dart
-void main() async {
   final db = await LocalPocket.open(
     LocalPocketOptions(
       path: ':memory:', // memory, not persisted
@@ -415,10 +409,7 @@ void main() async {
     ],
   ));
   print('There are $n tasks left to do');
-}
 ```
-
-> **Note**: The schema is built once and reused (memoized), and stores are registered by name. But LocalPocket also verifies you're passing the exact same object every time — not just an object with the same name and fields. So you must share a single `Tasks.store` everywhere in your app. If you ever create a second `Tasks.store` definition that merely looks identical, the database refuses to guess and throws a store-mismatch error (surfaced through the normal error path), instead of quietly treating the two look-alikes as one store.
 
 Your quickstart is over. **What you now have is:**
 
@@ -430,15 +421,16 @@ Your quickstart is over. **What you now have is:**
 
 follow along the rest of the doumentation to learn more about:
 
-- Encryption
+- CRUD & queries
 - Synchronization
-- Change hooks
 - Conflict resolution
+- Change hooks
+- Encryption
 - Binary and file attachements
 
 and more...
 
-## Typed CRUD
+## CRUD
 
 Every mutation is a list of `Write`s — `Tasks.title.set(...)` builds one,
 and `Writes` provides the id and extra-field helpers. Writes apply inside
@@ -446,103 +438,104 @@ a transaction: either all of them or none.
 
 <!-- localpocket-compile: typed-readme -->
 ```dart
-await tasks.put([
-  // Put operations are upserts but
-  // if an ID is defined and the record exists, it is updated
-  // if it's not found it will be inserted
-  // if it's not defined, it will be generated
-  Writes.id('my15charlongid0'),
+  await tasks.put([
+    // Put operations are upserts but
+    // if an ID is defined and the record exists
+    // it is updated, while clearing undefined fields
+    // if it's not found it will be inserted
+    // if it's not defined, it will be generated
+    Writes.id('my15charlongid0'),
 
-  // field writes syntax goes like this:
-  Tasks.title.set('My new task'),
-  Tasks.done.set(true),
-  Tasks.priority.set(1),
-  Tasks.status.set(TaskStatus.todo),
-  Tasks.dueAt.set(DateTime.now().add(const Duration(days: 14))),
+    // field writes syntax goes like this:
+    Tasks.title.set('My new task'),
+    Tasks.done.set(true),
+    Tasks.priority.set(1),
+    Tasks.status.set(TaskStatus.todo),
+    Tasks.dueAt.set(DateTime.now().add(const Duration(days: 14))),
 
-  // extra fields are allowed, but not typed
-  Writes.extra('extra key', 'extra value')
-]);
+    // extra fields are allowed, but not typed
+    Writes.extra('extra key', 'extra value')
+  ]);
 
-// same as put, but with a list of writes
-await tasks.putAll([
-  [
-    Writes.id('my15charlongid1'),
-    Tasks.title.set('task 1'),
-  ],
-  [
-    Writes.id('my15charlongid2'),
-    Tasks.title.set('task 1'),
-  ]
-]);
+  // same as put, but with a list of writes
+  await tasks.putAll([
+    [
+      Writes.id('my15charlongid1'),
+      Tasks.title.set('task 1'),
+    ],
+    [
+      Writes.id('my15charlongid2'),
+      Tasks.title.set('task 1'),
+    ]
+  ]);
 
-// same as put, but it doesn't clear
-// the fields that were not defined
-// i.e. it doesn't set them to null
-// i.e. updates only provided fields
-await tasks.upsert([
-  Writes.id('my15charlongid0'),
-  Tasks.title.set('My new task'),
-  Tasks.done.set(true),
-  Tasks.priority.set(1),
-  Tasks.status.set(TaskStatus.todo),
-  Tasks.dueAt.set(DateTime.now().add(const Duration(days: 14))),
-  Writes.extra('extra key', 'extra value')
-]);
+  // same as put, but it doesn't clear
+  // the fields that were not defined
+  // i.e. it doesn't set them to null
+  // i.e. updates only provided fields
+  await tasks.upsert([
+    Writes.id('my15charlongid0'),
+    Tasks.title.set('My new task'),
+    Tasks.done.set(true),
+    Tasks.priority.set(1),
+    Tasks.status.set(TaskStatus.todo),
+    Tasks.dueAt.set(DateTime.now().add(const Duration(days: 14))),
+    Writes.extra('extra key', 'extra value')
+  ]);
 
-// same as upsert, but in batches
-await tasks.upsertAll([
-  [
-    Writes.id('my15charlongid1'),
-    Tasks.title.set('task 1'),
-  ],
-  [
-    Writes.id('my15charlongid2'),
-    Tasks.title.set('task 1'),
-  ]
-]);
+  // same as upsert, but in batches
+  await tasks.upsertAll([
+    [
+      Writes.id('my15charlongid1'),
+      Tasks.title.set('task 1'),
+    ],
+    [
+      Writes.id('my15charlongid2'),
+      Tasks.title.set('task 1'),
+    ]
+  ]);
 
 
-// updates the existing record with id
-// without replacing unspecified fields.
-// Throws [RecordNotFoundException] when
-// the record does not exist;
-// a [Writes.id] value inside [writes] is rejected
-// since record ids are immutable.
-await tasks.patch('my15charlongid1', [
-  Writes.id('my15charlongid2'), // <- throws
-  Tasks.title.set('title gets updated')
-]);
+  // updates the existing record with id
+  // without replacing unspecified fields.
+  // Throws [RecordNotFoundException] when
+  // the record does not exist;
+  // a [Writes.id] value inside [writes] is rejected
+  // since record ids are immutable.
+  await tasks.patch('my15charlongid1', [
+    Writes.id('my15charlongid2'), // <- throws
+    Tasks.title.set('title gets updated')
+  ]);
 
-// Same as patch, but accepts a map of id -> [writes]
-await tasks.patchAll({
-  'my15charlongid1': [Tasks.title.set('title gets updated')],
-  'my15charlongid2': [Tasks.title.set('title gets updated')],
-});
+  // Same as patch, but accepts a map of id -> [writes]
+  await tasks.patchAll({
+    'my15charlongid1': [Tasks.title.set('title gets updated')],
+    'my15charlongid2': [Tasks.title.set('title gets updated')],
+  });
 
-// bulk point-read: one `id IN (...)` query instead of a fetch loop.
-// Rows come back in id-list order; missing ids drop out;
-// archived rows are included (same visibility as `get`).
-await tasks.getAll([
-  'my15charlongid1',
-  'my15charlongid2',
-]);
+  // bulk point-read: one `id IN (...)` query instead of a fetch loop.
+  // Rows come back in id-list order; missing ids drop out;
+  // archived rows are included (same visibility as `get`).
+  await tasks.getAll([
+    'my15charlongid1',
+    'my15charlongid2',
+  ]);
 
-// Soft deletes the record with id
-// However, if it hasn't been synched yet,
-// the record will be deleted permanently.
-// unless `keepUnsyncedArchives` is set to true.
-// (see step 1 above)
-await tasks.archive('my15charlongid1');
+  // Soft deletes the record with id
+  // However, if it hasn't been synched yet,
+  // the record will be deleted permanently.
+  // unless `keepUnsyncedArchives` is set to true.
+  // (see step 1 above)
+  await tasks.archive('my15charlongid1');
 
-// Restores the record with id from the archive.
-await tasks.restore('my15charlongid1');
+  // Restores the record with id from the archive.
+  await tasks.restore('my15charlongid1');
 
-// hard local deletes a record and all of its metadata
-// the remote copy (if it ever existed) will survive
-// if it ever gets updated by some other client,
-// the record will be pulled and resurrected again
-await tasks.purge('my15charlongid1');
+  // hard local deletes a record and all of its metadata
+  // the remote copy (if it ever existed) will survive
+  // if it ever gets updated by some other client,
+  // the record will be pulled and resurrected again
+  await tasks.purge('my15charlongid1');
 ```
 
 **Gotchas:**
@@ -597,114 +590,101 @@ await tasks.purge('my15charlongid1');
    both `put` and `patch`; on a required (schema: `.req()`) field it won't compile. And
    remember: in `put`, simply *omitting* a field also clears it (see #1).
 
-## Typed Queries
+## Queries
 
-<!-- localpocket-compile: typed-readme -->
 ```dart
-final donePage = await tasks.query(
-  QuerySpec(
-    where: [
-      Tasks.done.eq(false), // not done
-      Tasks.status.inValues([TaskStatus.todo, TaskStatus.done]), // one of these
-      Tasks.priority.between(1, 5), // priority in range
-      Tasks.dueAt.isNull(), // no due date set
-    ],
-    orderBy: [Tasks.priority.desc], // sort, then take the page
-    limit: 20,
-  ),
-);
+  final donePage = await tasks.query(
+    QuerySpec(
+      where: [
+        Tasks.done.eq(false), // not done
+        Tasks.status.inValues([TaskStatus.todo, TaskStatus.done]), // one of these
+        Tasks.priority.between(1, 5), // priority in range
+        Tasks.dueAt.isNull(), // no due date set
+      ],
+      orderBy: [Tasks.priority.desc], // sort, then take the page
+      limit: 20,
+    ),
+  );
 
-final allDone = await tasks.query(
-  QuerySpec(
-    // to make the query return all the results
-    // although not recommended
-    // but you can explicitly use `Limits.unbounded`
-    limit: Limits.unbounded,
-    where: [Tasks.done.eq(true)],
-  ),
-);
+  final allDone = await tasks.query(
+    QuerySpec(
+      // to make the query return all the results
+      // although not recommended
+      // but you can explicitly use `Limits.unbounded`
+      limit: Limits.unbounded,
+      where: [Tasks.done.eq(true)],
+    ),
+  );
 
-// conditions compose into bigger ones with
-// & (and), | (or) and ~ (not). parentheses
-// decide the order, like in arithmetic
-final matching = await tasks.query(
-  QuerySpec(
-    where: [
-      (Tasks.done.eq(true) | Tasks.priority.eq(5)) &
-          ~Tasks.title.startsWith('Draft'),
-    ],
-    // select trims every row down to these fields.
-    // reading anything else from these rows throws
-    select: [Tasks.title, Tasks.priority],
-    limit: 20,
-  ),
-);
+  // conditions compose into bigger ones with
+  // & (and), | (or) and ~ (not). parentheses
+  // decide the order, like in arithmetic
+  final matching = await tasks.query(
+    QuerySpec(
+      where: [
+        (Tasks.done.eq(true) | Tasks.priority.eq(5)) &
+            ~Tasks.title.startsWith('Draft'),
+      ],
+      // select trims every row down to these fields.
+      // reading anything else from these rows throws
+      select: [Tasks.title, Tasks.priority],
+      limit: 20,
+    ),
+  );
 
-// pages carry their own continuation. next()/prev().
-// hasNext/hasPrev are snapshot facts: they describe what the database
-// observed when the page was built, not a promise about the next call.
-final firstPage = await tasks.query(
-  QuerySpec(
+  // pages carry their own continuation. next()/prev().
+  // hasNext/hasPrev are snapshot facts: they describe what the database
+  // observed when the page was built, not a promise about the next call.
+  final firstPage = await tasks.query(
+    QuerySpec(
+      where: [Tasks.done.eq(false)],
+      orderBy: [Tasks.priority.desc],
+      limit: 20,
+    ),
+  );
+  final nextPage = await firstPage.next();       // null when hasNext is false
+  final again = await nextPage!.prev();          // back to the first page
+
+  // get reads one record by id.
+  // null when there is no such record — it doesn't throw
+  final oneTask = await tasks.get('tsk1234567890ab');
+
+  // fields are read through the descriptor: row(Tasks.field)
+  final oneTitle = oneTask?.call(Tasks.title);
+
+  // count returns how many rows match. nothing else
+  final activeCount = await tasks.count(QuerySpec(
     where: [Tasks.done.eq(false)],
-    orderBy: [Tasks.priority.desc],
-    limit: 20,
-  ),
-);
-final nextPage = await firstPage.next();       // null when hasNext is false
-final again = await nextPage!.prev();          // back to the first page
+  ));
 
-// get reads one record by id.
-// null when there is no such record — it doesn't throw
-final oneTask = await tasks.get('tsk1234567890ab');
+  // ids returns the matching record ids
+  // instead of whole rows
+  final openIds = await tasks.ids(
+    QuerySpec(
+      where: [Tasks.done.eq(false)],
+      orderBy: [Tasks.priority.desc],
+      limit: 100,
+    ),
+  );
 
-// fields are read through the descriptor: row(Tasks.field)
-final oneTitle = oneTask?.call(Tasks.title);
+  // sum / min / max / avg work on number fields only
+  // (integer, real, date) — anything else won't compile.
+  // they return null when no rows match
+  final priorityTotal = await tasks.sum(Tasks.priority);
+  final heaviest = await tasks.max(Tasks.priority);
+  final lightest = await tasks.min(Tasks.priority);
+  final average =
+      await tasks.avg(Tasks.priority, where: [Tasks.done.eq(false)]);
 
-// count returns how many rows match. nothing else
-final activeCount = await tasks.count(QuerySpec(
-  where: [Tasks.done.eq(false)],
-));
+  print("$priorityTotal $heaviest $lightest $average");
 
-// ids returns the matching record ids
-// instead of whole rows
-final openIds = await tasks.ids(
-  QuerySpec(
-    where: [Tasks.done.eq(false)],
-    orderBy: [Tasks.priority.desc],
-    limit: 100,
-  ),
-);
+  // distinct lists the unique values a field holds
+  final priorities = await tasks.distinct(Tasks.priority);
 
-// sum / min / max / avg work on number fields only
-// (integer, real, date) — anything else won't compile.
-// they return null when no rows match
-final priorityTotal = await tasks.sum(Tasks.priority);
-final heaviest = await tasks.max(Tasks.priority);
-final lightest = await tasks.min(Tasks.priority);
-final average =
-    await tasks.avg(Tasks.priority, where: [Tasks.done.eq(false)]);
+  // countDistinct counts them instead of listing them
+  final priorityCount = await tasks.countDistinct(Tasks.priority);
 
-// distinct lists the unique values a field holds
-final priorities = await tasks.distinct(Tasks.priority);
-
-// countDistinct counts them instead of listing them
-final priorityCount = await tasks.countDistinct(Tasks.priority);
-
-// Keep analyzed values live: the compile-checked fixture is one program,
-// and `unused_local_variable` is an error in this package.
-donePage;
-allDone;
-matching;
-again;
-oneTitle;
-activeCount;
-openIds;
-priorityTotal;
-heaviest;
-lightest;
-average;
-priorities;
-priorityCount;
+  print("$priorityCount ${priorities.length}");
 ```
 
 **Gotchas:**
@@ -758,36 +738,34 @@ priorityCount;
 
 ## Reactive Queries
 
-<!-- localpocket-compile: typed-readme -->
 ```dart
-final listStream = tasks.watch(
-  QuerySpec(
-    // takes the same predicate/order/projection as `query`
-    where: [Tasks.done.eq(false) & (~Tasks.priority.eq(0))],
-    orderBy: [Tasks.title.asc, Tasks.priority.desc],
-    select: [Tasks.title],
-    limit: 10,
-  ),
-);
+  final listStream = tasks.watch(
+    QuerySpec(
+      // takes the same predicate/order/projection as `query`
+      where: [Tasks.done.eq(false) & (~Tasks.priority.eq(0))],
+      orderBy: [Tasks.title.asc, Tasks.priority.desc],
+      select: [Tasks.title],
+      limit: 10,
+    ),
+  );
 
-// it returns a stream that you can listen to
-// or consume with Flutter StreamBuilder
-listStream.listen((rows) {
-  print('tasks updated!');
-  for (final task in rows) {
-    // each row only carries `title` (you picked it with `select:`),
-    // so reading `task.id` here would throw
-    print(task(Tasks.title));
-  }
-});
+  // it returns a stream that you can listen to
+  // or consume with Flutter StreamBuilder
+  listStream.listen((rows) {
+    print('tasks updated!');
+    for (final task in rows) {
+      // each row only carries `title` (you picked it with `select:`),
+      // so reading `task.id` here would throw
+      print(task(Tasks.title));
+    }
+  });
 
-// single-record changes ride the store's `changes` stream:
-// one notification per committed record change for this store.
-final changeSub = tasks.changes.listen((change) {
-  print('task ${change.ids} changed in ${change.storeName}');
-});
-await changeSub.cancel();
-}
+  // single-record changes ride the store's `changes` stream:
+  // one notification per committed record change for this store.
+  final changeSub = tasks.changes.listen((change) {
+    print('task ${change.ids} changed in ${change.storeName}');
+  });
+  await changeSub.cancel();
 ```
 
 **Gotchas:**
@@ -846,31 +824,38 @@ await changeSub.cancel();
 ## Search
 
 ```dart
-// before using search queries
-// you must have defined the FTSspec when you defined your store:
+  // before using search queries
+  // you must have defined the FTSspec when you defined your store:
 
-// @override
-// get fts => ftsSpec<Tasks>(
-//   [title],
-//   fuzzy: true,
-//   normalize: const FtsNormalization(rules: {'à': 'a', 'ä': 'a'}),
-// );
-// check "STEP 1" above.
+  // @override
+  // get fts => ftsSpec<Tasks>(
+  //   [title],
+  //   fuzzy: true,
+  //   normalize: const FtsNormalization(rules: {'à': 'a', 'ä': 'a'}),
+  // );
+  // check "STEP 1" above.
 
-// then:
-// you can search by term
-// but remember that your searches must have a limit
-// like `query` and `ids`
-// use `Limits.unbounded` to get all results
-final hits = await tasks.search('ship version', limit: 10);
+  // then:
+  // you can search by term
+  // but remember that your searches must have a limit
+  // like `query` and `ids`
+  // use `Limits.unbounded` to get all results
+  final hits = await tasks.search(SearchSpec(
+    term: "wash the car",
+    includeArchived: false,
+    includeHidden: false,
+    limit: 100,
+  ));
 
-// the hits object returns a list of Hit
+  // the hits object returns a list of Hit
 
-hits[0].id; // the id of the record
-hits[0].score; // search ranking score
-// and they are sorted by the `score`
-// use getAll to get the records from the hits
-final result = await tasks.getAll(hits.map((x)=>x.id).toList());
+  hits[0].id; // the id of the record
+  hits[0].score; // search ranking score
+  // and they are sorted by the `score`
+  // use getAll to get the records from the hits
+  final result = await tasks.getAll(hits.map((x)=>x.id).toList());
+
+  result.first!.title; // "wash the car"
 ```
 
 **Gotchas:**
@@ -906,27 +891,163 @@ final result = await tasks.getAll(hits.map((x)=>x.id).toList());
 
 ## Synchronization
 
+First you need to define a token provider. LocalPocket doesn't ship an
+auth layer — you own the credentials. The following example signs in
+over PocketBase's plain HTTP auth endpoints:
+
 ```dart
-final app = await AppDb.open('app.db');
-final db = app.db;
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
-// Two-way sync with PocketBase over REST,
-// with SSE realtime as an explicit opt-in hint layer.
-final sync = db.attachPocketBaseSync(
-  PocketBaseSyncOptions(
-    baseUrl: Uri.parse('https://pb.example.com'),
-    tokenProvider: myTokenProvider,
-    identity: 'user-123',
-  ),
+final class PocketBaseTokens implements TokenProvider {
+  PocketBaseTokens({
+    required this.baseUrl,
+    required this.email,
+    required this.password,
+    this.collection = 'users',
+  });
+
+  final Uri baseUrl;
+  final String email, password, collection;
+
+  final http.Client _http = http.Client();
+  String? _token, _recordId;
+  DateTime? _expiresAt;
+
+  // fresh = at least 5 minutes of lifetime left
+  bool get _fresh =>
+      _expiresAt != null &&
+      DateTime.now()
+          .toUtc()
+          .isBefore(_expiresAt!.subtract(const Duration(minutes: 5)));
+
+  @override
+  Future<Token> currentToken() async {
+    if (!_fresh) await _signIn(); // first call or expired: full sign-in
+    return Token(_token!, expiresAt: _expiresAt);
+  }
+
+  @override
+  Future<Token> refreshToken(Token current) async {
+    try {
+      await _auth('auth-refresh', const {}, authorized: true);
+    } on Exception {
+      await _signIn(); // session revoked server-side: sign in again
+    }
+    return Token(_token!, expiresAt: _expiresAt);
+  }
+
+  @override
+  // the auth record id: stable per account, unlike the rotating token
+  String get identity => _recordId ?? (throw StateError('ensureSignedIn() first'));
+
+  /// One up-front sign-in, so `identity` is known before sync attaches.
+  Future<void> ensureSignedIn() async {
+    if (_recordId == null) await currentToken();
+  }
+
+  Future<void> _signIn() =>
+      _auth('auth-with-password', {'identity': email, 'password': password});
+
+  Future<void> _auth(String action, Map<String, Object?> body,
+      {bool authorized = false}) async {
+    final res = await _http.post(
+      baseUrl.resolve('/api/collections/$collection/$action'),
+      headers: {
+        'Content-Type': 'application/json',
+        if (authorized) 'Authorization': _token!,
+      },
+      body: jsonEncode(body),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('PocketBase $action failed: HTTP ${res.statusCode}');
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    _token = data['token'] as String;
+    _recordId = (data['record'] as Map<String, dynamic>)['id'] as String;
+    _expiresAt = _jwtExpiry(_token!);
+  }
+
+  // PocketBase tokens are JWTs; decoding `exp` lets LocalPocket's
+  // proactive refresh fire when 75% of the token lifetime has elapsed.
+  DateTime? _jwtExpiry(String jwt) {
+    try {
+      final claims = jsonDecode(
+        utf8.decode(base64Url.decode(base64Url.normalize(jwt.split('.')[1]))),
+      ) as Map<String, dynamic>;
+      final exp = claims['exp'];
+      return exp is int
+          ? DateTime.fromMillisecondsSinceEpoch(exp * 1000, isUtc: true)
+          : null;
+    } on FormatException {
+      return null;
+    }
+  }
+}
+
+final myTokenProvider = PocketBaseTokens(
+  baseUrl: Uri.parse('https://pb.example.com'),
+  email: 'user@example.com', // in production these come from your login flow
+  password: 'app-password',
 );
+```
 
-sync.status.listen((status) {
-  print('${status.state} — ${status.pending} pending');
-});
+Then define the sync options and attach the sync layer:
 
-await sync.start(); // also opens the realtime connection
-final report = await sync.syncNow();
-await sync.stop();
+```dart
+  // Sign in once up front so the stable identity is known before attach.
+  await myTokenProvider.ensureSignedIn();
+
+  // Two-way sync with PocketBase over REST,
+  // with SSE realtime as an explicit opt-in hint layer.
+  // `identity` must be stable per account — reuse the auth record id
+  // your token provider is built on.
+  final sync = db.attachPocketBaseSync(
+    PocketBaseSyncOptions(
+      baseUrl: Uri.parse('https://pb.example.com'),
+      tokenProvider: myTokenProvider,
+      identity: myTokenProvider.identity,
+    ),
+  );
+
+  // this starts the sync engine
+  // also opens the realtime connection
+  await sync.start();
+
+  // you can listen to the following stream
+  // to get notified about sync progress
+  sync.status.listen((status) {
+    // what's the sync status currently?
+    // check the table below for sync status states
+    print('Sync status: ${status.state}');
+
+    status.blocked; // number of operations blocked by conflicts
+    status.conflicts; // number of records with open conflicts
+    status.lastError; // description of the most recent engine error
+    status.pending; // records with pending local work
+  });
+
+  // the following methods are available to control the sync engine
+  await sync.pause();
+  await sync.resume();
+
+  // informs the engine of online/offline connectivity changes.
+  sync.setConnectivity(false);
+  sync.setConnectivity(true);
+
+  // Replaces the bearer token the engine holds after a refresh or login.
+  sync.updateAuth('new token');
+
+  // stops the sync engine
+  // and closes the realtime connection
+  await sync.stop();
+
+  // Runs one full pull → sweep → push cycle immediately and returns its complete report.
+  final report = await sync.syncNow();
+
+  report.pulled; // number of records pulled from the server
+  report.pushed; // number of records pushed to the server
+  report.discarded; // Local edits discarded in favor of the remote.
 ```
 
 `attachPocketBaseSync` returns a `PocketBaseSync` — the same surface on
