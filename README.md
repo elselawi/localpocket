@@ -394,13 +394,13 @@ Now you can use the stores in your app:
 You can also open the database and wire the stores to it this way:
 
 ```dart
-  final db = await LocalPocket.open(
+  final openDB = await LocalPocket.open(
     LocalPocketOptions(
       path: ':memory:', // memory, not persisted
       stores: [Tasks.store],
     ),
   );
-  final tasks = db.store(Tasks.store);
+  final tasks = openDB.store(Tasks.store);
 
   final n = await tasks.count(QuerySpec(
     where: [
@@ -906,6 +906,9 @@ auth layer — you own the credentials. The following example signs in
 over PocketBase's plain HTTP auth endpoints:
 
 ```dart
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
 final class PocketBaseTokens implements TokenProvider {
   PocketBaseTokens({
     required this.baseUrl,
@@ -1042,11 +1045,11 @@ Then define the sync options and attach the sync layer:
   await sync.resume();
 
   // informs the engine of online/offline connectivity changes.
-  sync.setConnectivity(false);
-  sync.setConnectivity(true);
+  await sync.setConnectivity(false);
+  await sync.setConnectivity(true);
 
   // Replaces the bearer token the engine holds after a refresh or login.
-  sync.updateAuth('new token');
+  await sync.updateAuth('new token');
 
   // stops the sync engine
   // and closes the realtime connection
@@ -1519,6 +1522,8 @@ LocalPocket supports two separate encryption layers:
 In your schema, mark a field as encrypted with `encrypted: true`.
 
 ```dart
+import 'dart:typed_data';
+
 final class Vault extends StoreDef<Vault> {
   static final Vault store = Vault._();
   Vault._() : super(name: 'vault', version: 1);
@@ -1531,38 +1536,39 @@ final class Vault extends StoreDef<Vault> {
   @override
   List<FieldDef<Vault, Object?>> get fields => [userId, label, secret];
 }
+
+
+// Fill with 32 random bytes in production and keep the same key for every
+// later open — the app owns the cipher key, and the database never stores it.
+final keyBytes = Uint8List(32);
 ```
 
 then define a cipher key and open the database with encryption enabled:
 
 ```dart
-  // Fill with 32 random bytes in production and keep the same key for every
-  // later open — the app owns the cipher key, and the database never stores it.
-  final keyBytes = Uint8List(32);
-
   final myEncrpytedDB = await LocalPocket.open(
     LocalPocketOptions(
       path: ':memory:',
-      stores: [SecretKeys.store],
+      stores: [Vault.store],
       encryption: EncryptionConfig.aesGcm256(key: keyBytes),
     ),
   );
 
-  final secretKeys = myEncrpytedDB.store(SecretKeys.store);
+  final secretKeys = myEncrpytedDB.store(Vault.store);
 
   // Writes stay logical/plaintext at the API boundary. The kernel encrypts the
   // specific field before it hits SQLite, so the raw row stores ciphertext.
   await secretKeys.put([
-    SecretKeys.userId.set('user-id-1234567'),
-    SecretKeys.label.set('prod token'),
-    SecretKeys.secret.set('sk_live_010203...'),
+    Vault.userId.set('user-id-1234567'),
+    Vault.label.set('prod token'),
+    Vault.secret.set('sk_live_010203...'),
   ]);
 
   // Reads decrypt transparently. The app sees the plaintext value in-memory,
   // while the database file holds only the sealed bytes.
   final row = await secretKeys.get('user-id-1234567');
 
-  print(row?.get(SecretKeys.secret)); // => sk_live_010203...
+  print(row?.get(Vault.secret)); // => sk_live_010203...
 
   // Filtering and sorting on an encrypted field do NOT work: the database
   // stores ciphertext, so there is no plaintext for a SQL comparison to see.
@@ -1688,6 +1694,8 @@ final class MyCipherDatabase extends DirectSqliteDatabase {
       ),
     ),
   );
+
+  await wholeDBEncrypted.store(Tasks.store).query(QuerySpec(/* ... */));
 ```
 
 `DatabaseEncryptionConfig` carries the key and names the engine flavor for
@@ -1772,8 +1780,228 @@ The two have different jobs and are meaningless without each other:
 
 ## Schema migration
 
+LocalPocket manages schema evolution through forward-only versioned ledgers
+(`StoreMigration`). Each store tracks its own version (`super(version: ...)`),
+and migrations run automatically when `LocalPocket.open` detects that the
+code has bumped a store's version above what's currently stored on disk.
+
+Two kinds of migrations are supported:
+
+1. **Additive migrations (`destructive: false`, default)**: adds columns in
+   place via SQL `ALTER TABLE ... ADD COLUMN`, followed by an optional
+   chunked and resumable data backfill (`transform`).
+2. **Destructive migrations (`destructive: true`)**: performs a safe 12-step
+   table rebuild (with pre-migration backup) to rename/drop columns, change
+   constraints, or restructure rows.
+
+### Defining migrations
+
+When you add a new field or change existing schema layout, increment your
+store's `version` and register the corresponding `StoreMigration` steps in
+the `migrations` getter.
+
+```dart
+final class TasksV2 extends StoreDef<TasksV2> {
+  TasksV2._() : super(name: 'tasks', version: 2);
+  static final TasksV2 store = TasksV2._();
+
+  // Existing fields from v1
+  static final title = store.schema.text('title').req();
+  static final priority = store.schema.integer('priority');
+  static final done = store.schema.boolean('done');
+
+  // Newly added optional field in v2
+  static final notes = store.schema.text('notes');
+
+  // Newly added field with backfilled default data
+  static final tag = store.schema.text('tag');
+
+  @override
+  List<FieldDef<TasksV2, Object?>> get fields => [
+        title,
+        priority,
+        done,
+        notes,
+        tag,
+      ];
+
+  // ---- forward schema migrations ----
+  @override
+  List<StoreMigration> get migrations => [
+        // Step 1 -> 2: Add columns and backfill missing data
+        StoreMigration(
+          toVersion: 2,
+          // Fields added by this step (must be optional/nullable)
+          addedFields: [
+            notes.toField(),
+            tag.toField(),
+          ],
+          // Optional: backfill existing rows
+          // Receives the logical row map, returns a map of updated values
+          transform: (oldRow) {
+            return {
+              // set a default tag for any existing tasks
+              'tag': 'general',
+            };
+          },
+        ),
+      ];
+}
+```
+
+### Additive migrations
+
+Additive migrations modify the existing table without rebuilding it. They are
+fast, lightweight, and execute in place:
+
+```dart
+final class TasksV3 extends StoreDef<TasksV3> {
+  TasksV3._() : super(name: 'tasks', version: 3);
+  static final TasksV3 store = TasksV3._();
+
+  // Fields from v1 and v2
+  static final title = store.schema.text('title').req();
+  static final priority = store.schema.integer('priority');
+  static final done = store.schema.boolean('done');
+  static final notes = store.schema.text('notes');
+  static final tag = store.schema.text('tag');
+
+  // Newly added optional field in v3
+  static final estimatedHours = store.schema.real('estimated_hours');
+
+  @override
+  List<FieldDef<TasksV3, Object?>> get fields => [
+        title,
+        priority,
+        done,
+        notes,
+        tag,
+        estimatedHours,
+      ];
+
+  @override
+  List<StoreMigration> get migrations => [
+        // Historical migration from v1 -> v2
+        StoreMigration(
+          toVersion: 2,
+          addedFields: [notes.toField(), tag.toField()],
+          transform: (oldRow) => {'tag': 'general'},
+        ),
+        // Additive migration from v2 -> v3
+        StoreMigration(
+          toVersion: 3,
+          addedFields: [estimatedHours.toField()],
+          // Chunked backfill (10k rows/chunk with a persisted cursor)
+          transform: (oldRow) => {
+            'estimated_hours': (oldRow['priority'] as int? ?? 0) > 1 ? 4.0 : 1.0,
+          },
+        ),
+      ];
+}
+```
+
+### Destructive migrations (table rebuild)
+
+When you need to drop columns, change column types, alter nullability, or
+completely reshape rows, configure a destructive migration with
+`destructive: true`:
+
+```dart
+final class TasksV4 extends StoreDef<TasksV4> {
+  TasksV4._() : super(name: 'tasks', version: 4);
+  static final TasksV4 store = TasksV4._();
+
+  static final title = store.schema.text('title').req();
+  static final done = store.schema.boolean('done');
+  static final notes = store.schema.text('notes');
+  static final tag = store.schema.text('tag');
+  static final estimatedHours = store.schema.real('estimated_hours');
+
+  // 'priority' was dropped in v4; 'importance' replaces it
+  static final importance = store.schema.text('importance');
+
+  @override
+  List<FieldDef<TasksV4, Object?>> get fields => [
+        title,
+        done,
+        notes,
+        tag,
+        estimatedHours,
+        importance,
+      ];
+
+  @override
+  List<StoreMigration> get migrations => [
+        // Historical migration v1 -> v2 (additive)
+        StoreMigration(
+          toVersion: 2,
+          addedFields: [notes.toField(), tag.toField()],
+          transform: (oldRow) => {'tag': 'general'},
+        ),
+        // Historical migration v2 -> v3 (additive)
+        StoreMigration(
+          toVersion: 3,
+          addedFields: [estimatedHours.toField()],
+          transform: (oldRow) => {
+            'estimated_hours': (oldRow['priority'] as int? ?? 0) > 1 ? 4.0 : 1.0,
+          },
+        ),
+        // Destructive rebuild v3 -> v4
+        StoreMigration(
+          toVersion: 4,
+          destructive: true,
+          // Transform receives the old row (including dropped columns like 'priority')
+          // and produces the complete row for the new schema layout.
+          transform: (oldRow) {
+            final oldPriority = oldRow['priority'] as int? ?? 0;
+            return {
+              ...oldRow,
+              'importance': oldPriority > 2 ? 'high' : 'low',
+            };
+          },
+        ),
+      ];
+}
+```
+
+Destructive migrations follow a safe 12-step rebuild process:
+1. **Automatic pre-migration backup**: creates a backup copy (`<dbname>.v<ver>.<store>.bak`).
+2. **Staged build**: creates a new temporary table with the target schema and indexes.
+3. **Chunked copy & transform**: migrates all existing rows through your `transform` function.
+4. **Row count verification**: verifies row counts match between old and new tables.
+5. **Atomic swap**: drops the old table, renames the new table into place, and rebuilds indexes & FTS triggers.
 
 
+**Gotchas:**
+
+1. **Versions must be sequential with no gaps.** If your database is at
+   version 1 and your store definition is at version 3, you must supply
+   migrations for each step in between (`toVersion: 2` and `toVersion: 3`). A
+   missing step throws a `SchemaRegistrationError`.
+
+2. **Additive columns cannot be required.** SQLite cannot add a `NOT NULL`
+   column to an existing table with existing rows unless a default is
+   specified. In an additive migration, `addedFields` must be optional
+   fields. If you need a field to become required, use a destructive
+   rebuild (`destructive: true`).
+
+3. **Backfill transforms validate produced fields.** Values returned by
+   `transform` must correspond to fields defined in the target schema and
+   match their expected types/constraints. Producing unknown fields or values
+   violating schema rules throws `SchemaRegistrationError`.
+
+4. **Destructive migration requires backups.** Destructive rebuilds require
+   the safety backup step. If an existing completed backup file from a previous
+   run is detected at `<dbname>.v<version>.<store>.bak`, LocalPocket refuses to
+   overwrite it and throws `DestructiveMigrationRefusedError` (remove the
+   stale backup file to proceed).
+
+5. **Transforms are native-only on web workers.** Functions and closures
+   cannot cross the JavaScript web worker boundary. On web platforms using the
+   dedicated web worker, migration metadata (`addedFields`, `toVersion`,
+   `destructive`) is serialized, but functional `transform` callbacks are not
+   supported in the worker. Use additive migrations without `transform` when
+   targeting web workers.
 
 ## License & Credit
 
