@@ -249,7 +249,7 @@ void main() {
       final db = await LocalPocket.open(options());
       addTearDown(db.close);
 
-      final events = <ChangeNotification>[];
+      final events = <DatabaseRecordChange>[];
       final sub = db.changes.listen(events.add);
       addTearDown(sub.cancel);
 

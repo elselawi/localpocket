@@ -348,11 +348,11 @@ final class Store<S extends StoreDef<S>> {
 
   /// Committed changes to this store: one notification per committed record
   /// change, with old/new payloads, origin, action, and touched fields.
-  Stream<RecordChange<S>> get changes => _runtime.events
+  Stream<StoreRecordChange<S>> get changes => _runtime.events
       .where((event) => event is CommittedChange)
       .cast<CommittedChange>()
       .where((event) => event.store == name)
-      .map((event) => RecordChange<S>(
+      .map((event) => StoreRecordChange<S>(
             id: event.id,
             storeName: event.store,
             origin: event.origin,

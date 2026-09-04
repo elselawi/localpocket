@@ -53,7 +53,7 @@ void main() {
       addTearDown(db.close);
       final tasks = db.store(Tasks.store);
 
-      final events = <ChangeNotification>[];
+      final events = <DatabaseRecordChange>[];
       final sub = db.changes.listen(events.add);
       addTearDown(sub.cancel);
 

@@ -486,11 +486,11 @@ void main() {
         addTearDown(db.close);
         final tasks = db.store(Tasks.store);
 
-        final changes = <ChangeNotification>[];
+        final changes = <DatabaseRecordChange>[];
         final sub = db.changes.listen(changes.add);
         addTearDown(sub.cancel);
 
-        final storeChanges = <RecordChange<Tasks>>[];
+        final storeChanges = <StoreRecordChange<Tasks>>[];
         final storeSub = tasks.changes.listen(storeChanges.add);
         addTearDown(storeSub.cancel);
 

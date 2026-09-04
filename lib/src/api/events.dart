@@ -13,8 +13,8 @@ import '../schema/store_def.dart';
 
 export '../kernel/change_bus.dart' show ChangeAction, ChangeOrigin;
 
-abstract base class _RecordChangeBase {
-  const _RecordChangeBase({
+abstract base class _RecordChange {
+  const _RecordChange({
     required this.origin,
     required this.action,
     required this.id,
@@ -56,9 +56,9 @@ abstract base class _RecordChangeBase {
 /// [newRecord] the state after the commit (null for hard purges), decoded as
 /// immutable typed [Row] snapshots.
 /// {@endtemplate}
-final class ChangeNotification extends _RecordChangeBase {
+final class DatabaseRecordChange extends _RecordChange {
   /// {@macro localpocket.change_notification}
-  const ChangeNotification({
+  const DatabaseRecordChange({
     required super.storeName,
     required super.id,
     required super.origin,
@@ -87,9 +87,9 @@ final class ChangeNotification extends _RecordChangeBase {
 /// immutable [Row] snapshots decoded against the store's definition — a
 /// create carries a null [oldRecord], a purge a null [newRecord].
 /// {@endtemplate}
-final class RecordChange<S extends StoreDef<S>> extends _RecordChangeBase {
+final class StoreRecordChange<S extends StoreDef<S>> extends _RecordChange {
   /// {@macro localpocket.record_change}
-  const RecordChange({
+  const StoreRecordChange({
     required super.id,
     required super.origin,
     required super.action,

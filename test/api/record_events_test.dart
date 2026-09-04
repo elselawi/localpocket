@@ -15,7 +15,7 @@ void main() {
 
     test('store events carry typed old/new rows, origin, and fields', () async {
       final tasks = db.store(Tasks.store);
-      final events = <RecordChange<Tasks>>[];
+      final events = <StoreRecordChange<Tasks>>[];
       final sub = tasks.changes.listen(events.add);
       addTearDown(sub.cancel);
 
@@ -42,7 +42,7 @@ void main() {
 
     test('db.changes carries the full committed envelope', () async {
       final tasks = db.store(Tasks.store);
-      final changes = <ChangeNotification>[];
+      final changes = <DatabaseRecordChange>[];
       final sub = db.changes.listen(changes.add);
       addTearDown(sub.cancel);
 
@@ -66,7 +66,7 @@ void main() {
     test('db.changes supports pattern matching on oldRecord and newRecord',
         () async {
       final tasks = db.store(Tasks.store);
-      final changes = <ChangeNotification>[];
+      final changes = <DatabaseRecordChange>[];
       final sub = db.changes.listen(changes.add);
       addTearDown(sub.cancel);
 
@@ -116,7 +116,7 @@ void main() {
 
     test('store.changes carries decoded typed Row snapshots', () async {
       final tasks = db.store(Tasks.store);
-      final storeChanges = <RecordChange<Tasks>>[];
+      final storeChanges = <StoreRecordChange<Tasks>>[];
       final sub = tasks.changes.listen(storeChanges.add);
       addTearDown(sub.cancel);
 
@@ -176,7 +176,7 @@ void main() {
 
   group('notification surfaces', () {
     test('ChangeNotification prints store, id, action, and fields', () {
-      const notification = ChangeNotification(
+      const notification = DatabaseRecordChange(
         storeName: 'tasks',
         id: 'r1',
         origin: ChangeOrigin.local,
@@ -188,7 +188,7 @@ void main() {
     });
 
     test('RecordChange prints the store type, id, and action', () {
-      const change = RecordChange<Tasks>(
+      const change = StoreRecordChange<Tasks>(
         storeName: 'tasks',
         id: 'r1',
         origin: ChangeOrigin.remote,

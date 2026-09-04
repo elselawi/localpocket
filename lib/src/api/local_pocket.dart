@@ -157,12 +157,12 @@ final class LocalPocket {
   /// Committed changes across every store: one notification per committed
   /// record change, with old/new payloads, origin, action, and touched
   /// fields.
-  Stream<ChangeNotification> get changes => _runtime.events
+  Stream<DatabaseRecordChange> get changes => _runtime.events
           .where((event) => event is CommittedChange)
           .cast<CommittedChange>()
           .map((event) {
         final decode = _decoders[event.store];
-        return ChangeNotification(
+        return DatabaseRecordChange(
           storeName: event.store,
           id: event.id,
           origin: event.origin,
