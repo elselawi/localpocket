@@ -6,7 +6,11 @@ import 'package:localpocket/src/kernel/cipher.dart';
 import 'package:localpocket/src/kernel/database_adapter.dart';
 import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/page_callbacks.dart'
+    show StorePageCallbacks, attachStorePolicy;
 import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/platform/web/page/callback_server.dart'
+    show PageCallbackServer;
 import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
@@ -22,11 +26,25 @@ import 'helpers.dart';
 /// Recording [WorkerEventSink]: captures every worker→client event the engine
 /// emits (record events, watcher snapshots, sync status, auth required) so
 /// tests can assert on them.
-class RecordingSink implements WorkerEventSink {
+class RecordingSink implements WorkerEventSink, WorkerCallbackChannel {
+  RecordingSink({PageCallbackServer? callbackServer})
+      : _callbackServer = callbackServer;
+
+  final PageCallbackServer? _callbackServer;
+
+  /// Callback requests routed to the page (in arrival order).
+  final List<Map<String, Object?>> callbackRequests = [];
+
   final List<Map<String, Object?>> events = [];
 
   @override
   void emit(Map<String, Object?> event) => events.add(event);
+
+  @override
+  Future<Object?> call(Map<String, Object?> message) async {
+    callbackRequests.add(message);
+    return _callbackServer?.serve(message);
+  }
 
   /// Events with the given [op], in arrival order.
   List<Map<String, Object?>> byOp(String op) =>
@@ -80,7 +98,19 @@ class WorkerHarness {
     PlatformProfile platform = PlatformProfile.native,
     String path = ':memory:',
     RecordingSink? sink,
+    Map<String, StorePageCallbacks>? pageCallbacks,
+    Map<String, Object?>? storePolicies,
   }) async {
+    final callbackBridge =
+        storePolicies == null ? null : WorkerCallbackBridge();
+    final attachedStores = [
+      for (final s in stores ?? [widgetsSchema()])
+        attachStorePolicy(
+          s,
+          storePolicies?[s.name],
+          invoker: callbackBridge,
+        ),
+    ];
     final rawDb = path == ':memory:'
         ? sqlite.sqlite3.openInMemory()
         : sqlite.sqlite3.open(path);
@@ -88,7 +118,7 @@ class WorkerHarness {
     final pocket = await LocalPocket.open(
       path: ':memory:',
       database: adapter,
-      stores: stores ?? [widgetsSchema()],
+      stores: attachedStores,
       platform: platform,
       blobStore: blobStore ?? MemoryBlobStore(),
       fieldCipher: fieldCipher,
@@ -96,17 +126,24 @@ class WorkerHarness {
       testHooks: testHooks,
       maxDocBytes: maxDocBytes,
       syncBackendFactory: const PocketBaseSyncBackendFactory(),
+      callbackInvoker: callbackBridge,
     );
     final engine = WorkerEngine(
       rawDatabase: rawDb,
       databaseAdapter: adapter,
       pocket: pocket,
+      callbackBridge: callbackBridge,
     );
     return WorkerHarness._(
       rawDb: rawDb,
       pocket: pocket,
       engine: engine,
-      sink: sink ?? RecordingSink(),
+      sink: sink ??
+          RecordingSink(
+            callbackServer: pageCallbacks == null
+                ? null
+                : PageCallbackServer(stores: pageCallbacks),
+          ),
     );
   }
 

@@ -3,9 +3,15 @@ import 'dart:convert';
 
 import 'package:localpocket/src/api/api.dart';
 import 'package:localpocket/src/kernel/database_adapter.dart' show Database;
+import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
 import 'package:localpocket/src/kernel/files/blob_store.dart'
     show MemoryBlobStore;
+import 'package:localpocket/src/kernel/page_callbacks.dart'
+    show StorePageCallbacks, encodeStorePolicies;
+import 'package:localpocket/src/kernel/sync/merge.dart' show CounterResolver;
+import 'package:localpocket/src/platform/web/page/callback_server.dart'
+    show PageCallbackServer;
 import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
 import 'package:localpocket/src/runtime/remote_runtime_client.dart';
@@ -14,6 +20,7 @@ import 'package:localpocket/src/api/writes.dart';
 import 'package:test/test.dart';
 
 import '../support/fixtures/tasks_store.dart';
+import '../support/fixtures/validated_notes_store.dart';
 import '../support/helpers.dart';
 import '../support/mock_pb_server.dart';
 import '../support/worker_harness.dart';
@@ -213,6 +220,69 @@ void main() {
       });
     });
   }
+
+  for (final runtimeName in const ['direct', 'loopback', 'remote']) {
+    group('executable schema features over $runtimeName runtime', () {
+      late LocalPocket db;
+      WorkerHarness? harness;
+
+      setUp(() async {
+        final schema = ValidatedNotes.store.compiledSchema;
+        if (runtimeName == 'remote') {
+          final pageCallbacks = {
+            'validated_notes':
+                StorePageCallbacks(validator: ValidatedNotes.validate),
+          };
+          final pipe = _PipeSink(
+            callbackServer: PageCallbackServer(stores: pageCallbacks),
+          );
+          harness = await WorkerHarness.open(
+            stores: [schema],
+            storePolicies: encodeStorePolicies([schema], pageCallbacks),
+            pageCallbacks: pageCallbacks,
+            blobStore: MemoryBlobStore(),
+            sink: pipe,
+          );
+          addTearDown(harness!.close);
+          final client = RemoteRuntimeClient(transport: harness!.customRequest);
+          pipe.target = client.handleWorkerEvent;
+          db = LocalPocket.internal(client);
+        } else {
+          final raw = await openPocket(
+            stores: [schema],
+            blobStore: MemoryBlobStore(),
+          );
+          addTearDown(() => raw.close());
+          final runtime = runtimeName == 'direct'
+              ? LocalRuntimeClient(raw.commands)
+              : LoopbackRuntimeClient(raw.commands);
+          db = LocalPocket.internal(runtime);
+        }
+      });
+
+      test('the validator hook rejects and accepts writes identically',
+          () async {
+        final notes = db.store(ValidatedNotes.store);
+
+        await expectLater(
+          notes.put([ValidatedNotes.title.set('blocked')]),
+          throwsA(isA<ValidationException>().having(
+              (e) => e.message, 'message', contains('title is blocked'))),
+        );
+        final id = (await notes.put([ValidatedNotes.title.set('ok')])).id;
+        expect((await notes.get(id))?.get(ValidatedNotes.title), 'ok');
+      });
+
+      test('the data-only conflict policy reaches the runtime', () async {
+        final schema = runtimeName == 'remote'
+            ? harness!.pocket.requireTable('validated_notes').schema
+            : ValidatedNotes.store.compiledSchema;
+        expect(schema.conflictPolicy.editsUnarchive, isTrue);
+        expect(schema.conflictPolicy.fieldOverrides['qty'],
+            isA<CounterResolver>());
+      });
+    });
+  }
 }
 
 class _FakeTokens implements TokenProvider {
@@ -229,6 +299,8 @@ class _FakeTokens implements TokenProvider {
 /// Forwarding worker-event sink: hands every event the engine emits to the
 /// remote runtime's event feed (keeping the harness's recording behavior).
 class _PipeSink extends RecordingSink {
+  _PipeSink({super.callbackServer});
+
   void Function(Map<Object?, Object?> event)? target;
 
   @override

@@ -319,31 +319,25 @@ Map<String, Object?>? _encodeStore(
   }
 
   final entry = <String, Object?>{};
-  if (hasResolver) {
-    final policyJson = <String, Object?>{};
-    final collection = policy.collectionResolver;
-    if (collection != null) {
-      policyJson['collectionResolver'] = _encodeResolver(
-          collection, registeredResolvers, usedResolverIds,
-          where: 'collectionResolver of "${schema.name}"');
-    }
-    if (policy.fieldOverrides.isNotEmpty) {
-      policyJson['fieldOverrides'] = {
-        for (final e in policy.fieldOverrides.entries)
-          e.key: _encodeResolver(e.value, registeredResolvers, usedResolverIds,
-              where: 'field override "${e.key}" of "${schema.name}"'),
-      };
-    }
-    if (policy.editsUnarchive) policyJson['editsUnarchive'] = true;
-    if (policy.missingRemote != MissingRemotePolicy.conflict) {
-      policyJson['missingRemote'] = policy.missingRemote.name;
-    }
-    entry['conflictPolicy'] = policyJson;
-  } else if (registeredResolvers.isNotEmpty) {
-    throw ValidationException(
-        'pageCallbacks registers resolvers for store "${schema.name}", '
-        'whose conflict policy uses no executable resolver.');
+  final policyJson = <String, Object?>{};
+  final collection = policy.collectionResolver;
+  if (collection != null) {
+    policyJson['collectionResolver'] = _encodeResolver(
+        collection, registeredResolvers, usedResolverIds,
+        where: 'collectionResolver of "${schema.name}"');
   }
+  if (policy.fieldOverrides.isNotEmpty) {
+    policyJson['fieldOverrides'] = {
+      for (final e in policy.fieldOverrides.entries)
+        e.key: _encodeResolver(e.value, registeredResolvers, usedResolverIds,
+            where: 'field override "${e.key}" of "${schema.name}"'),
+    };
+  }
+  if (policy.editsUnarchive) policyJson['editsUnarchive'] = true;
+  if (policy.missingRemote != MissingRemotePolicy.conflict) {
+    policyJson['missingRemote'] = policy.missingRemote.name;
+  }
+  if (policyJson.isNotEmpty) entry['conflictPolicy'] = policyJson;
   if (schema.validator != null) entry['validator'] = true;
   if (schema.documentMigrations.isNotEmpty) {
     entry['documentMigrations'] = schema.documentMigrations.keys.toList()

@@ -5,7 +5,15 @@ import 'dart:typed_data';
 import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/page_callbacks.dart'
+    show
+        StorePageCallbacks,
+        ProxiedResolver,
+        callbackChannelValidator,
+        encodeStorePolicies;
 import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/kernel/schema_manifest.dart';
+import 'package:localpocket/src/kernel/sync/merge.dart';
 import 'package:localpocket/src/contract/contract.dart' as contract;
 
 import 'package:localpocket/src/platform/web/page/protocol.dart';
@@ -30,6 +38,17 @@ Future<void> waitUntil(
   }
   fail('Timed out after $timeout waiting for condition.');
 }
+
+/// The page-side resolver used by the callback-channel group: reviews the
+/// merged record and keeps both sides' values (never declines).
+Future<MergeResult?> _reviewResolver(MergeContext ctx) async => MergeResult(
+      merged: {
+        ...ctx.base,
+        ...ctx.local,
+        ...ctx.remote,
+        'resolved': true,
+      },
+    );
 
 void main() {
   group('WorkerEngine — envelope & protocol', () {
@@ -1078,6 +1097,100 @@ void main() {
           reason: 'no emissions after watch cancel');
     });
   });
+
+  group('WorkerEngine — page-callback channel', () {
+    final pageValidator = (Map<String, Object?> record) =>
+        record['name'] == 'blocked'
+            ? <String>['name is blocked on the page']
+            : <String>[];
+    const pageResolver = CustomResolver(_reviewResolver);
+
+    late WorkerHarness h;
+
+    setUp(() async {
+      final schema = CollectionSchema<Object?>(
+        name: 'widgets',
+        version: 1,
+        fields: [Field.text('name', required: true)],
+        conflictPolicy: ConflictPolicy(
+          editsUnarchive: true,
+          collectionResolver: pageResolver,
+        ),
+        validator: pageValidator,
+      );
+      final pageCallbacks = {
+        'widgets': StorePageCallbacks(
+          resolvers: {'review': pageResolver},
+          validator: pageValidator,
+        ),
+      };
+      h = await WorkerHarness.open(
+        stores: [schema],
+        storePolicies: encodeStorePolicies([schema], pageCallbacks),
+        pageCallbacks: pageCallbacks,
+      );
+      addTearDown(() async {
+        await h.close();
+      });
+    });
+
+    test('a bridged validator executes on the page and rejects the write',
+        () async {
+      await expectLater(
+        h.runtime.send(contract.MutateRequest(
+          store: 'widgets',
+          mutation: contract.MutationPut({'name': 'blocked'}),
+        )),
+        throwsA(isA<ValidationException>().having((e) => e.message, 'message',
+            contains('name is blocked on the page'))),
+      );
+      expect(
+        h.sink.callbackRequests
+            .where((m) => m['channel'] == callbackChannelValidator),
+        isNotEmpty,
+      );
+    });
+
+    test('a passing record crosses the channel and stores normally', () async {
+      await h.put('widgets', {'name': 'ok'}, id: 'aaaaaaaaaaaaaaa');
+      final row = await h.get('widgets', 'aaaaaaaaaaaaaaa');
+      expect(row, isNotNull);
+    });
+
+    test('the attached policy and hooks land in the worker schema', () {
+      final schema = h.pocket.requireTable('widgets').schema;
+      expect(schema.conflictPolicy.editsUnarchive, isTrue);
+      expect(schema.conflictPolicy.collectionResolver, isA<ProxiedResolver>());
+      expect(schema.validator, isNotNull);
+    });
+
+    test('an executable feature the worker cannot see fails the open closed',
+        () async {
+      final schema = CollectionSchema<Object?>(
+        name: 'gadgets',
+        version: 1,
+        fields: [Field.text('name', required: true)],
+        conflictPolicy: ConflictPolicy(collectionResolver: pageResolver),
+      );
+      final stale = await WorkerHarness.open(stores: [schema]);
+      addTearDown(stale.close);
+      // The page computes fingerprints from the FULL schema (including the
+      // resolver) but sends no policy envelope: a stale worker asset that
+      // would drop the envelope must fail closed, never silently register a
+      // resolver-free schema.
+      final err = await stale.sendError(
+        stale.req(WireOp.open, args: {
+          'stores': [schema.toJson()],
+          'manifestFingerprints': {
+            'gadgets': SchemaManifest.compile(schema).fingerprint,
+          },
+        }),
+      );
+      expect(err.code, WireErrorCode.localpocket);
+      expect(err.message, contains('manifest mismatch'));
+    });
+  });
+
   group('WorkerEngine — maintenance & close', () {
     test('maintenance requests execute against the engine', () async {
       final h = await WorkerHarness.open();
