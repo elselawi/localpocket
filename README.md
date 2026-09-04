@@ -1006,7 +1006,9 @@ final myTokenProvider = PocketBaseTokens(
 
 ### Sync operations
 
-Then define the sync options and attach the sync layer:
+Then define the sync options and attach the sync layer. The returned
+`PocketBaseSync` handle exposes the lifecycle, status stream, and control
+methods for the synced store.
 
 ```dart
   // Sign in once up front so the stable identity is known before attach.
@@ -1090,7 +1092,9 @@ neither. Anything undeclared falls through to the default
 (`RemoteWinsResolver`). Built-ins cover the common shapes; `CustomResolver`
 handles anything else.
 
-Conflicts that need a human are held in `store.conflicts`.
+Conflicts that need a human are held in `store.conflicts` through the
+`StoreConflicts` API; it exposes the backlog, per-record inspection, and
+manual resolution actions.
 
 ### How merging decides
 
@@ -1378,8 +1382,8 @@ This can be useful for invalidating caches, sending push notifications, etc.
 
 ## Binary attachments
 
-LocalPocket manages binary attachments through a store-scoped file service
-(`store.files`) backed by a configured `BlobStore`. File bytes stream in
+LocalPocket manages binary attachments through the `Files` service on each
+store (`store.files`) backed by a configured `BlobStore`. File bytes stream in
 bounded chunks across the runtime boundary rather than loading whole files into
 memory. The database manages file metadata, deduplication by SHA-256 hash, and
 two-way sync with remote PocketBase file fields, while the underlying byte
