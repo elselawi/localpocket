@@ -159,20 +159,6 @@ Future<void> exerciseAll() async {
       .listen((rows) => rows.length);
   await sub.cancel();
 
-  // Typed record events: the committed-change envelope rides the same event
-  // stream on web as on native — old/new typed snapshots included.
-  final recordSub = tasks.events.listen((change) {
-    change.id;
-    change.origin;
-    change.action;
-    change.changedFields;
-    // ignore: unnecessary_statements
-    change.oldRecord?.id;
-    // ignore: unnecessary_statements
-    change.newRecord?.id;
-  });
-  await recordSub.cancel();
-
   final dbSub = db.changes.listen((change) {
     change.storeName;
     change.id;

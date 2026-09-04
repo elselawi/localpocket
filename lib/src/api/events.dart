@@ -18,6 +18,7 @@ abstract class _RecordChangeBase {
     required this.origin,
     required this.action,
     required this.id,
+    required this.storeName,
     this.changedFields = const {},
   });
 
@@ -41,6 +42,9 @@ abstract class _RecordChangeBase {
 
   /// The field names the change touched.
   final Set<String> changedFields;
+
+  /// The store that changed.
+  final String storeName;
 }
 
 /// {@template localpocket.change_notification}
@@ -55,7 +59,7 @@ abstract class _RecordChangeBase {
 final class ChangeNotification extends _RecordChangeBase {
   /// {@macro localpocket.change_notification}
   const ChangeNotification({
-    required this.storeName,
+    required super.storeName,
     required super.id,
     required super.origin,
     required super.action,
@@ -63,9 +67,6 @@ final class ChangeNotification extends _RecordChangeBase {
     this.newRecord,
     super.changedFields,
   });
-
-  /// The store that changed.
-  final String storeName;
 
   /// Previous logical state before this change (null if newly created).
   final Row<dynamic>? oldRecord;
@@ -92,6 +93,7 @@ final class RecordChange<S extends StoreDef<S>> extends _RecordChangeBase {
     required super.id,
     required super.origin,
     required super.action,
+    required super.storeName,
     this.oldRecord,
     this.newRecord,
     super.changedFields,

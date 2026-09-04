@@ -16,7 +16,7 @@ void main() {
     test('store events carry typed old/new rows, origin, and fields', () async {
       final tasks = db.store(Tasks.store);
       final events = <RecordChange<Tasks>>[];
-      final sub = tasks.events.listen(events.add);
+      final sub = tasks.changes.listen(events.add);
       addTearDown(sub.cancel);
 
       final createdRow = await tasks.put([Tasks.title.set('before')]);
@@ -116,7 +116,7 @@ void main() {
 
     test('store.changes carries decoded typed Row snapshots', () async {
       final tasks = db.store(Tasks.store);
-      final storeChanges = <ChangeNotification>[];
+      final storeChanges = <RecordChange<Tasks>>[];
       final sub = tasks.changes.listen(storeChanges.add);
       addTearDown(sub.cancel);
 
@@ -189,6 +189,7 @@ void main() {
 
     test('RecordChange prints the store type, id, and action', () {
       const change = RecordChange<Tasks>(
+        storeName: 'tasks',
         id: 'r1',
         origin: ChangeOrigin.remote,
         action: ChangeAction.create,

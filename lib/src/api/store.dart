@@ -348,32 +348,13 @@ final class Store<S extends StoreDef<S>> {
 
   /// Committed changes to this store: one notification per committed record
   /// change, with old/new payloads, origin, action, and touched fields.
-  Stream<ChangeNotification> get changes => _runtime.events
-      .where((event) => event is CommittedChange)
-      .cast<CommittedChange>()
-      .where((event) => event.store == name)
-      .map((event) => ChangeNotification(
-            storeName: event.store,
-            id: event.id,
-            origin: event.origin,
-            action: event.action,
-            oldRecord:
-                event.oldRecord == null ? null : Row<S>(def, event.oldRecord!),
-            newRecord:
-                event.newRecord == null ? null : Row<S>(def, event.newRecord!),
-            changedFields: Set.of(event.changedFields),
-          ));
-
-  /// Typed committed record events for this store: one [RecordChange] per
-  /// committed record change, with immutable typed row snapshots decoded
-  /// against this store's definition. A create carries a null `oldRecord`,
-  /// a purge a null `newRecord`.
-  Stream<RecordChange<S>> get events => _runtime.events
+  Stream<RecordChange<S>> get changes => _runtime.events
       .where((event) => event is CommittedChange)
       .cast<CommittedChange>()
       .where((event) => event.store == name)
       .map((event) => RecordChange<S>(
             id: event.id,
+            storeName: event.store,
             origin: event.origin,
             action: event.action,
             oldRecord:
