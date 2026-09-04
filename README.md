@@ -11,9 +11,9 @@
 - **Reactive**: Queries and single-record reads are watchable streams.
 - **Synchronized**: Two-way sync with PocketBase over REST + SSE realtime.
 - **Search**: Full-text search with SQLite FTS5.
-- **Encrypted**: Built-in field-level AES-256-GCM encryption; whole-database SQLCipher is a native-only injected database layer, not the default public API.
+- **Encrypted**: Built-in field-level AES-256-GCM encryption on every platform; whole-database encryption on native platforms.
 - **Durable File Blobs**: content-addressed attachment storage with dedup and background lanes.
-- **Battle-tested**: ~2000 unit/integration tests, 100+ live-server e2e scenarios, 45+ browser matrix runs on Chromium/Firefox/WebKit.
+- **Battle-tested**: ~2700 unit/integration tests, 100+ live-server e2e scenarios, 45+ browser matrix runs on Chromium/Firefox/WebKit.
 - **Migrations**: versioned, forward-only ledgers with safe destructive rebuilds and backups.
 - **Conflict-aware**: deterministic 3-way merge engine with field-level resolvers.
 
@@ -1372,6 +1372,132 @@ This can be useful for invalidating caches, sending push notifications, etc.
    permission loss, or visibility loss emits `ChangeAction.hide`; that is a
    visibility change, not a hard delete.
 
+## Binary attachments
+
+LocalPocket manages binary attachments through a store-scoped file service
+(`store.files`) backed by a configured `BlobStore`. File bytes stream in
+bounded chunks across the runtime boundary rather than loading whole files into
+memory. The database manages file metadata, deduplication by SHA-256 hash, and
+two-way sync with remote PocketBase file fields, while the underlying byte
+blobs stay in your storage backend.
+
+```dart
+  // Check whether underlying blob storage persists on disk
+  final durable = await tasks.files.isBlobStorageDurable;
+  print('Storage is durable: $durable');
+
+  // Attachments belong to an existing record
+  final myTask = await tasks.put([Tasks.title.set('Trip Photos')]);
+
+  // Attach bytes from memory
+  final ref = await tasks.files.attach(
+    recordId: myTask.id,
+    source: FileSource.bytes(
+      // you can use [FileSource.stream] as well
+      [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+      name: 'avatar.png',
+    ),
+
+    // Target field defaults to store's declared `attachmentField` (or 'imgs')
+    // this definition is for local SQL only.
+    // it doesn't affect the field on pocketbase
+    field: 'imgs',
+
+    // Set true when using a non-durable/volatile blob store (e.g. MemoryBlobStore)
+    // otherwise if the blob store is volatile
+    // this will throw an StateError exception
+    allowVolatileBlobs: true,
+  );
+
+  print('Attached: ${ref.refId}, state: ${ref.state}, hash: ${ref.hash}');
+  // ref.state starts as 'pending_upload' until the next sync cycle completes
+
+  // List attachments for a specific record
+  final List<FileRef> attachments = await tasks.files.list(recordId: myTask.id);
+  for (final file in attachments) {
+    print('File ${file.refId}: ${file.field} (${file.state})');
+  }
+
+  // Stream attachment bytes
+  // Credit-windowed streaming ensures kernel only produces chunks as consumed
+  final Stream<List<int>> chunkStream = await tasks.files.open(ref);
+  await for (final chunk in chunkStream) {
+    print('Received ${chunk.length} bytes');
+  }
+
+  // if an attachement is deleted (remote only)
+  // you can do fetch: true to grab it before opening
+  await tasks.files.open(ref, fetch: true);
+
+  // or you can:
+  await tasks.files.download(ref);
+  await tasks.files.open(ref);
+
+  // delete an attachment
+  // Marks reference as pending_remove; swept on next sync / GC
+  await tasks.files.remove(ref);
+
+  // Maintenance: delete unreferenced blobs and enforce storage limits
+  final cleanedCount = await tasks.files.gc(
+    // grace period for orphaned blobs
+    blobGrace: const Duration(days: 7),
+    // grace period for temp files
+    tmpGrace: const Duration(hours: 24),
+  );
+  print('Cleaned $cleanedCount unreferenced/tmp blobs');
+
+  // Evict synced blobs (LRU) to respect storage budget (pending uploads are NEVER evicted)
+  final evictedCount =
+      await tasks.files.enforceStorageCap(maxBytes: 50 * 1024 * 1024);
+  print('Evicted $evictedCount bytes of synced blobs');
+
+  // evicted files now need either
+  await tasks.files.open(ref, fetch: true);
+  // or
+  await tasks.files.download(ref);
+  // to be opened or they would throw a RemoteOnlyError error
+```
+
+**Gotchas:**
+
+1. **Record-first sync dependency.** An attachment cannot be uploaded before its
+   owning record exists on the remote. The sync engine holds file upload
+   operations in the queue (`depends_on_op`) until the record creation op
+   succeeds on PocketBase.
+
+2. **Volatile stores refuse attach without opt-in.** A non-durable store
+   (`MemoryBlobStore`) loses bytes on process restart while SQLite metadata
+   survives. Calling `attach` against a volatile store throws a `StateError`
+   unless `allowVolatileBlobs: true` is explicitly provided.
+
+3. **Content deduplication by hash.** Attaching identical bytes across different
+   records or fields produces separate `FileRef` rows sharing a single stored
+   blob with an incremented reference count. A blob is only purged when all
+   references to its SHA-256 hash are removed.
+
+4. **Size mismatch aborts cleanly.** When using `FileSource.stream` with a
+   declared `length`, any discrepancy between declared and actual streamed bytes
+   throws a `ValidationException` and immediately aborts the upload session,
+   leaving no orphan references or published blobs.
+
+5. **Storage cap evicts only synced blobs.** `enforceStorageCap` evicts blobs on
+  an LRU basis to meet a byte ceiling, but it will **never** evict blobs in
+  `pending_upload` state. Evicted blobs transition their references to
+  `remote_only`. Re-hydrate one explicitly with `files.download(ref)` — a
+  call on an already-local ref short-circuits with no network I/O, and a ref
+  with no recorded remote filename fails typed. Or combine the steps with
+  `files.open(ref, fetch: true)`: the stream opens after a transparent
+  hydration (local bytes are never re-fetched; requires a started sync
+  host). Without `fetch`, `files.open` on a `remote_only` ref throws
+  `RemoteOnlyError`; with `prefetchFiles: true` on the store, the sync lane
+  re-downloads all evicted files on the next cycle instead (use the cap to
+  choose which model you want per store).
+
+6. **Cancellation releases streams and credit windows.** Cancelling a stream
+   returned by `files.open()` sends a typed close notification to the kernel to
+   release memory buffers and credit tracking immediately without leaking or
+   hanging background producers.
+
 ## Encryption
 
 LocalPocket supports two separate encryption layers:
@@ -1381,9 +1507,11 @@ LocalPocket supports two separate encryption layers:
    `EncryptionConfig.aesGcm256(key: keyBytes)`. LocalPocket stores each field's
    value as AES-256-GCM ciphertext with a fresh random nonce, and decrypts it
    transparently when a row is read back.
-2. **Database-level encryption** — a native-only (no web support) SQLCipher-backed
-   database layer. This is activated by the database implementation itself, not by
-   the field flag.
+2. **Database-level encryption (native only)** — whole-file at-rest encryption provided by
+  the database ENGINE the application supplies (a SQLCipher-style engine on
+  native). Configured through
+  `LocalPocketOptions.encrypted` / `nativeDatabaseFactory` /
+  `databaseEncryption` — see "Database-level" below.
 
 
 ### Field-level
@@ -1405,7 +1533,8 @@ final class Vault extends StoreDef<Vault> {
 }
 ```
 
-then define a cipher key and open the database with encryption enabled
+then define a cipher key and open the database with encryption enabled:
+
 ```dart
   // Fill with 32 random bytes in production and keep the same key for every
   // later open — the app owns the cipher key, and the database never stores it.
@@ -1435,13 +1564,14 @@ then define a cipher key and open the database with encryption enabled
 
   print(row?.get(SecretKeys.secret)); // => sk_live_010203...
 
-  // Filters continue to work against the logical value. The kernel decrypts the
-  // field when materializing the row, but the actual SQLite bytes remain
-  // ciphertext at rest.
-  final matches = await secretKeys.query(
-    QuerySpec(where: [SecretKeys.secret.eq("sk_live_010203...")]),
-  );
-  print(matches.items.length); // 1
+  // Filtering and sorting on an encrypted field do NOT work: the database
+  // stores ciphertext, so there is no plaintext for a SQL comparison to see.
+  // A where/orderBy term on an encrypted field compiles but throws at runtime
+  // ("encrypted and cannot be queried or sorted") — declare a separate,
+  // non-encrypted companion field if you need to filter or index by it.
+  // await secretKeys.query(
+  //   QuerySpec(where: [SecretKeys.secret.eq("sk_live_010203...")]),
+  // ); // <- throws: encrypted fields cannot be queried or sorted
 ```
 
 **Gotchas:**
@@ -1455,26 +1585,197 @@ then define a cipher key and open the database with encryption enabled
   existing rows. Keep the key in a proper app keystore, not in source or a
   randomly regenerated value.
 
-3. **`encrypted: true` alone does not encrypt the database file.** The flag is
-  not an encryptor; on the native code path it is only a marker for the
-  lower-level SQLCipher-backed database integration. A plain injected database
-  remains plaintext, and the web path rejects it instead of silently falling
-  back.
+3. **Encrypted fields drop from query/sort/index/FTS semantics.** The database
+  stores ciphertext, not the logical plaintext a comparison or index would need.
+  A `where` or `orderBy` term on an encrypted field throws at runtime
+  (`SchemaRegistrationError`: "encrypted and cannot be queried or sorted"), and
+  declaring an encrypted field in an index, a unique constraint, or an FTS spec
+  fails at open time with a typed error. Use encryption for sensitive payloads
+  and keep filterable/sortable values in separate, non-encrypted fields.
 
-4. **Encrypted fields drop from index/FTS/sort semantics.** They are excluded from
-  indexes and search declarations because the database stores ciphertext, not the
-  logical plaintext the index would need to compare. Use encryption for
-  sensitive payloads and keep indexable values in separate, non-encrypted fields.
 
-## Binary attachments
+### Database-level
 
-Content-addressed attachment storage with deduplication behind each
-store's `Files` API (`store.files`): `files.attach`
-(byte-array or stream; chunked upload on web), `files.open`, `files.list`,
-`files.remove`, and `files.gc` for capacity reclamation. Storage plugs in
-through `BlobStore` — `MemoryBlobStore` for tests, a native file-backed
-store on device, OPFS on web. A reference that exists only on the remote
-is `remote_only` — `files.open` throws until the bytes arrive, so sync the
-record (download it first) and then open.
+LocalPocket never ships or embeds a cipher — whole-file encryption comes from
+the SQLite **engine binary** itself, which the application supplies. Four
+pieces make it work, in this order:
+
+1. a **cipher-enabled engine binary** (via `package:sqlite3`'s build hook),
+2. a thin **adapter class** wrapping that engine,
+3. a **factory** handed to `LocalPocketOptions.nativeDatabaseFactory`,
+4. a **key config** handed to `LocalPocketOptions.databaseEncryption`,
+
+
+and LocalPocket does the rest: it opens the engine with `options.path`, applies `PRAGMA key`, verifies the engine actually reports a cipher codec, and closes the engine on `db.close()`.
+
+
+#### Piece 1: Get a cipher-enabled engine through the build hook
+
+`package:sqlite3` (which LocalPocket builds on) ships a Dart build hook that
+bundles a SQLite binary with your app; flip its source to a cipher build by
+adding **user-defines** to YOUR app's `pubspec.yaml`:
+
+```yaml
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlite3mc   # SQLite3MultipleCiphers build (cipher-enabled)
+      # ... or:
+      # source: sqlcipher # SQLCipher community build
+```
+
+At build time, the hook bundles that cipher-enabled binary as your sqlite3
+engine (downloaded from the package's GitHub releases with sha256 verification,
+or compiled from source). Two flavors are shipped per platform:
+
+- `sqlite3mc` — [SQLite3MultipleCiphers](https://utelle.github.io/SQLite3MultipleCiphers/)
+  (MIT; supports many cipher algorithms with ChaCha20-Poly1305 as default)
+- `sqlcipher` — [SQLCipher](https://www.zetetic.net/sqlcipher/) community build
+  (BSD-3-Clause; note it links OpenSSL on Windows/Linux/Android and
+  Foundation/Security on Apple platforms)
+
+Both SQLite3MultipleCiphers and SQLCipher have their own license terms distinct
+from SQLite's public domain — pick per your app's licensing constraints.
+
+This replaces the old `sqlcipher_flutter_libs` route, which is deprecated/EOL
+since `package:sqlite3` version 3.x. Do NOT add it.
+
+#### Piece 2: Define the adapter class
+
+You don't implement the database adapter from scratch. LocalPocket's public
+API ships a ready-made synchronous base class, `DirectSqliteDatabase`, which
+wraps a plain `package:sqlite3` connection. Define your engine as a subclass
+of it and let the one static `open` method hand over the connection opened
+through your cipher-enabled `sqlite3` build:
+
+```dart
+import 'package:sqlite3/sqlite3.dart' as sqlite;
+
+/// A Database opened through a cipher-enabled sqlite3 engine binary
+/// (wired by the pubspec user-defines in Step 1).
+///
+/// Precondition: the app is built so that `package:sqlite3`'s underlying
+/// binary is compiled WITH the cipher. A plain sqlite3 binary here silently
+/// accepts `PRAGMA key` without encrypting anything — LocalPocket guards
+/// against that by probing the codec at open and failing typed, but the
+/// correct setup is a cipher engine binary.
+/// [DirectSqliteDatabase] comes from localpocket.
+final class MyCipherDatabase extends DirectSqliteDatabase {
+  MyCipherDatabase._(super.rawDb);
+
+  /// The factory handed to `LocalPocketOptions.nativeDatabaseFactory`.
+  ///
+  /// Note: do NOT apply `PRAGMA key` here — LocalPocket applies the key from
+  /// `DatabaseEncryptionConfig` itself, before any other statement runs.
+  static Database open(String path) =>
+      MyCipherDatabase._(sqlite.sqlite3.open(path));
+}
+```
+
+#### Piece 3 & 4: Open the database with both slots configured
+
+```dart
+  final wholeDBEncrypted = await LocalPocket.open(
+    LocalPocketOptions(
+      path: 'vault.db',
+      stores: [Tasks.store],
+      // piece 3: the engine binary that knows how to encrypt pages...
+      nativeDatabaseFactory: (path) => MyCipherDatabase.open(path),
+      // piece 4: the key LocalPocket applies to it
+      databaseEncryption: DatabaseEncryptionConfig(
+        engineCipher: 'sqlcipher', // or 'sqlite3mc' to match Step 1
+        key: 'master-passphrase',
+      ),
+    ),
+  );
+```
+
+`DatabaseEncryptionConfig` carries the key and names the engine flavor for
+diagnostics; it can't encrypt anything by itself, and a `databaseEncryption`
+value without a `nativeDatabaseFactory` **fails the open immediately** with a
+typed `ValidationException` ("databaseEncryption requires
+nativeDatabaseFactory: ...").
+
+The two have different jobs and are meaningless without each other:
+
+| Piece | What it is | What it provides |
+|---|---|---|
+| `nativeDatabaseFactory` | Code (a `Database Function(String path)`) | Opens the file through a **cipher-enabled engine binary** |
+| `databaseEncryption: DatabaseEncryptionConfig` | Data (a key + engine flavor name) | The **key/passphrase** — LocalPocket applies it via `PRAGMA key` and verifies the engine actually reports a cipher codec before doing anything else |
+
+**Gotchas:**
+
+1. **A plain engine silently accepts `PRAGMA key`.** Uncompiled `sqlite3.open`
+   treats `PRAGMA key` as an unknown pragma and encrypts nothing. LocalPocket
+   catches that at open: if the engine reports no codec (`PRAGMA
+   cipher_version` for SQLCipher, `PRAGMA cipher` for SQLite3MultipleCiphers —
+   a plain engine silently accepts both and returns no rows), the open fails
+   with a typed `ValidationException` instead of leaving the database quietly
+   plaintext. Still, get the setup right — `source: sqlite3mc` or `sqlcipher`
+   bakes the codec into the binary so `PRAGMA key` genuinely encrypts.
+
+2. **`engineCipher` must match the engine you actually bundled.** The value is
+   a diagnostics label (`'sqlcipher'` / `'sqlite3mc'`); LocalPocket's probe
+   works on both, so a label mismatch won't produce a wrong-key error — but
+   the wrong *binary* paired with the wrong key WILL fail at open. To migrate
+   between the two engines, SQLite3MultipleCiphers can read existing SQLCipher
+   databases with `pragma cipher = 'sqlcipher'; pragma legacy = 4;`.
+
+3. **The key must be stable across opens.** Lose the key = lose the database;
+   keep it in a proper keystore, not source. LocalPocket never stores or
+   derives it — it only hands the string to `PRAGMA key` (with embedded
+   single-quotes escaped).
+
+4. **Native-only, full stop.** `nativeDatabaseFactory` cannot cross the web
+   worker boundary (it is code, not data), and `databaseEncryption` is
+   rejected on web for the same reason: sqlite3_web's OPFS VFS does not
+   provide the file-control hooks cipher codecs require (verified against a
+   pinned `sqlite3mc.wasm` tagged out of the sqlite3.dart releases). Web
+   data at rest is protected with field-level encryption (see the section
+   above and its gotchas) instead.
+
+5. **Field-level and database-level compose.** Sensitive columns can ride the
+   field cipher (`encryption: EncryptionConfig.aesGcm256(...)`, works on every
+   platform) on top of a sealed database file on native.
+
+6. **Don't apply `PRAGMA key` in your own factory** (or any engine-flavor
+   pragmas that consume key material) before handing the connection over —
+   LocalPocket applies the key itself as the first statement on the
+   connection, and doing it twice risks wedging the codec probe.
+
+7. **Everything else works unchanged** against the sealed file: encrypted
+   CRUD, queries, FTS5 search, transactions, watches, sync, and file
+   attachments run exactly as on a plain file.
+
+
+### Comparison
+
+| | Field-level | Database-level |
+|---|---|---|
+| **What is sealed** | Individual field values only | The entire database file |
+| **Granularity** | Per field (`encrypted: true`) | Whole file, all-at-nothing |
+| **Who does the encryption** | LocalPocket's kernel (Dart-side AES-256-GCM) | The SQLite engine binary itself (SQLCipher / SQLite3MultipleCiphers) |
+| **What you configure** | `encrypted: true` on the field + `encryption: EncryptionConfig.aesGcm256(key:)` at open | `nativeDatabaseFactory` + `databaseEncryption: DatabaseEncryptionConfig(key:, engineCipher:)` at open + the cipher engine in your pubspec build hooks |
+| **Key shape** | 32 random bytes (`Uint8List`) | A passphrase string (handed to the engine via `PRAGMA key`) |
+| **Key storage** | App-owned; the database never stores it | App-owned; LocalPocket never stores or derives it |
+| **Platforms** | Every platform, including web | Native only — rejected on web (worker boundary + OPFS VFS) |
+| **Cipher algorithm** | AES-256-GCM, fresh random nonce per value | Whatever the engine provides (SQLCipher AES-256; SQLite3MultipleCiphers defaults to ChaCha20-Poly1305, several more available) |
+| **Querying encrypted data** | Encrypted fields drop from `where`/`orderBy`/index/FTS — comparisons throw at runtime | Everything works normally — the engine decrypts pages in flight, so SQL sees plaintext |
+| **What a leaked file reveals** | Schema, record ids, `extra` JSON keys, and which fields are encrypted; only the marked fields' values are hidden | Nothing — the file is page-by-page ciphertext, no readable structure at all |
+| **Requirement to use** | Ships with the package, enabled at open — nothing to build | A cipher-enabled engine binary shipped through `package:sqlite3`'s build hook |
+| **Wrong/missing key behavior** | Reads of encrypted rows fail when the key differs from the one that wrote them | Open fails up front (`file is not a database` / typed codec probe failure) instead of returning garbage |
+| **Sync/remote side** | Server data passes through PocketBase unaffected — this is at-rest LOCAL storage only | Same — PocketBase never sees the key; remote copies are only as protected as PocketBase itself makes them |
+| **Composability** | Yes — layers stack: a field marked `encrypted: true` stays double-protected (field cipher inside a sealed file) inside a database-encrypted db | Yes — same, the two are independent |
+
+**Choose field-level** when only a few fields are sensitive, you need web support.
+**Choose database-level** when the whole file should be opaque (schema, ids, everything), you're native-only.
 
 ## Schema migration
+
+
+
+
+## License & Credit
+
+- License is MIT.
+- This package written by Ali A. Saleem. It's was originally written as the backbone for (apexo)[https://github.com/elselawi/apexo], and now it has been promoted to a standalone package.
