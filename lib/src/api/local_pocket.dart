@@ -79,10 +79,10 @@ final class LocalPocket {
       now: options.now == null
           ? null
           : () => options.now!().millisecondsSinceEpoch,
-      wasmAssetPath: options.bootstrap.wasmAssetPath,
-      workerAssetPath: options.bootstrap.workerAssetPath,
       syncBackendFactory: options.syncBackendFactory,
       blobStore: options.blobStore,
+      groupCommitWindow: options.groupCommitWindow,
+      txSessionTtl: options.txSessionTtl,
     );
     try {
       return LocalPocket.internal(

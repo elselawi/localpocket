@@ -9,6 +9,7 @@ library;
 import 'dart:typed_data';
 
 import '../kernel/cipher.dart';
+import '../kernel/kernel_context.dart' show defaultTxSessionTtl;
 import '../kernel/files/blob_store.dart' show BlobStore;
 import '../kernel/sync/sync_backend.dart' show SyncBackendFactory;
 import '../schema/store_def.dart';
@@ -29,6 +30,8 @@ final class LocalPocketOptions {
     this.bootstrap = const BootstrapOptions(),
     this.maxDocumentBytes = 1900000,
     this.now,
+    this.groupCommitWindow = Duration.zero,
+    this.txSessionTtl = defaultTxSessionTtl,
     this.syncBackendFactory,
     this.blobStore,
   });
@@ -53,6 +56,17 @@ final class LocalPocketOptions {
 
   /// Injectable wall clock (tests). `null` uses the system clock.
   final DateTime Function()? now;
+
+  /// Coalescing window for group commit: when positive, mutations from
+  /// separate turns may share one SQLite transaction (one fsync) if they
+  /// arrive within the window; zero (the default) commits at end-of-turn
+  /// only. See the engine docs for the read-your-writes guarantee.
+  final Duration groupCommitWindow;
+
+  /// Idle deadline for interactive transaction sessions: a session silent
+  /// longer than this is force-rolled back so it cannot wedge the single
+  /// write queue slot forever.
+  final Duration txSessionTtl;
 
   /// Builds the sync backend the kernel uses for sync start commands, or
   /// `null` when sync is not used on this database.

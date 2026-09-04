@@ -8,4 +8,4 @@ import 'db_open_native.dart' if (dart.library.js_interop) 'db_open_web.dart';
 Future<LocalPocket> openPlaygroundDb(
   List<StoreDef<Object?>> stores, {
   EncryptionConfig? encryption,
-}) => openPlatformDb(stores, encryption: encryption);
+}) => openLocalPocketDb(stores, encryption: encryption);

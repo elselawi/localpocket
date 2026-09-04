@@ -11,7 +11,7 @@
 - **Reactive**: Queries and single-record reads are watchable streams.
 - **Synchronized**: Two-way sync with PocketBase over REST + SSE realtime.
 - **Search**: Full-text search with SQLite FTS5.
-- **Encrypted**: Built-in field-level encryption; encryption via SQLCipher (native).
+- **Encrypted**: Built-in field-level AES-256-GCM encryption; whole-database SQLCipher is a native-only injected database layer, not the default public API.
 - **Durable File Blobs**: content-addressed attachment storage with dedup and background lanes.
 - **Battle-tested**: ~2000 unit/integration tests, 100+ live-server e2e scenarios, 45+ browser matrix runs on Chromium/Firefox/WebKit.
 - **Migrations**: versioned, forward-only ledgers with safe destructive rebuilds and backups.
@@ -1258,17 +1258,14 @@ rejecting stale `updated`, or a custom endpoint).
 
 ## Change hooks
 
-Every committed mutation delivers a `ChangeNotification` on
-`LocalPocket.changes` (all stores) and `Store.changes` (one store): the
-notification carries the store name and the record ids the committing
-transaction touched.
+Every committed mutation delivers a `RecordChange` on
+`LocalPocket.changes` (all stores) and `Store.changes` (one store).
 
 So, while reactive queries (`.watch`) can be used to watch for mutations to
 a result of specific query, `.changes` can be used to watch for any mutation
-to a specific store or to the whole database.
+to the whole database or to a specific store.
 
 This can be useful for invalidating caches, sending push notifications, etc.
-
 
 ### Whole database
 
@@ -1353,36 +1350,121 @@ This can be useful for invalidating caches, sending push notifications, etc.
   await taskSub.cancel();
 ```
 
-## Schema migration
+**Gotchas:**
 
-Schema versions migrate forward-only. Override `StoreDef.migrations` to
-declare `StoreMigration`s (added fields, optional chunked backfill
-transforms), and bump the `StoreDef.version` when they change.
-Destructive changes (dropping columns, tightening constraints) run a safe
-table rebuild with an automatic backup copy of the old data.
+1. **Events are post-commit facts, not pre-write hooks.** Every notification is
+   emitted only after the transaction commits, so the stream is a reliable
+   record of what is now true, not a chance to intercept or veto a write.
+
+2. **Create and purge are asymmetric on payloads.** A create carries a null
+   `oldRecord` and a non-null `newRecord`; a hard purge carries a non-null
+   `oldRecord` and a null `newRecord`.
+
+3. **`changedFields` is the actual diff, not the whole row.** It is the set of
+   fields the mutation touched; archive/restore events report `{'archived'}`
+   and hidden events report `{'hidden'}` rather than every field in the row.
+
+4. **The origin distinguishes who produced the write.** `local` means your app
+   wrote it, `remote` means the sync layer ingested it, and `resolution`
+   means it was produced during a merge or conflict settlement.
+
+5. **A record can be hidden without being purged.** Server-side deletion,
+   permission loss, or visibility loss emits `ChangeAction.hide`; that is a
+   visibility change, not a hard delete.
 
 ## Encryption
 
-Field-level encryption is per-field on the store, with an application-held
-AES-256-GCM key:
+LocalPocket supports two separate encryption layers:
+
+1. **Field-level encryption** — the built-in public API. Mark a field with
+   `encrypted: true` and open the database with
+   `EncryptionConfig.aesGcm256(key: keyBytes)`. LocalPocket stores each field's
+   value as AES-256-GCM ciphertext with a fresh random nonce, and decrypts it
+   transparently when a row is read back.
+2. **Database-level encryption** — a native-only (no web support) SQLCipher-backed
+   database layer. This is activated by the database implementation itself, not by
+   the field flag.
+
+
+### Field-level
+
+In your schema, mark a field as encrypted with `encrypted: true`.
 
 ```dart
-final key = Uint8List.fromList(List<int>.filled(32, 7)); // your 256-bit key
+final class Vault extends StoreDef<Vault> {
+  static final Vault store = Vault._();
+  Vault._() : super(name: 'vault', version: 1);
 
-final db = await LocalPocket.open(
-  LocalPocketOptions(
-    path: 'patients.db',
-    stores: [Patients.store],
-    encryption: EncryptionConfig.aesGcm256(key: key),
-  ),
-);
+  static final userId = store.schema.text('user_id').req();
+  static final label = store.schema.text('label');
+  // this field will be encrypted in the database
+  static final secret = store.schema.text('secret', encrypted: true);
+
+  @override
+  List<FieldDef<Vault, Object?>> get fields => [userId, label, secret];
+}
 ```
 
-Mark individual fields `encrypted: true` in the store declaration (e.g.
-`store.schema.text('ssn', encrypted: true)`) — those values are encrypted
-at rest with the database key. Whole-database at-rest encryption
-(SQLCipher) comes from an injected database on native platforms; the web
-profile keeps storage in the browser, so use field-level encryption there.
+then define a cipher key and open the database with encryption enabled
+```dart
+  // Fill with 32 random bytes in production and keep the same key for every
+  // later open — the app owns the cipher key, and the database never stores it.
+  final keyBytes = Uint8List(32);
+
+  final myEncrpytedDB = await LocalPocket.open(
+    LocalPocketOptions(
+      path: ':memory:',
+      stores: [SecretKeys.store],
+      encryption: EncryptionConfig.aesGcm256(key: keyBytes),
+    ),
+  );
+
+  final secretKeys = myEncrpytedDB.store(SecretKeys.store);
+
+  // Writes stay logical/plaintext at the API boundary. The kernel encrypts the
+  // specific field before it hits SQLite, so the raw row stores ciphertext.
+  await secretKeys.put([
+    SecretKeys.userId.set('user-id-1234567'),
+    SecretKeys.label.set('prod token'),
+    SecretKeys.secret.set('sk_live_010203...'),
+  ]);
+
+  // Reads decrypt transparently. The app sees the plaintext value in-memory,
+  // while the database file holds only the sealed bytes.
+  final row = await secretKeys.get('user-id-1234567');
+
+  print(row?.get(SecretKeys.secret)); // => sk_live_010203...
+
+  // Filters continue to work against the logical value. The kernel decrypts the
+  // field when materializing the row, but the actual SQLite bytes remain
+  // ciphertext at rest.
+  final matches = await secretKeys.query(
+    QuerySpec(where: [SecretKeys.secret.eq("sk_live_010203...")]),
+  );
+  print(matches.items.length); // 1
+```
+
+**Gotchas:**
+
+1. **The field flag is not full-database encryption.** The raw SQLite row still
+  reveals the schema, record ids, `extra` JSON keys, and which fields are
+  encrypted; only the field value bytes are protected.
+
+2. **The key must be stable across opens.** An app must supply the same 32-byte
+  AES key every time it opens the database; without it, decryption fails for
+  existing rows. Keep the key in a proper app keystore, not in source or a
+  randomly regenerated value.
+
+3. **`encrypted: true` alone does not encrypt the database file.** The flag is
+  not an encryptor; on the native code path it is only a marker for the
+  lower-level SQLCipher-backed database integration. A plain injected database
+  remains plaintext, and the web path rejects it instead of silently falling
+  back.
+
+4. **Encrypted fields drop from index/FTS/sort semantics.** They are excluded from
+  indexes and search declarations because the database stores ciphertext, not the
+  logical plaintext the index would need to compare. Use encryption for
+  sensitive payloads and keep indexable values in separate, non-encrypted fields.
 
 ## Binary attachments
 
@@ -1394,3 +1476,5 @@ through `BlobStore` — `MemoryBlobStore` for tests, a native file-backed
 store on device, OPFS on web. A reference that exists only on the remote
 is `remote_only` — `files.open` throws until the bytes arrive, so sync the
 record (download it first) and then open.
+
+## Schema migration

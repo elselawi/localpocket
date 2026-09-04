@@ -54,6 +54,32 @@ void main() {
     });
 
     test(
+        'facade txSessionTtl reaches the kernel: a body silent past the '
+        'deadline is force-rolled back', () async {
+      final db = await LocalPocket.open(LocalPocketOptions(
+        path: ':memory:',
+        stores: [Tasks.store],
+        txSessionTtl: const Duration(milliseconds: 120),
+      ));
+      addTearDown(db.close);
+      final tasks = db.store(Tasks.store);
+
+      await expectLater(
+        db.transaction((tx) async {
+          await tx.store(Tasks.store).put([Tasks.title.set('staged')]);
+          // The caller wedges and never issues another session command; the
+          // kernel's idle sweeper (working from the FACADE-configured TTL)
+          // force-rolls the session back before the body returns.
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+        }),
+        throwsA(isA<StateError>()),
+        reason: 'the abandoned session no longer exists',
+      );
+      expect(
+          (await tasks.query(const QuerySpec<Tasks>(limit: 10))).items, isEmpty,
+          reason: 'the staged write was rolled back, never half-committed');
+    });
+    test(
         'a corrupt row distinguishes a missing required field from a null '
         'one', () {
       final absent = Row(Tasks.store, {'id': 'x', 'archived': false});

@@ -3,9 +3,9 @@ import 'package:sqlite3/sqlite3.dart' as sqlite;
 import '../platform/native/backup_store.dart';
 import 'database_adapter.dart';
 
-/// Opens the platform (native FFI) SQLite database at [path] and wires the
-/// platform file hooks into the adapter.
-Future<Database> openPlatformDatabase(String path) async {
+/// Opens the (native FFI) SQLite database at [path] and wires the platform
+/// file hooks into the adapter.
+Future<Database> openSqliteDatabase(String path) async {
   final raw = path == ':memory:'
       ? sqlite.sqlite3.openInMemory()
       : sqlite.sqlite3.open(path);

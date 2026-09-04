@@ -381,6 +381,11 @@ class KernelDatabase with ChangeBusAwareLP {
   /// factory. Set [blobStore] to enable attachment APIs. [fieldCipher] or
   /// [cryptoProvider] enables field-level encryption for encrypted fields.
   ///
+  /// Web/worker asset paths are NOT kernel options: they are page/transport
+  /// concerns carried by the facade's `BootstrapOptions` and consumed by the
+  /// web opener. Keeping them out here is what keeps the kernel free of web
+  /// vocabulary (R2).
+  ///
   /// ```dart
   /// final db = await LocalPocket.open(
   ///   path: ':memory:',
@@ -406,8 +411,6 @@ class KernelDatabase with ChangeBusAwareLP {
     bool destructiveBackup = true,
     TestHooks? testHooks,
     BlobStore? blobStore,
-    String? wasmAssetPath,
-    String? workerAssetPath,
     int Function()? now,
     Duration groupCommitWindow = Duration.zero,
     Duration txSessionTtl = defaultTxSessionTtl,
@@ -420,7 +423,7 @@ class KernelDatabase with ChangeBusAwareLP {
     if (database != null) {
       db = database;
     } else {
-      db = await openPlatformDatabase(path);
+      db = await openSqliteDatabase(path);
     }
 
     try {
