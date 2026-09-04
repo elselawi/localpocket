@@ -19,7 +19,8 @@ import 'blob_store.dart';
 import '../../../adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
 import '../crypto.dart';
-import 'open_options.dart';
+import 'open_options.dart'
+    show hasEncryptedFieldsWithoutCipher, parseOpenOptions, rawOpenOption;
 import '../page/protocol.dart';
 import 'worker_engine.dart';
 
@@ -52,7 +53,13 @@ final class LocalPocketDatabaseController extends DatabaseController {
     var handedToPocket = false;
 
     try {
-      // Wire destructive-migration backup hooks to OPFS. sqlite3_web
+      // Whole-db encryption is NATIVE-ONLY: the page never sends a key
+      // envelope; if one were present it would be a code reality mismatch
+      // (the facade rejects databaseEncryption before reaching the worker),
+      // so nothing is applied here. See the OPFS VFS limitation in the
+      // DatabaseEncryptionConfig docs.
+
+      // Wire OPFS backup hooks (destructive migrations). sqlite3_web
       // persists each database under `drift_db/<name>`; VACUUM INTO writes
       // the `.bak` there. `backupDbName` carries the original DB name (the
       // in-worker path is the fixed `/database`). Validated INSIDE the

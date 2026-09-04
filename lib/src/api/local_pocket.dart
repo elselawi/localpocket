@@ -8,6 +8,7 @@ library;
 
 import '../kernel/local_pocket.dart' as kernel show KernelDatabase;
 import '../kernel/transaction_coordinator.dart' as kernel show DurabilityClass;
+import '../kernel/database_adapter.dart' show Database;
 import '../kernel/ids.dart' show generateRecordId;
 import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';
@@ -68,12 +69,68 @@ final class LocalPocket {
     LocalPocketOptions options,
     RuntimeClient Function(CommandHandler handler) createRuntime,
   ) async {
+    // Whole-db encryption config is validated, never silently ignored: the
+    // key must have an engine (the native factory) to be applied against.
+    // Web rejects the whole route up front (see open_web.dart) — this is
+    // the native path applying the key.
+    if (options.databaseEncryption != null &&
+        options.nativeDatabaseFactory == null) {
+      throw ValidationException(
+          'databaseEncryption requires nativeDatabaseFactory: whole-file '
+          'encryption is provided by the engine the factory opens (a '
+          'SQLCipher-style build); this config only carries the key that '
+          'LocalPocket applies via `PRAGMA key`.');
+    }
+    // The bare declaration is validated too: `encrypted: true` without an
+    // engine factory nor a key config has nothing providing the encryption
+    // (the web open rejects both separately).
+    if (options.encrypted &&
+        options.nativeDatabaseFactory == null &&
+        options.databaseEncryption == null) {
+      throw ValidationException(
+          'encrypted: true declares a whole-file-encrypted engine but no '
+          'nativeDatabaseFactory supplies it, and no databaseEncryption '
+          'config carries the key. Supply the engine factory (with '
+          'databaseEncryption); the flag alone encrypts nothing.');
+    }
     final schemas = [
       for (final def in options.stores) def.compiledSchema,
     ];
+    // Apply the key to the caller's engine BEFORE the kernel opens anything
+    // against it: with a cipher-enabled binary the file is ciphertext until
+    // `PRAGMA key` authenticates. The probe is portable across engines:
+    // `cipher_version` is SQLCipher's marker, `cipher` (read-back) is
+    // SQLite3MultipleCiphers'; a plain engine silently ignores both and
+    // returns no rows (the same silent-acceptance hole `PRAGMA key` has).
+    final Database? nativeDb =
+        options.nativeDatabaseFactory?.call(options.path);
+    final dbKey = options.databaseEncryption;
+    if (nativeDb != null && dbKey != null) {
+      await nativeDb.execute("PRAGMA key = '${_sqlQuoteLiteral(dbKey.key)}'");
+      final hasCodec = await nativeDb.rawQuery('PRAGMA cipher_version').then(
+                (rows) => rows.isNotEmpty,
+                onError: (_) => false,
+              ) ||
+          await nativeDb.rawQuery('PRAGMA cipher').then(
+                (rows) => rows.isNotEmpty,
+                onError: (_) => false,
+              );
+      if (!hasCodec) {
+        try {
+          await nativeDb.close();
+        } catch (_) {}
+        throw ValidationException(
+            'databaseEncryption was configured but the engine opened by '
+            'nativeDatabaseFactory has no cipher codec (PRAGMA '
+            'cipher_version returned nothing). Supply a SQLCipher or '
+            'SQLite3MultipleCiphers build of the SQLite binary.');
+      }
+    }
     final db = await kernel.KernelDatabase.open(
       path: options.path,
+      database: nativeDb,
       stores: schemas,
+      encrypted: options.encrypted,
       fieldCipher: options.encryption?.fieldCipher,
       maxDocBytes: options.maxDocumentBytes,
       now: options.now == null
@@ -98,6 +155,9 @@ final class LocalPocket {
       Error.throwWithStackTrace(e, st);
     }
   }
+
+  /// Escapes [value] for a single-quoted SQL string literal.
+  static String _sqlQuoteLiteral(String value) => value.replaceAll("'", "''");
 
   final RuntimeClient _runtime;
   final Map<String, Row<dynamic> Function(Map<String, Object?>)> _decoders;

@@ -26,7 +26,20 @@ import 'page/open_core.dart';
 /// Selected by the conditional export in `lib/src/api/open_platform.dart`;
 /// the api layer never imports platform code or the web SDK directly.
 Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
-  validateWebOpenConfig(path: options.path, encrypted: false);
+  validateWebOpenConfig(path: options.path, encrypted: options.encrypted);
+
+  // The native engine factory IS code (a Dart closure over an app-supplied
+  // SQLite engine) and cannot cross the worker boundary; the worker opens
+  // the database through the wasm binary it was booted with. A factory
+  // configured on web would be silently ignored otherwise, so this fails
+  // the open typed instead of pretending the option does not exist.
+  if (options.nativeDatabaseFactory != null) {
+    throw ValidationException(
+        'nativeDatabaseFactory cannot cross the web worker boundary: the '
+        'worker opens the database through its own SQLite WASM module '
+        '— you cannot supply an engine to a web database. Use field-level '
+        'encryption on web, or run this configuration on a native runtime.');
+  }
 
   // The worker boot configures the sync backend factory itself (code cannot
   // cross the worker boundary) — a caller-configured factory would be
@@ -74,6 +87,17 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     stores: schemas,
     fieldCipher: options.encryption?.fieldCipher,
   );
+  // Whole-db encryption is NATIVE-ONLY: sqlite3_web's OPFS VFS does not
+  // provide the file-control hooks cipher codecs require (proven by the
+  // pinned sqlite3mc.wasm), so a key config on web can never succeed —
+  // fail the open typed here instead of shipping a doomed envelope.
+  if (options.databaseEncryption != null) {
+    throw ValidationException(
+        'databaseEncryption cannot be honored on web: the OPFS VFS does '
+        'not yet support cipher engines (whole-file encryption is '
+        'native-only). Use field-level encryption on web, or run this '
+        'configuration on a native runtime.');
+  }
 
   // Worker asset falls back to the plain root asset for dev/test harnesses
   // where the package asset 404s; wasm falls back to the root asset, then

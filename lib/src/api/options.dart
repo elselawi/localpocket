@@ -9,6 +9,7 @@ library;
 import 'dart:typed_data';
 
 import '../kernel/cipher.dart';
+import '../kernel/database_adapter.dart' show Database;
 import '../kernel/kernel_context.dart' show defaultTxSessionTtl;
 import '../kernel/files/blob_store.dart' show BlobStore;
 import '../kernel/sync/sync_backend.dart' show SyncBackendFactory;
@@ -27,6 +28,9 @@ final class LocalPocketOptions {
     required this.path,
     this.stores = const [],
     this.encryption,
+    this.databaseEncryption,
+    this.nativeDatabaseFactory,
+    this.encrypted = false,
     this.bootstrap = const BootstrapOptions(),
     this.maxDocumentBytes = 1900000,
     this.now,
@@ -46,6 +50,41 @@ final class LocalPocketOptions {
 
   /// Field-level encryption configuration, or `null` for plaintext storage.
   final EncryptionConfig? encryption;
+
+  /// Whole-database (file-level) encryption configuration, or `null` for a
+  /// plaintext database file.
+  ///
+  /// LocalPocket applies the key uniformly on every platform: it executes
+  /// the engine's `PRAGMA key` before anything else touches the file.
+  ///
+  /// NATIVE-ONLY: requires [nativeDatabaseFactory] to open the cipher-enabled
+  /// engine (a SQLCipher or SQLite3MultipleCiphers build — the config only
+  /// CARRIES the key; LocalPocket applies it and verifies the engine
+  /// reports a codec via the cipher probes). `engineCipher` names the
+  /// engine flavor (`'sqlcipher'`, `'sqlite3mc'`) for diagnostics.
+  ///
+  /// WEB: rejected with a typed error — sqlite3_web's OPFS VFS does not
+  /// support cipher engines. Use [encryption] (field-level) on web.
+  final DatabaseEncryptionConfig? databaseEncryption;
+
+  /// Builds the SQLite engine this database runs on (NATIVE ONLY).
+  ///
+  /// The default builds a plain (unencrypted) SQLite database from the
+  /// bundled `package:sqlite3` binary. Supply a factory that opens the
+  /// file through an engine binary compiled WITH whole-database encryption
+  /// (a SQLCipher or SQLite3MultipleCiphers build of `package:sqlite3`,
+  /// wired per its build-hook documentation) and set
+  /// [databaseEncryption]: LocalPocket applies the key and verifies the
+  /// engine's cipher codec itself. The web open rejects a supplied factory
+  /// with a typed error — engine code cannot cross the worker boundary and
+  /// web whole-file encryption is not supported (OPFS VFS limitation).
+  final Database Function(String path)? nativeDatabaseFactory;
+
+  /// Declares that the supplied [nativeDatabaseFactory] opens a
+  /// whole-file-encrypted database (SQLCipher-style).
+  /// NATIVE-ONLY: validated with the factory/key config on native and
+  /// rejected on web (no engine can be supplied there).
+  final bool encrypted;
 
   /// Remote-runtime bootstrap settings (web worker assets). Ignored on
   /// native targets, where the runtime runs in-process.
@@ -99,6 +138,33 @@ final class EncryptionConfig {
 
   /// The field cipher the kernel uses for encrypted fields.
   final FieldCipher fieldCipher;
+}
+
+/// {@template localpocket.database_encryption_config}
+/// Whole-database (file-level) at-rest encryption: the key the database
+/// ENGINE applies (SQLCipher / SQLite3MultipleCiphers), NOT a Dart-side
+/// encryptor. Field-level secrets stay in [EncryptionConfig].
+///
+/// NATIVE-ONLY: honored with [LocalPocketOptions.nativeDatabaseFactory] and
+/// rejected on web (the OPFS VFS does not support cipher engines).
+/// {@endtemplate}
+final class DatabaseEncryptionConfig {
+  /// {@macro localpocket.database_encryption_config}
+  const DatabaseEncryptionConfig({
+    required this.key,
+    this.engineCipher = 'sqlcipher',
+  });
+
+  /// The passphrase/key the engine's `PRAGMA key` applies. Kept as a plain
+  /// string: SQLCipher/MC accept text passphrases (and raw hex with
+  /// `x'...'` prefixes handled by the caller's engine convention).
+  final String key;
+
+  /// Which engine flavor to configure:
+  /// - `'sqlcipher'` — standard SQLCipher `PRAGMA key = '<key>'`;
+  /// - `'sqlite3mc'` — SQLite3MultipleCiphers `PRAGMA key = '<key>'`
+  ///   (MC's default cipher/chacha settings).
+  final String engineCipher;
 }
 
 /// {@template localpocket.bootstrap_options}

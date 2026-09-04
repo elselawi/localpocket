@@ -11,6 +11,7 @@
 library;
 
 import '../../../kernel/schema.dart';
+import '../../../kernel/errors.dart' show ValidationException;
 import '../page/protocol.dart';
 import 'worker_engine.dart' show deepStringMap, parseSchema;
 
