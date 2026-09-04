@@ -1099,7 +1099,7 @@ void main() {
   });
 
   group('WorkerEngine — page-callback channel', () {
-    final pageValidator = (Map<String, Object?> record) =>
+    List<String> pageValidator(Map<String, Object?> record) =>
         record['name'] == 'blocked'
             ? <String>['name is blocked on the page']
             : <String>[];

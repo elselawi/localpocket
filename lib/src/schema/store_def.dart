@@ -260,7 +260,9 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   ConflictPolicy? get conflictPolicy => null;
 
   /// Lazy document-format migrations keyed by target version, forwarded
-  /// verbatim to the database. See the descriptor policy on [migrations].
+  /// verbatim to the database. Like every executable hook, the closures run
+  /// in-process on native and must be registered in the open call's
+  /// `pageCallbacks` on the worker runtime.
   Map<int, DocumentMigration> get documentMigrations => const {};
 
   /// Optional application-level validation callback, forwarded verbatim to

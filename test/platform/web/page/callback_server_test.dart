@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/page_callbacks.dart';
-import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/kernel/sync/merge.dart';
 import 'package:localpocket/src/platform/web/page/callback_server.dart';
 import 'package:localpocket/src/platform/web/page/protocol.dart';
@@ -59,12 +58,12 @@ void main() {
           'id': scope == 'record' ? 'review' : 'tags',
           'scope': scope,
           if (field != null) 'field': field,
-          'ctx': {
+          'ctx': <String, Object?>{
             'store': 'widgets',
             'recordId': 'r1',
-            'base': {'tags': []},
-            'local': {'tags': []},
-            'remote': {'tags': []},
+            'base': <String, Object?>{'tags': <Map<String, Object?>>[]},
+            'local': <String, Object?>{'tags': <Map<String, Object?>>[]},
+            'remote': <String, Object?>{'tags': <Map<String, Object?>>[]},
             'dirtyLocal': <String>[],
             'dirtyRemote': <String>[],
           },

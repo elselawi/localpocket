@@ -1122,12 +1122,16 @@ final class Posts extends StoreDef<Posts> {
   List<FieldDef<Posts, Object?>> get fields => [title, views, tags];
 
   // ---- automated resolution policy ----
+  // The exact resolver instance the web registry hands back (see
+  // "Executable features on web" below) — matched by identity.
+  static final reviewResolver = CustomResolver(customResolver);
+
   @override
-  ConflictPolicy? get conflictPolicy => const ConflictPolicy(
+  ConflictPolicy? get conflictPolicy => ConflictPolicy(
         // Whole-record resolver: runs only when BOTH sides changed the
         // record; returning null declines — conservative merge plus
         // review escalation.
-        collectionResolver: CustomResolver(customResolver),
+        collectionResolver: reviewResolver,
         // Field-level overrides (top-level or dotted paths like
         // 'meta.name'; the most specific entry wins). Shown for the API
         // shape only: with a collectionResolver declared they never fire
@@ -1182,6 +1186,57 @@ equality — numbers match by value (`2` == `2.0`), and maps/lists match by
 identity only, so two equal-content maps count as different elements. If you
 need structural identity for list items, `AppendOnlyListResolver` with an
 `identity` function is the closer fit.
+
+### Executable features on web
+
+On the web the engine runs in a dedicated worker while your closures live on
+the page, so code-bearing configuration crosses a different bridge than on
+native:
+
+- **Data resolvers just work.** The closure-free built-ins
+  (`LocalWinsResolver`, `RemoteWinsResolver`, `CounterResolver`,
+  `SetUnionWithDeletionWinsResolver`, `AppendOnlyLinesResolver`, and
+  `AppendOnlyListResolver` without an `identity`) cross as data, are
+  reconstructed as the real classes in the worker, and resolve merges
+  exactly as they do natively. `editsUnarchive` and `missingRemote` are
+  plain data and work everywhere.
+- **Executable hooks run on the page.** A `CustomResolver` (and any resolver
+  carrying a closure, such as `AppendOnlyListResolver` with an `identity`
+  function), the store `validator`, document migrations, and backfill
+  `transform`s are invoked on the page over a callback channel: the worker
+  serializes the merge context (or record), the page executes your closure,
+  and the result rides back into the merge.
+- **Register what you declare.** Every executable feature a store declares
+  must be registered per store in `LocalPocketOptions.pageCallbacks` —
+  resolver instances are matched by identity, validator/migration closures
+  must cover exactly the schema's declarations. A mismatch fails the open
+  with a typed error; a store whose executable features have no callback
+  channel fails with `UnsupportedSchemaFeatureError`. Native platforms
+  ignore the registry (hooks already run in-process).
+
+```dart
+  // The web open: executable resolvers resolve to the page-registered
+  // instances (matched by identity against the store's policy).
+  final webDb = await LocalPocket.open(
+    LocalPocketOptions(
+      path: 'posts.db',
+      stores: [Posts.store],
+      pageCallbacks: {
+        'posts': StorePageCallbacks(
+          resolvers: {'posts-review': Posts.reviewResolver},
+        ),
+      },
+    ),
+  );
+  await webDb.close();
+```
+
+Constraints worth knowing: a page callback must answer with data and return
+data — querying or writing the same database from inside a callback is
+unsupported (the write queue and OPFS locks are held while it runs). One
+callback costs one round-trip (per contested merge, per validated write, per
+backfilled row), so prefer structural resolvers and keep page-side closures
+fast.
 
 ### Open conflicts
 
@@ -1251,9 +1306,13 @@ need structural identity for list items, `AppendOnlyListResolver` with an
   one of two racing resolutions wins, the other throws. Resolving a
   locally-purged record cleans up the stale conflict instead of throwing.
 
-6. **Resolvers are native-only** — a store carrying `collectionResolver` or
-  `fieldOverrides` fails the web open with `UnsupportedSchemaFeatureError`;
-  `editsUnarchive`/`missingRemote` work everywhere.
+6. **Web: executable resolvers need registration** — closure-free built-ins
+  run in the worker as data; a `CustomResolver` (or any closure-bearing
+  resolver) must be registered in `LocalPocketOptions.pageCallbacks` and is
+  executed on the page during the merge. Unregistered executable features
+  fail the web open with `UnsupportedSchemaFeatureError`;
+  `editsUnarchive`/`missingRemote` work everywhere. See
+  "Executable features on web" above.
 
 **Note: Concurrent edits on PocketBase are last-write-wins**
 PocketBase has no conditional (compare-and-swap) writes, so **concurrent
@@ -2001,12 +2060,15 @@ Destructive migrations follow a safe 12-step rebuild process:
    overwrite it and throws `DestructiveMigrationRefusedError` (remove the
    stale backup file to proceed).
 
-5. **Transforms are native-only on web workers.** Functions and closures
-   cannot cross the JavaScript web worker boundary. On web platforms using the
-   dedicated web worker, migration metadata (`addedFields`, `toVersion`,
-   `destructive`) is serialized, but functional `transform` callbacks are not
-   supported in the worker. Use additive migrations without `transform` when
-   targeting web workers.
+5. **Transforms run on the page on web workers.** Closures cannot be
+   serialized to the dedicated web worker: migration metadata
+   (`addedFields`, `toVersion`, `destructive`) crosses as data, but a
+   `transform` (and every other executable hook — validators, document
+   migrations, custom resolvers) executes on the page through the callback
+   channel. Register the hooks in `LocalPocketOptions.pageCallbacks`;
+   unregistered executable features fail the open with
+   `UnsupportedSchemaFeatureError`. Each backfilled row costs one page
+   round-trip, so prefer small stores for transformed migrations on web.
 
 
 ## Tests and checks

@@ -132,10 +132,12 @@ class SchemaRegistrationError extends LocalPocketError {
 }
 
 /// {@template localpocket.unsupported_schema_feature_error}
-/// A schema declared an executable feature that cannot be represented in the
-/// worker-safe manifest (a validator callback, a document-migration
-/// transform, a custom conflict resolver). Thrown BEFORE any DDL, migration,
-/// or worker registration — the schema is never silently reduced.
+/// A schema declared an executable feature the runtime cannot serve (a
+/// validator callback, a document-migration transform, a custom conflict
+/// resolver) without a callback channel that executes it. On the worker
+/// runtime this means the feature was not registered in the open call's
+/// page callbacks. Thrown BEFORE any DDL, migration, or worker
+/// registration — the schema is never silently reduced.
 /// {@endtemplate}
 class UnsupportedSchemaFeatureError extends SchemaRegistrationError {
   /// {@macro localpocket.unsupported_schema_feature_error}
