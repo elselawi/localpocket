@@ -303,6 +303,49 @@ final class FileOpenRequest extends Request<FileOpenResult> {
       };
 }
 
+/// Ensures one attachment's bytes are available locally: a `remote_only`
+/// reference is re-downloaded from the backend; an already-local one
+/// short-circuits without network I/O. The result carries the post-download
+/// reference (state `synced` on success).
+///
+/// {@template localpocket.file_download_request}
+/// {@endtemplate}
+final class FileDownloadRequest extends Request<FileRefResult> {
+  /// {@macro localpocket.file_download_request}
+  const FileDownloadRequest({
+    required this.store,
+    required this.recordId,
+    this.field = attachmentFieldDefault,
+    this.refId,
+  });
+
+  /// Store owning the record.
+  final String store;
+
+  /// Record holding the attachment.
+  final String recordId;
+
+  /// Attachment field name.
+  final String field;
+
+  /// Selects a specific reference; required when the field holds more than
+  /// one. Omitted resolves the field's first reference.
+  final String? refId;
+
+  @override
+  String get tag => 'fileDownload';
+  @override
+  String get resultTag => FileRefResult.tagValue;
+
+  @override
+  Map<String, Object?> toJson() => {
+        'store': store,
+        'recordId': recordId,
+        'field': field,
+        if (refId != null) 'refId': refId,
+      };
+}
+
 /// Grants [bytes] of download credit to an open stream. The kernel pauses the
 /// stream when outstanding (un-credited) bytes reach the credit window.
 ///

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'database_adapter.dart';
+import 'errors.dart';
 
 import 'change_bus.dart';
 import 'ids.dart';
@@ -302,7 +303,6 @@ class LocalPocketFiles {
     int index = 0,
     String? refId,
   }) async {
-    final bs = _requireBlobStore;
     final refs = await list(store: store, recordId: recordId, field: field);
     if (refs.isEmpty) {
       throw StateError('No files found for $store/$recordId/$field');
@@ -313,8 +313,11 @@ class LocalPocketFiles {
         : refs[index];
 
     if (ref.state == 'remote_only') {
-      throw StateError('File is remote_only; download it before opening.');
+      throw RemoteOnlyError(
+          'File is remote_only; call files.download(ref) to fetch its bytes, '
+          'or enable prefetchFiles on the store and sync.');
     }
+    final bs = _requireBlobStore;
 
     await _ex.execute(
       'UPDATE lp_blobs SET last_access = ? WHERE hash = ?',

@@ -354,6 +354,13 @@ class KernelCommandHandler implements CommandHandler {
                 refId: refId,
               )
               .then((_) => const OkResult()),
+        FileDownloadRequest(
+          :final store,
+          :final recordId,
+          :final field,
+          :final refId,
+        ) =>
+          _fileDownload(store, recordId, field, refId),
         FileGcRequest(:final blobGraceMs, :final tmpGraceMs) =>
           context.database.files
               .gc(
@@ -974,6 +981,20 @@ class KernelCommandHandler implements CommandHandler {
     _fileDownloads[id] = download;
     _ensureDownloadSweeper();
     return FileOpenResult(stream: id);
+  }
+
+  /// On-demand re-hydration of one attachment's bytes. Downloads are pulls,
+  /// not single-writer mutations, so they route through the sync engine's
+  /// file lane (the same lane a pull uses) rather than the write queue.
+  Future<Result> _fileDownload(
+    String store,
+    String recordId,
+    String field,
+    String? refId,
+  ) async {
+    final ref = await _requireSyncEngine().fileLane.downloadRef(
+        store: store, recordId: recordId, field: field, refId: refId);
+    return FileRefResult(_fileRefData(ref));
   }
 
   Future<Result> _fileCredit(String stream, int bytes) async {

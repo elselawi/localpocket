@@ -61,6 +61,7 @@ abstract final class ContractCodec {
       FileAbortRequest(session: 'x'),
       FilesListRequest(store: 's', recordId: 'i'),
       FileOpenRequest(store: 's', recordId: 'i'),
+      FileDownloadRequest(store: 's', recordId: 'i'),
       FileCreditRequest(stream: 'x', bytes: 1),
       FileRemoveRequest(store: 's', recordId: 'i'),
       FileGcRequest(),
@@ -260,6 +261,14 @@ abstract final class ContractCodec {
           field: _optWireStringFallback(
               m['field'], 'field', attachmentFieldDefault),
           index: _optWireInt(m['index'], 'index', 0),
+          refId: _optWireString(m['refId'], 'refId'),
+        );
+      case 'fileDownload':
+        return FileDownloadRequest(
+          store: _store(m),
+          recordId: _required(m, 'recordId'),
+          field: _optWireStringFallback(
+              m['field'], 'field', attachmentFieldDefault),
           refId: _optWireString(m['refId'], 'refId'),
         );
       case 'fileCredit':

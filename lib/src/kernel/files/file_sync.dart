@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import '../database_adapter.dart';
+import '../errors.dart';
 
 import '../change_bus.dart';
+import '../errors.dart' show RecordNotFoundException, ValidationException;
+import '../file_service.dart' show FileRef;
 import '../ids.dart';
 import '../local_pocket.dart';
 import 'attachment_field.dart';
@@ -287,6 +290,86 @@ class FileSyncLane {
     });
 
     return hash;
+  }
+
+  /// Re-hydrates one attachment's bytes on demand and returns the
+  /// post-download reference.
+  ///
+  /// A reference whose blob is already present locally short-circuits —
+  /// no network I/O — so repeated downloads are free. Otherwise the bytes
+  /// are fetched from the backend through [downloadFile] and the ref
+  /// settles to `synced`.
+  ///
+  /// Throws [RecordNotFoundException] when the record field holds no
+  /// reference, and [ValidationException] for a `remote_only` ref with no
+  /// recorded remote filename (a ghost that can never be downloaded).
+  /// Backend failures (offline, 404) surface as their own typed sync
+  /// errors.
+  Future<FileRef> downloadRef({
+    required String store,
+    required String recordId,
+    required String field,
+    String? refId,
+  }) async {
+    final refs = await pocket.files.list(
+      store: store,
+      recordId: recordId,
+      field: field,
+    );
+    if (refs.isEmpty) {
+      throw RecordNotFoundException(
+          'No file references for $store/$recordId/$field.');
+    }
+    final FileRef ref = refId != null
+        ? refs.firstWhere(
+            (r) => r.refId == refId,
+            orElse: () => throw RecordNotFoundException(
+                'FileRef $refId not found for $store/$recordId/$field.'),
+          )
+        // No explicit ref: prefer a remote_only one (the hydration target);
+        // otherwise short-circuit on the field's first reference.
+        : refs.firstWhere(
+            (r) => r.state == 'remote_only',
+            orElse: () => refs.first,
+          );
+
+    // Short-circuit: the metadata row says the bytes are local. The
+    // `lp_blobs` row is the same dependency `open` relies on, so a ref that
+    // passes here opens without network. A non-remote_only ref whose blob
+    // row vanished (e.g. a wiped volatile store) is repaired by re-downloading.
+    final blobs = await pocket.db.query(
+      'lp_blobs',
+      where: 'hash = ?',
+      whereArgs: [ref.hash],
+      limit: 1,
+    );
+    if (blobs.isNotEmpty && ref.state != 'remote_only') {
+      return ref;
+    }
+
+    final remoteName = ref.remoteName;
+    if (remoteName == null) {
+      throw ValidationException(
+          'File ${ref.refId} in $store/$recordId/$field has no remote '
+          'filename recorded and cannot be downloaded (state: '
+          '${ref.state}). Only remotely-known attachments are downloadable.');
+    }
+    await downloadFile(
+      store: store,
+      recordId: recordId,
+      refId: ref.refId,
+      remoteName: remoteName,
+    );
+    final updated = await pocket.files.list(
+      store: store,
+      recordId: recordId,
+      field: field,
+    );
+    return updated.firstWhere(
+      (r) => r.refId == ref.refId,
+      orElse: () => throw RecordNotFoundException(
+          'FileRef ${ref.refId} disappeared during download.'),
+    );
   }
 
   /// Observes remote filenames on pull and syncs `lp_file_refs`.

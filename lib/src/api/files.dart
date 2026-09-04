@@ -437,6 +437,29 @@ final class Files<S extends StoreDef<S>> {
     return controller.stream;
   }
 
+  /// Ensures the bytes behind [ref] are available locally, re-downloading
+  /// them from the backend when the reference is `remote_only` (for example
+  /// after `enforceStorageCap` evicted them), and returns the post-download
+  /// reference (state `synced` on success).
+  ///
+  /// When the bytes are already local the call short-circuits: no network
+  /// I/O, no state change. A reference with no recorded remote filename can
+  /// never be downloaded and fails typed ([ValidationException]).
+  ///
+  /// Requires a started sync host: downloads ride the sync engine's file
+  /// lane (the same lane a pull uses). Offline downloads fail with a typed
+  /// [TransientNetworkError] and can be retried after connectivity returns.
+  Future<FileRef> download(FileRef ref) async {
+    _ensureOpen();
+    final result = await _send(FileDownloadRequest(
+      store: name,
+      recordId: ref.recordId,
+      field: ref.field,
+      refId: ref.refId,
+    ));
+    return FileRef.fromData(result.ref!);
+  }
+
   /// Removes [ref] from its record. The reference is parked as
   /// `pending_remove`; the kernel sweeps the blob when the removal settles.
   Future<void> remove(FileRef ref) => _send(FileRemoveRequest(

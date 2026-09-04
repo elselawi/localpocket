@@ -34,6 +34,7 @@ String canonicalErrorType(Object error) {
       SchemaRegistrationError() => 'SchemaRegistrationError',
       SchemaTooNewError() => 'SchemaTooNewError',
       StorageError() => 'StorageError',
+      RemoteOnlyError() => 'RemoteOnlyError',
       RecordNotFoundException() => 'RecordNotFoundException',
       ConflictNotFoundException() => 'ConflictNotFoundException',
       StaleCursorError() => 'StaleCursorError',
