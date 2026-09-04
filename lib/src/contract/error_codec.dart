@@ -109,6 +109,8 @@ Object decodeError(Map<String, Object?> wire) {
       return SchemaTooNewError(m);
     case 'StorageError':
       return StorageError(m);
+    case 'RemoteOnlyError':
+      return RemoteOnlyError(m);
     case 'RecordNotFoundException':
       return RecordNotFoundException(m);
     case 'ConflictNotFoundException':

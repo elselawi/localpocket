@@ -88,6 +88,16 @@ class StorageError extends LocalPocketError {
   StorageError(super.message);
 }
 
+/// {@template localpocket.remote_only_error}
+/// A file attachment's bytes are not local: the reference exists only as
+/// metadata (`remote_only`). Open it with `files.download(ref)` first, or
+/// enable `prefetchFiles` on the store and sync.
+/// {@endtemplate}
+class RemoteOnlyError extends LocalPocketError {
+  /// {@macro localpocket.remote_only_error}
+  RemoteOnlyError(super.message);
+}
+
 /// {@template localpocket.record_not_found_exception}
 /// A record the caller expected to exist does not.
 /// {@endtemplate}

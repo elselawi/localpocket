@@ -340,8 +340,21 @@ final class Files<S extends StoreDef<S>> {
   /// the kernel pushes chunks only as fast as the caller consumes them, and
   /// the stream ends after the terminal chunk event (a failed stream
   /// surfaces the kernel's error).
-  Future<Stream<List<int>>> open(FileRef ref) async {
+  ///
+  /// With `fetch: true`, a `remote_only` reference — for example one evicted
+  /// by `enforceStorageCap` — is re-downloaded through the sync engine's
+  /// file lane before the stream opens, so the call succeeds where plain
+  /// [open] would throw [RemoteOnlyError]. Already-local bytes are never
+  /// re-fetched. Requires a started sync host (fails typed otherwise), and
+  /// a ref with no recorded remote filename stays undownloadable (typed
+  /// error from the download).
+  Future<Stream<List<int>>> open(FileRef ref, {bool fetch = false}) async {
     _ensureOpen();
+    if (fetch) {
+      // Hydrate first so the open below sees local bytes. `download` is a
+      // no-op for refs whose bytes are already local (see its contract).
+      await download(ref);
+    }
     // Chunk events can overtake the open reply (they travel a different
     // channel); buffer events for the not-yet-known stream briefly.
     final buffered = <FileChunkEvent>[];
