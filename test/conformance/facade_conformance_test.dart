@@ -497,8 +497,8 @@ void main() {
         final created = await tasks.put([Tasks.title.set('eventful')]);
         await _waitFor(() => changes.isNotEmpty && storeChanges.isNotEmpty);
         expect(changes.single.storeName, 'tasks');
-        expect(changes.single.ids, [created.id]);
-        expect(storeChanges.single.ids, [created.id]);
+        expect(changes.single.id, created.id);
+        expect(storeChanges.single.id, created.id);
       });
 
       test('typed errors survive the runtime', () async {

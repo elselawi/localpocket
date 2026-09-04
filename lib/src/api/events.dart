@@ -73,10 +73,6 @@ final class ChangeNotification extends _RecordChangeBase {
   /// New logical state after this change (null if hard-purged).
   final Row<dynamic>? newRecord;
 
-  /// The record ids touched by this committed change (one envelope carries
-  /// exactly one record).
-  List<String> get ids => [id];
-
   @override
   String toString() => 'ChangeNotification($storeName, $id, ${action.name}, '
       'changed: $changedFields)';

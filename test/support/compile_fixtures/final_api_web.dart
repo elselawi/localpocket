@@ -175,7 +175,7 @@ Future<void> exerciseAll() async {
 
   final dbSub = db.changes.listen((change) {
     change.storeName;
-    change.ids;
+    change.id;
     change.origin;
     change.action;
     // ignore: unnecessary_statements

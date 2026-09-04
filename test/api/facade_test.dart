@@ -256,7 +256,7 @@ void main() {
       final created = await db.store(Tasks.store).put([
         Tasks.title.set('eventful'),
       ]);
-      await _waitFor(() => events.any((e) => e.ids.contains(created.id)));
+      await _waitFor(() => events.any((e) => e.id == created.id));
       expect(events.last.storeName, 'tasks');
     });
   });

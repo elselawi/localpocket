@@ -53,7 +53,6 @@ void main() {
       expect(changes, hasLength(1));
       expect(changes.first.storeName, 'tasks');
       expect(changes.first.id, id);
-      expect(changes.first.ids, [id]);
       expect(changes.first.origin, ChangeOrigin.local);
       expect(changes.first.action, ChangeAction.create);
       expect(changes.first.newRecord, isA<Row<Tasks>>());
@@ -195,16 +194,6 @@ void main() {
         action: ChangeAction.create,
       );
       expect(change.toString(), 'RecordChange<Tasks>(r1, create, changed: {})');
-    });
-
-    test('the ids convenience lists the single touched record', () {
-      const notification = ChangeNotification(
-        storeName: 'tasks',
-        id: 'r2',
-        origin: ChangeOrigin.resolution,
-        action: ChangeAction.update,
-      );
-      expect(notification.ids, ['r2']);
     });
   });
 

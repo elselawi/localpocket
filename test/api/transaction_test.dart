@@ -76,7 +76,7 @@ void main() {
       expect((await tasks.get(keptId))!(Tasks.title), 'kept');
       await _waitFor(() => events.isNotEmpty);
       expect(
-        events.expand((e) => e.ids),
+        events.map((e) => e.id),
         contains(keptId),
       );
       final titles = [

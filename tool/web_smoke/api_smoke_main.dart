@@ -78,9 +78,7 @@ Future<void> main() async {
     mark('crud');
     final changes = <String>[];
     final changesSub = db.changes.listen((c) {
-      for (final id in c.ids) {
-        changes.add('${c.storeName}:$id');
-      }
+      changes.add('${c.storeName}:${c.id}');
     });
 
     final a =

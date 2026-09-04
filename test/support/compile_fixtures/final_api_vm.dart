@@ -166,13 +166,13 @@ Future<void> exerciseAll() async {
 
   final recordSub = tasks.changes.listen((change) {
     change.storeName;
-    change.ids;
+    change.id;
   });
   await recordSub.cancel();
 
   final dbSub = db.changes.listen((change) {
     change.storeName;
-    change.ids;
+    change.id;
   });
   await dbSub.cancel();
 
