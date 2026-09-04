@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:localpocket/src/kernel/cipher.dart';
+import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/platform/web/crypto.dart';
 import 'package:test/test.dart';
@@ -116,6 +117,22 @@ void main() {
         ),
         throwsA(isA<WebCipherUnsupportedError>()),
       );
+    });
+
+    test('the unsupported-cipher error belongs to the LocalPocketError family',
+        () {
+      // One `catch (LocalPocketError)` must cover the web cipher rejection
+      // like every other caller-facing failure.
+      try {
+        buildFieldCipherEnvelope(
+          cryptoProvider: SingleKeyCryptoProvider(AesGcmFieldCipher(keyBytes)),
+          stores: [encryptedSchema('vault')],
+        );
+        fail('expected WebCipherUnsupportedError');
+      } on LocalPocketError catch (e) {
+        expect(e, isA<ValidationException>());
+        expect(e.toString(), startsWith('WebCipherUnsupportedError:'));
+      }
     });
   });
 

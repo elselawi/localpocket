@@ -38,7 +38,49 @@ void main() {
         'manifestFingerprints': {schema.name: 'deadbeef'},
       }));
       expect(error.details?['type'], 'ProtocolEnvelopeException');
-      expect(error.message, contains('different schemas'));
+      expect(error.message, contains('manifest mismatch'));
+      expect(error.message, contains('Schema manifest mismatch'));
+    });
+
+    test('a mismatch with no policy envelope names the dropped envelope',
+        () async {
+      final h = await WorkerHarness.open();
+      addTearDown(h.close);
+      final schema = CollectionSchema<Object?>(
+        name: 'gizmos',
+        version: 1,
+        fields: [Field.text('name', required: true)],
+        validator: (doc) => const <String>[],
+      );
+
+      final error = await h.sendError(h.req(WireOp.open, args: {
+        'stores': [schema.toJson()],
+        'manifestFingerprints': {
+          'gizmos': SchemaManifest.compile(schema).fingerprint,
+        },
+      }));
+      expect(error.message, contains('No store-policy envelope was received'));
+    });
+
+    test('a re-sent store whose definition drifted names the divergence',
+        () async {
+      final h = await WorkerHarness.open();
+      addTearDown(h.close);
+      final drifted = CollectionSchema<Object?>(
+        name: 'widgets',
+        version: 2,
+        fields: [Field.text('name', required: true)],
+      );
+
+      // The page fingerprint matches the drifted schema, so the first gate
+      // passes; the already-registered definition is what disagrees.
+      final error = await h.sendError(h.req(WireOp.open, args: {
+        'stores': [drifted.toJson()],
+        'manifestFingerprints': {
+          'widgets': SchemaManifest.compile(drifted).fingerprint,
+        },
+      }));
+      expect(error.message, contains('version (page: 2, worker: 1)'));
     });
 
     test('re-sending a store with a different definition is rejected',

@@ -11,6 +11,7 @@ library;
 import 'dart:typed_data';
 
 import '../../kernel/cipher.dart';
+import '../../kernel/errors.dart';
 import '../../kernel/schema.dart';
 
 /// Tag identifying the AES-256-GCM cipher envelope.
@@ -19,18 +20,17 @@ const String cipherEnvelopeTypeAesGcm = 'aes-gcm';
 /// {@template localpocket.web_cipher_unsupported_error}
 /// Thrown when a cipher configuration cannot be honored on the web platform.
 /// A `fieldCipher` / `cryptoProvider` argument that cannot be honored must
-/// never be silently ignored: the web open fails loudly. Web-only typed error
-/// (like the protocol exceptions in `protocol.dart`), not native
-/// [LocalPocketError] hierarchy.
+/// never be silently ignored: the web open fails loudly.
+///
+/// A member of the sealed [LocalPocketError] family (via
+/// [ValidationException] — the configuration is a caller bug, never
+/// retriable), so one `catch (LocalPocketError)` covers it everywhere.
 /// {@endtemplate}
-final class WebCipherUnsupportedError implements Exception {
+final class WebCipherUnsupportedError extends ValidationException {
   /// Creates an error for an unsupported web cipher configuration.
   ///
   /// {@macro localpocket.web_cipher_unsupported_error}
-  const WebCipherUnsupportedError(this.message);
-
-  /// Human-readable explanation of why the web cipher configuration is unsupported.
-  final String message;
+  WebCipherUnsupportedError(super.message);
 
   @override
   String toString() => 'WebCipherUnsupportedError: $message';
@@ -50,14 +50,14 @@ Map<String, Object?>? buildFieldCipherEnvelope({
   Object? cryptoProvider,
 }) {
   if (cryptoProvider != null) {
-    throw const WebCipherUnsupportedError(
+    throw WebCipherUnsupportedError(
         'CryptoProvider is not supported on web: it is an app-supplied '
         'interface with no serializable form. Pass an AesGcmFieldCipher via '
         'fieldCipher instead.');
   }
   if (fieldCipher == null) {
     if (_hasEncryptedFields(stores)) {
-      throw const WebCipherUnsupportedError(
+      throw WebCipherUnsupportedError(
           'Store declares encrypted fields but no fieldCipher was provided. '
           'Open with an AesGcmFieldCipher to use field-level encryption on '
           'web.');

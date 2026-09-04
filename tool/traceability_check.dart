@@ -86,11 +86,6 @@ void main(List<String> args) {
   for (final symbol in exportedSymbols) {
     // Check in tests
     final symbolPattern = RegExp('\\b${RegExp.escape(symbol)}\\b');
-    if (symbol == 'Row') {
-      stderr.writeln('DEBUG root=${root.path} readmeLen=${readmeText.length} '
-          'RowMatches=${symbolPattern.hasMatch(readmeText)} '
-          'firstRowIdx=${readmeText.indexOf('Row')}');
-    }
     if (!symbolPattern.hasMatch(combinedTestText)) {
       missingInTest.add(symbol);
     }

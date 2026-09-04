@@ -44,6 +44,22 @@
   `UnsupportedSchemaFeatureError`; native platforms are unchanged and
   ignore the registry.
 
+### Changed
+
+- **Web: schema manifest mismatches name the divergence.** The worker's
+  generic "compiled different schemas" error now diffs the manifest
+  descriptors of both sides (`hasValidatorCallback`,
+  `hasCollectionResolver`, `fieldOverrides`, `editsUnarchive`,
+  `missingRemote`, `documentMigrationVersions`, `hasTransform`,
+  `transformVersions`, `keepUnsyncedArchives`, version) and lists exactly
+  what disagrees — plus an explicit note when no store-policy envelope was
+  received (the stale-worker-asset signature).
+- **`WebCipherUnsupportedError` is now a typed kernel error.** It extends
+  `ValidationException` in the sealed `LocalPocketError` family, so one
+  `catch (LocalPocketError)` covers it like every other caller-facing
+  failure. The class name, message, and `toString()` are unchanged;
+  existing `is WebCipherUnsupportedError` handlers keep working.
+
 ## 0.2.0
 
 - major refactors, prepearing for release
