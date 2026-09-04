@@ -731,7 +731,8 @@ either all of them or none.
    `integer`, `real` and `date` descriptors; anything else won't compile.
    They return `null` when no rows match — there is nothing to add up.
 
-7. **`distinct` quietly caps at 1000 values** unless you pass `limit:` yourself. `countDistinct` has no cap — it counts in the database.
+7. **`distinct` quietly caps at 1000 values** unless you pass `limit:` yourself.
+   `countDistinct` has no cap — it counts in the database.
 
 8. **A projected row only carries what you selected.** After `select:`,
    reading any other field throws — including `row.id` — so list every field
