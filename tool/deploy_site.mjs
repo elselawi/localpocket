@@ -6,7 +6,7 @@
 //   - index.html            (docs page; fetches README.md at runtime)
 //   - benchmark.html        (benchmark page; fetches a baseline JSON)
 //   - README.md             (loaded by index.html)
-//   - logo.svg              (project mark used by the pages and README)
+//   - graphics/             (logo.svg project mark + merge.png README image)
 //   - icon.jpg              (favicon)
 //   - benchmark/baseline/*.json (baseline data for benchmark.html)
 import { cpSync, mkdirSync, readdirSync, rmSync } from "node:fs";
@@ -21,9 +21,12 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "benchmark", "baseline"), { recursive: true });
 
 // Top-level pages.
-for (const file of ["index.html", "benchmark.html", "README.md", "logo.svg", "icon.jpg"]) {
+for (const file of ["index.html", "benchmark.html", "README.md", "icon.jpg"]) {
     cpSync(join(root, file), join(out, file));
 }
+
+// Graphics: the project mark and the README's decision-flow image.
+cpSync(join(root, "graphics"), join(out, "graphics"), { recursive: true });
 
 // Benchmark baselines (all *.json under benchmark/baseline/).
 const baselineDir = join(root, "benchmark", "baseline");

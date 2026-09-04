@@ -1,7 +1,7 @@
 # LocalPocket
 
 <p align="center">
-  <img src="logo.svg" alt="LocalPocket" width="180">
+  <img src="graphics/logo.svg" alt="LocalPocket" width="180">
 </p>
 
 - **A database**: SQLite FFI with an in-memory LRU point-read cache.
@@ -1079,24 +1079,27 @@ pushed / dead-lettered / discarded counts).
 ## Conflict Resolution
 
 LocalPocket uses a deterministic **3-way merge engine**: each edit resolves
-against the shared pre-edit base, `base → (local, remote)`. Precedence:
-field-level overrides on the schema's `ConflictPolicy`, then a
-store-level resolver, then the default (`RemoteWinsResolver`, which
-preserves non-overlapping edits from both sides automatically). Built-in
-resolvers cover the common shapes — `LocalWinsResolver`, `CounterResolver`,
-`SetUnionWithDeletionWinsResolver`, `AppendOnlyListResolver`,
-`AppendOnlyLinesResolver` — and `CustomResolver` handles anything else.
+against the shared pre-edit base, `base → (local, remote)`. A store declares
+its policy on the schema (`StoreDef.conflictPolicy`): per-field resolvers
+(`fieldOverrides`), a whole-record resolver (`collectionResolver`), or
+neither. Anything undeclared falls through to the default
+(`RemoteWinsResolver`). Built-ins cover the common shapes; `CustomResolver`
+handles anything else.
 
-Conflicts that need a human are held in `store.conflicts` (a
-`StoreConflicts<S>`: `listOpen`, `watch`, `resolve`, `acceptLocal`,
-`acceptRemote`).
+Conflicts that need a human are held in `store.conflicts`.
 
-### Setting resolution policies
+### How merging decides
 
-Policies are declared on the store, not set at runtime: override
-`StoreDef.conflictPolicy` once and the engine applies it to every merge.
-This is where automated resolution is configured — most apps never open
-a conflict by hand.
+Every synced record carries three versions: **base** (last state you and the
+server agreed on), **local** (your edits), **remote** (the server's current
+version). A field both sides changed from base is *contested*.
+
+![Conflict-resolution decision flow](graphics/merge.png)
+
+The two levels never fire together: when a `collectionResolver` owns a
+contested record, declared `fieldOverrides` are dead configuration.
+
+### Declaring resolution policies
 
 ```dart
 final class Posts extends StoreDef<Posts> {
@@ -1116,9 +1119,11 @@ final class Posts extends StoreDef<Posts> {
         // Whole-record resolver: runs only when BOTH sides changed the
         // record; returning null declines — conservative merge plus
         // review escalation.
-        collectionResolver: CustomResolver(pick),
+        collectionResolver: CustomResolver(customResolver),
         // Field-level overrides (top-level or dotted paths like
-        // 'meta.name'; the most specific entry wins):
+        // 'meta.name'; the most specific entry wins). Shown for the API
+        // shape only: with a collectionResolver declared they never fire
+        // on contested records (see "How merging decides" above).
         fieldOverrides: {
           'views': CounterResolver(max: 1000000), // base + Δlocal + Δremote
           'tags': SetUnionWithDeletionWinsResolver(), // union; deletions win
@@ -1126,14 +1131,14 @@ final class Posts extends StoreDef<Posts> {
         },
         // Editing a locally-archived record unarchives it.
         editsUnarchive: true,
-        // A push whose target was deleted remotely:
+        // A push (edit) whose target was deleted remotely:
         // conflict (default; never loses data) | recreate | discardLocal.
-        missingRemote: MissingRemotePolicy.conflict,
+        missingRemote: MissingRemotePolicy.recreate,
       );
 
   // A custom resolver sees base, local, remote, and both dirty sets,
   // and returns the merged document — or null to escalate for review.
-  static MergeResult? pick(MergeContext ctx) {
+  static MergeResult? customResolver(MergeContext ctx) {
     if (ctx.dirtyLocal.contains('title') &&
         ctx.dirtyRemote.contains('title')) {
       return MergeResult(merged: {
@@ -1146,15 +1151,33 @@ final class Posts extends StoreDef<Posts> {
 }
 ```
 
-`Tasks` below declares no policy: that IS the default configuration —
-three-way merge, overlapping fields take the remote value, and delete
-races escalate to `store.conflicts`.
+> Note: **if a store declares no policy**, that IS the default configuration, overlapping fields take the remote value, and delete races escalate to `store.conflicts`.
 
-### Watching and resolving open conflicts
+#### Available policies
+
+Every resolver below is deterministic — it always produces a value and never
+escalates to a human. The only resolver that can is `CustomResolver`, by
+returning `null` or `needsReview`.
+
+| Resolver                      | Field type        | What it decides                                                                                                                                    |
+| ----------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LocalWinsResolver`           | any               | Your edit wins every contested field — the remote version is discarded (the remote device converges on its next pull). |
+| `RemoteWinsResolver`          | any               | The server's version wins every contested field. This is the package default when no policy is declared.                                             |
+| `CounterResolver`             | numbers           | Adds up both sides' *changes*, not their values: `base + Δlocal + Δremote` (e.g. base 10, +5 local, +2 remote → 17). Optional `min`/`max` clamp the result. |
+| `SetUnionWithDeletionWinsResolver` | list/set    | Unions both sides' additions and removes anything either side deleted. A deletion beats a re-add of the same element (no tombstones — same value = same element). |
+| `AppendOnlyListResolver`      | lists             | Keeps base + local + remote list items, dropping duplicates. Content-identical items collapse into one unless you pass an `identity:` key (e.g. an event id) to keep look-alikes distinct. |
+| `AppendOnlyLinesResolver`     | text              | For newline text: merges the union of lines, trimming each, skipping blank lines, and dropping duplicate lines. Not a generic text append — it normalizes by design. |
+| `CustomResolver`              | any               | Your function. Whole-record use: sees base/local/remote + both dirty sets, returns the complete merged map (or `null`/`needsReview` to escalate for a human). Field use: sees one field's three values; a decline takes remote and flags the record for review. |
+
+A note on the union resolver: elements compare by ordinary Dart set
+equality — numbers match by value (`2` == `2.0`), and maps/lists match by
+identity only, so two equal-content maps count as different elements. If you
+need structural identity for list items, `AppendOnlyListResolver` with an
+`identity` function is the closer fit.
+
+### Open conflicts
 
 ```dart
-  final tasks = db.store(Tasks.store);
-
   // Stream the open conflicts as they appear — the current list arrives
   // with the first snapshot, then re-emits on every add and resolution.
   final sub = tasks.conflicts.watch().listen((open) {
@@ -1169,6 +1192,25 @@ races escalate to `store.conflicts`.
     }
   });
 
+  // don't forget to cancel
+  await sub.cancel();
+
+  // Or enumerate the backlog on demand instead of streaming.
+  // open is a List<Conflict<Tasks>> sorted by detection time (ascending).
+  final open = await tasks.conflicts.listOpen();
+  print('there are ${open.length} open conflicts');
+
+  // get the conflict for a specific record
+  final conflict = await tasks.conflicts.get("task00000000001");
+  conflict?.base; // Row<Task>
+  conflict?.local; // Row<Task>
+  conflict?.remote; // Row<Task>
+  conflict?.detectedAt; // detection time
+  conflict?.dirtyLocal; // Set<String> of field names
+  conflict?.dirtyRemote; // Set<String> of field names
+  conflict?.resolved; // the stored resolution once resolved (null while open)
+  conflict?.remoteDeleted; // Whether the remote side is a deletion tombstone
+
   // Resolve one by id: accept a side wholesale ...
   await tasks.conflicts.acceptLocal('task00000000001');
   await tasks.conflicts.acceptRemote('task00000000002');
@@ -1179,57 +1221,33 @@ races escalate to `store.conflicts`.
     Tasks.title.set('Chosen by the user'),
     Tasks.done.set(true),
   ]);
-
-  // Or enumerate the backlog on demand instead of streaming.
-  final open = await tasks.conflicts.listOpen();
-  print('${open.length} open conflict(s)');
-
-  await sub.cancel();
 ```
 
 **Gotchas:**
 
-1. **An open conflict blocks edits to that record.** While a conflict is
-   open, `put`/`upsert`/`patch` on the record throw
-   `ConflictBlockedError` — resolve it first. Reads keep working: the
-   record still appears in queries, watches, and search with its local
-   state.
+1. **An open conflict blocks edits** — `put`/`upsert`/`patch` on the record
+  throw `ConflictBlockedError`. Reads still work.
 
-2. **The default policy never escalates a two-sided merge.** With no
-   resolvers configured, both sides' non-overlapping edits merge
-   automatically and overlapping fields take the remote value. An open
-   conflict therefore means either a configured resolver declined
-   (returned `null` or `needsReview`) — or a remote deletion raced a
-   local edit, which escalates by default (`missingRemote: conflict`).
+2. **The default policy never escalates a two-sided merge** — an open
+  conflict means a resolver declined, or a remote deletion raced a local
+  edit (`missingRemote` defaults to `conflict`).
 
-3. **A store-level resolver only sees genuine conflicts.** The collection
-   resolver runs only when BOTH sides changed the record; one-sided edits
-   merge by the classic three-way rules without consulting it. An
-   always-escalate resolver (returning `null`) never fires on one-sided
-   edits — by design, so routine convergence can't loop into new
-   conflicts.
+3. **Resolvers only see genuine conflicts** — a resolver never fires on a
+  one-sided edit, so routine convergence can't loop into new conflicts.
 
-4. **`acceptRemote` on a deletion conflict purges the local record.** The
-   remote side is a tombstone (`conflict.remoteDeleted` is `true`);
-   accepting mirrors the deletion. To keep the record, `acceptLocal` —
-   the resolution pushes as a create and recreates it remotely.
+4. **`acceptRemote` on a deletion conflict purges the local record**;
+  `acceptLocal` recreates it remotely instead.
 
-5. **Resolution methods throw when the conflict is gone.** `resolve`
-  throws `ConflictNotFoundException`; `acceptLocal`/`acceptRemote` go
-  straight to the engine and surface a `StateError`. Two racing
-  resolutions: one wins, the other throws. Resolving a locally-purged
-  record is not an error: the stale conflict (and its dangling sync
-  rows) is cleaned up.
+5. **Resolving a gone conflict throws** — `resolve` throws
+  `ConflictNotFoundException`, `acceptLocal`/`acceptRemote` a `StateError`;
+  one of two racing resolutions wins, the other throws. Resolving a
+  locally-purged record cleans up the stale conflict instead of throwing.
 
-6. **Resolvers are native-only vocabulary.** A store carrying
-   `collectionResolver` or `fieldOverrides` cannot cross the web worker —
-   the open fails typed with `UnsupportedSchemaFeatureError` before any
-   DDL. Declare executable resolvers on native targets only;
-   `editsUnarchive` and `missingRemote` policies ride the manifest on
-   every platform.
+6. **Resolvers are native-only** — a store carrying `collectionResolver` or
+  `fieldOverrides` fails the web open with `UnsupportedSchemaFeatureError`;
+  `editsUnarchive`/`missingRemote` work everywhere.
 
 **Note: Concurrent edits on PocketBase are last-write-wins**
-
 PocketBase has no conditional (compare-and-swap) writes, so **concurrent
 edits to the same record from two clients resolve last-write-wins on the
 server**: whichever write arrives last wins, silently overwriting the
