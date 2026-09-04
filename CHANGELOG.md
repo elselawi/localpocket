@@ -1,5 +1,37 @@
 ## Unreleased
 
+- **On-demand file re-hydration: `Store.files.download(ref)`.** The storage
+  cap (`enforceStorageCap`) demotes evicted attachments to `remote_only`, but
+  until now the only public way to get their bytes back was a full-store
+  prefetch sync. New contract request `fileDownload` rides the sync engine's
+  file lane: a `remote_only` ref is fetched from the backend and settles
+  `synced`; an already-local ref short-circuits with no network I/O. Requires
+  a started sync host (fails typed `ValidationException` without one). A ref
+  with no recorded remote filename can never be downloaded and fails typed
+  `ValidationException`; a field with no refs fails typed
+  `RecordNotFoundException`. `files.open` on a `remote_only` ref now throws
+  the new typed `RemoteOnlyError` (exported; previously a raw `StateError`)
+  whose message names `download` as the affordance. The shipped web worker
+  embeds the new contract request.
+
+- **Whole-database encryption on native, configurable from the public
+  API.** `LocalPocketOptions` gains `nativeDatabaseFactory` (supply a
+  SQLCipher/SQLite3MultipleCiphers-backed engine the application builds) and
+  `databaseEncryption` (the `PRAGMA key` config). LocalPocket applies the
+  key itself and probes the engine's cipher codec (`cipher_version` /
+  `cipher`) before anything else touches the file; every silent-failure path
+  is closed — a config without an engine and a plain engine under a key
+  config both fail the open with typed, actionable errors. Web is
+  deliberately excluded: engine code cannot cross the worker boundary, and
+  sqlite3_web's OPFS VFS does not support cipher engines (verified against
+  a pinned `sqlite3mc.wasm`), so both `nativeDatabaseFactory` and
+  `databaseEncryption` fail the web open typed — web data at rest is
+  protected with field-level AES-256-GCM encryption. The kernel seam
+  (`KernelDatabase.open(database:, encrypted:)`) was always there; this
+  change makes the native capability reachable and enforced from the public
+  facade. `Database`/`DirectSqliteDatabase` are now exported from the public
+  barrel so applications can implement the factory.
+
 - **Conflict resolution policies are publicly configurable.** The conflict
   vocabulary is exported from the one import — `ConflictPolicy`,
   `MissingRemotePolicy`, `ConflictResolver`, `MergeContext`, `MergeResult`,
@@ -80,7 +112,6 @@
 
 - **Correctness and lifecycle hardening across the engine and web layers.**
   Highlights:
-  - **Declared `unique: true` indexes now actually enforce uniqueness.**
     The `id` tie-breaker is no longer appended to UNIQUE indexes, so an
     `IndexSpec(['email'], unique: true)` rejects duplicates instead of never
     firing (use a declared unique index or `uniqueWhenActive` for
@@ -100,8 +131,9 @@
     and a watch whose refresh keeps failing cancels itself instead of
     leaking the kernel subscription.
   - **Web open rejects what it cannot honor**: a non-null `now` clock, a
-    caller-provided `blobStore`, and any sync-backend factory instance other
-    than the worker's own canonical one now fail the open with a typed error
+    non-standard worker protocol version (older or newer than the current
+    engine's), or a worker source that does not match the worker's own
+    canonical one now fail the open with a typed error
     (previously they were silently ignored on the web path).
   - **Web blob storage is bounded and self-verifying**: one blob is capped
     mid-stream, writes are verified after landing (a partial write is
