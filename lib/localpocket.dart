@@ -43,6 +43,12 @@ export 'src/kernel/sync/status.dart'
 // platform store here.
 export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
 
+// The Database adapter type `LocalPocketOptions.nativeDatabaseFactory`
+// builds: apps supplying a whole-file-encrypted engine (SQLCipher-style)
+// implement it by wrapping their cipher-enabled `package:sqlite3`
+// connection. The kernel internals behind the adapter stay internal.
+export 'src/kernel/database_adapter.dart' show Database, DirectSqliteDatabase;
+
 // The schema helper types store declarations name. The raw schema types
 // (CollectionSchema, Field, ...) are kernel-internal and not exported.
 export 'src/kernel/schema.dart'
