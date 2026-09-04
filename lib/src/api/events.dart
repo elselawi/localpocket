@@ -13,7 +13,7 @@ import '../schema/store_def.dart';
 
 export '../kernel/change_bus.dart' show ChangeAction, ChangeOrigin;
 
-abstract class _RecordChangeBase {
+abstract base class _RecordChangeBase {
   const _RecordChangeBase({
     required this.origin,
     required this.action,
