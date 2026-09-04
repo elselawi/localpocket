@@ -1122,8 +1122,9 @@ final class Posts extends StoreDef<Posts> {
   List<FieldDef<Posts, Object?>> get fields => [title, views, tags];
 
   // ---- automated resolution policy ----
-  // The exact resolver instance the web registry hands back (see
-  // "Executable features on web" below) — matched by identity.
+  // The exact resolver instance the page serves on web: auto-collected as
+  // 'posts:collectionResolver', or resolvable under your own id via an
+  // explicit LocalPocketOptions.pageCallbacks entry.
   static final reviewResolver = CustomResolver(customResolver);
 
   @override
@@ -1206,17 +1207,23 @@ native:
   `transform`s are invoked on the page over a callback channel: the worker
   serializes the merge context (or record), the page executes your closure,
   and the result rides back into the merge.
-- **Register what you declare.** Every executable feature a store declares
-  must be registered per store in `LocalPocketOptions.pageCallbacks` —
-  resolver instances are matched by identity, validator/migration closures
-  must cover exactly the schema's declarations. A mismatch fails the open
-  with a typed error; a store whose executable features have no callback
-  channel fails with `UnsupportedSchemaFeatureError`. Native platforms
-  ignore the registry (hooks already run in-process).
+- **Registration is automatic.** You do not have to register anything:
+  every executable feature a store declares is auto-collected at open time
+  under a deterministic id (`'<store>:collectionResolver'`,
+  `'<store>:field:<dotted.path>'`, `'<store>:validator'`,
+  `'<store>:documentMigration:<version>'`, `'<store>:transform:<toVersion>'`)
+  and served from the page. An explicit `LocalPocketOptions.pageCallbacks`
+  registry is merged over the auto-collected one — explicit entries win on
+  id conflict, auto-collected entries fill the gaps — and the coverage
+  checks still apply: an explicit registration the schema never uses fails
+  the open with a typed error, and a store whose executable features have
+  no callback channel fails with `UnsupportedSchemaFeatureError`. Native
+  platforms ignore the registry (hooks already run in-process).
 
 ```dart
-  // The web open: executable resolvers resolve to the page-registered
-  // instances (matched by identity against the store's policy).
+  // The web open: registration is optional — the executable resolver below
+  // would also be auto-collected as 'posts:collectionResolver'. An explicit
+  // entry pins your own id (and wins over the auto id on conflict).
   final webDb = await LocalPocket.open(
     LocalPocketOptions(
       path: 'posts.db',
@@ -1306,13 +1313,14 @@ fast.
   one of two racing resolutions wins, the other throws. Resolving a
   locally-purged record cleans up the stale conflict instead of throwing.
 
-6. **Web: executable resolvers need registration** — closure-free built-ins
+6. **Web: executable resolvers resolve on the page** — closure-free built-ins
   run in the worker as data; a `CustomResolver` (or any closure-bearing
-  resolver) must be registered in `LocalPocketOptions.pageCallbacks` and is
-  executed on the page during the merge. Unregistered executable features
-  fail the web open with `UnsupportedSchemaFeatureError`;
-  `editsUnarchive`/`missingRemote` work everywhere. See
-  "Executable features on web" above.
+  resolver) is executed on the page during the merge, auto-collected under
+  a deterministic id (or resolved to your explicit
+  `LocalPocketOptions.pageCallbacks` entry). A store whose executable
+  features have no callback channel fails the web open with
+  `UnsupportedSchemaFeatureError`; `editsUnarchive`/`missingRemote` work
+  everywhere. See "Executable features on web" above.
 
 **Note: Concurrent edits on PocketBase are last-write-wins**
 PocketBase has no conditional (compare-and-swap) writes, so **concurrent
@@ -2065,10 +2073,10 @@ Destructive migrations follow a safe 12-step rebuild process:
    (`addedFields`, `toVersion`, `destructive`) crosses as data, but a
    `transform` (and every other executable hook — validators, document
    migrations, custom resolvers) executes on the page through the callback
-   channel. Register the hooks in `LocalPocketOptions.pageCallbacks`;
-   unregistered executable features fail the open with
-   `UnsupportedSchemaFeatureError`. Each backfilled row costs one page
-   round-trip, so prefer small stores for transformed migrations on web.
+   channel, auto-collected under a deterministic id (an explicit
+   `LocalPocketOptions.pageCallbacks` entry wins over the auto id). Each
+   backfilled row costs one page round-trip, so prefer small stores for
+   transformed migrations on web.
 
 
 ## Tests and checks

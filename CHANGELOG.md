@@ -21,6 +21,19 @@
 
 ### Added
 
+- **Web: page callbacks auto-register.** Executable schema features
+  (custom conflict resolvers, store validators, document migrations, and
+  migration backfill transforms) no longer require an explicit
+  `LocalPocketOptions.pageCallbacks` registry: the web open auto-collects
+  every executable member each schema declares and serves it under a
+  deterministic id (`'<store>:collectionResolver'`,
+  `'<store>:field:<dotted.path>'`, `'<store>:validator'`,
+  `'<store>:documentMigration:<version>'`, `'<store>:transform:<toVersion>'`).
+  An explicit registry merges over the auto-collected one — explicit
+  entries win on id conflict, auto-collected entries fill the gaps — and
+  all existing strictness (coverage equality, unused-registry rejection,
+  identity matching) still applies to the merged result. Existing code
+  that registers everything explicitly behaves exactly as before.
 - **Executable schema features on web.** Custom conflict resolvers, store
   validators, document migrations, and migration backfill transforms now
   run on the worker runtime: closure-free built-in resolvers cross as data

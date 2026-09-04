@@ -10,7 +10,8 @@ import 'package:localpocket/src/kernel/page_callbacks.dart'
         StorePageCallbacks,
         ProxiedResolver,
         callbackChannelValidator,
-        encodeStorePolicies;
+        encodeStorePolicies,
+        resolvePageCallbacks;
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/kernel/schema_manifest.dart';
 import 'package:localpocket/src/kernel/sync/merge.dart';
@@ -1188,6 +1189,45 @@ void main() {
       );
       expect(err.code, WireErrorCode.localpocket);
       expect(err.message, contains('manifest mismatch'));
+    });
+
+    test('auto-registration serves executable features with no registry',
+        () async {
+      List<String> validator(Map<String, Object?> record) =>
+          record['name'] == 'blocked'
+              ? <String>['name is blocked on the page']
+              : <String>[];
+      const resolver = CustomResolver(_reviewResolver);
+      final schema = CollectionSchema<Object?>(
+        name: 'gizmos',
+        version: 1,
+        fields: [Field.text('name', required: true)],
+        conflictPolicy: ConflictPolicy(collectionResolver: resolver),
+        validator: validator,
+      );
+      // No explicit registry: the open auto-collects every executable
+      // member under deterministic ids and the worker calls them back.
+      final merged = resolvePageCallbacks([schema], null);
+      expect(merged['gizmos']!.resolvers.keys.toList(),
+          ['gizmos:collectionResolver']);
+      final auto = await WorkerHarness.open(
+        stores: [schema],
+        storePolicies: encodeStorePolicies([schema], merged),
+        pageCallbacks: merged,
+      );
+      addTearDown(auto.close);
+
+      final attached = auto.pocket.requireTable('gizmos').schema;
+      expect(attached.conflictPolicy.collectionResolver, isA<ProxiedResolver>());
+      expect(attached.validator, isNotNull);
+      await expectLater(
+        auto.runtime.send(contract.MutateRequest(
+          store: 'gizmos',
+          mutation: contract.MutationPut({'name': 'blocked'}),
+        )),
+        throwsA(isA<ValidationException>().having((e) => e.message, 'message',
+            contains('name is blocked on the page'))),
+      );
     });
   });
 

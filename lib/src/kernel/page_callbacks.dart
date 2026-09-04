@@ -244,6 +244,117 @@ MergeResult decodeMergeResult(Object? raw, {required String where}) {
   );
 }
 
+/// Deterministic auto-registration id for a store's collection resolver.
+String autoResolverId(String store) => '$store:collectionResolver';
+
+/// Deterministic auto-registration id for a store's `fieldOverrides` entry
+/// at [field] (a dotted path).
+String autoFieldResolverId(String store, String field) =>
+    '$store:field:$field';
+
+/// Deterministic auto-registration id for a store's validator.
+String autoValidatorId(String store) => '$store:validator';
+
+/// Deterministic auto-registration id for the document-format migration to
+/// [version].
+String autoDocumentMigrationId(String store, int version) =>
+    '$store:documentMigration:$version';
+
+/// Deterministic auto-registration id for the backfill transform targeting
+/// store version [toVersion].
+String autoTransformId(String store, int toVersion) =>
+    '$store:transform:$toVersion';
+
+/// Auto-collects every executable member of [schema] into a
+/// [StorePageCallbacks] registry.
+///
+/// A member is executable when it is code the worker cannot reconstruct:
+/// conflict resolvers that are not structurally representable, the store
+/// validator, every document-format migration, and every store migration
+/// that declares a backfill `transform`. Each entry lands under its
+/// deterministic auto id (see [autoResolverId], [autoFieldResolverId],
+/// [autoValidatorId], [autoDocumentMigrationId], [autoTransformId]), so a
+/// web open with no explicit registry still covers exactly what the schema
+/// declares.
+StorePageCallbacks autoCollectStoreCallbacks(CollectionSchema<Object?> schema) {
+  final store = schema.name;
+  final policy = schema.conflictPolicy;
+  final resolvers = <String, ConflictResolver>{};
+  final collection = policy.collectionResolver;
+  if (collection != null && _structuralDescriptor(collection) == null) {
+    resolvers[autoResolverId(store)] = collection;
+  }
+  for (final e in policy.fieldOverrides.entries) {
+    if (_structuralDescriptor(e.value) == null) {
+      resolvers[autoFieldResolverId(store, e.key)] = e.value;
+    }
+  }
+  return StorePageCallbacks(
+    resolvers: resolvers,
+    validator: schema.validator,
+    documentMigrations: Map.of(schema.documentMigrations),
+    migrationTransforms: {
+      for (final m in schema.migrations)
+        if (m.transform != null) m.toVersion: m.transform!,
+    },
+  );
+}
+
+/// Builds the page callback registry a web open serves: every store's
+/// executable members are auto-collected under their deterministic ids, and
+/// an explicit [explicit] registry is merged over the result.
+///
+/// Explicit entries win on id conflict; auto-collected entries fill the
+/// gaps — including members the explicit registry omitted. An auto entry is
+/// skipped when its resolver instance is already registered under an
+/// explicit id, so the coverage/unused-registry checks in
+/// [encodeStorePolicies] run over the merged result unchanged. Explicit
+/// stores that are not part of [schemas] fail the open with a typed error,
+/// exactly as before auto-registration existed.
+Map<String, StorePageCallbacks> resolvePageCallbacks(
+  List<CollectionSchema<Object?>> schemas,
+  Map<String, StorePageCallbacks>? explicit,
+) {
+  if (explicit != null) {
+    for (final name in explicit.keys) {
+      final declared = schemas.any((s) => s.name == name);
+      if (!declared) {
+        throw ValidationException(
+            'pageCallbacks declares store "$name", which is not part of this '
+            'open call.');
+      }
+    }
+  }
+  return {
+    for (final schema in schemas)
+      schema.name: _mergeStoreCallbacks(schema, explicit?[schema.name]),
+  };
+}
+
+StorePageCallbacks _mergeStoreCallbacks(
+    CollectionSchema<Object?> schema, StorePageCallbacks? registered) {
+  final auto = autoCollectStoreCallbacks(schema);
+  if (registered == null) return auto;
+  final resolvers = Map.of(registered.resolvers);
+  for (final e in auto.resolvers.entries) {
+    final alreadyRegistered =
+        resolvers.values.any((r) => identical(r, e.value));
+    if (!alreadyRegistered) resolvers[e.key] = e.value;
+  }
+  return StorePageCallbacks(
+    resolvers: resolvers,
+    validator: registered.validator ?? auto.validator,
+    documentMigrations: {
+      ...auto.documentMigrations,
+      ...registered.documentMigrations,
+    },
+    migrationTransforms: {
+      ...auto.migrationTransforms,
+      ...registered.migrationTransforms,
+    },
+  );
+}
+
 /// Encodes every store's executable-feature envelope for the wire.
 ///
 /// Returns null when no store declares anything the worker cannot parse

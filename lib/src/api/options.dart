@@ -126,9 +126,16 @@ final class LocalPocketOptions {
   /// transforms are code and cannot be serialized to the database worker;
   /// structurally-representable resolvers (the closure-free built-ins) run
   /// in the worker as-is, everything else is invoked on the page through
-  /// the callback channel. Each entry must cover exactly what the store's
-  /// definition declares — a mismatch fails the open with a typed error.
-  /// Natively this map is unused: hooks execute in-process.
+  /// the callback channel.
+  ///
+  /// Optional: every executable member not registered here is
+  /// auto-collected under a deterministic id (`'<store>:collectionResolver'`,
+  /// `'<store>:field:<path>'`, `'<store>:validator'`,
+  /// `'<store>:documentMigration:<version>'`, `'<store>:transform:<toVersion>'`)
+  /// and served automatically; explicit entries win on id conflict. Each
+  /// entry must still cover exactly what the store's definition declares —
+  /// a mismatch fails the open with a typed error. Natively this map is
+  /// unused: hooks execute in-process.
   final Map<String, StorePageCallbacks>? pageCallbacks;
 }
 

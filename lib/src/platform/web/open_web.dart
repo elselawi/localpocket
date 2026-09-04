@@ -9,7 +9,7 @@ import '../../adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
 import '../../contract/contract.dart';
 import '../../kernel/schema_manifest.dart';
-import '../../kernel/page_callbacks.dart' show encodeStorePolicies;
+import '../../kernel/page_callbacks.dart' show encodeStorePolicies, resolvePageCallbacks;
 import '../../runtime/remote_runtime_client.dart';
 import 'crypto.dart';
 import 'page/assets.dart';
@@ -84,15 +84,17 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   ];
 
   // Executable schema features cross as an envelope of descriptors plus
-  // page-registered callback ids; coverage against `pageCallbacks` is
-  // validated here so a missing registration fails the open typed instead
-  // of surfacing at first merge/write.
-  final storePolicies = encodeStorePolicies(schemas, options.pageCallbacks);
+  // page-registered callback ids. Every store's executable members are
+  // auto-collected under deterministic ids; an explicit `pageCallbacks`
+  // registry merges over the result (explicit wins on id conflict). Coverage
+  // is validated against the merged registry so a mismatch fails the open
+  // typed instead of surfacing at first merge/write.
+  final mergedCallbacks = resolvePageCallbacks(schemas, options.pageCallbacks);
+  final storePolicies = encodeStorePolicies(schemas, mergedCallbacks);
 
   // Executes worker callback requests (conflict resolvers, validators,
-  // migration hooks) against the page-registered callbacks.
-  final callbackServer =
-      PageCallbackServer(stores: options.pageCallbacks ?? const {});
+  // migration hooks) against the merged page-registered callbacks.
+  final callbackServer = PageCallbackServer(stores: mergedCallbacks);
 
   // The cipher is serialized into the open options so the worker reconstructs
   // an AesGcmFieldCipher with the same key (crosses postMessage into the

@@ -236,6 +236,161 @@ void main() {
     });
   });
 
+  group('resolvePageCallbacks (auto-registration)', () {
+    test('a plain schema auto-collects nothing executable', () {
+      final merged = resolvePageCallbacks([_schema()], null);
+      final callbacks = merged['widgets']!;
+      expect(callbacks.resolvers, isEmpty);
+      expect(callbacks.validator, isNull);
+      expect(callbacks.documentMigrations, isEmpty);
+      expect(callbacks.migrationTransforms, isEmpty);
+    });
+
+    test('executable members are collected under deterministic ids', () {
+      const resolver = CustomResolver(_decline);
+      const fieldResolver = CustomResolver(_decline);
+      final schema = _schema(
+        policy: ConflictPolicy(
+          collectionResolver: resolver,
+          fieldOverrides: {'qty': fieldResolver},
+        ),
+        validator: _emptyValidator,
+        documentMigrations: {2: _addVersion},
+        migrations: [
+          StoreMigration(toVersion: 3, transform: (row) => row),
+        ],
+      );
+      final callbacks = resolvePageCallbacks([schema], null)['widgets']!;
+      expect(callbacks.resolvers.keys.toList(),
+          ['widgets:collectionResolver', 'widgets:field:qty']);
+      expect(identical(callbacks.resolvers['widgets:collectionResolver'],
+          resolver), isTrue);
+      expect(
+          identical(
+              callbacks.resolvers['widgets:field:qty'], fieldResolver),
+          isTrue);
+      expect(identical(callbacks.validator, _emptyValidator), isTrue);
+      expect(callbacks.documentMigrations.keys, [2]);
+      expect(callbacks.migrationTransforms.keys, [3]);
+    });
+
+    test('structural resolvers are never collected', () {
+      final schema = _schema(
+        policy: ConflictPolicy(
+          collectionResolver: const LocalWinsResolver(),
+          fieldOverrides: {'qty': const CounterResolver(min: 0)},
+        ),
+      );
+      final callbacks = resolvePageCallbacks([schema], null)['widgets']!;
+      expect(callbacks.resolvers, isEmpty);
+    });
+
+    test('an auto-collected registry covers the schema on the wire', () {
+      const resolver = CustomResolver(_decline);
+      final schema = _schema(
+        policy: ConflictPolicy(
+          collectionResolver: resolver,
+          fieldOverrides: {'qty': const RemoteWinsResolver()},
+        ),
+        validator: _emptyValidator,
+        documentMigrations: {2: _addVersion},
+        migrations: [
+          StoreMigration(toVersion: 3, transform: (row) => row),
+        ],
+      );
+      final merged = resolvePageCallbacks([schema], null);
+      final envelope = encodeStorePolicies([schema], merged)!;
+      final store = _store(envelope);
+      expect(store['validator'], isTrue);
+      expect(
+          (store['conflictPolicy'] as Map)['collectionResolver'],
+          {'kind': 'custom', 'id': 'widgets:collectionResolver'});
+      expect(store['documentMigrations'], [2]);
+      expect(store['migrationTransforms'], [3]);
+    });
+
+    test('an explicit registry wins on id conflict; auto fills the gaps', () {
+      const explicitResolver = CustomResolver(_decline);
+      const schemaResolver = CustomResolver(_decline);
+      final schema = _schema(
+        policy: ConflictPolicy(
+          collectionResolver: schemaResolver,
+          fieldOverrides: {'qty': const RemoteWinsResolver()},
+        ),
+        documentMigrations: {2: _addVersion, 3: _addVersion},
+      );
+      final explicit = {
+        'widgets': StorePageCallbacks(
+          // Explicit entry under the auto id for the collection resolver:
+          // it wins, and the auto entry for the same id must not shadow it.
+          resolvers: {
+            'widgets:collectionResolver': explicitResolver,
+          },
+          documentMigrations: {3: _addVersion},
+        ),
+      };
+      final callbacks = resolvePageCallbacks([schema], explicit)['widgets']!;
+      expect(
+          identical(
+              callbacks.resolvers['widgets:collectionResolver'],
+              explicitResolver),
+          isTrue);
+      // Coverage gaps the explicit registry left are auto-filled.
+      expect(callbacks.documentMigrations.keys.toSet(), {2, 3});
+    });
+
+    test('an explicit entry for the same instance is not duplicated', () {
+      const resolver = CustomResolver(_decline);
+      final schema = _schema(
+        policy: ConflictPolicy(collectionResolver: resolver),
+      );
+      final explicit = {
+        'widgets': StorePageCallbacks(
+          resolvers: {'review': resolver},
+        ),
+      };
+      final callbacks = resolvePageCallbacks([schema], explicit)['widgets']!;
+      // Only the explicit id remains: a duplicated auto id would surface as
+      // an unused registration on the wire.
+      expect(callbacks.resolvers.keys.toList(), ['review']);
+      final envelope = encodeStorePolicies([schema], {
+        'widgets': callbacks,
+      })!;
+      expect(
+          (_store(envelope)['conflictPolicy']
+              as Map)['collectionResolver'],
+          {'kind': 'custom', 'id': 'review'});
+    });
+
+    test('an explicit registration the schema never uses is still rejected',
+        () {
+      const schemaResolver = CustomResolver(_decline);
+      final schema = _schema(
+        policy: ConflictPolicy(collectionResolver: schemaResolver),
+      );
+      final explicit = {
+        'widgets': StorePageCallbacks(
+          resolvers: {'alien': CustomResolver(_decline)},
+        ),
+      };
+      final merged = resolvePageCallbacks([schema], explicit);
+      expect(
+        () => encodeStorePolicies([schema], merged),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.message, 'message', contains('alien'))),
+      );
+    });
+
+    test('an explicit store outside the open call fails the open', () {
+      expect(
+        () => resolvePageCallbacks(
+            [_schema()], {'ghosts': const StorePageCallbacks()}),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.message, 'message', contains('ghosts'))),
+      );
+    });
+  });
+
   group('attachStorePolicy', () {
     test('data-only policies survive the plain-JSON round trip', () {
       final page = _schema(
