@@ -30,7 +30,6 @@ final class LocalPocketOptions {
     this.encryption,
     this.databaseEncryption,
     this.nativeDatabaseFactory,
-    this.encrypted = false,
     this.bootstrap = const BootstrapOptions(),
     this.maxDocumentBytes = 1900000,
     this.now,
@@ -79,12 +78,6 @@ final class LocalPocketOptions {
   /// with a typed error — engine code cannot cross the worker boundary and
   /// web whole-file encryption is not supported (OPFS VFS limitation).
   final Database Function(String path)? nativeDatabaseFactory;
-
-  /// Declares that the supplied [nativeDatabaseFactory] opens a
-  /// whole-file-encrypted database (SQLCipher-style).
-  /// NATIVE-ONLY: validated with the factory/key config on native and
-  /// rejected on web (no engine can be supplied there).
-  final bool encrypted;
 
   /// Remote-runtime bootstrap settings (web worker assets). Ignored on
   /// native targets, where the runtime runs in-process.

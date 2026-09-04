@@ -25,10 +25,7 @@ void failWorkerStreams({
 ///
 /// Throws [UnsupportedError] if unsupported options (like whole-database encryption
 /// via SQLCipher) are requested on web.
-void validateWebOpenConfig({required String path, required bool encrypted}) {
-  if (encrypted) {
-    throw UnsupportedError('SQLCipher is unsupported on web platform.');
-  }
+void validateWebOpenConfig({required String path}) {
   if (path == ':memory:') {
     throw UnsupportedError(
       'Web platform does not support in-memory databases (:memory:). '

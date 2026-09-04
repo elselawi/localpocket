@@ -1,11 +1,9 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:localpocket/src/kernel/capabilities.dart';
 import 'package:localpocket/src/kernel/database_adapter.dart';
 import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/ids.dart';
-import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
@@ -23,7 +21,6 @@ void main() {
       final pocket = await openPocket(
         path: t.path,
         database: encDb,
-        encrypted: true,
       );
 
       final id = generateRecordId();
@@ -55,7 +52,6 @@ void main() {
       final pocket = await openPocket(
         path: t.path,
         database: encDbCorrect,
-        encrypted: true,
       );
       final id = generateRecordId();
       await pocket
@@ -76,27 +72,10 @@ void main() {
       final pocketReopen = await openPocket(
         path: t.path,
         database: encDbReopen,
-        encrypted: true,
       );
       addTearDown(pocketReopen.close);
       final doc = await pocketReopen.collection('widgets').get(id);
       expect(doc!['name'], 'Item');
-    });
-
-    test('web encrypted factory throws unsupported', () async {
-      expect(
-        () => LocalPocket.open(
-          path: 'test.db',
-          stores: [widgetsSchema()],
-          platform: PlatformProfile.web,
-          encrypted: true,
-        ),
-        throwsA(isA<UnsupportedError>().having(
-          (e) => e.message,
-          'message',
-          contains('SQLCipher is unsupported on web'),
-        )),
-      );
     });
 
     test('full CRUD survives process-close and reopen with the right key',
@@ -107,8 +86,7 @@ void main() {
       // Process A: create encrypted DB, full CRUD.
       final encA = _MockSqlCipherDatabase.open(t.path,
           password: 'vault-master-key-1234');
-      final pA =
-          await openPocket(path: t.path, database: encA, encrypted: true);
+      final pA = await openPocket(path: t.path, database: encA);
       final id = generateRecordId();
       await pA.collection('widgets').put({
         'id': id,
@@ -128,8 +106,7 @@ void main() {
       // "Process" B: reopen with the correct key.
       final encB = _MockSqlCipherDatabase.open(t.path,
           password: 'vault-master-key-1234');
-      final pB =
-          await openPocket(path: t.path, database: encB, encrypted: true);
+      final pB = await openPocket(path: t.path, database: encB);
       final doc = await pB.collection('widgets').get(id);
       expect(doc!['name'], 'durable');
       expect(doc['qty'], 8, reason: 'patch was durable');
@@ -154,8 +131,8 @@ void main() {
       final schema = widgetsSchema(fts: const FtsSpec(['name']));
       final encA = _MockSqlCipherDatabase.open(t.path,
           password: 'vault-master-key-1234');
-      final pA = await openPocket(
-          path: t.path, database: encA, encrypted: true, stores: [schema]);
+      final pA =
+          await openPocket(path: t.path, database: encA, stores: [schema]);
       final id = generateRecordId();
       await pA
           .collection('widgets')
@@ -167,8 +144,8 @@ void main() {
 
       final encB = _MockSqlCipherDatabase.open(t.path,
           password: 'vault-master-key-1234');
-      final pB = await openPocket(
-          path: t.path, database: encB, encrypted: true, stores: [schema]);
+      final pB =
+          await openPocket(path: t.path, database: encB, stores: [schema]);
       addTearDown(pB.close);
       final hitsAfter =
           await pB.collection('widgets').search('FTS').limit(10).fetch();
@@ -183,8 +160,7 @@ void main() {
       final v1 = widgetsSchema(version: 1);
       final encA = _MockSqlCipherDatabase.open(t.path,
           password: 'vault-master-key-1234');
-      final pA = await openPocket(
-          path: t.path, database: encA, encrypted: true, stores: [v1]);
+      final pA = await openPocket(path: t.path, database: encA, stores: [v1]);
       final id = generateRecordId();
       await pA.collection('widgets').put({'id': id, 'name': 'before-migrate'});
       await pA.close();
@@ -198,8 +174,7 @@ void main() {
       );
       final encB = _MockSqlCipherDatabase.open(t.path,
           password: 'vault-master-key-1234');
-      final pB = await openPocket(
-          path: t.path, database: encB, encrypted: true, stores: [v2]);
+      final pB = await openPocket(path: t.path, database: encB, stores: [v2]);
       addTearDown(pB.close);
       await pB.collection('widgets').patch(id, {'nickname': 'nick'});
       expect((await pB.collection('widgets').get(id))!['nickname'], 'nick');
@@ -214,7 +189,7 @@ void main() {
       addTearDown(t.cleanup);
       final enc = _MockSqlCipherDatabase.open(t.path,
           password: 'vault-master-key-1234');
-      final p = await openPocket(path: t.path, database: enc, encrypted: true);
+      final p = await openPocket(path: t.path, database: enc);
       addTearDown(p.close);
       expect(firstInt(await p.db.rawQuery('PRAGMA foreign_keys'))!, 1);
       expect(firstInt(await p.db.rawQuery('PRAGMA busy_timeout'))!, 5000);
@@ -235,7 +210,6 @@ void main() {
       final pocket = await openPocket(
         path: t.path,
         database: DirectSqliteDatabase(plain),
-        encrypted: true,
       );
       addTearDown(pocket.close);
       final id = generateRecordId();

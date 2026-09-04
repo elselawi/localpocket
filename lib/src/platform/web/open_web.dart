@@ -26,7 +26,7 @@ import 'page/open_core.dart';
 /// Selected by the conditional export in `lib/src/api/open_platform.dart`;
 /// the api layer never imports platform code or the web SDK directly.
 Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
-  validateWebOpenConfig(path: options.path, encrypted: options.encrypted);
+  validateWebOpenConfig(path: options.path);
 
   // The native engine factory IS code (a Dart closure over an app-supplied
   // SQLite engine) and cannot cross the worker boundary; the worker opens

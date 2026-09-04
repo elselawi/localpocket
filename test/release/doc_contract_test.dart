@@ -2,10 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:localpocket/src/adapters/pocketbase/backend.dart';
-import 'package:localpocket/src/kernel/capabilities.dart';
+import 'package:localpocket/src/kernel/errors.dart' show RemoteOnlyError;
 import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:localpocket/src/kernel/ids.dart';
-import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:test/test.dart';
 
 import '../adapters/pocketbase/fake_transport.dart';
@@ -80,7 +79,7 @@ void main() {
       });
       await expectLater(
           pocket.files.open(store: 'widgets', recordId: recId),
-          throwsA(isA<StateError>()
+          throwsA(isA<RemoteOnlyError>()
               .having((e) => e.message, 'message', contains('remote_only'))),
           reason: 'remote_only files must be downloaded before open');
     });
@@ -133,23 +132,6 @@ void main() {
       expect(blob['refcount'], 0, reason: 'refcount released for GC');
       expect(await store.exists(ref.hash), isTrue,
           reason: 'bytes remain until GC reclaims them');
-    });
-
-    test('injected SQLCipher configuration is the documented encryption path',
-        () async {
-      final readme = await File('README.md').readAsString();
-      // The README documents `encrypted: true` with a FieldCipher for
-      // field-level encryption; at-rest DB encryption comes from the injected
-      // database. The web profile rejects it.
-      expect(readme, contains('encrypted: true'));
-      expect(
-        () => LocalPocket.open(
-            path: 'x.db',
-            stores: [widgetsSchema()],
-            platform: PlatformProfile.web,
-            encrypted: true),
-        throwsA(isA<UnsupportedError>()),
-      );
     });
 
     test(

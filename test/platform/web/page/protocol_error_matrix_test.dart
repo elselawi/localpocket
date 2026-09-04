@@ -18,6 +18,7 @@ void main() {
         PrimaryKeyConstraintException('x'): 'PrimaryKeyConstraintException',
         ForeignKeyConstraintException('x'): 'ForeignKeyConstraintException',
         StorageError('x'): 'StorageError',
+        RemoteOnlyError('x'): 'RemoteOnlyError',
         RecordNotFoundException('x'): 'RecordNotFoundException',
         SchemaTooNewError('x'): 'SchemaTooNewError',
         FtsUnavailableError('x'): 'FtsUnavailableError',

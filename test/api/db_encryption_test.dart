@@ -39,18 +39,6 @@ void main() {
       );
     });
 
-    test('encrypted: true without a factory fails the open typed', () async {
-      await expectLater(
-        LocalPocket.open(LocalPocketOptions(
-          path: 'no_factory_flag.db',
-          stores: [Tasks.store],
-          encrypted: true,
-        )),
-        throwsA(isA<ValidationException>().having(
-            (e) => e.message, 'message', contains('nativeDatabaseFactory'))),
-      );
-    });
-
     test(
         'databaseEncryption against a PLAIN engine fails typed (the silent '
         'no-op is classed out)', () async {

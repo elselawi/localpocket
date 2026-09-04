@@ -81,18 +81,6 @@ final class LocalPocket {
           'SQLCipher-style build); this config only carries the key that '
           'LocalPocket applies via `PRAGMA key`.');
     }
-    // The bare declaration is validated too: `encrypted: true` without an
-    // engine factory nor a key config has nothing providing the encryption
-    // (the web open rejects both separately).
-    if (options.encrypted &&
-        options.nativeDatabaseFactory == null &&
-        options.databaseEncryption == null) {
-      throw ValidationException(
-          'encrypted: true declares a whole-file-encrypted engine but no '
-          'nativeDatabaseFactory supplies it, and no databaseEncryption '
-          'config carries the key. Supply the engine factory (with '
-          'databaseEncryption); the flag alone encrypts nothing.');
-    }
     final schemas = [
       for (final def in options.stores) def.compiledSchema,
     ];
@@ -130,7 +118,6 @@ final class LocalPocket {
       path: options.path,
       database: nativeDb,
       stores: schemas,
-      encrypted: options.encrypted,
       fieldCipher: options.encryption?.fieldCipher,
       maxDocBytes: options.maxDocumentBytes,
       now: options.now == null

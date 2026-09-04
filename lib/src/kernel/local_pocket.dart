@@ -404,7 +404,6 @@ class KernelDatabase with ChangeBusAwareLP {
     required List<CollectionSchema<Object?>> stores,
     Database? database,
     PlatformProfile platform = PlatformProfile.native,
-    bool encrypted = false,
     FieldCipher? fieldCipher,
     CryptoProvider? cryptoProvider,
     int maxDocBytes = 1900000,
@@ -416,9 +415,6 @@ class KernelDatabase with ChangeBusAwareLP {
     Duration txSessionTtl = defaultTxSessionTtl,
     SyncBackendFactory? syncBackendFactory,
   }) async {
-    if (encrypted && platform == PlatformProfile.web) {
-      throw UnsupportedError('SQLCipher is unsupported on web platform.');
-    }
     final Database db;
     if (database != null) {
       db = database;
