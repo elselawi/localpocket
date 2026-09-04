@@ -8,7 +8,7 @@ import 'package:localpocket/src/kernel/ids.dart' show generateRecordId;
 import 'package:localpocket/src/kernel/files/blob_store.dart'
     show MemoryBlobStore;
 import 'package:localpocket/src/kernel/page_callbacks.dart'
-    show StorePageCallbacks, encodeStorePolicies;
+    show PageCallbacks, StorePageCallbacks, encodeStorePolicies;
 import 'package:localpocket/src/kernel/sync/merge.dart' show CounterResolver;
 import 'package:localpocket/src/platform/web/page/callback_server.dart'
     show PageCallbackServer;
@@ -229,16 +229,19 @@ void main() {
       setUp(() async {
         final schema = ValidatedNotes.store.compiledSchema;
         if (runtimeName == 'remote') {
-          final pageCallbacks = {
-            'validated_notes':
-                StorePageCallbacks(validator: ValidatedNotes.validate),
-          };
+          final pageCallbacks = PageCallbacks(
+            stores: {
+              'validated_notes':
+                  StorePageCallbacks(validator: ValidatedNotes.validate),
+            },
+          );
           final pipe = _PipeSink(
-            callbackServer: PageCallbackServer(stores: pageCallbacks),
+            callbackServer:
+                PageCallbackServer(stores: pageCallbacks.stores),
           );
           harness = await WorkerHarness.open(
             stores: [schema],
-            storePolicies: encodeStorePolicies([schema], pageCallbacks),
+            storePolicies: encodeStorePolicies([schema], pageCallbacks.stores),
             pageCallbacks: pageCallbacks,
             blobStore: MemoryBlobStore(),
             sink: pipe,

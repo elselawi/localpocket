@@ -12,7 +12,7 @@ import '../kernel/cipher.dart';
 import '../kernel/database_adapter.dart' show Database;
 import '../kernel/kernel_context.dart' show defaultTxSessionTtl;
 import '../kernel/files/blob_store.dart' show BlobStore;
-import '../kernel/page_callbacks.dart' show StorePageCallbacks;
+import '../kernel/page_callbacks.dart' show PageCallbacks;
 import '../kernel/sync/sync_backend.dart' show SyncBackendFactory;
 import '../schema/store_def.dart';
 
@@ -131,24 +131,30 @@ final class LocalPocketOptions {
   /// with a `StateError`.
   final BlobStore? blobStore;
 
-  /// Per-store page callbacks that executable schema features resolve to on
-  /// the worker runtime, keyed by store name.
+  /// Page callbacks that executable schema features resolve to on the
+  /// worker runtime, plus the database-level sync backend / blob store that
+  /// execute on the page.
   ///
   /// Conflict resolvers, validators, document migrations, and backfill
   /// transforms are code and cannot be serialized to the database worker;
   /// structurally-representable resolvers (the closure-free built-ins) run
   /// in the worker as-is, everything else is invoked on the page through
-  /// the callback channel.
+  /// the callback channel. [PageCallbacks.stores] holds the per-store
+  /// entries (keyed by store name); the container's `syncBackendFactory`
+  /// and `blobStore` slots host a caller-supplied sync backend / blob store
+  /// entirely on the page and are chunked across the same channel.
   ///
-  /// Optional: every executable member not registered here is
-  /// auto-collected under a deterministic id (`'<store>:collectionResolver'`,
-  /// `'<store>:field:<path>'`, `'<store>:validator'`,
-  /// `'<store>:documentMigration:<version>'`, `'<store>:transform:<toVersion>'`)
-  /// and served automatically; explicit entries win on id conflict. Each
-  /// entry must still cover exactly what the store's definition declares —
-  /// a mismatch fails the open with a typed error. Natively this map is
-  /// unused: hooks execute in-process.
-  final Map<String, StorePageCallbacks>? pageCallbacks;
+  /// Optional: every executable schema member not registered under
+  /// [PageCallbacks.stores] is auto-collected under a deterministic id
+  /// (`'<store>:collectionResolver'`, `'<store>:field:<path>'`,
+  /// `'<store>:validator'`, `'<store>:documentMigration:<version>'`,
+  /// `'<store>:transform:<toVersion>'`) and served automatically; explicit
+  /// entries win on id conflict. Each entry must still cover exactly what
+  /// the store's definition declares — a mismatch fails the open with a
+  /// typed error. Natively this container is unused: hooks execute
+  /// in-process and the runtime's own backend/blob-store configuration
+  /// applies.
+  final PageCallbacks? pageCallbacks;
 }
 
 /// {@template localpocket.encryption_config}

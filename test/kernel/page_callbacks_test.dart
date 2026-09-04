@@ -239,7 +239,7 @@ void main() {
   group('resolvePageCallbacks (auto-registration)', () {
     test('a plain schema auto-collects nothing executable', () {
       final merged = resolvePageCallbacks([_schema()], null);
-      final callbacks = merged['widgets']!;
+      final callbacks = merged.stores['widgets']!;
       expect(callbacks.resolvers, isEmpty);
       expect(callbacks.validator, isNull);
       expect(callbacks.documentMigrations, isEmpty);
@@ -260,7 +260,8 @@ void main() {
           StoreMigration(toVersion: 3, transform: (row) => row),
         ],
       );
-      final callbacks = resolvePageCallbacks([schema], null)['widgets']!;
+      final callbacks =
+          resolvePageCallbacks([schema], null).stores['widgets']!;
       expect(callbacks.resolvers.keys.toList(),
           ['widgets:collectionResolver', 'widgets:field:qty']);
       expect(
@@ -281,7 +282,8 @@ void main() {
           fieldOverrides: {'qty': const CounterResolver(min: 0)},
         ),
       );
-      final callbacks = resolvePageCallbacks([schema], null)['widgets']!;
+      final callbacks =
+          resolvePageCallbacks([schema], null).stores['widgets']!;
       expect(callbacks.resolvers, isEmpty);
     });
 
@@ -299,7 +301,7 @@ void main() {
         ],
       );
       final merged = resolvePageCallbacks([schema], null);
-      final envelope = encodeStorePolicies([schema], merged)!;
+      final envelope = encodeStorePolicies([schema], merged.stores)!;
       final store = _store(envelope);
       expect(store['validator'], isTrue);
       expect((store['conflictPolicy'] as Map)['collectionResolver'],
@@ -318,17 +320,20 @@ void main() {
         ),
         documentMigrations: {2: _addVersion, 3: _addVersion},
       );
-      final explicit = {
-        'widgets': StorePageCallbacks(
-          // Explicit entry under the auto id for the collection resolver:
-          // it wins, and the auto entry for the same id must not shadow it.
-          resolvers: {
-            'widgets:collectionResolver': explicitResolver,
-          },
-          documentMigrations: {3: _addVersion},
-        ),
-      };
-      final callbacks = resolvePageCallbacks([schema], explicit)['widgets']!;
+      final explicit = PageCallbacks(
+        stores: {
+          'widgets': StorePageCallbacks(
+            // Explicit entry under the auto id for the collection resolver:
+            // it wins, and the auto entry for the same id must not shadow it.
+            resolvers: {
+              'widgets:collectionResolver': explicitResolver,
+            },
+            documentMigrations: {3: _addVersion},
+          ),
+        },
+      );
+      final callbacks =
+          resolvePageCallbacks([schema], explicit).stores['widgets']!;
       expect(
           identical(callbacks.resolvers['widgets:collectionResolver'],
               explicitResolver),
@@ -342,12 +347,15 @@ void main() {
       final schema = _schema(
         policy: ConflictPolicy(collectionResolver: resolver),
       );
-      final explicit = {
-        'widgets': StorePageCallbacks(
-          resolvers: {'review': resolver},
-        ),
-      };
-      final callbacks = resolvePageCallbacks([schema], explicit)['widgets']!;
+      final explicit = PageCallbacks(
+        stores: {
+          'widgets': StorePageCallbacks(
+            resolvers: {'review': resolver},
+          ),
+        },
+      );
+      final callbacks =
+          resolvePageCallbacks([schema], explicit).stores['widgets']!;
       // Only the explicit id remains: a duplicated auto id would surface as
       // an unused registration on the wire.
       expect(callbacks.resolvers.keys.toList(), ['review']);
@@ -366,14 +374,16 @@ void main() {
       final schema = _schema(
         policy: ConflictPolicy(collectionResolver: schemaResolver),
       );
-      final explicit = {
-        'widgets': StorePageCallbacks(
-          resolvers: {'alien': CustomResolver(_decline)},
-        ),
-      };
+      final explicit = PageCallbacks(
+        stores: {
+          'widgets': StorePageCallbacks(
+            resolvers: {'alien': CustomResolver(_decline)},
+          ),
+        },
+      );
       final merged = resolvePageCallbacks([schema], explicit);
       expect(
-        () => encodeStorePolicies([schema], merged),
+        () => encodeStorePolicies([schema], merged.stores),
         throwsA(isA<ValidationException>()
             .having((e) => e.message, 'message', contains('alien'))),
       );
@@ -382,7 +392,9 @@ void main() {
     test('an explicit store outside the open call fails the open', () {
       expect(
         () => resolvePageCallbacks(
-            [_schema()], {'ghosts': const StorePageCallbacks()}),
+            [_schema()],
+            const PageCallbacks(
+                stores: {'ghosts': StorePageCallbacks()})),
         throwsA(isA<ValidationException>()
             .having((e) => e.message, 'message', contains('ghosts'))),
       );

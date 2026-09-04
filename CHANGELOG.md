@@ -2,6 +2,28 @@
 
 ### BREAKING
 
+- **`LocalPocketOptions.pageCallbacks` is now a `PageCallbacks` container
+  instead of a per-store map.** The container carries the per-store
+  executable-feature registry under `stores` (whose entries work exactly
+  like the old map values — auto-registration, id-conflict merge, and
+  coverage checks are unchanged) plus database-level slots for the sync
+  backend and blob store that execute on the page
+  (`PageCallbacks.syncBackendFactory`, `PageCallbacks.blobStore`).
+  Migration: replace the map literal with the container —
+
+  ```dart
+  // before
+  pageCallbacks: {
+    'posts': StorePageCallbacks(validator: validatePost),
+  },
+  // after
+  pageCallbacks: PageCallbacks(
+    stores: {
+      'posts': StorePageCallbacks(validator: validatePost),
+    },
+  ),
+  ```
+
 - **Removed the deprecated resolver aliases `SetUnionResolver` and
   `AppendOnlyResolver`.** Migration: use
   `SetUnionWithDeletionWinsResolver` instead of `SetUnionResolver`; use

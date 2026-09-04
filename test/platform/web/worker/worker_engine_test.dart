@@ -7,6 +7,7 @@ import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:localpocket/src/kernel/page_callbacks.dart'
     show
+        PageCallbacks,
         StorePageCallbacks,
         ProxiedResolver,
         callbackChannelValidator,
@@ -1119,15 +1120,17 @@ void main() {
         ),
         validator: pageValidator,
       );
-      final pageCallbacks = {
-        'widgets': StorePageCallbacks(
-          resolvers: {'review': pageResolver},
-          validator: pageValidator,
-        ),
-      };
+      final pageCallbacks = PageCallbacks(
+        stores: {
+          'widgets': StorePageCallbacks(
+            resolvers: {'review': pageResolver},
+            validator: pageValidator,
+          ),
+        },
+      );
       h = await WorkerHarness.open(
         stores: [schema],
-        storePolicies: encodeStorePolicies([schema], pageCallbacks),
+        storePolicies: encodeStorePolicies([schema], pageCallbacks.stores),
         pageCallbacks: pageCallbacks,
       );
       addTearDown(() async {
@@ -1208,11 +1211,11 @@ void main() {
       // No explicit registry: the open auto-collects every executable
       // member under deterministic ids and the worker calls them back.
       final merged = resolvePageCallbacks([schema], null);
-      expect(merged['gizmos']!.resolvers.keys.toList(),
+      expect(merged.stores['gizmos']!.resolvers.keys.toList(),
           ['gizmos:collectionResolver']);
       final auto = await WorkerHarness.open(
         stores: [schema],
-        storePolicies: encodeStorePolicies([schema], merged),
+        storePolicies: encodeStorePolicies([schema], merged.stores),
         pageCallbacks: merged,
       );
       addTearDown(auto.close);

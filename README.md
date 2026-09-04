@@ -1228,11 +1228,13 @@ native:
     LocalPocketOptions(
       path: 'posts.db',
       stores: [Posts.store],
-      pageCallbacks: {
-        'posts': StorePageCallbacks(
-          resolvers: {'posts-review': Posts.reviewResolver},
-        ),
-      },
+      pageCallbacks: PageCallbacks(
+        stores: {
+          'posts': StorePageCallbacks(
+            resolvers: {'posts-review': Posts.reviewResolver},
+          ),
+        },
+      ),
     ),
   );
   await webDb.close();

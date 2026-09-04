@@ -9,7 +9,7 @@ import 'package:localpocket/src/kernel/local_pocket.dart';
 import 'package:localpocket/src/kernel/kernel_context.dart'
     show defaultTxSessionTtl;
 import 'package:localpocket/src/kernel/page_callbacks.dart'
-    show StorePageCallbacks, attachStorePolicy;
+    show PageCallbacks, attachStorePolicy;
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/platform/web/page/callback_server.dart'
     show PageCallbackServer;
@@ -100,7 +100,7 @@ class WorkerHarness {
     PlatformProfile platform = PlatformProfile.native,
     String path = ':memory:',
     RecordingSink? sink,
-    Map<String, StorePageCallbacks>? pageCallbacks,
+    PageCallbacks? pageCallbacks,
     Map<String, Object?>? storePolicies,
     Duration? groupCommitWindow,
     Duration? txSessionTtl,
@@ -150,7 +150,7 @@ class WorkerHarness {
           RecordingSink(
             callbackServer: pageCallbacks == null
                 ? null
-                : PageCallbackServer(stores: pageCallbacks),
+                : PageCallbackServer(stores: pageCallbacks.stores),
           ),
     );
   }

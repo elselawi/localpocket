@@ -27,8 +27,10 @@ library;
 import 'dart:async';
 
 import 'errors.dart';
+import 'files/blob_store.dart' show BlobStore;
 import 'schema.dart';
 import 'sync/merge.dart';
+import 'sync/sync_backend.dart' show SyncBackendFactory;
 
 /// Resolver descriptor kind: structural reconstruction of
 /// [RemoteWinsResolver].
@@ -244,6 +246,44 @@ MergeResult decodeMergeResult(Object? raw, {required String where}) {
   );
 }
 
+/// {@template localpocket.page_callbacks}
+/// Database-level container for everything the page executes on the worker
+/// runtime.
+///
+/// Per-store executable schema features live in [stores]; the database-level
+/// slots ([syncBackendFactory], [blobStore]) host a caller-supplied sync
+/// backend / blob store entirely on the page, reached by the worker through
+/// the same callback channel as the schema features.
+/// {@endtemplate}
+final class PageCallbacks {
+  /// {@macro localpocket.page_callbacks}
+  const PageCallbacks({
+    this.stores = const {},
+    this.syncBackendFactory,
+    this.blobStore,
+  });
+
+  /// Per-store executable schema callbacks, keyed by store name. Entries
+  /// behave exactly like the values of the pre-container per-store
+  /// `pageCallbacks` map: auto-registration merges over them, explicit
+  /// entries win on id conflict, and coverage is validated unchanged.
+  final Map<String, StorePageCallbacks> stores;
+
+  /// Builds the caller's sync backend on the page for the worker runtime.
+  ///
+  /// The backend object (and everything it closes over — HTTP clients, token
+  /// providers, realtime connections) never crosses the worker boundary: the
+  /// worker receives a proxy that forwards every `SyncBackend` method over
+  /// the callback channel. Null keeps the worker's own canonical factory.
+  final SyncBackendFactory? syncBackendFactory;
+
+  /// Hosts the caller's blob store on the page for the worker runtime.
+  ///
+  /// Attachment bytes are chunked across the callback channel in both
+  /// directions; null keeps the worker's own OPFS-backed store.
+  final BlobStore? blobStore;
+}
+
 /// Deterministic auto-registration id for a store's collection resolver.
 String autoResolverId(String store) => '$store:collectionResolver';
 
@@ -309,13 +349,16 @@ StorePageCallbacks autoCollectStoreCallbacks(CollectionSchema<Object?> schema) {
 /// explicit id, so the coverage/unused-registry checks in
 /// [encodeStorePolicies] run over the merged result unchanged. Explicit
 /// stores that are not part of [schemas] fail the open with a typed error,
-/// exactly as before auto-registration existed.
-Map<String, StorePageCallbacks> resolvePageCallbacks(
+/// exactly as before auto-registration existed. The database-level slots
+/// ([PageCallbacks.syncBackendFactory], [PageCallbacks.blobStore]) pass
+/// through untouched.
+PageCallbacks resolvePageCallbacks(
   List<CollectionSchema<Object?>> schemas,
-  Map<String, StorePageCallbacks>? explicit,
+  PageCallbacks? explicit,
 ) {
-  if (explicit != null) {
-    for (final name in explicit.keys) {
+  final explicitStores = explicit?.stores;
+  if (explicitStores != null) {
+    for (final name in explicitStores.keys) {
       final declared = schemas.any((s) => s.name == name);
       if (!declared) {
         throw ValidationException(
@@ -324,10 +367,14 @@ Map<String, StorePageCallbacks> resolvePageCallbacks(
       }
     }
   }
-  return {
-    for (final schema in schemas)
-      schema.name: _mergeStoreCallbacks(schema, explicit?[schema.name]),
-  };
+  return PageCallbacks(
+    stores: {
+      for (final schema in schemas)
+        schema.name: _mergeStoreCallbacks(schema, explicitStores?[schema.name]),
+    },
+    syncBackendFactory: explicit?.syncBackendFactory,
+    blobStore: explicit?.blobStore,
+  );
 }
 
 StorePageCallbacks _mergeStoreCallbacks(

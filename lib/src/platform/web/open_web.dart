@@ -89,15 +89,15 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   // Executable schema features cross as an envelope of descriptors plus
   // page-registered callback ids. Every store's executable members are
   // auto-collected under deterministic ids; an explicit `pageCallbacks`
-  // registry merges over the result (explicit wins on id conflict). Coverage
+  // container merges over the result (explicit wins on id conflict). Coverage
   // is validated against the merged registry so a mismatch fails the open
   // typed instead of surfacing at first merge/write.
-  final mergedCallbacks = resolvePageCallbacks(schemas, options.pageCallbacks);
-  final storePolicies = encodeStorePolicies(schemas, mergedCallbacks);
+  final container = resolvePageCallbacks(schemas, options.pageCallbacks);
+  final storePolicies = encodeStorePolicies(schemas, container.stores);
 
   // Executes worker callback requests (conflict resolvers, validators,
   // migration hooks) against the merged page-registered callbacks.
-  final callbackServer = PageCallbackServer(stores: mergedCallbacks);
+  final callbackServer = PageCallbackServer(stores: container.stores);
 
   // The cipher is serialized into the open options so the worker reconstructs
   // an AesGcmFieldCipher with the same key (crosses postMessage into the

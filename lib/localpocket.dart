@@ -85,7 +85,7 @@ export 'src/kernel/sync/merge.dart'
 // The page-callback registry: on the worker runtime, executable schema
 // features (custom resolvers, validators, document migrations, backfill
 // transforms) resolve to these per-store declarations.
-export 'src/kernel/page_callbacks.dart' show StorePageCallbacks;
+export 'src/kernel/page_callbacks.dart' show PageCallbacks, StorePageCallbacks;
 
 // The typed error hierarchy: the public API throws these (Row.get throws
 // FieldNotSelectedError, stale cursors throw StaleCursorError, unsupported

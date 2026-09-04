@@ -67,8 +67,9 @@ void main() async {
         note: 'the worker builds its own OPFS-backed store'),
     'pageCallbacks': Parity.pageExecutes(
         channel: 'callback_rpc',
-        note: 'auto-collected executable schema features resolve to the '
-            'page'),
+        note: 'the PageCallbacks container: `stores` entries (auto-collected '
+            'executable schema features) plus the database-level '
+            'syncBackendFactory/blobStore slots resolve to the page'),
   };
 
   test('every LocalPocketOptions constructor field has a parity entry', () {
