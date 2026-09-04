@@ -12,7 +12,11 @@ import 'package:localpocket/src/kernel/page_callbacks.dart'
     show PageCallbacks, attachStorePolicy;
 import 'package:localpocket/src/kernel/errors.dart'
     show ValidationException;
+import 'package:localpocket/src/kernel/files/blob_proxy.dart'
+    show ProxyBlobStore;
 import 'package:localpocket/src/kernel/schema.dart';
+import 'package:localpocket/src/platform/web/page/blob_server.dart'
+    show BlobStoreServer;
 import 'package:localpocket/src/platform/web/page/callback_server.dart'
     show PageCallbackServer;
 import 'package:localpocket/src/platform/web/page/sync_server.dart'
@@ -38,11 +42,14 @@ class RecordingSink implements WorkerEventSink, WorkerCallbackChannel {
   RecordingSink({
     PageCallbackServer? callbackServer,
     SyncBackendServer? syncServer,
+    BlobStoreServer? blobServer,
   })  : _callbackServer = callbackServer,
-        _syncServer = syncServer;
+        _syncServer = syncServer,
+        _blobServer = blobServer;
 
   final PageCallbackServer? _callbackServer;
   final SyncBackendServer? _syncServer;
+  final BlobStoreServer? _blobServer;
 
   /// Callback requests routed to the page (in arrival order).
   final List<Map<String, Object?>> callbackRequests = [];
@@ -62,6 +69,9 @@ class RecordingSink implements WorkerEventSink, WorkerCallbackChannel {
       }
       if (_syncServer != null && _syncServer!.handles(channel)) {
         return _syncServer!.serve(message);
+      }
+      if (_blobServer != null && _blobServer!.handles(channel)) {
+        return _blobServer!.serve(message);
       }
     }
     // No server claims the channel: fall through to the schema-callback
@@ -140,6 +150,13 @@ class WorkerHarness {
     Future<Object?> Function(Map<String, Object?>)? workerPush;
     final backendHub =
         pageCallbacks?.syncBackendFactory == null ? null : ProxyBackendHub();
+    final blobServer = pageCallbacks?.blobStore == null
+        ? null
+        : BlobStoreServer(store: pageCallbacks!.blobStore!);
+    final effectiveBlobStore = blobStore ??
+        (pageCallbacks?.blobStore != null
+            ? ProxyBlobStore(invoker: callbackBridge!)
+            : null);
     final syncServer = pageCallbacks?.syncBackendFactory == null
         ? null
         : SyncBackendServer(
@@ -170,7 +187,8 @@ class WorkerHarness {
       database: adapter,
       stores: attachedStores,
       platform: platform,
-      blobStore: blobStore ?? MemoryBlobStore(),
+      blobStore:
+          effectiveBlobStore ?? MemoryBlobStore(),
       fieldCipher: fieldCipher,
       now: now,
       testHooks: testHooks,
@@ -199,6 +217,7 @@ class WorkerHarness {
                 ? null
                 : PageCallbackServer(stores: pageCallbacks.stores),
             syncServer: syncServer,
+            blobServer: blobServer,
           ),
     );
     workerPush = harness.customRequest;

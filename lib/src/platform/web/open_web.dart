@@ -20,6 +20,7 @@ import 'page/lifecycle.dart';
 import 'page/object_urls.dart';
 import 'page/open_core.dart';
 import 'page/protocol.dart' show CallbackRpc;
+import 'page/blob_server.dart' show BlobStoreServer;
 import 'page/sync_server.dart' show SyncBackendServer;
 
 /// Opens the facade on the web: the kernel runs in the dedicated database
@@ -123,6 +124,12 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
           },
         );
 
+  // The page-hosted blob store: with the container slot filled, the worker
+  // receives a proxy and this server executes the caller's store.
+  final blobServer = container.blobStore == null
+      ? null
+      : BlobStoreServer(store: container.blobStore!);
+
   // The cipher is serialized into the open options so the worker reconstructs
   // an AesGcmFieldCipher with the same key (crosses postMessage into the
   // same-origin trusted worker); unserializable configs throw typed here.
@@ -186,9 +193,11 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     'clockOffsetMs': options.clockOffsetMs,
     if (cipherEnvelope != null) 'fieldCipher': cipherEnvelope,
     if (storePolicies != null) 'storePolicies': storePolicies,
-    // The sync proxy marker: with the container slot filled the worker
-    // builds ProxySyncBackendFactory instead of its canonical one.
+    // The sync/blob proxy markers: with the respective container slots
+    // filled the worker builds proxy objects instead of its own backend
+    // factory / OPFS blob store.
     if (container.syncBackendFactory != null) 'syncProxy': true,
+    if (container.blobStore != null) 'blobProxy': true,
   };
 
   try {
@@ -208,7 +217,7 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
           if (value is Map) {
             if (value['kind'] == CallbackRpc.requestKind) {
               // Route by channel: schema callbacks, then the page-hosted
-              // sync backend when the open configured one.
+              // sync backend / blob store when the open configured them.
               final channel = value[CallbackRpc.channel];
               final Map<String, Object?>? reply;
               if (channel is String && callbackServer.handles(channel)) {
@@ -217,6 +226,10 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
                   syncServer != null &&
                   syncServer.handles(channel)) {
                 reply = await syncServer.serve(value);
+              } else if (channel is String &&
+                  blobServer != null &&
+                  blobServer.handles(channel)) {
+                reply = await blobServer.serve(value);
               } else {
                 reply = null;
               }

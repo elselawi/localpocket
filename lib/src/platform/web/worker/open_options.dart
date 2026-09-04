@@ -67,6 +67,15 @@ Map<String, Object?> parseOpenOptions(Object? data) {
     }
     result['syncProxy'] = syncProxy;
   }
+  // The blob proxy marker: the page hosts the caller's blob store and the
+  // worker builds a ProxyBlobStore instead of the OPFS-backed store.
+  final blobProxy = stringMap['blobProxy'];
+  if (blobProxy != null) {
+    if (blobProxy is! bool) {
+      throw ProtocolEnvelopeException('"blobProxy" must be a bool.');
+    }
+    result['blobProxy'] = blobProxy;
+  }
   _parseMsOption(stringMap, 'groupCommitWindowMs', result,
       min: 0, what: 'the group-commit coalescing window');
   // Zero disables the idle sweeper on native, so it is valid here too.

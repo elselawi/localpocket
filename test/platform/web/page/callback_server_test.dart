@@ -1,17 +1,21 @@
 import 'dart:async';
 
 import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/files/blob_proxy.dart';
+import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:localpocket/src/kernel/page_callbacks.dart';
 import 'package:localpocket/src/kernel/sync/merge.dart';
 import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:localpocket/src/kernel/sync/sync_proxy.dart';
 import 'package:localpocket/src/kernel/sync/sync_wire.dart';
+import 'package:localpocket/src/platform/web/page/blob_server.dart';
 import 'package:localpocket/src/platform/web/page/callback_server.dart';
 import 'package:localpocket/src/platform/web/page/protocol.dart';
 import 'package:localpocket/src/platform/web/page/sync_server.dart';
 import 'package:localpocket/src/platform/web/worker/worker_engine.dart';
 import 'package:test/test.dart';
 
+import '../../../support/fake_blob_store.dart';
 import '../../../support/fake_sync_backend.dart';
 
 /// A scripted worker-side channel: feeds the request to a handler and
@@ -305,11 +309,9 @@ void main() {
         push: (Map<String, Object?> args) => invoker.push(args),
       );
       hub = ProxyBackendHub();
-      invoker = ServerCallbackInvoker(
-        server,
-        onPush: (envelope) => hub
-            .pageCall((envelope['a'] as Map).cast<String, Object?>()),
-      );
+      invoker =
+          ServerCallbackInvoker(server.serve, onPush: (envelope) => hub
+              .pageCall((envelope['a'] as Map).cast<String, Object?>()));
       proxyFactory = ProxySyncBackendFactory(invoker: invoker, hub: hub);
       final backend = await proxyFactory.create(
         baseUrl: Uri.parse('http://pb.test'),
@@ -578,6 +580,106 @@ void main() {
         throwsA(isA<ValidationException>()
             .having((e) => e.message, 'message', contains('4242'))),
       );
+    });
+  });
+
+  group('BlobStoreServer (proxy blob channel)', () {
+    late ScriptedBlobStore pageStore;
+    late BlobStoreServer server;
+    late ServerCallbackInvoker invoker;
+    late ProxyBlobStore proxy;
+
+    setUp(() {
+      pageStore = ScriptedBlobStore();
+      server = BlobStoreServer(store: pageStore);
+      invoker = ServerCallbackInvoker(server.serve, onPush: (_) async => null);
+      proxy = ProxyBlobStore(invoker: invoker);
+    });
+
+    test('put crosses chunked and byte-equal with its expectations', () async {
+      // One byte past the chunk size forces multiple chunk messages.
+      final big = List<int>.generate(proxyChunkBytes + 9, (i) => i % 253);
+      final hash = await proxy.put(
+        Stream.value(big),
+        expectedSha256: 'a' * 64,
+        expectedSize: big.length,
+        key: 'k1',
+      );
+      expect(hash, 'a' * 64);
+      expect(pageStore.blobs['a' * 64], big);
+      final put = pageStore.puts['a' * 64]!;
+      expect(put.expectedSha256, 'a' * 64);
+      expect(put.expectedSize, big.length);
+      expect(put.key, 'k1');
+      expect(
+        invoker.sent.map((m) => m['method']),
+        containsAllInOrder(
+            ['putBegin', 'putChunk', 'putChunk', 'putFinish']),
+      );
+    });
+
+    test('open streams back chunked and byte-equal', () async {
+      final big = List<int>.generate(200000, (i) => i % 249);
+      pageStore.blobs['b' * 64] = big;
+      final stream = await proxy.open('b' * 64);
+      final received = await stream.expand((c) => c).toList();
+      expect(received, big);
+      expect(
+        invoker.sent.map((m) => m['method']),
+        containsAllInOrder(
+            ['openBegin', 'openChunk', 'openChunk', 'openEnd']),
+      );
+    });
+
+    test('metadata methods round-trip with honest nulls and page '
+        'durability', () async {
+      expect(await proxy.exists('c' * 64), isFalse);
+      expect(await proxy.size('c' * 64), isNull);
+      // modifiedAt on an unknown hash stays null — never fabricated.
+      expect(await proxy.modifiedAt('c' * 64), isNull);
+      expect(await proxy.isDurable, isTrue,
+          reason: 'isDurable reflects the PAGE store, not the worker');
+      expect(await proxy.listHashes(), isEmpty);
+      expect(await proxy.cleanTmp(olderThan: const Duration(hours: 1)), 0);
+      expect(
+        invoker.sent.singleWhere((m) => m['method'] == 'cleanTmp'),
+        containsPair('olderThanMs', 3600000),
+      );
+
+      pageStore.blobs['c' * 64] = [1, 2, 3];
+      pageStore.modified['c' * 64] = 4242;
+      expect(await proxy.exists('c' * 64), isTrue);
+      expect(await proxy.size('c' * 64), 3);
+      expect(await proxy.modifiedAt('c' * 64), 4242);
+      expect(await proxy.listHashes(), ['c' * 64]);
+    });
+
+    test('blob errors reconstruct as the exact types', () async {
+      pageStore.putError = BlobStorageException('quota blown', 'e' * 64);
+      await expectLater(
+        proxy.put(Stream.value([1])),
+        throwsA(isA<BlobStorageException>()
+            .having((e) => e.hash, 'hash', 'e' * 64)
+            .having((e) => e.cause, 'cause', 'quota blown')),
+      );
+
+      // Missing-blob classification survives the channel.
+      await expectLater(
+        proxy.open('d' * 64),
+        throwsA(isA<BlobMissingError>().having(
+            (e) => e.hash, 'hash', 'd' * 64)),
+      );
+      await expectLater(
+        proxy.delete('d' * 64),
+        throwsA(isA<BlobMissingError>()),
+      );
+      try {
+        await proxy.open('d' * 64);
+        fail('expected BlobMissingError');
+      } catch (e) {
+        expect(isBlobMissing(e), isTrue,
+            reason: 'the caller classifies via isBlobMissing');
+      }
     });
   });
 

@@ -61,6 +61,19 @@
 
 ### Added
 
+- **Web: caller-supplied blob stores now run on the page.** A store
+  configured in `PageCallbacks.blobStore` executes entirely on the page;
+  the worker receives a transparent proxy that forwards every `BlobStore`
+  method over the callback channel. Bytes cross chunked (256 KiB) in both
+  directions; `expectedSha256`/`expectedSize` are verified where the bytes
+  are reassembled on the page; `modifiedAt` keeps its honest null (GC
+  orphan-aging depends on it) and `isDurable` reflects the page store's
+  durability, not the worker's. `BlobMissingError` (with its hash) and
+  `BlobStorageException` reconstruct as the same types, so callers
+  classify via `isBlobMissing` exactly as on native. Without the container
+  slot the worker keeps its OPFS-backed store; the top-level
+  `LocalPocketOptions.blobStore` field stays rejected on web.
+
 - **Web: caller-supplied sync backends now run on the page.** A backend
   configured in `PageCallbacks.syncBackendFactory` executes entirely on the
   page (its HTTP client, token provider, and realtime connection never

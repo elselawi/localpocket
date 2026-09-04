@@ -5,8 +5,6 @@ import 'package:localpocket/src/kernel/page_callbacks.dart'
     show CallbackInvoker;
 import 'package:localpocket/src/kernel/sync/sync_backend.dart';
 import 'package:localpocket/src/platform/web/page/protocol.dart';
-import 'package:localpocket/src/platform/web/page/sync_server.dart'
-    show SyncBackendServer;
 
 /// A configurable page-side [SyncBackend] fake for the proxy-channel tests:
 /// records every call, replays scripted results, and throws scripted typed
@@ -254,9 +252,11 @@ class ScriptedTokenSource implements SyncTokenSource {
 /// (the worker-side hub), wrapped in the same WebResponse envelope the
 /// worker's request path returns.
 class ServerCallbackInvoker implements CallbackInvoker {
-  ServerCallbackInvoker(this.server, {required this.onPush});
+  ServerCallbackInvoker(this._serve, {required this.onPush});
 
-  final SyncBackendServer server;
+  /// The page server's `serve` method (any of the page RPC servers — sync
+  /// backend, blob store, schema callbacks).
+  final Future<Map<String, Object?>?> Function(Map<Object?, Object?>) _serve;
 
   /// Handles one page→worker push: receives the full `WireOp.backendCall`
   /// request envelope (as the worker's request path does) and returns the
@@ -272,7 +272,7 @@ class ServerCallbackInvoker implements CallbackInvoker {
   @override
   Future<Object?> invoke(String channel, Map<String, Object?> args) async {
     sent.add(args);
-    final reply = await server.serve({
+    final reply = await _serve({
       'kind': CallbackRpc.requestKind,
       CallbackRpc.rpcId: _nextRpcId++,
       CallbackRpc.channel: channel,

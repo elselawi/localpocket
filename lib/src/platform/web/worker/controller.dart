@@ -17,6 +17,7 @@ import '../../../kernel/local_pocket.dart';
 import '../../../kernel/kernel_context.dart' show defaultTxSessionTtl;
 import '../../../kernel/page_callbacks.dart' show attachStorePolicy;
 import '../../../kernel/schema.dart';
+import '../../../kernel/files/blob_proxy.dart' show ProxyBlobStore;
 import '../../../kernel/sync/sync_proxy.dart'
     show ProxyBackendHub, ProxySyncBackendFactory;
 import 'blob_store.dart';
@@ -105,6 +106,10 @@ final class LocalPocketDatabaseController extends DatabaseController {
       // entirely on the page and the worker receives a proxy factory.
       final syncProxy = (options['syncProxy'] as bool?) ?? false;
       final backendHub = syncProxy ? ProxyBackendHub() : null;
+      // The page sets this marker when the open carried a caller-supplied
+      // blob store in the PageCallbacks container: bytes cross chunked over
+      // the callback channel and the worker receives a proxy.
+      final blobProxy = (options['blobProxy'] as bool?) ?? false;
 
       // The page-callback bridge: executable schema features (conflict
       // resolvers, validators, migration hooks) round-trip to the page
@@ -138,10 +143,13 @@ final class LocalPocketDatabaseController extends DatabaseController {
             'Store declares encrypted fields but no fieldCipher was provided.');
       }
 
-      // Worker-owned blob store backs LocalPocket.files + the sync file lane.
+      // Worker-owned blob store backs LocalPocket.files + the sync file lane:
+      // the OPFS-backed store by default, or the proxy to the page-hosted
+      // caller store when the open configured one.
       // @JS('navigator') OPFS access is safe in a dedicated worker (no window
       // dependency); degrades to an in-memory store when OPFS is unavailable.
-      final blobStore = WebBlobStore();
+      final blobStore =
+          blobProxy ? ProxyBlobStore(invoker: callbackBridge) : WebBlobStore();
 
       // The PocketBase backend factory lets the kernel's sync start command
       // build its backend without importing the adapter here.

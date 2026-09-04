@@ -27,6 +27,7 @@ import 'package:localpocket/src/platform/web/worker/worker_engine.dart';
 import 'package:test/test.dart';
 
 import '../../../support/helpers.dart';
+import '../../../support/fake_blob_store.dart';
 import '../../../support/fake_sync_backend.dart';
 import '../../../support/mock_pb_server.dart';
 import '../../../support/worker_harness.dart';
@@ -45,6 +46,32 @@ Future<void> waitUntil(
   }
   fail('Timed out after $timeout waiting for condition.');
 }
+
+/// Begins a contract file upload for [recordId] and returns the session id.
+Future<String> beginContractUpload(
+  WorkerHarness h,
+  String recordId,
+  int size,
+) async =>
+    (await h.runtime.send(contract.FileBeginUploadRequest(
+      store: 'widgets',
+      recordId: recordId,
+      size: size,
+    )))
+        .session;
+
+/// The [contract.FileChunkEvent]s the engine emitted for [stream].
+List<contract.FileChunkEvent> contractChunkEvents(
+  WorkerHarness h,
+  String stream,
+) =>
+    [
+      for (final e in h.sink.byOp(WireOp.contractEvent))
+        if (contract.ContractCodec.decodeEvent(
+                (e['event']! as Map).cast<String, Object?>())
+            case final contract.FileChunkEvent c when c.stream == stream)
+          c,
+    ];
 
 /// The page-side resolver used by the callback-channel group: reviews the
 /// merged record and keeps both sides' values (never declines).
@@ -1371,6 +1398,67 @@ void main() {
         code: WireErrorCode.localpocket,
       );
       expect(unknown.message, contains('99'));
+    });
+  });
+
+  group('WorkerEngine — proxy blob store (page-executed)', () {
+    test('attachment bytes cross to the page store and back byte-equal',
+        () async {
+      final pageStore = ScriptedBlobStore();
+      final h = await WorkerHarness.open(
+        pageCallbacks: PageCallbacks(blobStore: pageStore),
+      );
+      addTearDown(h.close);
+
+      // The kernel file surface writes through ProxyBlobStore.put; the
+      // page store receives the reassembled bytes.
+      final id = generateRecordId();
+      await h.put('widgets', record(name: 'with-file'), id: id);
+      final payload = utf8.encode('proxy blob payload');
+      final session = await beginContractUpload(h, id, payload.length);
+      await h.runtime.send(contract.FileChunkRequest(
+          session: session,
+          chunk: Uint8List.fromList(payload.sublist(0, 7))));
+      await h.runtime.send(contract.FileChunkRequest(
+          session: session,
+          chunk: Uint8List.fromList(payload.sublist(7))));
+      final ref = (await h.runtime
+              .send(contract.FileFinishRequest(session: session)))
+          .ref!;
+      expect(pageStore.blobs[ref.hash], payload,
+          reason: 'the page store must have received the exact bytes');
+      expect(ref.state, 'pending_upload');
+
+      // Reads stream back through ProxyBlobStore.open as chunk events.
+      final opened = await h.runtime.send(contract.FileOpenRequest(
+          store: 'widgets', recordId: id, refId: ref.refId));
+      await waitUntil(() async => contractChunkEvents(h, opened.stream)
+          .isNotEmpty);
+      final events = contractChunkEvents(h, opened.stream);
+      expect(
+        utf8.decode(events.expand((e) => e.chunk).toList()),
+        'proxy blob payload',
+      );
+    });
+
+    test('storage status reports the PAGE store durability', () async {
+      final pageStore = ScriptedBlobStore()..durable = true;
+      final h = await WorkerHarness.open(
+        pageCallbacks: PageCallbacks(blobStore: pageStore),
+      );
+      addTearDown(h.close);
+      final status = await h.runtime.send(const contract.StorageStatusRequest());
+      expect(status.durable, isTrue,
+          reason: 'isDurable must reflect the page store, not the worker');
+
+      final volatile = ScriptedBlobStore()..durable = false;
+      final h2 = await WorkerHarness.open(
+        pageCallbacks: PageCallbacks(blobStore: volatile),
+      );
+      addTearDown(h2.close);
+      final status2 =
+          await h2.runtime.send(const contract.StorageStatusRequest());
+      expect(status2.durable, isFalse);
     });
   });
 

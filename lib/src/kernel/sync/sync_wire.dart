@@ -73,9 +73,16 @@ Map<String, Object?> encodeBackendPageError(Object error) =>
     {'ok': false, 'pageError': error.toString()};
 
 /// Decodes one method answer: returns the result on success, throws the
-/// decoded [SyncError] (exact subtype) for encoded sync failures, and a
-/// [ValidationException] for page-side failures or a malformed envelope.
-Object? decodeBackendResponse(Object? raw, {required String where}) {
+/// decoded error (exact subtype — sync errors by default, or whatever
+/// [decodeError] reconstructs, e.g. the blob-store errors) for encoded
+/// failures, and a [ValidationException] for page-side failures or a
+/// malformed envelope.
+Object? decodeBackendResponse(
+  Object? raw, {
+  required String where,
+  Object Function(Object? raw, {required String where}) decodeError =
+      decodeSyncError,
+}) {
   final map = _requireMap(raw, where);
   final ok = map['ok'];
   if (ok is! bool) {
@@ -87,10 +94,10 @@ Object? decodeBackendResponse(Object? raw, {required String where}) {
   if (hasError == hasPageError) {
     throw ValidationException(
         'A failed answer at $where must carry exactly one of "error" '
-        '(typed sync error) or "pageError".');
+        '(typed error) or "pageError".');
   }
   if (hasError) {
-    throw decodeSyncError(map['error'], where: where);
+    throw decodeError(map['error'], where: where);
   }
   final pageError = map['pageError'];
   if (pageError is! String) {
