@@ -13,6 +13,14 @@
   the new typed `RemoteOnlyError` (exported; previously a raw `StateError`)
   whose message names `download` as the affordance. The shipped web worker
   embeds the new contract request.
+  Also new: `files.open(ref, fetch: true)` hydrates a `remote_only` ref
+  through the same lane before streaming — one call for "give me the bytes,
+  fetching them if they were evicted". Already-local bytes are never
+  re-fetched. As part of this, a latent facade bug is fixed: when a
+  `fileOpen` request failed (for example on a `remote_only` ref), the facade
+  awaited the close of an unlistened stream controller, hanging the await
+  forever instead of surfacing the typed error. Kernels-level opens were
+  unaffected; every facade `open` failure path now rethrows promptly.
 
 - **Whole-database encryption on native, configurable from the public
   API.** `LocalPocketOptions` gains `nativeDatabaseFactory` (supply a
