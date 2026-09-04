@@ -9,6 +9,7 @@ export 'src/kernel/change_bus.dart' show ChangeAction, ChangeOrigin;
 export 'src/kernel/database_adapter.dart' show Database, DirectSqliteDatabase;
 export 'src/kernel/errors.dart';
 export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
+export 'src/kernel/page_callbacks.dart' show StorePageCallbacks;
 export 'src/kernel/schema.dart'
 export 'src/kernel/sync/merge.dart'
 export 'src/kernel/sync/status.dart'
