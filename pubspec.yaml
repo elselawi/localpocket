@@ -2,7 +2,7 @@ name: localpocket
 description: >-
   Local-first SQLite database for Dart and Flutter with offline-first storage and
   eventually-consistent PocketBase synchronization.
-version: 0.1.1
+version: 0.2.0
 
 repository: https://github.com/elselawi/localpocket
 homepage: https://github.com/elselawi/localpocket
