@@ -373,9 +373,15 @@ String _blankCommentsAndStrings(String source) {
 /// lines identical (e.g. a `show` list that no longer matches the file).
 List<String> publicInventory(Directory root, String entrypoint) {
   final lines = <String>{};
+  final visited = <String>{};
 
   void visit(String relative, {Set<String>? show, Set<String>? hide}) {
     final normalized = relative.replaceAll('\\', '/');
+    final showKey = (show ?? const <String>{}).toList()..sort();
+    final hideKey = (hide ?? const <String>{}).toList()..sort();
+    final visitKey = '$normalized|${showKey.join(',')}|${hideKey.join(',')}';
+    if (!visited.add(visitKey)) return;
+
     final file = File(
         '${root.path}${Platform.pathSeparator}${normalized.replaceAll('/', Platform.pathSeparator)}');
     if (!file.existsSync()) return;

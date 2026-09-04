@@ -70,6 +70,38 @@ final class SneakySurface {
     });
   });
 
+  test('publicInventory handles cyclic exports without recursing forever', () {
+    final temp = Directory.systemTemp.createTempSync('api_inventory_cycle_');
+    addTearDown(() {
+      if (temp.existsSync()) {
+        temp.deleteSync(recursive: true);
+      }
+    });
+
+    final libDir = Directory('${temp.path}${Platform.pathSeparator}lib');
+    libDir.createSync(recursive: true);
+
+    File('${libDir.path}${Platform.pathSeparator}a.dart').writeAsStringSync('''
+export 'b.dart';
+
+class A {}
+''');
+    File('${libDir.path}${Platform.pathSeparator}b.dart').writeAsStringSync('''
+export 'a.dart';
+
+class B {}
+''');
+    File('${libDir.path}${Platform.pathSeparator}entry.dart')
+        .writeAsStringSync('''
+export 'a.dart';
+''');
+
+    final inventory = publicInventory(temp, 'lib/entry.dart');
+
+    expect(inventory, contains('lib/a.dart::A'));
+    expect(inventory, contains('lib/b.dart::B'));
+  });
+
   test('repository gates pass end to end', () async {
     for (final script in [
       'tool/raw_api_gate.dart',

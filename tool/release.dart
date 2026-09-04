@@ -170,7 +170,7 @@ List<ReleaseStep> buildReleaseSteps({
       ),
       const ReleaseStep(
         id: 'api_inventory',
-        label: 'Public API inventory gate (plan 14.1)',
+        label: 'Public API inventory gate',
         argv: ['run', 'tool/api_surface_scanner.dart'],
       ),
       const ReleaseStep(
