@@ -48,7 +48,25 @@ Map<String, Object?> parseOpenOptions(Object? data) {
     }
     result['destructiveBackup'] = destructiveBackup;
   }
+  final storePolicies = stringMap['storePolicies'];
+  if (storePolicies != null) {
+    if (storePolicies is! Map) {
+      throw ProtocolEnvelopeException('"storePolicies" must be a map.');
+    }
+    result['storePolicies'] = {
+      for (final e in storePolicies.entries)
+        e.key.toString(): _requirePolicyEnvelope(e.value, e.key.toString()),
+    };
+  }
   return result;
+}
+
+Map<String, Object?> _requirePolicyEnvelope(Object? raw, String store) {
+  if (raw is! Map) {
+    throw ProtocolEnvelopeException(
+        'The store policy for "$store" must be a map.');
+  }
+  return deepStringMap(raw);
 }
 
 /// Reads a single raw option from the dartified `additionalData` WITHOUT

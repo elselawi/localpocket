@@ -16,6 +16,7 @@ import 'file_service.dart' show LocalPocketFiles;
 import 'files/blob_store.dart' show BlobStore;
 import 'local_pocket.dart' show KernelDatabase, StoreTable, TestHooks;
 import 'mutation_service.dart' show MutationService;
+import 'page_callbacks.dart' show CallbackInvoker;
 import 'perf_counters.dart' show PerfCounters;
 import 'read_service.dart' show ReadService;
 import 'sync/conflicts.dart' show Conflicts;
@@ -52,6 +53,7 @@ final class KernelContext {
     this.blobStore,
     this.fieldCipher,
     this.cryptoProvider,
+    this.callbackInvoker,
   });
 
   /// The owning kernel database. Services should prefer the narrow fields
@@ -102,6 +104,10 @@ final class KernelContext {
 
   /// Per-field cipher provider, when configured.
   final CryptoProvider? cryptoProvider;
+
+  /// The page-callback channel for executable schema features on the worker
+  /// runtime, or null on runtimes that execute hooks in-process.
+  final CallbackInvoker? callbackInvoker;
 
   /// Coalescing window for group commit (zero = end-of-turn only).
   final Duration groupCommitWindow;

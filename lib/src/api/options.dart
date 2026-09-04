@@ -12,6 +12,7 @@ import '../kernel/cipher.dart';
 import '../kernel/database_adapter.dart' show Database;
 import '../kernel/kernel_context.dart' show defaultTxSessionTtl;
 import '../kernel/files/blob_store.dart' show BlobStore;
+import '../kernel/page_callbacks.dart' show StorePageCallbacks;
 import '../kernel/sync/sync_backend.dart' show SyncBackendFactory;
 import '../schema/store_def.dart';
 
@@ -37,6 +38,7 @@ final class LocalPocketOptions {
     this.txSessionTtl = defaultTxSessionTtl,
     this.syncBackendFactory,
     this.blobStore,
+    this.pageCallbacks,
   });
 
   /// Database file path (`:memory:` opens an in-memory database).
@@ -116,6 +118,18 @@ final class LocalPocketOptions {
   /// natively this is the storage adapter. Without one, file operations fail
   /// with a `StateError`.
   final BlobStore? blobStore;
+
+  /// Per-store page callbacks that executable schema features resolve to on
+  /// the worker runtime, keyed by store name.
+  ///
+  /// Conflict resolvers, validators, document migrations, and backfill
+  /// transforms are code and cannot be serialized to the database worker;
+  /// structurally-representable resolvers (the closure-free built-ins) run
+  /// in the worker as-is, everything else is invoked on the page through
+  /// the callback channel. Each entry must cover exactly what the store's
+  /// definition declares — a mismatch fails the open with a typed error.
+  /// Natively this map is unused: hooks execute in-process.
+  final Map<String, StorePageCallbacks>? pageCallbacks;
 }
 
 /// {@template localpocket.encryption_config}

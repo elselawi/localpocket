@@ -2,6 +2,7 @@
 /// class that compiles descriptors into a database `CollectionSchema`.
 library;
 
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:localpocket/src/kernel/errors.dart';
@@ -248,11 +249,10 @@ abstract base class StoreDef<S extends StoreDef<S>> {
 
   /// Forward store migrations, forwarded verbatim to the database.
   ///
-  /// Descriptor policy: callbacks never cross a runtime boundary. The
-  /// manifest records their presence (`SchemaManifest.unsupportedFeatures`)
-  /// and the web worker rejects any store carrying one before DDL runs, so
-  /// worker-backed databases are descriptor-only. Native targets keep the
-  /// legacy in-process path; the split is pinned by `test/refactor/manifest/`.
+  /// Callback transforms execute in-process on native. On the worker runtime
+  /// a transform must be registered in the open call's `pageCallbacks` so
+  /// the worker can call the page back; unregistered executable features
+  /// fail the web open with a typed error.
   List<StoreMigration> get migrations => const [];
 
   /// Conflict resolution policy; `null` means the database's default
@@ -264,8 +264,10 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   Map<int, DocumentMigration> get documentMigrations => const {};
 
   /// Optional application-level validation callback, forwarded verbatim to
-  /// the database. See the descriptor policy on [migrations].
-  List<String> Function(Map<String, Object?> record)? get validator => null;
+  /// the database. The hook may be synchronous (native in-process) or
+  /// asynchronous (a page-registered callback on the worker runtime).
+  FutureOr<List<String>> Function(Map<String, Object?> record)? get validator =>
+      null;
 
   /// Whether archived records that never existed remotely stay archived
   /// locally (soft archive) instead of vanishing on [Collection.archive].

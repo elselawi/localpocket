@@ -72,6 +72,36 @@ class WireErrorCode {
 /// category string.
 String stableWireErrorType(Object error) => canonicalErrorType(error);
 
+/// Worker→page callback RPC vocabulary: the reverse request/response channel
+/// the worker uses to execute page-registered schema callbacks (conflict
+/// resolvers, validators, migration hooks). The page answers each request
+/// envelope with a result envelope through the same custom-request response.
+abstract final class CallbackRpc {
+  /// `kind` of a worker→page callback request.
+  static const String requestKind = 'callback_rpc';
+
+  /// `kind` of the page's answer.
+  static const String resultKind = 'callback_rpc_result';
+
+  /// Request/result correlation id.
+  static const String rpcId = 'rpcId';
+
+  /// Callback channel name (see `kernel/page_callbacks.dart`).
+  static const String channel = 'channel';
+
+  /// Channel arguments.
+  static const String args = 'args';
+
+  /// Success flag on the result envelope.
+  static const String ok = 'ok';
+
+  /// Response value on a successful result envelope.
+  static const String value = 'value';
+
+  /// Failure message on a failed result envelope.
+  static const String error = 'error';
+}
+
 /// {@template localpocket.web_request}
 /// A request envelope sent from the facade to the worker.
 /// {@endtemplate}

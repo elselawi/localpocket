@@ -9,13 +9,16 @@ import '../../adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
 import '../../contract/contract.dart';
 import '../../kernel/schema_manifest.dart';
+import '../../kernel/page_callbacks.dart' show encodeStorePolicies;
 import '../../runtime/remote_runtime_client.dart';
 import 'crypto.dart';
 import 'page/assets.dart';
+import 'page/callback_server.dart';
 import 'page/connector.dart';
 import 'page/lifecycle.dart';
 import 'page/object_urls.dart';
 import 'page/open_core.dart';
+import 'page/protocol.dart' show CallbackRpc;
 
 /// Opens the facade on the web: the kernel runs in the dedicated database
 /// worker and the page holds only the typed contract client. The worker boots
@@ -80,6 +83,17 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     for (final def in options.stores) def.compiledSchema,
   ];
 
+  // Executable schema features cross as an envelope of descriptors plus
+  // page-registered callback ids; coverage against `pageCallbacks` is
+  // validated here so a missing registration fails the open typed instead
+  // of surfacing at first merge/write.
+  final storePolicies = encodeStorePolicies(schemas, options.pageCallbacks);
+
+  // Executes worker callback requests (conflict resolvers, validators,
+  // migration hooks) against the page-registered callbacks.
+  final callbackServer =
+      PageCallbackServer(stores: options.pageCallbacks ?? const {});
+
   // The cipher is serialized into the open options so the worker reconstructs
   // an AesGcmFieldCipher with the same key (crosses postMessage into the
   // same-origin trusted worker); unserializable configs throw typed here.
@@ -130,6 +144,7 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     'destructiveBackup': true,
     'backupDbName': options.path,
     if (cipherEnvelope != null) 'fieldCipher': cipherEnvelope,
+    if (storePolicies != null) 'storePolicies': storePolicies,
   };
 
   try {
@@ -146,7 +161,14 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
           // Events cannot arrive before the runtime exists (they ride the
           // lazily-created event subscription), but an early worker→page
           // message must not touch an uninitialized variable.
-          if (value is Map) runtimeRef?.handleWorkerEvent(value);
+          if (value is Map) {
+            if (value['kind'] == CallbackRpc.requestKind) {
+              final reply = await callbackServer.serve(value);
+              if (reply != null) return reply.jsify();
+            } else {
+              runtimeRef?.handleWorkerEvent(value);
+            }
+          }
         }
         return null;
       },
@@ -181,6 +203,7 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
       manifestFingerprints: {
         for (final s in schemas) s.name: SchemaManifest.compile(s).fingerprint,
       },
+      storePolicies: storePolicies,
     ));
 
     // Worker death ends the event stream; later sends fail via the

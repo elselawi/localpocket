@@ -1,6 +1,8 @@
 /// Schema declaration model.
 library;
 
+import 'dart:async';
+
 import 'package:collection/collection.dart' show ListEquality;
 import 'package:localpocket/src/kernel/sync/merge.dart';
 
@@ -581,8 +583,11 @@ class StoreMigration {
   /// Fields added by an additive migration.
   final List<Field> addedFields;
 
-  /// Optional row transformation used during backfill or rebuild.
-  final Map<String, Object?> Function(Map<String, Object?> oldRow)? transform;
+  /// Optional row transformation used during backfill or rebuild. The hook
+  /// may be synchronous (native in-process) or asynchronous (a
+  /// channel-backed hook that executes on the page).
+  final FutureOr<Map<String, Object?>> Function(Map<String, Object?> oldRow)?
+      transform;
 
   /// Serializes migration metadata that can cross the web worker boundary.
   /// Function transforms are intentionally omitted: closures are not
@@ -592,6 +597,19 @@ class StoreMigration {
         'destructive': destructive,
         'addedFields': [for (final field in addedFields) field.toJson()],
       };
+
+  /// Internal: rebuilds this migration with [transform] attached. The worker
+  /// attach path rebinds transforms that execute on the page; the wire form
+  /// never carries them.
+  StoreMigration withTransform(
+          FutureOr<Map<String, Object?>> Function(Map<String, Object?> oldRow)?
+              transform) =>
+      StoreMigration(
+        toVersion: toVersion,
+        destructive: destructive,
+        addedFields: addedFields,
+        transform: transform,
+      );
 
   /// Reconstructs migration metadata from a JSON-compatible map.
   static StoreMigration fromJson(Map<String, Object?> json) => _parseSchemaJson(
@@ -607,7 +625,10 @@ class StoreMigration {
 }
 
 /// A lazy, deterministic, never-pushed document-format migration.
-typedef DocumentMigration = Map<String, Object?> Function(
+///
+/// The hook may be synchronous (the native in-process path) or asynchronous
+/// (a channel-backed hook that executes on the page); `await` accepts both.
+typedef DocumentMigration = FutureOr<Map<String, Object?>> Function(
   Map<String, Object?> doc,
 );
 
@@ -761,8 +782,10 @@ class CollectionSchema<T> {
   /// Lazy document-format migrations keyed by target version.
   final Map<int, DocumentMigration> documentMigrations;
 
-  /// Optional application-level validation callback.
-  final List<String> Function(Map<String, Object?> record)? validator;
+  /// Optional application-level validation callback. The hook may be
+  /// synchronous (the native in-process path) or asynchronous (a
+  /// channel-backed hook that executes on the page).
+  final FutureOr<List<String>> Function(Map<String, Object?> record)? validator;
 
   /// The local attachment field name for this store's files, or `null` for
   /// the shared default (`attachmentFieldDefault`). A metadata label only;
@@ -805,16 +828,16 @@ class CollectionSchema<T> {
 
 /// Applies document migrations `from+1 .. to` to a logical document.
 /// Pure, deterministic, idempotent — never pushes anything.
-Map<String, Object?> applyDocumentMigrations(
+Future<Map<String, Object?>> applyDocumentMigrations(
   CollectionSchema<Object?> schema,
   Map<String, Object?> doc, {
   required int from,
   required int to,
-}) {
+}) async {
   var result = doc;
   for (var v = from + 1; v <= to; v++) {
     final m = schema.documentMigrations[v];
-    if (m != null) result = m(result);
+    if (m != null) result = await m(result);
   }
   return result;
 }

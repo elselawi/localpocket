@@ -14,6 +14,7 @@ import '../../../kernel/capabilities.dart';
 import '../../../kernel/database_adapter.dart';
 import '../../../kernel/errors.dart';
 import '../../../kernel/local_pocket.dart';
+import '../../../kernel/page_callbacks.dart' show attachStorePolicy;
 import '../../../kernel/schema.dart';
 import 'blob_store.dart';
 import '../../../adapters/pocketbase/backend.dart'
@@ -87,6 +88,22 @@ final class LocalPocketDatabaseController extends DatabaseController {
       final stores = (options['stores'] as List<CollectionSchema>?) ?? [];
       final maxDocBytes = (options['maxDocBytes'] as int?) ?? 1900000;
       final destructiveBackup = (options['destructiveBackup'] as bool?) ?? true;
+      final storePolicies =
+          options['storePolicies'] as Map<String, Object?>? ?? const {};
+
+      // The page-callback bridge: executable schema features (conflict
+      // resolvers, validators, migration hooks) round-trip to the page
+      // through it; the schemas must attach their channel-backed members
+      // before the engine boots so manifest fingerprints match the page's.
+      final callbackBridge = WorkerCallbackBridge();
+      final attachedStores = [
+        for (final s in stores)
+          attachStorePolicy(
+            s,
+            storePolicies[s.name],
+            invoker: callbackBridge,
+          ),
+      ];
 
       // Cipher parsing is intentionally OUTSIDE `parseOpenOptions`, which
       // validates open-option keys individually — the cipher envelope has
@@ -111,13 +128,14 @@ final class LocalPocketDatabaseController extends DatabaseController {
       final pocket = await LocalPocket.open(
         path: path,
         database: db,
-        stores: stores,
+        stores: attachedStores,
         platform: PlatformProfile.web,
         blobStore: blobStore,
         fieldCipher: fieldCipher,
         maxDocBytes: maxDocBytes,
         destructiveBackup: destructiveBackup,
         syncBackendFactory: const PocketBaseSyncBackendFactory(),
+        callbackInvoker: callbackBridge,
       );
       handedToPocket = true;
 
@@ -125,6 +143,7 @@ final class LocalPocketDatabaseController extends DatabaseController {
         rawDatabase: rawDb,
         databaseAdapter: db,
         pocket: pocket,
+        callbackBridge: callbackBridge,
       );
     } catch (_) {
       if (!handedToPocket) {
@@ -153,10 +172,12 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     required this.rawDatabase,
     required this.databaseAdapter,
     required this.pocket,
+    required this.callbackBridge,
   }) : _engine = WorkerEngine(
           rawDatabase: rawDatabase,
           databaseAdapter: databaseAdapter,
           pocket: pocket,
+          callbackBridge: callbackBridge,
         );
 
   /// The underlying SQLite database exposed to the worker runtime.
@@ -167,6 +188,9 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   /// The local database engine hosted by this worker database.
   final LocalPocket pocket;
+
+  /// Routes kernel callback invocations to connected pages.
+  final WorkerCallbackBridge callbackBridge;
 
   final WorkerEngine _engine;
 
@@ -259,7 +283,7 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 /// Adapts a [ClientConnection] (JS-interop) to the pure-Dart
 /// [WorkerEventSink] the engine emits through.
 /// {@endtemplate}
-final class _ConnectionSink implements WorkerEventSink {
+final class _ConnectionSink implements WorkerEventSink, WorkerCallbackChannel {
   /// {@macro localpocket.__connection_sink}
   _ConnectionSink(this.connection);
 
@@ -284,6 +308,12 @@ final class _ConnectionSink implements WorkerEventSink {
     }, onError: (_) {
       _inFlight--;
     }));
+  }
+
+  @override
+  Future<Object?> call(Map<String, Object?> message) async {
+    final raw = await connection.customRequest(message.jsify());
+    return raw?.dartify();
   }
 }
 

@@ -9,7 +9,13 @@ abstract final class ContractCodec {
   /// const and rides outside the const spread.
   static final List<Request> requestSamples = [
     ...const <Request>[
-      OpenRequest(stores: [], manifestFingerprints: {}),
+      OpenRequest(stores: [], manifestFingerprints: {}, storePolicies: {
+        's': {
+          'conflictPolicy': {
+            'collectionResolver': {'kind': 'localWins'},
+          },
+        },
+      }),
       CapabilitiesRequest(),
       HealthRequest(),
       CloseRequest(),
@@ -205,6 +211,7 @@ abstract final class ContractCodec {
         if (stores is! List || fingerprints is! Map) {
           throw WireException('Malformed open payload.');
         }
+        final policies = m['storePolicies'];
         return OpenRequest(
           stores: [
             for (var i = 0; i < stores.length; i++)
@@ -214,6 +221,12 @@ abstract final class ContractCodec {
             for (final e in fingerprints.entries)
               e.key.toString(): _wireString(e.value, 'fingerprint'),
           },
+          storePolicies: policies == null
+              ? null
+              : {
+                  for (final e in (policies as Map).entries)
+                    e.key.toString(): _stringMap(e.value, 'storePolicies'),
+                },
         );
       case 'capabilities':
         return const CapabilitiesRequest();

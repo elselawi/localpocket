@@ -140,7 +140,7 @@ class Migrator {
         lastRowid = r['rowid']! as int;
         final logical = decodeDbRow(schema, r,
             cipher: pocket.fieldCipher, cryptoProvider: pocket.cryptoProvider);
-        final values = m.transform!(logical);
+        final values = await m.transform!(logical);
         if (values.isNotEmpty) {
           updates.add((lastRowid, logical['id'] as String? ?? '', values));
         }
@@ -273,7 +273,7 @@ class Migrator {
             final logical = decodeDbRow(schema, r,
                 cipher: pocket.fieldCipher,
                 cryptoProvider: pocket.cryptoProvider);
-            final newLogical = m.transform?.call(logical) ?? logical;
+            final newLogical = await m.transform?.call(logical) ?? logical;
             // Validate transformed values against the target schema's kind /
             // required / enum rules (item 12) before encoding, mirroring the
             // normal CRUD validation.

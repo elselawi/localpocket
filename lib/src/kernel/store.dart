@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:collection/collection.dart';
@@ -417,8 +418,9 @@ class Collection with ChangeBusAwareStore {
         canonicalizePayloadInto(payloadBuffer, _schema, merged);
     final payloadJson = payloadBuffer.toString();
     // Validators see the logical form without the synthetic `id` key.
-    _validate(id, {...merged}..remove('id'),
+    final pending = _validate(id, {...merged}..remove('id'),
         precomputedPayload: payloadJson, precomputedPayloadBytes: payloadBytes);
+    if (pending is Future) await pending;
 
     final dirtyFields =
         _dirtyFields(currentPayload, merged, MutationAction.update);
@@ -581,8 +583,9 @@ class Collection with ChangeBusAwareStore {
         idOverride: recordId.isNotEmpty ? recordId : null);
     final payloadJson = payloadBuffer.toString();
 
-    _validate(recordId, logical,
+    final pending = _validate(recordId, logical,
         precomputedPayload: payloadJson, precomputedPayloadBytes: payloadBytes);
+    if (pending is Future) await pending;
 
     // A fresh create cannot have sync/outbox rows (id is the PK): skip the
     // reads. putAll and the combined probe supply prefetched state.
@@ -934,9 +937,10 @@ class Collection with ChangeBusAwareStore {
             payloadBuffer, schema, logical,
             idOverride: rid);
         final payloadJson = payloadBuffer.toString();
-        _validate(rid, logical,
+        final pending = _validate(rid, logical,
             precomputedPayload: payloadJson,
             precomputedPayloadBytes: payloadBytes);
+        if (pending is Future) await pending;
         // Map-free domain encoding in [domainCols] order.
         appendDomainValues(domainVals, schema,
             id: rid,
@@ -1032,8 +1036,9 @@ class Collection with ChangeBusAwareStore {
     final payloadBytes = canonicalizePayloadInto(payloadBuffer, schema, logical,
         idOverride: rid);
     final payloadJson = payloadBuffer.toString();
-    _validate(rid, logical,
+    final pending = _validate(rid, logical,
         precomputedPayload: payloadJson, precomputedPayloadBytes: payloadBytes);
+    if (pending is Future) await pending;
     final row = encodeDbRow(
       schema,
       id: rid,
@@ -1255,7 +1260,7 @@ class Collection with ChangeBusAwareStore {
         cipher: _pocket.fieldCipher, cryptoProvider: _pocket.cryptoProvider);
     final storedVer = (row['lp_schema_ver'] as int?) ?? 1;
     if (storedVer < _schema.version) {
-      logical = applyDocumentMigrations(_schema, logical,
+      logical = await applyDocumentMigrations(_schema, logical,
           from: storedVer, to: _schema.version);
     }
     if (_tx == null) {
@@ -1266,7 +1271,12 @@ class Collection with ChangeBusAwareStore {
 
   // ------------------------------------------------------------- validation --
 
-  void _validate(String id, Map<String, Object?> logical,
+  /// Validates one logical record. Synchronous on the fast path: when the
+  /// store's validator hook completes without awaiting (a native in-process
+  /// closure, or no hook at all) this returns void and the caller never
+  /// suspends. A channel-backed validator (worker runtime) returns the
+  /// pending size check, which the caller must await.
+  FutureOr<void> _validate(String id, Map<String, Object?> logical,
       {String? precomputedPayload, int? precomputedPayloadBytes}) {
     for (final f in _schema.fields) {
       final v = logical[f.name];
@@ -1281,10 +1291,37 @@ class Collection with ChangeBusAwareStore {
             field: f.name);
       }
     }
-    final msgs = _schema.validator?.call(logical) ?? const <String>[];
-    if (msgs.isNotEmpty) {
-      throw ValidationException(msgs.join('; '));
+    final validator = _schema.validator;
+    if (validator != null) {
+      final msgs = validator(logical);
+      if (msgs is Future<List<String>>) {
+        return _validateAsyncTail(msgs, logical,
+            precomputedPayload: precomputedPayload,
+            precomputedPayloadBytes: precomputedPayloadBytes);
+      }
+      if (msgs.isNotEmpty) {
+        throw ValidationException(msgs.join('; '));
+      }
     }
+    _validateSize(logical,
+        precomputedPayload: precomputedPayload,
+        precomputedPayloadBytes: precomputedPayloadBytes);
+  }
+
+  Future<void> _validateAsyncTail(
+      Future<List<String>> msgs, Map<String, Object?> logical,
+      {String? precomputedPayload, int? precomputedPayloadBytes}) async {
+    final resolved = await msgs;
+    if (resolved.isNotEmpty) {
+      throw ValidationException(resolved.join('; '));
+    }
+    _validateSize(logical,
+        precomputedPayload: precomputedPayload,
+        precomputedPayloadBytes: precomputedPayloadBytes);
+  }
+
+  void _validateSize(Map<String, Object?> logical,
+      {String? precomputedPayload, int? precomputedPayloadBytes}) {
     // Upper-bound UTF-8 measurement (non-ASCII counted as 4 bytes), no
     // second serialization pass.
     final bytes = precomputedPayloadBytes ??

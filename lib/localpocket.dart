@@ -65,9 +65,10 @@ export 'src/kernel/schema.dart'
 // (`StoreDef.conflictPolicy`): the merge context/result a resolver sees,
 // the resolver interface, the five built-in resolvers, and the custom
 // wrapper. The kernel's `MergePolicy` mirror and the engine internals stay
-// internal. A schema carrying executable resolvers still cannot cross the
-// web worker (see UnsupportedSchemaFeatureError) — these types compile on
-// every platform, the worker rejects stores that declare them.
+// internal. Closure-free built-in resolvers run in the web worker as-is;
+// anything executable must be registered per store in `pageCallbacks` (see
+// UnsupportedSchemaFeatureError, which still fails a worker runtime when no
+// callback channel serves the store's executable features).
 export 'src/kernel/sync/merge.dart'
     show
         AppendOnlyLinesResolver,
@@ -80,6 +81,11 @@ export 'src/kernel/sync/merge.dart'
         MergeResult,
         RemoteWinsResolver,
         SetUnionWithDeletionWinsResolver;
+
+// The page-callback registry: on the worker runtime, executable schema
+// features (custom resolvers, validators, document migrations, backfill
+// transforms) resolve to these per-store declarations.
+export 'src/kernel/page_callbacks.dart' show StorePageCallbacks;
 
 // The typed error hierarchy: the public API throws these (Row.get throws
 // FieldNotSelectedError, stale cursors throw StaleCursorError, unsupported

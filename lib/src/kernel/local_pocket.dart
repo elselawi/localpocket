@@ -26,6 +26,7 @@ import 'kernel_context.dart';
 import 'maintenance_service.dart';
 import 'schema_service.dart';
 import 'mutation_service.dart';
+import 'page_callbacks.dart' show CallbackInvoker;
 import 'perf_counters.dart';
 import 'read_service.dart';
 import 'schema.dart';
@@ -234,6 +235,7 @@ class KernelDatabase with ChangeBusAwareLP {
     this.groupCommitWindow = Duration.zero,
     this.txSessionTtl = defaultTxSessionTtl,
     this.syncBackendFactory,
+    this.callbackInvoker,
   }) : perf = PerfCounters() {
     writeQueue = WriteQueue(onQueueDepthChanged: perf.queueChanged);
     kernel = KernelContext(
@@ -251,6 +253,7 @@ class KernelDatabase with ChangeBusAwareLP {
       cryptoProvider: cryptoProvider,
       groupCommitWindow: groupCommitWindow,
       txSessionTtl: txSessionTtl,
+      callbackInvoker: callbackInvoker,
     );
     _transactions = TransactionCoordinator(kernel);
     mutations = MutationService(kernel);
@@ -319,6 +322,11 @@ class KernelDatabase with ChangeBusAwareLP {
   /// is configured (sync start commands fail typed). Depends only on the
   /// seam in `sync/sync_backend.dart`.
   final SyncBackendFactory? syncBackendFactory;
+
+  /// The page-callback channel for executable schema features on the worker
+  /// runtime (conflict resolvers, validators, migration hooks), or null when
+  /// hooks execute in-process.
+  final CallbackInvoker? callbackInvoker;
 
   /// Optional test-only crash and tracing hooks.
   final TestHooks? testHooks;
@@ -414,6 +422,7 @@ class KernelDatabase with ChangeBusAwareLP {
     Duration groupCommitWindow = Duration.zero,
     Duration txSessionTtl = defaultTxSessionTtl,
     SyncBackendFactory? syncBackendFactory,
+    CallbackInvoker? callbackInvoker,
   }) async {
     final Database db;
     if (database != null) {
@@ -445,6 +454,7 @@ class KernelDatabase with ChangeBusAwareLP {
         groupCommitWindow: groupCommitWindow,
         txSessionTtl: txSessionTtl,
         syncBackendFactory: syncBackendFactory,
+        callbackInvoker: callbackInvoker,
       );
       await _recordCoreMigration(db, pocket.now);
       for (final schema in stores) {

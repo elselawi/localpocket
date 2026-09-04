@@ -18,9 +18,15 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
         if (k is String && v is String) expectedFingerprints[k] = v;
       });
     }
+    final storePolicies = _parseStorePolicies(req.args);
     if (storesRaw != null) {
       for (final s in storesRaw) {
-        final schema = parseSchema(s);
+        var schema = parseSchema(s);
+        schema = attachStorePolicy(
+          schema,
+          storePolicies[schema.name],
+          invoker: callbackBridge,
+        );
         // Never register an encrypted store without an engine cipher — the
         // facade already rejects this at open.
         final hasEncrypted = schema.fields.any((f) => f.encrypted);
@@ -54,5 +60,26 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
       }
     }
     return {'ok': true};
+  }
+
+  /// Parses the optional `storePolicies` argument: store name → envelope.
+  Map<String, Object?> _parseStorePolicies(Map<String, Object?> args) {
+    final raw = args['storePolicies'];
+    if (raw == null) return const {};
+    if (raw is! Map) {
+      throw ProtocolEnvelopeException('"storePolicies" must be a map.');
+    }
+    return {
+      for (final e in raw.entries)
+        e.key.toString(): _requireEnvelope(e.value, e.key.toString()),
+    };
+  }
+
+  Map<String, Object?> _requireEnvelope(Object? raw, String store) {
+    if (raw is! Map) {
+      throw ProtocolEnvelopeException(
+          'The store policy for "$store" must be a map.');
+    }
+    return deepStringMap(raw);
   }
 }

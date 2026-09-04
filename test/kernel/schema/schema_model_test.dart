@@ -348,7 +348,7 @@ void main() {
   });
 
   group('document migrations', () {
-    test('applyDocumentMigrations applies each step in order', () {
+    test('applyDocumentMigrations applies each step in order', () async {
       final schema = CollectionSchema<Object?>(
         name: 'docs',
         version: 1,
@@ -359,15 +359,16 @@ void main() {
           3: _incrementVersion,
         },
       );
-      final result =
-          applyDocumentMigrations(schema, {'title': 'hello'}, from: 0, to: 3);
+      final result = await applyDocumentMigrations(
+          schema, {'title': 'hello'},
+          from: 0, to: 3);
       expect(result, {
         'title': 'renamed:hello',
         'version': 2, // incremented once by step 3 (step 2 renames)
       });
     });
 
-    test('partial range applies only the steps in (from, to]', () {
+    test('partial range applies only the steps in (from, to]', () async {
       final schema = CollectionSchema<Object?>(
         name: 'docs',
         version: 1,
@@ -377,19 +378,19 @@ void main() {
           2: _renameTitle,
         },
       );
-      expect(applyDocumentMigrations(schema, {'title': 'x'}, from: 0, to: 1),
+      expect(await applyDocumentMigrations(schema, {'title': 'x'}, from: 0, to: 1),
           {'title': 'x', 'version': 1});
-      expect(applyDocumentMigrations(schema, {'title': 'x'}, from: 1, to: 2),
+      expect(await applyDocumentMigrations(schema, {'title': 'x'}, from: 1, to: 2),
           {'title': 'renamed:x'});
       // from == to -> no-op.
-      expect(applyDocumentMigrations(schema, {'title': 'x'}, from: 2, to: 2),
+      expect(await applyDocumentMigrations(schema, {'title': 'x'}, from: 2, to: 2),
           {'title': 'x'});
       // from > to -> no-op.
-      expect(applyDocumentMigrations(schema, {'title': 'x'}, from: 3, to: 1),
+      expect(await applyDocumentMigrations(schema, {'title': 'x'}, from: 3, to: 1),
           {'title': 'x'});
     });
 
-    test('migrations are pure and do not mutate the input doc', () {
+    test('migrations are pure and do not mutate the input doc', () async {
       final schema = CollectionSchema<Object?>(
         name: 'docs',
         version: 1,
@@ -397,13 +398,14 @@ void main() {
         documentMigrations: const {1: _addVersion},
       );
       final doc = {'title': 'x'};
-      final result = applyDocumentMigrations(schema, doc, from: 0, to: 1);
+      final result = await applyDocumentMigrations(schema, doc, from: 0, to: 1);
       expect(result, isNot(same(doc)));
       expect(doc.containsKey('version'), isFalse);
       expect(result['version'], 1);
     });
 
-    test('with no applicable steps the input map reference is returned', () {
+    test('with no applicable steps the input map reference is returned',
+        () async {
       final schema = CollectionSchema<Object?>(
         name: 'docs',
         version: 1,
@@ -411,7 +413,7 @@ void main() {
         documentMigrations: const {1: _addVersion},
       );
       final doc = {'title': 'x'};
-      final result = applyDocumentMigrations(schema, doc, from: 5, to: 9);
+      final result = await applyDocumentMigrations(schema, doc, from: 5, to: 9);
       expect(identical(result, doc), isTrue,
           reason: 'no step ran; the same map is returned');
     });

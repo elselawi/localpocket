@@ -27,6 +27,8 @@ import '../../../contract/contract.dart' as contract;
 import '../../../kernel/database_adapter.dart';
 import '../../../kernel/errors.dart';
 import '../../../kernel/local_pocket.dart';
+import '../../../kernel/page_callbacks.dart'
+    show CallbackInvoker, attachStorePolicy, stringKeyedDeepMap;
 import '../../../kernel/schema_manifest.dart';
 import '../../../kernel/schema.dart';
 import '../page/protocol.dart';
@@ -40,6 +42,107 @@ part 'worker_engine_crud.dart';
 abstract interface class WorkerEventSink {
   /// Delivers a structured-clone-safe event envelope to the client.
   void emit(Map<String, Object?> event);
+}
+
+/// A connection that can answer worker→page callback RPCs. Implemented by
+/// the controller's per-connection sink; VM tests supply a fake.
+abstract interface class WorkerCallbackChannel {
+  /// Sends one callback request envelope to the owning page and resolves
+  /// with the dartified reply (null when the page returned no value).
+  Future<Object?> call(Map<String, Object?> message);
+}
+
+/// How long one worker→page callback may stay unanswered.
+const Duration pageCallbackTimeout = Duration(seconds: 30);
+
+/// {@template localpocket.worker_callback_bridge}
+/// The worker-side [CallbackInvoker]: routes kernel callback invocations to
+/// a connected page over the reverse request/response channel.
+///
+/// Any live connection may serve a callback; the bridge picks the first
+/// registered one, so every page of a shared database must register
+/// equivalent callbacks. Failures (no connected page, timeout, page-side
+/// error) surface as typed [ValidationException]s — never raw transport
+/// errors and never silent defaults.
+/// {@endtemplate}
+final class WorkerCallbackBridge implements CallbackInvoker {
+  /// Creates a bridge with the per-callback [timeout].
+  ///
+  /// {@macro localpocket.worker_callback_bridge}
+  WorkerCallbackBridge({this.timeout = pageCallbackTimeout});
+
+  /// Upper bound for one callback round-trip.
+  final Duration timeout;
+
+  final List<WorkerCallbackChannel> _channels = [];
+  int _nextRpcId = 0;
+
+  /// Registers a connection as callback-capable (idempotent).
+  void attach(WorkerCallbackChannel channel) {
+    if (!_channels.contains(channel)) _channels.add(channel);
+  }
+
+  /// Drops a connection (idempotent); in-flight calls fail typed.
+  void detach(WorkerCallbackChannel channel) {
+    _channels.remove(channel);
+  }
+
+  @override
+  Future<Object?> invoke(String channel, Map<String, Object?> args) async {
+    final WorkerCallbackChannel? target =
+        _channels.isEmpty ? null : _channels.first;
+    if (target == null) {
+      throw ValidationException(
+          'No connected page can serve the "$channel" callback.');
+    }
+    final rpcId = _nextRpcId++;
+    final completer = Completer<Object?>();
+    final timer = Timer(timeout, () {
+      if (!completer.isCompleted) {
+        completer.completeError(
+            ValidationException('The "$channel" callback did not answer within '
+                '${timeout.inMilliseconds} ms.'));
+      }
+    });
+    // The Completer+Timer shape (not `Future.timeout`) keeps a failing page
+    // reply from escaping into the enclosing zone's unhandled-error handler.
+    unawaited(target.call({
+      'kind': CallbackRpc.requestKind,
+      CallbackRpc.rpcId: rpcId,
+      CallbackRpc.channel: channel,
+      CallbackRpc.args: args,
+    }).then((raw) {
+      timer.cancel();
+      if (completer.isCompleted) return;
+      try {
+        completer.complete(_parseReply(raw, channel));
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    }, onError: (Object e, StackTrace st) {
+      timer.cancel();
+      if (!completer.isCompleted) {
+        completer.completeError(
+            ValidationException('The "$channel" callback failed: $e'), st);
+      }
+    }));
+    return completer.future;
+  }
+
+  Object? _parseReply(Object? raw, String channel) {
+    if (raw is! Map) {
+      throw ProtocolEnvelopeException(
+          'The "$channel" callback reply must be a map.');
+    }
+    final reply = stringKeyedDeepMap(raw);
+    if (reply['kind'] != CallbackRpc.resultKind) {
+      throw ProtocolEnvelopeException(
+          'The "$channel" callback reply has kind "${reply['kind']}".');
+    }
+    if (reply[CallbackRpc.ok] == true) return reply[CallbackRpc.value];
+    throw ValidationException(
+        'The "$channel" callback failed on the page: ${reply[CallbackRpc.error]}');
+  }
 }
 
 /// {@template localpocket.worker_reply}
@@ -107,21 +210,8 @@ CollectionSchema<Object?> parseSchema(Object? raw) {
 /// Recursively stringifies map keys (and nested map keys) so an arbitrary
 /// wire map can be indexed by String regardless of the JS-interop key type.
 /// Shared by [parseSchema] and the web option parser.
-Map<String, Object?> deepStringMap(Map<Object?, Object?> raw) {
-  final out = <String, Object?>{};
-  raw.forEach((k, v) {
-    final key = k.toString();
-    if (v is Map) {
-      out[key] = deepStringMap(v);
-    } else if (v is List) {
-      out[key] =
-          v.map((item) => item is Map ? deepStringMap(item) : item).toList();
-    } else {
-      out[key] = v;
-    }
-  });
-  return out;
-}
+Map<String, Object?> deepStringMap(Map<Object?, Object?> raw) =>
+    stringKeyedDeepMap(raw);
 
 /// {@template localpocket.worker_engine_host}
 /// Shared engine state (library-internal base): the real [LocalPocket]
@@ -140,6 +230,7 @@ abstract class WorkerEngineHost {
     required this.rawDatabase,
     required this.databaseAdapter,
     required this.pocket,
+    this.callbackBridge,
   });
 
   /// The underlying SQLite database.
@@ -151,12 +242,21 @@ abstract class WorkerEngineHost {
   /// The LocalPocket engine served by this worker.
   final LocalPocket pocket;
 
+  /// Routes kernel callback invocations to connected pages, when the open
+  /// carried page callbacks.
+  final WorkerCallbackBridge? callbackBridge;
+
   final Set<WorkerEventSink> _connections = {};
 
   /// Drops a connection's sink: called by the host when the underlying
   /// client connection closes, so events stop going to dead connections and
   /// the registry cannot grow without bound.
-  void removeSink(WorkerEventSink sink) => _connections.remove(sink);
+  void removeSink(WorkerEventSink sink) {
+    _connections.remove(sink);
+    if (sink is WorkerCallbackChannel) {
+      callbackBridge?.detach(sink as WorkerCallbackChannel);
+    }
+  }
 
   /// Broadcasts every kernel event to the connected sinks; lives for the
   /// whole worker and completes when the kernel's event stream closes.
@@ -204,6 +304,7 @@ final class WorkerEngine extends WorkerEngineHost with WorkerCrudHandlers {
     required super.rawDatabase,
     required super.databaseAdapter,
     required super.pocket,
+    super.callbackBridge,
   });
 
   /// Handles one request envelope (the decoded wire payload) and returns the
@@ -216,6 +317,9 @@ final class WorkerEngine extends WorkerEngineHost with WorkerCrudHandlers {
     Map<String, Object?> payload,
   ) async {
     _connections.add(sink);
+    if (sink is WorkerCallbackChannel) {
+      callbackBridge?.attach(sink as WorkerCallbackChannel);
+    }
     _contractEventSubscription ??= pocket.commands.events.listen((event) {
       final envelope = <String, Object?>{
         'v': webProtocolVersion,

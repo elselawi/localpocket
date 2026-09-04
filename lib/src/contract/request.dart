@@ -22,17 +22,26 @@ sealed class Request<R extends Result> {
 
 /// {@template localpocket.open_request}
 /// Registers stores on an open runtime; matching manifest fingerprints verify
-/// both sides compiled the same schema.
+/// both sides compiled the same schema. [storePolicies] carries the wire
+/// envelope for each store's executable features (conflict resolvers,
+/// validator, migration hooks); it is absent when no store declares any.
 /// {@endtemplate}
 final class OpenRequest extends Request<OkResult> {
   /// {@macro localpocket.open_request}
-  const OpenRequest({required this.stores, required this.manifestFingerprints});
+  const OpenRequest({
+    required this.stores,
+    required this.manifestFingerprints,
+    this.storePolicies,
+  });
 
   /// The serialized store definitions to register.
   final List<Map<String, Object?>> stores;
 
   /// Store name → fingerprint; a mismatch is rejected.
   final Map<String, String> manifestFingerprints;
+
+  /// Store name → executable-feature envelope, when any store declares one.
+  final Map<String, Object?>? storePolicies;
 
   @override
   String get tag => 'open';
@@ -43,6 +52,7 @@ final class OpenRequest extends Request<OkResult> {
   Map<String, Object?> toJson() => {
         'stores': stores,
         'manifestFingerprints': manifestFingerprints,
+        if (storePolicies != null) 'storePolicies': storePolicies,
       };
 }
 

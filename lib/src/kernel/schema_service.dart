@@ -20,6 +20,7 @@ import 'errors.dart'
         UnsupportedSchemaFeatureError;
 import 'fts_normalizer.dart';
 import 'kernel_context.dart';
+import 'page_callbacks.dart' show executableFeaturesSupported;
 import 'local_pocket.dart' show StoreTable;
 import 'migrator.dart';
 import 'schema.dart';
@@ -56,7 +57,8 @@ class SchemaService {
     // Reject unrepresentable behavior before anything touches disk.
     final manifest = SchemaManifest.compile(schema);
     if (context.capabilities.platform == PlatformProfile.web &&
-        manifest.unsupportedFeatures.isNotEmpty) {
+        manifest.unsupportedFeatures.isNotEmpty &&
+        !executableFeaturesSupported(schema, context.callbackInvoker)) {
       throw UnsupportedSchemaFeatureError(
           'Store "${schema.name}" declares executable features that cannot '
           'run on the worker runtime: ${manifest.unsupportedFeatures.join(', ')}.');
