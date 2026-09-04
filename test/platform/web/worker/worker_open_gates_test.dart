@@ -239,6 +239,31 @@ void main() {
           throwsA(isA<ProtocolEnvelopeException>()));
     });
 
+    test('clockOffsetMs passes through signed, rejects wrong types', () {
+      expect(parseOpenOptions(const {'clockOffsetMs': -5000}),
+          containsPair('clockOffsetMs', -5000));
+      expect(parseOpenOptions(const {'clockOffsetMs': 0}),
+          containsPair('clockOffsetMs', 0));
+      expect(() => parseOpenOptions(const {'clockOffsetMs': 'yesterday'}),
+          throwsA(isA<ProtocolEnvelopeException>()));
+      expect(() => parseOpenOptions(const {'clockOffsetMs': 1.5}),
+          throwsA(isA<ProtocolEnvelopeException>()));
+    });
+
+    test('a parsed clock offset lands in the worker kernel clock', () async {
+      // The controller wires a parsed openArgs offset exactly like this:
+      // the kernel clock reads the system clock plus the offset.
+      const offset = -5000;
+      final h = await WorkerHarness.open(
+        now: () => DateTime.now().millisecondsSinceEpoch + offset,
+      );
+      addTearDown(h.close);
+      final shifted = h.pocket.now();
+      final wallClock = DateTime.now().millisecondsSinceEpoch;
+      expect(shifted, lessThan(wallClock - 4000));
+      expect(shifted, greaterThan(wallClock - 10000));
+    });
+
     test(
         'durability and callback bounds land in the worker kernel and bridge',
         () async {

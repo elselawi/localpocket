@@ -58,15 +58,17 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
         'configures the PocketBase factory itself. Omit the option on web, or '
         'run the sync attachment on a native runtime for custom backends.');
   }
-  // A caller-injected clock is code and cannot cross into the worker either;
-  // the worker keeps the system clock. Rejecting keeps suites honest: an
-  // injected `now` that passes on native but silently uses the real clock on
-  // the worker leg would corrupt cross-runtime test parity.
+  // A caller-injected clock closure is code and cannot cross into the
+  // worker. The DATA-style replacement is [LocalPocketOptions
+  // .clockOffsetMs]: a plain integer applied on top of the worker's system
+  // clock (carried in openArgs below), so deterministic-clock configs
+  // behave identically on web and native.
   if (options.now != null) {
     throw ValidationException(
-        'The injectable `now` clock cannot cross the web worker boundary: the '
-        'worker uses the system clock. Omit the option on web (or run on a '
-        'native runtime for an injected clock).');
+        'The injectable `now` clock cannot cross the web worker boundary: '
+        'the worker uses the system clock (shifted by clockOffsetMs). Use '
+        'the clockOffsetMs option on web, or run on a native runtime for '
+        'an injected clock.');
   }
   // Same for a caller-provided blob store: the worker builds its own
   // OPFS-backed store, and a caller store object (with its methods) cannot
@@ -155,6 +157,8 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     // so the worker keeps its documented default.
     if (options.bootstrap.requestTimeout.inMilliseconds > 0)
       'callbackTimeoutMs': options.bootstrap.requestTimeout.inMilliseconds,
+    // The data-style clock shift: strict-parsed int on the worker side.
+    'clockOffsetMs': options.clockOffsetMs,
     if (cipherEnvelope != null) 'fieldCipher': cipherEnvelope,
     if (storePolicies != null) 'storePolicies': storePolicies,
   };

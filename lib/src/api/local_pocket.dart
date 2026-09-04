@@ -120,9 +120,10 @@ final class LocalPocket {
       stores: schemas,
       fieldCipher: options.encryption?.fieldCipher,
       maxDocBytes: options.maxDocumentBytes,
-      now: options.now == null
-          ? null
-          : () => options.now!().millisecondsSinceEpoch,
+      // The injected closure wins; [clockOffsetMs] shifts whichever base
+      // clock is in effect (injected or system) so the data-style offset
+      // behaves identically on native and on the worker runtime.
+      now: _effectiveNow(options),
       syncBackendFactory: options.syncBackendFactory,
       blobStore: options.blobStore,
       groupCommitWindow: options.groupCommitWindow,
@@ -145,6 +146,17 @@ final class LocalPocket {
 
   /// Escapes [value] for a single-quoted SQL string literal.
   static String _sqlQuoteLiteral(String value) => value.replaceAll("'", "''");
+
+  /// The kernel clock for [options]: the injected [LocalPocketOptions.now]
+  /// closure when supplied, shifted by [LocalPocketOptions.clockOffsetMs];
+  /// null leaves the kernel on its default system clock.
+  static int Function()? _effectiveNow(LocalPocketOptions options) {
+    final injected = options.now;
+    final offset = options.clockOffsetMs;
+    if (injected == null && offset == 0) return null;
+    return () =>
+        (injected?.call() ?? DateTime.now()).millisecondsSinceEpoch + offset;
+  }
 
   final RuntimeClient _runtime;
   final Map<String, Row<dynamic> Function(Map<String, Object?>)> _decoders;

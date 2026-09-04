@@ -97,6 +97,7 @@ final class LocalPocketDatabaseController extends DatabaseController {
       final groupCommitWindowMs = options['groupCommitWindowMs'] as int?;
       final txSessionTtlMs = options['txSessionTtlMs'] as int?;
       final callbackTimeoutMs = options['callbackTimeoutMs'] as int?;
+      final clockOffsetMs = options['clockOffsetMs'] as int?;
 
       // The page-callback bridge: executable schema features (conflict
       // resolvers, validators, migration hooks) round-trip to the page
@@ -152,6 +153,11 @@ final class LocalPocketDatabaseController extends DatabaseController {
         txSessionTtl: txSessionTtlMs == null
             ? defaultTxSessionTtl
             : Duration(milliseconds: txSessionTtlMs),
+        // The data-style clock shift: the worker applies the offset on top
+        // of its system clock (the `now` closure itself cannot cross).
+        now: clockOffsetMs == null || clockOffsetMs == 0
+            ? null
+            : () => DateTime.now().millisecondsSinceEpoch + clockOffsetMs,
         syncBackendFactory: const PocketBaseSyncBackendFactory(),
         callbackInvoker: callbackBridge,
       );

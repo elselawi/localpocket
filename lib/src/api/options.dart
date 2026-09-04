@@ -34,6 +34,7 @@ final class LocalPocketOptions {
     this.bootstrap = const BootstrapOptions(),
     this.maxDocumentBytes = 1900000,
     this.now,
+    this.clockOffsetMs = 0,
     this.groupCommitWindow = Duration.zero,
     this.txSessionTtl = defaultTxSessionTtl,
     this.syncBackendFactory,
@@ -90,6 +91,17 @@ final class LocalPocketOptions {
 
   /// Injectable wall clock (tests). `null` uses the system clock.
   final DateTime Function()? now;
+
+  /// Fixed millisecond offset applied on top of the system clock for all
+  /// persistence bookkeeping (outbox timestamps, conflicts, compaction
+  /// cutoffs), or `0` for the unshifted system clock.
+  ///
+  /// DATA, not code: unlike [now] (a closure that cannot cross the web
+  /// worker boundary and is rejected on web), this plain integer crosses
+  /// the open envelope on every platform — the worker applies it to its
+  /// system clock. Use it for deterministic-clock tests and for far-future
+  /// or far-past fixtures that must behave identically on web and native.
+  final int clockOffsetMs;
 
   /// Coalescing window for group commit: when positive, mutations from
   /// separate turns may share one SQLite transaction (one fsync) if they

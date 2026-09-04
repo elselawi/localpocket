@@ -64,8 +64,16 @@ Map<String, Object?> parseOpenOptions(Object? data) {
   _parseMsOption(stringMap, 'txSessionTtlMs', result,
       min: 0, what: 'the interactive-transaction idle deadline');
   _parseMsOption(stringMap, 'callbackTimeoutMs', result,
-      min: 1, what: 'the page-callback round-trip bound');
-  return result;
+      min: 1, what: 'the page-callback round-trip bound');  // The clock offset is a signed shift (negative = into the past), so only
+  // the type is validated, never the sign.
+  final clockOffsetMs = stringMap['clockOffsetMs'];
+  if (clockOffsetMs != null) {
+    if (clockOffsetMs is! int) {
+      throw ProtocolEnvelopeException(
+          '"clockOffsetMs" must be an int (milliseconds).');
+    }
+    result['clockOffsetMs'] = clockOffsetMs;
+  }  return result;
 }
 
 /// Parses one millisecond-denominated integer option: absent keys are

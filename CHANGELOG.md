@@ -21,6 +21,13 @@
 
 ### Added
 
+- **`LocalPocketOptions.clockOffsetMs` — an injectable clock that works on
+  web.** The injectable `now` closure remains native-only (code cannot
+  cross the worker boundary), but this data-style millisecond shift
+  crosses the open envelope on every platform: the worker applies it on
+  top of its system clock, and native applies it on top of whichever clock
+  is configured. Strict-parsed (a present wrong-typed value fails the
+  open with a typed error; negative offsets are valid).
 - **Web: page callbacks auto-register.** Executable schema features
   (custom conflict resolvers, store validators, document migrations, and
   migration backfill transforms) no longer require an explicit
