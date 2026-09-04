@@ -295,6 +295,9 @@ lib/src/kernel/files/blob_store.dart::MemoryBlobStore.put
 lib/src/kernel/files/blob_store.dart::MemoryBlobStore.size
 lib/src/kernel/files/blob_store.dart::MemoryBlobStore.toList
 lib/src/kernel/files/blob_store.dart::MemoryBlobStore.value
+lib/src/kernel/page_callbacks.dart::StorePageCallbacks
+lib/src/kernel/page_callbacks.dart::StorePageCallbacks.Function
+lib/src/kernel/page_callbacks.dart::StorePageCallbacks.StorePageCallbacks
 lib/src/kernel/schema.dart::CollectionSchema
 lib/src/kernel/schema.dart::CollectionSchema.CollectionSchema
 lib/src/kernel/schema.dart::CollectionSchema.Function
@@ -356,6 +359,7 @@ lib/src/kernel/schema.dart::StoreMigration.Function
 lib/src/kernel/schema.dart::StoreMigration.StoreMigration
 lib/src/kernel/schema.dart::StoreMigration.fromJson
 lib/src/kernel/schema.dart::StoreMigration.toJson
+lib/src/kernel/schema.dart::StoreMigration.withTransform
 lib/src/kernel/sync/merge.dart::AppendOnlyLinesResolver
 lib/src/kernel/sync/merge.dart::AppendOnlyLinesResolver.AppendOnlyLinesResolver
 lib/src/kernel/sync/merge.dart::AppendOnlyLinesResolver.RemoteWinsResolver
