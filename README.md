@@ -2004,6 +2004,27 @@ Destructive migrations follow a safe 12-step rebuild process:
    supported in the worker. Use additive migrations without `transform` when
    targeting web workers.
 
+
+## Tests and checks
+
+```bash
+# hermetic tests
+dart test
+
+# real tests (real PB - from secret.dart + mock PB)
+dart test --tags real --run-skipped -j 1
+
+# start nested `dart` processes for the release and web checks
+dart test --tags gate --run-skipped -j 1
+
+# run the release checklist
+dart tool/release.dart
+
+# all the above tests
+# must be green before any release or pull request
+```
+
+
 ## License & Credit
 
 - License is MIT.
