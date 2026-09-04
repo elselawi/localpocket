@@ -771,7 +771,7 @@ either all of them or none.
   // single-record changes ride the store's `changes` stream:
   // one notification per committed record change for this store.
   final changeSub = tasks.changes.listen((change) {
-    print('task ${change.ids} changed in ${change.storeName}');
+    print('task ${change.id} changed in ${change.storeName}');
   });
   await changeSub.cancel();
 ```
@@ -1269,29 +1269,88 @@ to a specific store or to the whole database.
 
 This can be useful for invalidating caches, sending push notifications, etc.
 
+
+### Whole database
+
 ```dart
-// Watch the whole database for any committed record change.
-final dbSub = db.changes.listen((change) {
-  print('db change: ${change.storeName}/${change.id}');
-  print('action=${change.action.name}, fields=${change.changedFields}');
+  // you can subscribe to changes in the whole database
+  // across multiple stores
+  final dbSub = db.changes.listen((change) {
+    // .id is the 'id' of the changed row
+    print('db change: ${change.storeName}/${change.id}');
 
-  if (change.oldRecord != null && change.newRecord != null) {
-    print('before=${change.oldRecord}');
-    print('after=${change.newRecord}');
-  }
-});
+    // .action is an enum about the mutation type (create, edit ...etc)
+    // .changedFields is a set of strings of changed fields
+    print('action=${change.action.name}, fields=${change.changedFields}');
+    if (change.action == ChangeAction.update) {
+      print('updated row: ${change.id}');
+    }
 
-// Or watch only one store; each event is a committed record mutation.
-final taskSub = tasks.changes.listen((change) {
-  print('task change: ids=${change.ids}, action=${change.action.name}');
+    // could be `local` or `remote` or `resolution`
+    print('origin: ${change.origin.name}');
+    if (change.origin == ChangeOrigin.remote) {
+      print('this change was pushed from another device');
+    }
 
-  if (change.action == ChangeAction.update) {
-    print('updated row: ${change.id}');
-  }
-});
+    // .oldRecord and .newRecord are both generic Row<dynamic>
+    if (change.oldRecord != null && change.newRecord != null) {
+      print('before=${change.oldRecord}');
+      print('after=${change.newRecord}');
 
-// Cancel when you are done listening.
-// await Future.wait([dbSub.cancel(), taskSub.cancel()]);
+      // you can certainly cast them to your store's row type
+      if (change.newRecord is Row<Tasks>) {
+        final newTask = change.newRecord as Row<Tasks>;
+        print('newTask.priority=${newTask.priority}');
+      }
+
+      // or using switch statements pattern matching:
+      switch (change.newRecord) {
+        case final Row<Tasks> task:
+          print('New task title: ${task(Tasks.title)}');
+        case final Row<Posts> post:
+          print('New post tags: ${post(Posts.tags)!.length}');
+        case null:
+          print('Record was purged/deleted');
+        default:
+          break;
+      }
+    }
+  });
+
+  // don't forget to cancel
+  await dbSub.cancel();
+```
+
+### Single store
+
+```dart
+  // Or watch only one store; each event is a committed record mutation.
+  final taskSub = tasks.changes.listen((change) {
+    // .id is the 'id' of the changed row
+    print('db change: ${change.storeName}/${change.id}');
+
+    // .action is an enum about the mutation type (create, edit ...etc)
+    // .changedFields is a set of strings of changed fields
+    print('action=${change.action.name}, fields=${change.changedFields}');
+    if (change.action == ChangeAction.update) {
+      print('updated row: ${change.id}');
+    }
+
+    // could be `local` or `remote` or `resolution`
+    print('origin: ${change.origin.name}');
+    if (change.origin == ChangeOrigin.remote) {
+      print('this change was pushed from another device');
+    }
+
+    // no type casting / pattern matching needed
+    // we can infer the type from the store we are listening to
+    if (change.newRecord != null) {
+      print('newTask.priority=${change.newRecord!.priority}');
+    }
+  });
+
+  // don't forget to cancel
+  await taskSub.cancel();
 ```
 
 ## Schema migration
