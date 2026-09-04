@@ -17,6 +17,8 @@ import '../../../kernel/local_pocket.dart';
 import '../../../kernel/kernel_context.dart' show defaultTxSessionTtl;
 import '../../../kernel/page_callbacks.dart' show attachStorePolicy;
 import '../../../kernel/schema.dart';
+import '../../../kernel/sync/sync_proxy.dart'
+    show ProxyBackendHub, ProxySyncBackendFactory;
 import 'blob_store.dart';
 import '../../../adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
@@ -98,6 +100,11 @@ final class LocalPocketDatabaseController extends DatabaseController {
       final txSessionTtlMs = options['txSessionTtlMs'] as int?;
       final callbackTimeoutMs = options['callbackTimeoutMs'] as int?;
       final clockOffsetMs = options['clockOffsetMs'] as int?;
+      // The page sets this marker when the open carried a caller-supplied
+      // sync backend in the PageCallbacks container: the backend executes
+      // entirely on the page and the worker receives a proxy factory.
+      final syncProxy = (options['syncProxy'] as bool?) ?? false;
+      final backendHub = syncProxy ? ProxyBackendHub() : null;
 
       // The page-callback bridge: executable schema features (conflict
       // resolvers, validators, migration hooks) round-trip to the page
@@ -158,7 +165,13 @@ final class LocalPocketDatabaseController extends DatabaseController {
         now: clockOffsetMs == null || clockOffsetMs == 0
             ? null
             : () => DateTime.now().millisecondsSinceEpoch + clockOffsetMs,
-        syncBackendFactory: const PocketBaseSyncBackendFactory(),
+        // Without the marker the worker configures its canonical PocketBase
+        // factory; with it, the page-hosted backend is reached through the
+        // proxy (kernel-pure, over the callback channel).
+        syncBackendFactory: syncProxy
+            ? ProxySyncBackendFactory(
+                invoker: callbackBridge, hub: backendHub!)
+            : const PocketBaseSyncBackendFactory(),
         callbackInvoker: callbackBridge,
       );
       handedToPocket = true;
@@ -168,6 +181,7 @@ final class LocalPocketDatabaseController extends DatabaseController {
         databaseAdapter: db,
         pocket: pocket,
         callbackBridge: callbackBridge,
+        backendHub: backendHub,
       );
     } catch (_) {
       if (!handedToPocket) {
@@ -197,11 +211,13 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
     required this.databaseAdapter,
     required this.pocket,
     required this.callbackBridge,
+    this.backendHub,
   }) : _engine = WorkerEngine(
           rawDatabase: rawDatabase,
           databaseAdapter: databaseAdapter,
           pocket: pocket,
           callbackBridge: callbackBridge,
+          backendHub: backendHub,
         );
 
   /// The underlying SQLite database exposed to the worker runtime.
@@ -215,6 +231,10 @@ final class LocalPocketWorkerDatabase extends WorkerDatabase {
 
   /// Routes kernel callback invocations to connected pages.
   final WorkerCallbackBridge callbackBridge;
+
+  /// Routes page→worker backend pushes to the proxy sync backends, when the
+  /// open configured the sync proxy.
+  final ProxyBackendHub? backendHub;
 
   final WorkerEngine _engine;
 

@@ -58,6 +58,15 @@ Map<String, Object?> parseOpenOptions(Object? data) {
         e.key.toString(): _requirePolicyEnvelope(e.value, e.key.toString()),
     };
   }
+  // The sync proxy marker: the page hosts the caller's sync backend and the
+  // worker builds ProxySyncBackendFactory instead of its canonical one.
+  final syncProxy = stringMap['syncProxy'];
+  if (syncProxy != null) {
+    if (syncProxy is! bool) {
+      throw ProtocolEnvelopeException('"syncProxy" must be a bool.');
+    }
+    result['syncProxy'] = syncProxy;
+  }
   _parseMsOption(stringMap, 'groupCommitWindowMs', result,
       min: 0, what: 'the group-commit coalescing window');
   // Zero disables the idle sweeper on native, so it is valid here too.

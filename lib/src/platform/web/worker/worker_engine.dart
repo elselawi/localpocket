@@ -31,6 +31,7 @@ import '../../../kernel/page_callbacks.dart'
     show CallbackInvoker, attachStorePolicy, stringKeyedDeepMap;
 import '../../../kernel/schema_manifest.dart';
 import '../../../kernel/schema.dart';
+import '../../../kernel/sync/sync_proxy.dart' show ProxyBackendHub;
 import '../page/protocol.dart';
 import 'wire_args.dart';
 
@@ -231,6 +232,7 @@ abstract class WorkerEngineHost {
     required this.databaseAdapter,
     required this.pocket,
     this.callbackBridge,
+    this.backendHub,
   });
 
   /// The underlying SQLite database.
@@ -245,6 +247,11 @@ abstract class WorkerEngineHost {
   /// Routes kernel callback invocations to connected pages, when the open
   /// carried page callbacks.
   final WorkerCallbackBridge? callbackBridge;
+
+  /// Routes page→worker backend pushes (hints, token reads) to the proxy
+  /// sync backends, when the open configured the sync proxy. Never a global:
+  /// the controller creates it together with the engine.
+  final ProxyBackendHub? backendHub;
 
   final Set<WorkerEventSink> _connections = {};
 
@@ -305,6 +312,7 @@ final class WorkerEngine extends WorkerEngineHost with WorkerCrudHandlers {
     required super.databaseAdapter,
     required super.pocket,
     super.callbackBridge,
+    super.backendHub,
   });
 
   /// Handles one request envelope (the decoded wire payload) and returns the
@@ -368,7 +376,20 @@ final class WorkerEngine extends WorkerEngineHost with WorkerCrudHandlers {
       _handlers = {
     WireOp.open: _handleOpen,
     WireOp.contractRequest: _handleContract,
+    WireOp.backendCall: _handleBackendCall,
   };
+
+  /// Serves one page→worker backend push (realtime hint or token read) by
+  /// routing it into the proxy sync backend hub. Args are strict-parsed by
+  /// the hub; a push for an unknown backend fails typed.
+  Future<Object?> _handleBackendCall(WorkerEventSink sink, WebRequest req) {
+    final hub = backendHub;
+    if (hub == null) {
+      throw ProtocolEnvelopeException(
+          'The open did not configure a proxy sync backend.');
+    }
+    return hub.pageCall(deepStringMap(req.args));
+  }
 
   Future<Object?> _dispatch(
     WorkerEventSink sink,

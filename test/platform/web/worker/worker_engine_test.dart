@@ -5,6 +5,10 @@ import 'dart:typed_data';
 import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/sync/sync_backend.dart'
+    show BackendHint, BackendHintKind, RemoteRecord;
+import 'package:localpocket/src/adapters/pocketbase/backend.dart'
+    show PocketBaseSyncBackendFactory;
 import 'package:localpocket/src/kernel/page_callbacks.dart'
     show
         PageCallbacks,
@@ -23,6 +27,7 @@ import 'package:localpocket/src/platform/web/worker/worker_engine.dart';
 import 'package:test/test.dart';
 
 import '../../../support/helpers.dart';
+import '../../../support/fake_sync_backend.dart';
 import '../../../support/mock_pb_server.dart';
 import '../../../support/worker_harness.dart';
 
@@ -1232,6 +1237,140 @@ void main() {
         throwsA(isA<ValidationException>().having((e) => e.message, 'message',
             contains('name is blocked on the page'))),
       );
+    });
+  });
+
+  group('WorkerEngine — proxy sync backend (page-executed)', () {
+    test('sync start drives the page-hosted backend end-to-end', () async {
+      final pageFactory = FakeSyncBackendFactory();
+      final h = await WorkerHarness.open(
+        pageCallbacks: PageCallbacks(syncBackendFactory: pageFactory),
+      );
+      addTearDown(h.close);
+
+      final start = await h.runtime.send(contract.SyncStartRequest(
+        baseUrl: 'http://pb.test',
+        scopeId: 'proxy-e2e',
+        token: 'jwt',
+      ));
+      expect(start.state, isA<contract.SyncEngineState>());
+      expect(pageFactory.creates.single.baseUrl, Uri.parse('http://pb.test'));
+      expect(pageFactory.creates.single.identity, 'proxy-e2e');
+      expect(pageFactory.creates.single.stores, contains('widgets'));
+
+      // A local mutation pushes through the proxy; the opId is minted by
+      // the kernel and crosses untouched.
+      final id = generateRecordId();
+      await h.put('widgets', record(name: 'pushed'), id: id);
+      final report =
+          (await h.runtime.send(const contract.SyncNowRequest())).report;
+      expect(report.hadError, isFalse);
+      expect(pageFactory.backend.pushBatchCalls, isNotEmpty);
+      expect(
+        pageFactory.backend.pushBatchCalls
+            .expand((ops) => ops)
+            .map((op) => op.dataJson),
+        everyElement(contains('pushed')),
+      );
+
+      // A pull through the proxy applies the remote record locally.
+      pageFactory.backend.changes = [
+        RemoteRecord(
+          id: 'bbbbbbbbbbbbbbb',
+          store: 'widgets',
+          updated: '2026-01-01 00:00:00.000Z',
+          data: const {'name': 'pulled'},
+        ),
+      ];
+      await h.runtime.send(const contract.SyncNowRequest());
+      expect(await h.get('widgets', 'bbbbbbbbbbbbbbb'), isNotNull);
+
+      // Realtime hints cross page → worker (backend_call op) and drive the
+      // fast path without an explicit syncNow.
+      pageFactory.backend.emitHint(BackendHint(
+        'widgets',
+        BackendHintKind.changed,
+        RemoteRecord(
+          id: 'ccccccccccccccc',
+          store: 'widgets',
+          updated: '2026-01-02 00:00:00.000Z',
+          data: const {'name': 'fast-path'},
+        ),
+      ));
+      await waitUntil(() async =>
+          (await h.get('widgets', 'ccccccccccccccc'))?['name'] ==
+              'fast-path');
+      expect(
+        h.pageToWorkerRequests
+            .where((m) => m['op'] == WireOp.backendCall),
+        isNotEmpty,
+      );
+
+      await h.runtime.send(const contract.SyncStopRequest());
+      expect(pageFactory.backend.disposed, isTrue);
+    });
+
+    test('the full chain reaches a wire server: kernel → proxy → page '
+        'PocketBase backend → HTTP', () async {
+      final server = await MockPbServer().start();
+      addTearDown(server.stop);
+      final h = await WorkerHarness.open(
+        pageCallbacks: PageCallbacks(
+          syncBackendFactory: const PocketBaseSyncBackendFactory(),
+        ),
+      );
+      addTearDown(h.close);
+
+      await h.runtime.send(contract.SyncStartRequest(
+        baseUrl: server.baseUrl.toString(),
+        scopeId: 'pb-chain',
+        token: server.validToken,
+      ));
+      final id = generateRecordId();
+      await h.put('widgets', record(name: 'via-proxy'), id: id);
+      final report =
+          (await h.runtime.send(const contract.SyncNowRequest())).report;
+      expect(report.hadError, isFalse);
+      expect(report.pushed, 1);
+      expect(
+        server.records.values
+            .any((r) => r.store == 'widgets' && r.data['name'] == 'via-proxy'),
+        isTrue,
+        reason: 'the record must reach the wire server through the page '
+            'backend',
+      );
+      await h.runtime.send(const contract.SyncStopRequest());
+    });
+
+    test('backend_call pushes validate the envelope and route typed', () async {
+      final h = await WorkerHarness.open(
+        pageCallbacks: PageCallbacks(
+          syncBackendFactory: FakeSyncBackendFactory(),
+        ),
+      );
+      addTearDown(h.close);
+
+      // A wrong protocol version fails like every other envelope.
+      final err = await h.sendError(
+        WebRequest(
+          version: webProtocolVersion + 1,
+          requestId: 1,
+          op: WireOp.backendCall,
+          args: const {'backend': 0, 'call': 'currentToken'},
+        ),
+        code: WireErrorCode.protocolMismatch,
+      );
+      expect(err.requestId, 1);
+
+      // An unknown backend id fails typed (never silently ignored).
+      final unknown = await h.sendError(
+        h.req(WireOp.backendCall, args: const {
+          'backend': 99,
+          'call': 'currentToken',
+        }),
+        code: WireErrorCode.localpocket,
+      );
+      expect(unknown.message, contains('99'));
     });
   });
 

@@ -61,6 +61,20 @@
 
 ### Added
 
+- **Web: caller-supplied sync backends now run on the page.** A backend
+  configured in `PageCallbacks.syncBackendFactory` executes entirely on the
+  page (its HTTP client, token provider, and realtime connection never
+  cross the worker boundary); the worker receives a transparent proxy that
+  forwards every `SyncBackend` method over the callback channel. Typed sync
+  errors reconstruct as their exact subtypes across the channel, file
+  uploads and downloads cross chunked (256 KiB), realtime `BackendHint`s
+  stream page→worker, and the page backend reads the kernel's live token
+  source (so `syncUpdateAuth` reaches it without a rebuild). The proxy is
+  idempotency-transparent: `PushOp.opId` and client record ids cross
+  untouched, and no retries are added. The top-level
+  `LocalPocketOptions.syncBackendFactory` field remains rejected on web
+  (the worker configures its canonical PocketBase factory there).
+
 - **`LocalPocketOptions.clockOffsetMs` — an injectable clock that works on
   web.** The injectable `now` closure remains native-only (code cannot
   cross the worker boundary), but this data-style millisecond shift

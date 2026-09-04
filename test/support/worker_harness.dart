@@ -10,9 +10,15 @@ import 'package:localpocket/src/kernel/kernel_context.dart'
     show defaultTxSessionTtl;
 import 'package:localpocket/src/kernel/page_callbacks.dart'
     show PageCallbacks, attachStorePolicy;
+import 'package:localpocket/src/kernel/errors.dart'
+    show ValidationException;
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/platform/web/page/callback_server.dart'
     show PageCallbackServer;
+import 'package:localpocket/src/platform/web/page/sync_server.dart'
+    show SyncBackendServer;
+import 'package:localpocket/src/kernel/sync/sync_proxy.dart'
+    show ProxyBackendHub, ProxySyncBackendFactory;
 import 'package:localpocket/src/contract/contract.dart' as contract;
 import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
@@ -29,10 +35,14 @@ import 'helpers.dart';
 /// emits (record events, watcher snapshots, sync status, auth required) so
 /// tests can assert on them.
 class RecordingSink implements WorkerEventSink, WorkerCallbackChannel {
-  RecordingSink({PageCallbackServer? callbackServer})
-      : _callbackServer = callbackServer;
+  RecordingSink({
+    PageCallbackServer? callbackServer,
+    SyncBackendServer? syncServer,
+  })  : _callbackServer = callbackServer,
+        _syncServer = syncServer;
 
   final PageCallbackServer? _callbackServer;
+  final SyncBackendServer? _syncServer;
 
   /// Callback requests routed to the page (in arrival order).
   final List<Map<String, Object?>> callbackRequests = [];
@@ -45,6 +55,17 @@ class RecordingSink implements WorkerEventSink, WorkerCallbackChannel {
   @override
   Future<Object?> call(Map<String, Object?> message) async {
     callbackRequests.add(message);
+    final channel = message['channel'];
+    if (channel is String) {
+      if (_callbackServer != null && _callbackServer!.handles(channel)) {
+        return _callbackServer!.serve(message);
+      }
+      if (_syncServer != null && _syncServer!.handles(channel)) {
+        return _syncServer!.serve(message);
+      }
+    }
+    // No server claims the channel: fall through to the schema-callback
+    // server so unknown channels still fail typed (or null when absent).
     return _callbackServer?.serve(message);
   }
 
@@ -106,9 +127,32 @@ class WorkerHarness {
     Duration? txSessionTtl,
     Duration? callbackTimeout,
   }) async {
-    final callbackBridge = storePolicies == null
+    final needsBridge = storePolicies != null ||
+        pageCallbacks?.syncBackendFactory != null ||
+        pageCallbacks?.blobStore != null;
+    final callbackBridge = needsBridge
+        ? WorkerCallbackBridge(timeout: callbackTimeout ?? pageCallbackTimeout)
+        : null;
+    // With the container's sync slot filled, the engine receives the proxy
+    // factory and the page side executes the caller's backend through the
+    // server below — exactly what the web open wires. The push handle binds
+    // to the harness request path once it exists.
+    Future<Object?> Function(Map<String, Object?>)? workerPush;
+    final backendHub =
+        pageCallbacks?.syncBackendFactory == null ? null : ProxyBackendHub();
+    final syncServer = pageCallbacks?.syncBackendFactory == null
         ? null
-        : WorkerCallbackBridge(timeout: callbackTimeout ?? pageCallbackTimeout);
+        : SyncBackendServer(
+            factory: pageCallbacks!.syncBackendFactory!,
+            push: (envelope) async {
+              final push = workerPush;
+              if (push == null) {
+                throw ValidationException(
+                    'The worker connection is not ready.');
+              }
+              return push(envelope);
+            },
+          );
     final attachedStores = [
       for (final s in stores ?? [widgetsSchema()])
         attachStorePolicy(
@@ -133,26 +177,32 @@ class WorkerHarness {
       maxDocBytes: maxDocBytes,
       groupCommitWindow: groupCommitWindow ?? Duration.zero,
       txSessionTtl: txSessionTtl ?? defaultTxSessionTtl,
-      syncBackendFactory: const PocketBaseSyncBackendFactory(),
+      syncBackendFactory: backendHub == null
+          ? const PocketBaseSyncBackendFactory()
+          : ProxySyncBackendFactory(
+              invoker: callbackBridge!, hub: backendHub),
       callbackInvoker: callbackBridge,
     );
-    final engine = WorkerEngine(
-      rawDatabase: rawDb,
-      databaseAdapter: adapter,
-      pocket: pocket,
-      callbackBridge: callbackBridge,
-    );
-    return WorkerHarness._(
+    final harness = WorkerHarness._(
       rawDb: rawDb,
       pocket: pocket,
-      engine: engine,
+      engine: WorkerEngine(
+        rawDatabase: rawDb,
+        databaseAdapter: adapter,
+        pocket: pocket,
+        callbackBridge: callbackBridge,
+        backendHub: backendHub,
+      ),
       sink: sink ??
           RecordingSink(
             callbackServer: pageCallbacks == null
                 ? null
                 : PageCallbackServer(stores: pageCallbacks.stores),
+            syncServer: syncServer,
           ),
     );
+    workerPush = harness.customRequest;
+    return harness;
   }
 
   /// Builds a request with the next request id.
@@ -221,11 +271,17 @@ class WorkerHarness {
     transport: customRequest,
   );
 
+  /// Every page→worker request that passed through [customRequest] (the
+  /// contract runtime's own requests, sync-backend pushes, close), in
+  /// arrival order.
+  final List<Map<String, Object?>> pageToWorkerRequests = [];
+
   /// Feeds one wire envelope through the JS boundary's exact path: parse →
   /// dispatch → reply → response envelope. This is the transport a page-side
   /// remote runtime binds to; the returned map is what `jsify()` would hand
   /// to `Database.customRequest` in the browser.
   Future<Object?> customRequest(Map<String, Object?> envelope) async {
+    pageToWorkerRequests.add(envelope);
     final reply = await engine.handleRequest(sink, envelope);
     if (reply is WorkerSuccess) {
       return WebResponse.success(

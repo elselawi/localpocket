@@ -20,6 +20,7 @@ import 'page/lifecycle.dart';
 import 'page/object_urls.dart';
 import 'page/open_core.dart';
 import 'page/protocol.dart' show CallbackRpc;
+import 'page/sync_server.dart' show SyncBackendServer;
 
 /// Opens the facade on the web: the kernel runs in the dedicated database
 /// worker and the page holds only the typed contract client. The worker boots
@@ -45,19 +46,23 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
         'encryption on web, or run this configuration on a native runtime.');
   }
 
-  // The worker boot configures the sync backend factory itself (code cannot
-  // cross the worker boundary) — a caller-configured factory would be
-  // silently ignored, so fail the open typed instead. The identity check
-  // rejects not only foreign factory CLASSES but any foreign INSTANCE (a
-  // PocketBaseSyncBackendFactory subclass or a non-const instance): only the
-  // worker's own canonical const factory may configure the backend.
+  // The worker boot configures the canonical PocketBase factory in the
+  // top-level option (code cannot cross the worker boundary); the identity
+  // check rejects not only foreign factory CLASSES but any foreign INSTANCE
+  // (a PocketBaseSyncBackendFactory subclass or a non-const instance): only
+  // the worker's own canonical const factory may configure it. A
+  // caller-supplied backend configured in the PageCallbacks container does
+  // NOT take this path: it executes entirely on the page and the worker
+  // receives a proxy over the callback channel (see the syncProxy marker in
+  // the open args below).
   const workerBackendFactory = PocketBaseSyncBackendFactory();
   if (options.syncBackendFactory != null &&
       !identical(options.syncBackendFactory, workerBackendFactory)) {
     throw ValidationException(
         'syncBackendFactory cannot cross the web worker boundary: the worker '
-        'configures the PocketBase factory itself. Omit the option on web, or '
-        'run the sync attachment on a native runtime for custom backends.');
+        'configures the PocketBase factory itself. Omit the option on web, '
+        'or supply your backend through pageCallbacks.syncBackendFactory so '
+        'it executes on the page.');
   }
   // A caller-injected clock closure is code and cannot cross into the
   // worker. The DATA-style replacement is [LocalPocketOptions
@@ -98,6 +103,25 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   // Executes worker callback requests (conflict resolvers, validators,
   // migration hooks) against the merged page-registered callbacks.
   final callbackServer = PageCallbackServer(stores: container.stores);
+
+  // The page-hosted sync backend: with the container slot filled, the worker
+  // receives a proxy and this server executes the user's factory. The push
+  // handle (realtime hints, token reads) binds to the worker connection once
+  // it exists.
+  Future<Object?> Function(Map<String, Object?> envelope)? workerPush;
+  final syncServer = container.syncBackendFactory == null
+      ? null
+      : SyncBackendServer(
+          factory: container.syncBackendFactory!,
+          push: (envelope) async {
+            final push = workerPush;
+            if (push == null) {
+              throw ValidationException(
+                  'The database worker connection is not ready.');
+            }
+            return push(envelope);
+          },
+        );
 
   // The cipher is serialized into the open options so the worker reconstructs
   // an AesGcmFieldCipher with the same key (crosses postMessage into the
@@ -162,6 +186,9 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     'clockOffsetMs': options.clockOffsetMs,
     if (cipherEnvelope != null) 'fieldCipher': cipherEnvelope,
     if (storePolicies != null) 'storePolicies': storePolicies,
+    // The sync proxy marker: with the container slot filled the worker
+    // builds ProxySyncBackendFactory instead of its canonical one.
+    if (container.syncBackendFactory != null) 'syncProxy': true,
   };
 
   try {
@@ -180,7 +207,19 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
           // message must not touch an uninitialized variable.
           if (value is Map) {
             if (value['kind'] == CallbackRpc.requestKind) {
-              final reply = await callbackServer.serve(value);
+              // Route by channel: schema callbacks, then the page-hosted
+              // sync backend when the open configured one.
+              final channel = value[CallbackRpc.channel];
+              final Map<String, Object?>? reply;
+              if (channel is String && callbackServer.handles(channel)) {
+                reply = await callbackServer.serve(value);
+              } else if (channel is String &&
+                  syncServer != null &&
+                  syncServer.handles(channel)) {
+                reply = await syncServer.serve(value);
+              } else {
+                reply = null;
+              }
               if (reply != null) return reply.jsify();
             } else {
               runtimeRef?.handleWorkerEvent(value);
@@ -200,6 +239,13 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
       timeout: options.bootstrap.spawnTimeout,
     );
     disposeConnected = () => connectResult.database.dispose();
+
+    // Bind the page→worker push handle (realtime hints, token reads for the
+    // page-hosted sync backend) to the live connection.
+    workerPush = (envelope) async {
+      final raw = await connectResult.database.customRequest(envelope.jsify());
+      return raw?.dartify();
+    };
 
     final runtime = RemoteRuntimeClient(
       transport: (envelope) async {

@@ -31,6 +31,18 @@ final class PageCallbackServer {
 
   final Map<String, StorePageCallbacks> _stores;
 
+  /// The channels this server claims (the open's dispatch routes by channel
+  /// before calling [serve]).
+  static const Set<String> channels = {
+    callbackChannelResolver,
+    callbackChannelValidator,
+    callbackChannelDocumentMigration,
+    callbackChannelMigrationTransform,
+  };
+
+  /// Whether [channel] belongs to this server.
+  bool handles(String channel) => channels.contains(channel);
+
   /// Serves one worker callback request envelope and returns the reply
   /// envelope, or null when [message] is not a callback request (so callers
   /// can fall through to event handling).

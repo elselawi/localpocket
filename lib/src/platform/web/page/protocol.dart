@@ -35,6 +35,13 @@ class WireOp {
   /// Committed facts and watch snapshots, contract-event encoded.
   static const String contractEvent = 'contract_event';
 
+  /// Page→worker backend call for the proxy sync backend: forwards realtime
+  /// `BackendHint`s into the proxy's stream and serves the page-side token
+  /// source. Args carry the backend id and a `call` discriminator (see
+  /// `kernel/sync/sync_proxy.dart`); requests validate the protocol version
+  /// like every other envelope.
+  static const String backendCall = 'backend_call';
+
   static bool isKnown(String op) => _known.contains(op);
 
   /// Immutable list of operations used by worker dispatch tables.
@@ -44,6 +51,7 @@ class WireOp {
     open,
     contractRequest,
     contractEvent,
+    backendCall,
   };
 }
 
