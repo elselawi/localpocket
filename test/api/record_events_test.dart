@@ -56,8 +56,122 @@ void main() {
       expect(changes.first.ids, [id]);
       expect(changes.first.origin, ChangeOrigin.local);
       expect(changes.first.action, ChangeAction.create);
-      expect(changes.first.newRecord, isNotNull);
+      expect(changes.first.newRecord, isA<Row<Tasks>>());
+      final newRecord = changes.first.newRecord;
+      if (newRecord is Row<Tasks>) {
+        expect(newRecord(Tasks.title), 'x');
+      }
       expect(changes.first.changedFields, contains('title'));
+    });
+
+    test('db.changes supports pattern matching on oldRecord and newRecord',
+        () async {
+      final tasks = db.store(Tasks.store);
+      final changes = <ChangeNotification>[];
+      final sub = db.changes.listen(changes.add);
+      addTearDown(sub.cancel);
+
+      final row = await tasks.put([Tasks.title.set('initial')]);
+      await tasks.patch(row.id, [Tasks.title.set('updated')]);
+      await tasks.purge(row.id);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(changes, hasLength(3));
+
+      // 1. Create: oldRecord is null, newRecord is Row<Tasks>
+      final createEvent = changes[0];
+      expect(createEvent.oldRecord, isNull);
+      expect(createEvent.newRecord is Row<Tasks>, isTrue);
+      final createdTitle = switch (createEvent.newRecord) {
+        final Row<Tasks> task => task(Tasks.title),
+        _ => null,
+      };
+      expect(createdTitle, 'initial');
+
+      // 2. Update: both oldRecord and newRecord are Row<Tasks>
+      final updateEvent = changes[1];
+      expect(updateEvent.oldRecord is Row<Tasks>, isTrue);
+      expect(updateEvent.newRecord is Row<Tasks>, isTrue);
+      final titleTransition = (
+        switch (updateEvent.oldRecord) {
+          final Row<Tasks> task => task(Tasks.title),
+          _ => null,
+        },
+        switch (updateEvent.newRecord) {
+          final Row<Tasks> task => task(Tasks.title),
+          _ => null,
+        },
+      );
+      expect(titleTransition, ('initial', 'updated'));
+
+      // 3. Purge: oldRecord is Row<Tasks>, newRecord is null
+      final purgeEvent = changes[2];
+      expect(purgeEvent.newRecord, isNull);
+      expect(purgeEvent.oldRecord is Row<Tasks>, isTrue);
+      if (purgeEvent.oldRecord is Row<Tasks>) {
+        final purgedTask = purgeEvent.oldRecord as Row<Tasks>;
+        expect(purgedTask(Tasks.title), 'updated');
+      }
+    });
+
+    test('store.changes carries decoded typed Row snapshots', () async {
+      final tasks = db.store(Tasks.store);
+      final storeChanges = <ChangeNotification>[];
+      final sub = tasks.changes.listen(storeChanges.add);
+      addTearDown(sub.cancel);
+
+      final row = await tasks.put([Tasks.title.set('store_event')]);
+      await tasks.patch(row.id, [Tasks.title.set('store_patched')]);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(storeChanges, hasLength(2));
+      expect(storeChanges[0].newRecord, isA<Row<Tasks>>());
+      if (storeChanges[0].newRecord is Row<Tasks>) {
+        final r = storeChanges[0].newRecord as Row<Tasks>;
+        expect(r(Tasks.title), 'store_event');
+      }
+
+      expect(storeChanges[1].oldRecord, isA<Row<Tasks>>());
+      expect(storeChanges[1].newRecord, isA<Row<Tasks>>());
+      if (storeChanges[1].oldRecord is Row<Tasks> &&
+          storeChanges[1].newRecord is Row<Tasks>) {
+        final oldR = storeChanges[1].oldRecord as Row<Tasks>;
+        final newR = storeChanges[1].newRecord as Row<Tasks>;
+        expect(oldR(Tasks.title), 'store_event');
+        expect(newR(Tasks.title), 'store_patched');
+      }
+    });
+
+    test(
+        'pattern matching discriminates between different stores on db.changes',
+        () async {
+      final multiDb = await LocalPocket.open(LocalPocketOptions(
+        path: ':memory:',
+        stores: [Tasks.store, _Notes.store],
+      ));
+      addTearDown(multiDb.close);
+
+      final logged = <String>[];
+      final sub = multiDb.changes.listen((change) {
+        switch (change.newRecord) {
+          case final Row<Tasks> task:
+            logged.add('task:${task(Tasks.title)}');
+          case final Row<_Notes> note:
+            logged.add('note:${note(_Notes.body)}');
+          case null:
+            logged.add('deleted');
+        }
+      });
+      addTearDown(sub.cancel);
+
+      await multiDb.store(Tasks.store).put([Tasks.title.set('Task 1')]);
+      await multiDb.store(_Notes.store).put([_Notes.body.set('Note 1')]);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(logged, ['task:Task 1', 'note:Note 1']);
     });
   });
 
@@ -149,4 +263,14 @@ class _StaticTokens implements TokenProvider {
 
   @override
   String? get identity => 'test-user';
+}
+
+final class _Notes extends StoreDef<_Notes> {
+  _Notes._() : super(name: 'notes', version: 1);
+  static final _Notes store = _Notes._();
+
+  static final body = store.schema.text('body').req();
+
+  @override
+  List<FieldDef<_Notes, Object?>> get fields => [body];
 }

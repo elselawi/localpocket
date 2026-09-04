@@ -13,47 +13,65 @@ import '../schema/store_def.dart';
 
 export '../kernel/change_bus.dart' show ChangeAction, ChangeOrigin;
 
+abstract class _RecordChangeBase {
+  const _RecordChangeBase({
+    required this.origin,
+    required this.action,
+    required this.id,
+    this.changedFields = const {},
+  });
+
+  /// Where the mutation originated:
+  /// - [ChangeOrigin.local]: Initiated by local user operations (e.g. `put`, `patch`, `archive`, `restore`, `purge`).
+  /// - [ChangeOrigin.remote]: Ingested from the remote server via puller, realtime SSE events, or server sweeps.
+  /// - [ChangeOrigin.resolution]: Applied during 3-way conflict merge or push settlement transformations.
+  final ChangeOrigin origin;
+
+  /// The mutation action performed on the record:
+  /// - [ChangeAction.create]: A new record was inserted.
+  /// - [ChangeAction.update]: An existing record's contents were modified.
+  /// - [ChangeAction.archive]: An existing record was soft-deleted (archived).
+  /// - [ChangeAction.restore]: A previously archived record was restored.
+  /// - [ChangeAction.purge]: A record was permanently deleted (hard purge).
+  /// - [ChangeAction.hide]: A record was hidden (e.g. server-side deletion or loss of query visibility).
+  final ChangeAction action;
+
+  /// The id of the changed record.
+  final String id;
+
+  /// The field names the change touched.
+  final Set<String> changedFields;
+}
+
 /// {@template localpocket.change_notification}
 /// A committed change to one record of one store.
 ///
 /// Delivered through [LocalPocket.changes] (every store) and
 /// `Store.changes` (one store). The record payloads ride with the event:
 /// [oldRecord] is the previous logical state (null for creates) and
-/// [newRecord] the state after the commit (null for hard purges), exactly as
-/// the contract's committed-change event carries them on every runtime.
+/// [newRecord] the state after the commit (null for hard purges), decoded as
+/// immutable typed [Row] snapshots.
 /// {@endtemplate}
-final class ChangeNotification {
+final class ChangeNotification extends _RecordChangeBase {
   /// {@macro localpocket.change_notification}
   const ChangeNotification({
     required this.storeName,
-    required this.id,
-    required this.origin,
-    required this.action,
+    required super.id,
+    required super.origin,
+    required super.action,
     this.oldRecord,
     this.newRecord,
-    this.changedFields = const {},
+    super.changedFields,
   });
 
   /// The store that changed.
   final String storeName;
 
-  /// The id of the changed record.
-  final String id;
-
-  /// Where the change originated (local write, remote ingest, resolution).
-  final ChangeOrigin origin;
-
-  /// What happened to the record.
-  final ChangeAction action;
-
   /// Previous logical state before this change (null if newly created).
-  final Map<String, Object?>? oldRecord;
+  final Row<dynamic>? oldRecord;
 
   /// New logical state after this change (null if hard-purged).
-  final Map<String, Object?>? newRecord;
-
-  /// The field names the change touched.
-  final Set<String> changedFields;
+  final Row<dynamic>? newRecord;
 
   /// The record ids touched by this committed change (one envelope carries
   /// exactly one record).
@@ -72,34 +90,22 @@ final class ChangeNotification {
 /// immutable [Row] snapshots decoded against the store's definition — a
 /// create carries a null [oldRecord], a purge a null [newRecord].
 /// {@endtemplate}
-final class RecordChange<S extends StoreDef<S>> {
+final class RecordChange<S extends StoreDef<S>> extends _RecordChangeBase {
   /// {@macro localpocket.record_change}
   const RecordChange({
-    required this.id,
-    required this.origin,
-    required this.action,
+    required super.id,
+    required super.origin,
+    required super.action,
     this.oldRecord,
     this.newRecord,
-    this.changedFields = const {},
+    super.changedFields,
   });
-
-  /// The id of the changed record.
-  final String id;
-
-  /// Where the change originated (local write, remote ingest, resolution).
-  final ChangeOrigin origin;
-
-  /// What happened to the record.
-  final ChangeAction action;
 
   /// Previous typed snapshot before this change (null if newly created).
   final Row<S>? oldRecord;
 
   /// New typed snapshot after this change (null if hard-purged).
   final Row<S>? newRecord;
-
-  /// The field names the change touched.
-  final Set<String> changedFields;
 
   @override
   String toString() =>

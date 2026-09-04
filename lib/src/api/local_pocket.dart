@@ -15,6 +15,7 @@ import '../schema/store_def.dart';
 import 'events.dart';
 import 'open_platform.dart';
 import 'options.dart';
+import 'row.dart';
 import 'store.dart';
 import 'sync.dart';
 import 'transaction.dart';
@@ -37,8 +38,17 @@ final class LocalPocket {
   /// flush OPFS, without which committed blob data can be lost.
   ///
   /// {@macro localpocket.local_pocket}
-  LocalPocket.internal(this._runtime, {Future<void> Function()? onClose})
-      : _onClose = onClose;
+  LocalPocket.internal(
+    this._runtime, {
+    Iterable<StoreDef<Object?>> stores = const [],
+    Future<void> Function()? onClose,
+  })  : _onClose = onClose,
+        _decoders = {
+          for (final s in stores)
+            s.name: s.accept(
+              <T extends StoreDef<T>>(def) => (map) => Row<T>(def, map),
+            ),
+        };
 
   /// Mints one client-side record id (PocketBase-compatible, creation-ordered
   /// so id-index inserts stay append-only). The id format is engine-owned;
@@ -75,7 +85,10 @@ final class LocalPocket {
       blobStore: options.blobStore,
     );
     try {
-      return LocalPocket.internal(createRuntime(db.commands));
+      return LocalPocket.internal(
+        createRuntime(db.commands),
+        stores: options.stores,
+      );
     } catch (e, st) {
       try {
         await db.close();
@@ -87,6 +100,7 @@ final class LocalPocket {
   }
 
   final RuntimeClient _runtime;
+  final Map<String, Row<dynamic> Function(Map<String, Object?>)> _decoders;
   final Future<void> Function()? _onClose;
   bool _closed = false;
   Future<void>? _closing;
@@ -144,19 +158,22 @@ final class LocalPocket {
   /// record change, with old/new payloads, origin, action, and touched
   /// fields.
   Stream<ChangeNotification> get changes => _runtime.events
-      .where((event) => event is CommittedChange)
-      .cast<CommittedChange>()
-      .map((event) => ChangeNotification(
-            storeName: event.store,
-            id: event.id,
-            origin: event.origin,
-            action: event.action,
-            oldRecord:
-                event.oldRecord == null ? null : Map.of(event.oldRecord!),
-            newRecord:
-                event.newRecord == null ? null : Map.of(event.newRecord!),
-            changedFields: Set.of(event.changedFields),
-          ));
+          .where((event) => event is CommittedChange)
+          .cast<CommittedChange>()
+          .map((event) {
+        final decode = _decoders[event.store];
+        return ChangeNotification(
+          storeName: event.store,
+          id: event.id,
+          origin: event.origin,
+          action: event.action,
+          oldRecord:
+              event.oldRecord == null ? null : decode?.call(event.oldRecord!),
+          newRecord:
+              event.newRecord == null ? null : decode?.call(event.newRecord!),
+          changedFields: Set.of(event.changedFields),
+        );
+      });
 
   /// Attaches a PocketBase sync host to this database.
   ///

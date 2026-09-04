@@ -1261,8 +1261,38 @@ rejecting stale `updated`, or a custom endpoint).
 Every committed mutation delivers a `ChangeNotification` on
 `LocalPocket.changes` (all stores) and `Store.changes` (one store): the
 notification carries the store name and the record ids the committing
-transaction touched. Nothing is delivered before the transaction commits —
-events are committed facts, and today the notification names what changed.
+transaction touched.
+
+So, while reactive queries (`.watch`) can be used to watch for mutations to
+a result of specific query, `.changes` can be used to watch for any mutation
+to a specific store or to the whole database.
+
+This can be useful for invalidating caches, sending push notifications, etc.
+
+```dart
+// Watch the whole database for any committed record change.
+final dbSub = db.changes.listen((change) {
+  print('db change: ${change.storeName}/${change.id}');
+  print('action=${change.action.name}, fields=${change.changedFields}');
+
+  if (change.oldRecord != null && change.newRecord != null) {
+    print('before=${change.oldRecord}');
+    print('after=${change.newRecord}');
+  }
+});
+
+// Or watch only one store; each event is a committed record mutation.
+final taskSub = tasks.changes.listen((change) {
+  print('task change: ids=${change.ids}, action=${change.action.name}');
+
+  if (change.action == ChangeAction.update) {
+    print('updated row: ${change.id}');
+  }
+});
+
+// Cancel when you are done listening.
+// await Future.wait([dbSub.cancel(), taskSub.cancel()]);
+```
 
 ## Schema migration
 

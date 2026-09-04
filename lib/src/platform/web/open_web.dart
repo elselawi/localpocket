@@ -170,6 +170,7 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     // otherwise leak. Plain-path fallbacks are never revoked.
     return LocalPocket.internal(
       runtime,
+      stores: options.stores,
       onClose: () async {
         await connectResult.database.dispose();
         if (workerResolved.fetched) revokeObjectUrl(workerResolved.url);

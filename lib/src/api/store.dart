@@ -358,9 +358,9 @@ final class Store<S extends StoreDef<S>> {
             origin: event.origin,
             action: event.action,
             oldRecord:
-                event.oldRecord == null ? null : Map.of(event.oldRecord!),
+                event.oldRecord == null ? null : Row<S>(def, event.oldRecord!),
             newRecord:
-                event.newRecord == null ? null : Map.of(event.newRecord!),
+                event.newRecord == null ? null : Row<S>(def, event.newRecord!),
             changedFields: Set.of(event.changedFields),
           ));
 

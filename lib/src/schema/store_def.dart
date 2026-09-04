@@ -201,6 +201,10 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   /// Monotonically increasing local schema version.
   final int version;
 
+  /// Dispatches [visitor] with this store definition's reified store type [S].
+  R accept<R>(R Function<T extends StoreDef<T>>(T def) visitor) =>
+      visitor<S>(this as S);
+
   /// Descriptors are declared as:
   /// `static final title = store.schema.text('title').req();`
   late final Fields<S> schema = Fields<S>(this as S);
