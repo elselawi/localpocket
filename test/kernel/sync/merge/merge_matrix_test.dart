@@ -10,7 +10,7 @@ import 'package:test/test.dart';
 /// `l == r -> l`, `l == b -> r`, `r == b -> l`, else resolver (default remote wins).
 void main() {
   group('exhaustive small domain triples', () {
-    test('exhaustive small domain triples', () {
+    test('exhaustive small domain triples', () async {
       // The expected outcome under the current spec: the classic three-way
       // rules per path, with nested String-keyed maps merging per-key.
       Object? expectedMerge(Object? b, Object? l, Object? r) {
@@ -58,7 +58,7 @@ void main() {
             final local = {'val': l};
             final remote = {'val': r};
 
-            final outcome = merge3Way(base: base, local: local, remote: remote);
+            final outcome = await merge3WayAsync(base: base, local: local, remote: remote);
             final mergedVal = outcome.merged['val'];
 
             if (deepEquals(l, r)) {
@@ -91,7 +91,7 @@ void main() {
         final local = {'val': l, 'local_only': seed};
         final remote = {'val': r, 'remote_only': seed * 2};
 
-        final outcome = merge3Way(base: base, local: local, remote: remote);
+        final outcome = await merge3WayAsync(base: base, local: local, remote: remote);
 
         if (deepEquals(l, r)) {
           expect(deepEquals(outcome.merged['val'], l), isTrue);
@@ -112,9 +112,9 @@ void main() {
   });
 
   group('key presence and absence branches', () {
-    test('key deleted on both sides becomes present-with-null', () {
+    test('key deleted on both sides becomes present-with-null', () async {
       // base holds the key, both sides drop it: merged keeps it as null.
-      final res = merge3Way(
+      final res = await merge3WayAsync(
           base: {'val': 'x'}, local: <String, Object?>{}, remote: const {});
       expect(res.merged.containsKey('val'), isTrue);
       expect(res.merged['val'], isNull,
@@ -122,42 +122,42 @@ void main() {
               'a union key always appears, with null when both sides drop it');
     });
 
-    test('key only in local survives', () {
-      final res = merge3Way(
+    test('key only in local survives', () async {
+      final res = await merge3WayAsync(
           base: <String, Object?>{},
           local: {'local_only': 7},
           remote: const {});
       expect(res.merged['local_only'], 7);
     });
 
-    test('key only in remote survives', () {
-      final res = merge3Way(
+    test('key only in remote survives', () async {
+      final res = await merge3WayAsync(
           base: <String, Object?>{},
           local: <String, Object?>{},
           remote: {'remote_only': 9});
       expect(res.merged['remote_only'], 9);
     });
 
-    test('local drops the key, remote changes it -> remote wins', () {
+    test('local drops the key, remote changes it -> remote wins', () async {
       // base = {val: 'x'}; local deletes val; remote changes val.
-      final res = merge3Way(
+      final res = await merge3WayAsync(
           base: {'val': 'x'}, local: <String, Object?>{}, remote: {'val': 'y'});
       expect(res.merged['val'], 'y');
     });
 
-    test('remote drops the key, local changes it -> remote drop wins', () {
+    test('remote drops the key, local changes it -> remote drop wins', () async {
       // base = {val: 'x'}; local changes val; remote deletes val.
       // Both sides changed (1->y and 1->null) -> default remote wins, so the
       // deletion wins over the local edit.
-      final res = merge3Way(
+      final res = await merge3WayAsync(
           base: {'val': 'x'}, local: {'val': 'y'}, remote: <String, Object?>{});
       expect(res.merged.containsKey('val'), isTrue);
       expect(res.merged['val'], isNull,
           reason: 'a remote deletion beats a local edit under remote-wins');
     });
 
-    test('key missing from base and unchanged on both sides stays null', () {
-      final res = merge3Way(
+    test('key missing from base and unchanged on both sides stays null', () async {
+      final res = await merge3WayAsync(
           base: <String, Object?>{},
           local: <String, Object?>{'absent': null},
           remote: <String, Object?>{'absent': null});
@@ -165,8 +165,8 @@ void main() {
       expect(res.merged['absent'], isNull);
     });
 
-    test('distinct keys on all three sides are all present', () {
-      final res = merge3Way(
+    test('distinct keys on all three sides are all present', () async {
+      final res = await merge3WayAsync(
           base: {'b': 1}, local: {'l': 2, 'b': 1}, remote: {'r': 3, 'b': 1});
       expect(res.merged.keys.toSet(), {'b', 'l', 'r'});
       expect(res.merged['b'], 1);
@@ -200,10 +200,10 @@ void main() {
       'intKeyMap': {1: 'a', 2: 'b'},
     };
 
-    void runBranch(
-        String name, Object? b, Object? l, Object? r, Object? expected) {
-      final res =
-          merge3Way(base: {'val': b}, local: {'val': l}, remote: {'val': r});
+    Future<void> runBranch(
+        String name, Object? b, Object? l, Object? r, Object? expected) async {
+      final res = await merge3WayAsync(
+          base: {'val': b}, local: {'val': l}, remote: {'val': r});
       expect(deepEquals(res.merged['val'], expected), isTrue,
           reason:
               '$name branch (b=${_short(b)}, l=${_short(l)}, r=${_short(r)}) -> ${_short(expected)}');
@@ -211,25 +211,25 @@ void main() {
 
     for (final entry in types.entries) {
       final v = entry.value;
-      test('l == r branch keeps the value (${entry.key})', () {
+      test('l == r branch keeps the value (${entry.key})', () async {
         // Separate instances with equal content, not the same reference.
         final lCopy = _clone(v);
         final rCopy = _clone(v);
-        runBranch('l==r', v, lCopy, rCopy, lCopy);
+        await runBranch('l==r', v, lCopy, rCopy, lCopy);
       });
 
-      test('l == b branch adopts remote (${entry.key})', () {
+      test('l == b branch adopts remote (${entry.key})', () async {
         final bCopy = _clone(v);
-        runBranch('l==b', bCopy, _clone(v), 'remote-val', 'remote-val');
+        await runBranch('l==b', bCopy, _clone(v), 'remote-val', 'remote-val');
       });
 
-      test('r == b branch keeps local (${entry.key})', () {
+      test('r == b branch keeps local (${entry.key})', () async {
         final bCopy = _clone(v);
-        runBranch('r==b', bCopy, 'local-val', _clone(v), 'local-val');
+        await runBranch('r==b', bCopy, 'local-val', _clone(v), 'local-val');
       });
     }
 
-    test('both-changed branch: default remote wins across types', () {
+    test('both-changed branch: default remote wins across types', () async {
       // Two genuinely different values on both sides.
       const pairs = <(Object?, Object?)>[
         (1, 2),
@@ -241,14 +241,14 @@ void main() {
         (null, 'non-null'),
       ];
       for (final (l, r) in pairs) {
-        final res = merge3Way(
+        final res = await merge3WayAsync(
             base: <String, Object?>{}, local: {'val': l}, remote: {'val': r});
         expect(deepEquals(res.merged['val'], r), isTrue,
             reason: 'both changed -> remote wins for $_short(l)/$_short(r)');
       }
     });
 
-    test('deep-equal distinct instances take the l == r branch', () {
+    test('deep-equal distinct instances take the l == r branch', () async {
       // Map instances with equal content but different identity.
       final l = {
         'nested': {
@@ -261,13 +261,13 @@ void main() {
         }
       };
       expect(identical(l, r), isFalse, reason: 'distinct instances');
-      final res = merge3Way(base: const {}, local: {'m': l}, remote: {'m': r});
+      final res = await merge3WayAsync(base: const {}, local: {'m': l}, remote: {'m': r});
       expect(deepEquals(res.merged['m'], l), isTrue);
       // And the merged value is the LOCAL instance (l wins on l==r).
       expect(identical(res.merged['m'], l), isTrue);
     });
 
-    test('nested maps merge per-key: additions from both sides survive', () {
+    test('nested maps merge per-key: additions from both sides survive', () async {
       final base = {
         'cfg': {'a': 1, 'b': 2}
       };
@@ -279,29 +279,29 @@ void main() {
       };
       // Per-key recursion: unchanged keys follow their sides, and each
       // side's own additions survive as nested keys.
-      final res = merge3Way(base: base, local: local, remote: remote);
+      final res = await merge3WayAsync(base: base, local: local, remote: remote);
       expect(res.merged['cfg'], {'a': 1, 'b': 2, 'l': true, 'r': true},
           reason: 'nested maps merge per-key (each side\'s nested additions '
               'survive)');
     });
 
-    test('maps with non-string keys deep-compare correctly', () {
+    test('maps with non-string keys deep-compare correctly', () async {
       final l = {1: 'a', 2: 'b'};
       final r = {1: 'a', 2: 'b'};
       // l == r (deep equal) even with int keys.
-      final res1 = merge3Way(base: const {}, local: {'m': l}, remote: {'m': r});
+      final res1 = await merge3WayAsync(base: const {}, local: {'m': l}, remote: {'m': r});
       expect(deepEquals(res1.merged['m'], l), isTrue);
 
       // Both changed with int-keyed maps -> remote wins whole.
       final r2 = {1: 'x'};
       final res2 =
-          merge3Way(base: const {}, local: {'m': l}, remote: {'m': r2});
+          await merge3WayAsync(base: const {}, local: {'m': l}, remote: {'m': r2});
       expect(deepEquals(res2.merged['m'], r2), isTrue);
     });
   });
 
   group('dirty sets and input immutability', () {
-    test('dirtyLocal/dirtyRemote reflect actual base diffs (dot-notation)', () {
+    test('dirtyLocal/dirtyRemote reflect actual base diffs (dot-notation)', () async {
       final base = {
         'name': 'n',
         'meta': {'a': 1, 'b': 2},
@@ -318,7 +318,7 @@ void main() {
         'qty': 5
       };
 
-      final res = merge3Way(base: base, local: local, remote: remote);
+      final res = await merge3WayAsync(base: base, local: local, remote: remote);
       expect(res.dirtyLocal, containsAll(['name', 'meta', 'meta.b']));
       expect(res.dirtyLocal, isNot(contains('qty')));
       expect(res.dirtyRemote, containsAll(['meta', 'meta.a']));
@@ -326,8 +326,8 @@ void main() {
       expect(res.dirtyRemote, isNot(contains('qty')));
     });
 
-    test('dirty sets are ordered deterministically and are Sets', () {
-      final res = merge3Way(
+    test('dirty sets are ordered deterministically and are Sets', () async {
+      final res = await merge3WayAsync(
           base: {'a': 1, 'b': 2},
           local: {'a': 1, 'b': 9, 'c': 3},
           remote: {'a': 7, 'b': 2, 'd': 4});
@@ -336,7 +336,7 @@ void main() {
       expect(res.dirtyRemote, {'a', 'd'});
     });
 
-    test('merge does not mutate any input map (deep)', () {
+    test('merge does not mutate any input map (deep)', () async {
       final base = {
         'name': 'n',
         'meta': {
@@ -365,14 +365,14 @@ void main() {
       final localBefore = _clone(local);
       final remoteBefore = _clone(remote);
 
-      merge3Way(base: base, local: local, remote: remote);
+      await merge3WayAsync(base: base, local: local, remote: remote);
 
       expect(base, equals(baseBefore), reason: 'base not mutated');
       expect(local, equals(localBefore), reason: 'local not mutated');
       expect(remote, equals(remoteBefore), reason: 'remote not mutated');
     });
 
-    test('field-resolver path does not mutate inputs either', () {
+    test('field-resolver path does not mutate inputs either', () async {
       final base = {'n': 0};
       final local = {'n': 5};
       final remote = {'n': 3};
@@ -380,7 +380,7 @@ void main() {
       final localBefore = _clone(local);
       final remoteBefore = _clone(remote);
 
-      merge3Way(
+      await merge3WayAsync(
         base: base,
         local: local,
         remote: remote,
@@ -392,8 +392,8 @@ void main() {
       expect(remote, equals(remoteBefore));
     });
 
-    test('merged key presence matches the union of all three sides', () {
-      final res = merge3Way(
+    test('merged key presence matches the union of all three sides', () async {
+      final res = await merge3WayAsync(
           base: {'a': 1, 'b': 1},
           local: {'b': 2, 'c': 3},
           remote: {'c': 3, 'd': 4});
@@ -411,112 +411,6 @@ void main() {
   });
 
   group('MergeEngine parity and async adapters', () {
-    test('MergeEngine.runSync and runAsync agree for branch-heavy cases',
-        () async {
-      final cases = <({
-        Map<String, Object?> base,
-        Map<String, Object?> local,
-        Map<String, Object?> remote,
-        MergePolicy? policy
-      })>[
-        (
-          base: {'title': 'old', 'count': 3},
-          local: {'title': 'local', 'count': 4},
-          remote: {'title': 'remote', 'count': 5},
-          policy: null,
-        ),
-        (
-          base: {'archived': false, 'name': 'v0'},
-          local: {'archived': true, 'name': 'v1'},
-          remote: {'archived': false, 'name': 'v0'},
-          policy: const MergePolicy(editsUnarchive: true),
-        ),
-        (
-          base: {
-            'tags': ['a', 'b']
-          },
-          local: {
-            'tags': ['a', 'c']
-          },
-          remote: {
-            'tags': ['b', 'd']
-          },
-          policy: const MergePolicy(
-              fieldOverrides: {'tags': SetUnionWithDeletionWinsResolver()}),
-        ),
-        (
-          base: {'score': 10},
-          local: {'score': 15},
-          remote: {'score': 12},
-          policy:
-              const MergePolicy(fieldOverrides: {'score': CounterResolver()}),
-        ),
-        (
-          base: {'value': 'start'},
-          local: {'value': 'local'},
-          remote: {'value': 'remote'},
-          policy: const MergePolicy(
-            fieldOverrides: {'value': LocalWinsResolver()},
-          ),
-        ),
-      ];
-
-      for (final testCase in cases) {
-        final sync = MergeEngine.runSync(
-          base: testCase.base,
-          local: testCase.local,
-          remote: testCase.remote,
-          store: 'patients',
-          recordId: 'rec-1',
-          policy: testCase.policy,
-        );
-        final async = await MergeEngine.runAsync(
-          base: testCase.base,
-          local: testCase.local,
-          remote: testCase.remote,
-          store: 'patients',
-          recordId: 'rec-1',
-          policy: testCase.policy,
-        );
-
-        expect(sync.merged, equals(async.merged));
-        expect(sync.needsReview, equals(async.needsReview));
-        expect(sync.dirtyLocal, equals(async.dirtyLocal));
-        expect(sync.dirtyRemote, equals(async.dirtyRemote));
-      }
-    });
-
-    test(
-        'sync merge rejects async custom resolvers in both collection and field positions',
-        () {
-      final asyncCollection = CustomResolver((ctx) async => MergeResult(
-            merged: {'value': 'collection'},
-          ));
-      final asyncField = CustomResolver((ctx) async => MergeResult(
-            merged: {'value': 'field'},
-          ));
-
-      expect(
-        () => merge3Way(
-          base: {'value': 'base'},
-          local: {'value': 'local'},
-          remote: {'value': 'remote'},
-          policy: MergePolicy(collectionResolver: asyncCollection),
-        ),
-        throwsA(isA<StateError>()),
-      );
-
-      expect(
-        () => merge3Way(
-          base: {'value': 'base'},
-          local: {'value': 'local'},
-          remote: {'value': 'remote'},
-          policy: MergePolicy(fieldOverrides: {'value': asyncField}),
-        ),
-        throwsA(isA<StateError>()),
-      );
-    });
-
     test(
         'async merge accepts async custom resolvers and keeps review fallback semantics',
         () async {
@@ -558,13 +452,13 @@ void main() {
       expect(collectionRes.merged['extra'], 'ok');
     });
 
-    test('MergeEngine respects collection precedence over field overrides', () {
+    test('MergeEngine respects collection precedence over field overrides', () async {
       final collection = CustomResolver((ctx) => MergeResult(
             merged: {'value': 'collection'},
           ));
       final field = const LocalWinsResolver();
 
-      final res = MergeEngine.runSync(
+      final res = await MergeEngine.runAsync(
         base: {'value': 'base'},
         local: {'value': 'local'},
         remote: {'value': 'remote'},
@@ -577,7 +471,7 @@ void main() {
       expect(res.merged['value'], 'collection');
     });
 
-    test('dirty tracking includes nested paths and missing-key unions', () {
+    test('dirty tracking includes nested paths and missing-key unions', () async {
       final base = {
         'meta': {'a': 1, 'b': 2},
         'baseOnly': true,
@@ -592,7 +486,7 @@ void main() {
         'shared': 'y',
       };
 
-      final res = MergeEngine.runSync(
+      final res = await MergeEngine.runAsync(
         base: base,
         local: local,
         remote: remote,
@@ -606,12 +500,12 @@ void main() {
 
     test(
         'archive branch with both sides changed can still be resolved by a field override',
-        () {
+        () async {
       final policy = const MergePolicy(
         fieldOverrides: {'archived': LocalWinsResolver()},
       );
 
-      final res = MergeEngine.runSync(
+      final res = await MergeEngine.runAsync(
         base: {'archived': false},
         local: {'archived': true},
         remote: {'archived': false},

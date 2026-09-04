@@ -23,7 +23,7 @@ import 'package:test/test.dart';
 ///   string-mode line transforms (trim / split-lines / blank-line drop).
 void main() {
   group('collection resolver replaces the whole merge', () {
-    test('a collection remote-wins resolver drops local-only fields', () {
+    test('a collection remote-wins resolver drops local-only fields', () async {
       // Base: title/priority. Local edits both; remote only edited `title`.
       // `RemoteWinsResolver` spreads `{...base, ...local, ...remote}` so the
       // remote value wins EVERY field — including `priority`, which remote
@@ -32,7 +32,7 @@ void main() {
       final local = {'title': 'B', 'priority': 2};
       final remote = {'title': 'C', 'priority': 1};
 
-      final res = merge3Way(
+      final res = await merge3WayAsync(
         base: base,
         local: local,
         remote: remote,
@@ -47,7 +47,7 @@ void main() {
       expect(res.needsReview, isFalse);
     });
 
-    test('MergeContext exposes dirtyLocal and dirtyRemote to resolvers', () {
+    test('MergeContext exposes dirtyLocal and dirtyRemote to resolvers', () async {
       final base = {
         'name': 'n',
         'meta': {'a': 1, 'b': 2},
@@ -78,7 +78,7 @@ void main() {
         }),
       );
 
-      merge3Way(
+      await merge3WayAsync(
         base: base,
         local: local,
         remote: remote,
@@ -98,7 +98,7 @@ void main() {
       expect(seenRecordId, 'rec-1');
     });
 
-    test('a field-aware collection resolver keeps local-only changes', () {
+    test('a field-aware collection resolver keeps local-only changes', () async {
       // The recommended pattern for a collection resolver that means "remote
       // wins conflicts": consult `ctx.dirtyLocal`/`ctx.dirtyRemote` and only
       // let remote win fields it actually changed.
@@ -131,7 +131,7 @@ void main() {
       final local = {'title': 'B', 'priority': 2};
       final remote = {'title': 'C', 'priority': 1};
 
-      final res = merge3Way(
+      final res = await merge3WayAsync(
         base: base,
         local: local,
         remote: remote,
@@ -160,11 +160,11 @@ void main() {
       'meta': {'name': 'nR', 'city': 'c0'}
     };
 
-    test('a dotted-path override fires at its exact nested key', () {
+    test('a dotted-path override fires at its exact nested key', () async {
       // `meta.name` changed on both sides while `meta.city` changed only
       // locally: the dotted override resolves `name`, and the per-key rules
       // keep the local-only city change.
-      final res = merge3Way(
+      final res = await merge3WayAsync(
         base: base,
         local: local,
         remote: remote,
@@ -180,8 +180,8 @@ void main() {
           reason: 'the nested local-only change survives (per-key merge)');
     });
 
-    test('a top-level override governs its nested children', () {
-      final res = merge3Way(
+    test('a top-level override governs its nested children', () async {
+      final res = await merge3WayAsync(
         base: base,
         local: local,
         remote: remote,
@@ -197,10 +197,10 @@ void main() {
           reason: 'the nested local-only change survives');
     });
 
-    test('a dotted override beats the top-level policy at its exact key', () {
+    test('a dotted override beats the top-level policy at its exact key', () async {
       // Both nested keys conflict; the dotted override flips `name` back to
       // local while `city` still follows the top-level remote policy.
-      final res = merge3Way(
+      final res = await merge3WayAsync(
         base: base,
         local: local,
         remote: {
@@ -220,16 +220,16 @@ void main() {
     });
 
     test('without a policy nested maps merge per-key (remote wins per key)',
-        () {
-      final res = merge3Way(base: base, local: local, remote: remote);
+        () async {
+      final res = await merge3WayAsync(base: base, local: local, remote: remote);
 
       final meta = res.merged['meta']! as Map<String, Object?>;
       expect(meta['name'], 'nR', reason: 'both-changed nested key -> remote');
       expect(meta['city'], 'cL', reason: 'local-only nested key -> local');
     });
 
-    test('a type change on one side keeps the nested value atomic', () {
-      final res = merge3Way(
+    test('a type change on one side keeps the nested value atomic', () async {
+      final res = await merge3WayAsync(
         base: base,
         local: local,
         remote: {
@@ -243,31 +243,32 @@ void main() {
   });
 
   group('set union delete/re-add identity', () {
-    List<Object?> mergeTags(
-            List<Object?>? b, List<Object?>? l, List<Object?>? r) =>
-        (merge3Way(
-          base: {'tags': b},
-          local: {'tags': l},
-          remote: {'tags': r},
-          policy: const MergePolicy(
-              fieldOverrides: {'tags': SetUnionWithDeletionWinsResolver()}),
-        ).merged['tags'] as List)
-            .cast<Object?>();
+    Future<List<Object?>> mergeTags(
+        List<Object?>? b, List<Object?>? l, List<Object?>? r) async {
+      final res = await merge3WayAsync(
+        base: {'tags': b},
+        local: {'tags': l},
+        remote: {'tags': r},
+        policy: const MergePolicy(
+            fieldOverrides: {'tags': SetUnionWithDeletionWinsResolver()}),
+      );
+      return (res.merged['tags'] as List).cast<Object?>();
+    }
 
-    test('a remotely re-added element loses to the local removal', () {
+    test('a remotely re-added element loses to the local removal', () async {
       // Base [a]; local removes a; remote re-adds a. There is no tombstone,
       // so the re-added element is indistinguishable from the original and
       // the local removal wins — the union drops it.
-      final m = mergeTags(['a'], [], ['a']);
+      final m = await mergeTags(['a'], [], ['a']);
       expect(m, isEmpty,
           reason: 'deletion wins over a re-add of the same value');
     });
 
-    test('a new element equal to the removed one is treated as a re-add', () {
+    test('a new element equal to the removed one is treated as a re-add', () async {
       // Remote re-adds `a` AND adds a genuinely new `b`. `a` is treated as
       // the removed original (value identity — no tombstone), so only `b`
       // (a true addition) survives.
-      final m = mergeTags(['a'], [], ['a', 'b']);
+      final m = await mergeTags(['a'], [], ['a', 'b']);
       expect(m, ['b'],
           reason: 'a new element with the same value is indistinguishable '
               'from a re-add and is dropped; only the truly new element '
@@ -276,33 +277,34 @@ void main() {
   });
 
   group('set union element equality', () {
-    List<Object?> mergeTags(
-            List<Object?>? b, List<Object?>? l, List<Object?>? r) =>
-        (merge3Way(
-          base: {'tags': b},
-          local: {'tags': l},
-          remote: {'tags': r},
-          policy: const MergePolicy(
-              fieldOverrides: {'tags': SetUnionWithDeletionWinsResolver()}),
-        ).merged['tags'] as List)
-            .cast<Object?>();
+    Future<List<Object?>> mergeTags(
+        List<Object?>? b, List<Object?>? l, List<Object?>? r) async {
+      final res = await merge3WayAsync(
+        base: {'tags': b},
+        local: {'tags': l},
+        remote: {'tags': r},
+        policy: const MergePolicy(
+            fieldOverrides: {'tags': SetUnionWithDeletionWinsResolver()}),
+      );
+      return (res.merged['tags'] as List).cast<Object?>();
+    }
 
-    test('int 2 and double 2.0 are the same element', () {
+    test('int 2 and double 2.0 are the same element', () async {
       // Engine level: deepEquals treats 2 == 2.0 as equal, so a 2-only local
       // and a 2.0-only remote AGREE and merge to a single element.
-      final agreed = mergeTags(<Object?>[], [2], [2.0]);
+      final agreed = await mergeTags(<Object?>[], [2], [2.0]);
       expect(agreed, [2],
           reason: '2 and 2.0 are the same element (canonical num identity)');
 
       // Resolver level: under a genuine two-sided change, a 2.0 re-add
       // collapses into the existing 2 instead of adding a second element.
-      final m = mergeTags(<Object?>[], [2], [2.0, 'x']);
+      final m = await mergeTags(<Object?>[], [2], [2.0, 'x']);
       expect(m, [2, 'x'],
           reason: 'the set-union resolver treats 2.0 as the same element as '
               '2 and does not append it again');
     });
 
-    test('equal-content nested maps stay distinct elements', () {
+    test('equal-content nested maps stay distinct elements', () async {
       // Unlike primitives (2 vs 2.0), non-primitive elements use Dart Set
       // identity: two equal-content but distinct map instances are DIFFERENT
       // elements. This pins the current pre-canonicalize behaviour so a
@@ -311,7 +313,7 @@ void main() {
       final remoteMap = {'x': 1};
       expect(identical(localMap, remoteMap), isFalse);
 
-      final m = mergeTags(<Object?>[], [localMap], [remoteMap, 'y']);
+      final m = await mergeTags(<Object?>[], [localMap], [remoteMap, 'y']);
       expect(m, hasLength(3),
           reason: 'each side\'s distinct map instance survives as its own '
               'element (identity, not structural, equality)');
@@ -320,11 +322,11 @@ void main() {
       expect(m, contains('y'));
     });
 
-    test('a one-sided duplicate survives verbatim (no resolver pass)', () {
+    test('a one-sided duplicate survives verbatim (no resolver pass)', () async {
       // remote == base, so the engine\'s r == b branch takes the local list
       // wholesale — the set-union resolver never runs and the duplicate 2.0
       // is NOT collapsed into 2.
-      final m = mergeTags([2], [2, 2.0], [2]);
+      final m = await mergeTags([2], [2, 2.0], [2]);
       expect(m, [2, 2.0],
           reason: 'canonical collapse only happens when the resolver actually '
               'runs, i.e. on a genuine two-sided change');
@@ -332,43 +334,44 @@ void main() {
   });
 
   group('append-only identical-event dedup', () {
-    List<Object?> mergeLog(
-            List<Object?>? b, List<Object?>? l, List<Object?>? r) =>
-        (merge3Way(
-          base: {'log': b},
-          local: {'log': l},
-          remote: {'log': r},
-          policy: const MergePolicy(
-              fieldOverrides: {'log': AppendOnlyListResolver()}),
-        ).merged['log'] as List)
-            .cast<Object?>();
+    Future<List<Object?>> mergeLog(
+        List<Object?>? b, List<Object?>? l, List<Object?>? r) async {
+      final res = await merge3WayAsync(
+        base: {'log': b},
+        local: {'log': l},
+        remote: {'log': r},
+        policy: const MergePolicy(
+            fieldOverrides: {'log': AppendOnlyListResolver()}),
+      );
+      return (res.merged['log'] as List).cast<Object?>();
+    }
 
-    test('identical events appended on both sides collapse to one', () {
+    test('identical events appended on both sides collapse to one', () async {
       // The documented contract: the same event appended independently by
       // both sides is one element. (Distinct events that happen to look
       // identical need an identity hook, which does not exist yet — this
       // pins the current content-dedup behaviour.)
-      final m = mergeLog(<Object?>[], ['approved'], ['approved']);
+      final m = await mergeLog(<Object?>[], ['approved'], ['approved']);
       expect(m, ['approved'],
           reason: 'identical events from both sides are one element');
     });
 
-    test('the resolver dedups an identical event across all three sides', () {
+    test('the resolver dedups an identical event across all three sides', () async {
       // A genuine two-sided change (local and remote both add their own
       // event) runs the resolver, which collapses the repeated 'approved'
       // present in base, local, AND remote into a single element.
-      final m = mergeLog(
+      final m = await mergeLog(
           ['approved'], ['approved', 'local2'], ['approved', 'remote2']);
       expect(m, ['approved', 'local2', 'remote2'],
           reason: 'under a two-sided change the resolver dedups the '
               'identical event across base, local, and remote');
     });
 
-    test('a one-sided duplicate survives verbatim (no resolver pass)', () {
+    test('a one-sided duplicate survives verbatim (no resolver pass)', () async {
       // remote == base, so the engine\'s r == b branch takes the local list
       // wholesale — the append-only resolver never runs and the local
       // duplicate survives.
-      final m = mergeLog(['approved'], ['approved', 'approved'], ['approved']);
+      final m = await mergeLog(['approved'], ['approved', 'approved'], ['approved']);
       expect(m, ['approved', 'approved'],
           reason: 'content dedup only applies when the resolver actually '
               'runs, i.e. on a genuine two-sided change');
@@ -376,37 +379,39 @@ void main() {
   });
 
   group('append-only text transforms', () {
-    String mergeNotes(String? b, String? l, String? r) => (merge3Way(
+    Future<String> mergeNotes(String? b, String? l, String? r) async =>
+        (await merge3WayAsync(
           base: {'notes': b},
           local: {'notes': l},
           remote: {'notes': r},
           policy: const MergePolicy(
               fieldOverrides: {'notes': AppendOnlyLinesResolver()}),
-        ).merged['notes'] as String);
+        ))
+            .merged['notes'] as String;
 
-    test('whole-value leading and trailing whitespace is trimmed', () {
-      expect(mergeNotes('  alpha  ', ' beta ', ''), 'alpha\nbeta',
+    test('whole-value leading and trailing whitespace is trimmed', () async {
+      expect(await mergeNotes('  alpha  ', ' beta ', ''), 'alpha\nbeta',
           reason: 'each line (here the entire value) is trimmed before '
               'joining');
     });
 
-    test('embedded newlines are split into separate lines and deduped', () {
+    test('embedded newlines are split into separate lines and deduped', () async {
       // A multi-line addition is line-split; the resulting lines dedup
       // against the existing base lines.
-      expect(mergeNotes('a', 'a\nb\nc', ''), 'a\nb\nc',
+      expect(await mergeNotes('a', 'a\nb\nc', ''), 'a\nb\nc',
           reason: 'the multi-line addition is split and its `a` dedups '
               'against base');
-      expect(mergeNotes('a\nb', 'x\ny', ''), 'a\nb\nx\ny');
+      expect(await mergeNotes('a\nb', 'x\ny', ''), 'a\nb\nx\ny');
     });
 
-    test('string mode splits lines while list mode keeps items atomic', () {
+    test('string mode splits lines while list mode keeps items atomic', () async {
       // Same content, two modes: a string value 'x\ny' becomes two lines,
       // whereas a list item 'x\ny' is a single atomic element that is never
       // split.
-      expect(mergeNotes('', 'x\ny', ''), 'x\ny',
+      expect(await mergeNotes('', 'x\ny', ''), 'x\ny',
           reason: 'string mode splits on newlines (and rejoins)');
 
-      final m = (merge3Way(
+      final res = await merge3WayAsync(
         base: {'log': <Object?>[]},
         local: {
           'log': ['x\ny']
@@ -414,8 +419,8 @@ void main() {
         remote: {'log': <Object?>[]},
         policy: const MergePolicy(
             fieldOverrides: {'log': AppendOnlyListResolver()}),
-      ).merged['log'] as List)
-          .cast<Object?>();
+      );
+          final m = (res.merged['log'] as List).cast<Object?>();
       expect(m, ['x\ny'],
           reason: 'list mode appends the item atomically — the embedded '
               'newline stays inside the element');
@@ -423,21 +428,22 @@ void main() {
   });
 
   group('append-only list identity', () {
-    List<Object?> mergeLog(
-            List<Object?>? b, List<Object?>? l, List<Object?>? r) =>
-        (merge3Way(
-          base: {'log': b},
-          local: {'log': l},
-          remote: {'log': r},
-          policy: MergePolicy(fieldOverrides: {
-            'log': AppendOnlyListResolver(
-                identity: (item) => (item as Map)['id'] as String),
-          }),
-        ).merged['log'] as List)
-            .cast<Object?>();
+    Future<List<Object?>> mergeLog(
+        List<Object?>? b, List<Object?>? l, List<Object?>? r) async {
+      final res = await merge3WayAsync(
+        base: {'log': b},
+        local: {'log': l},
+        remote: {'log': r},
+        policy: MergePolicy(fieldOverrides: {
+          'log': AppendOnlyListResolver(
+              identity: (item) => (item as Map)['id'] as String),
+        }),
+      );
+      return (res.merged['log'] as List).cast<Object?>();
+    }
 
-    test('identical-looking events with distinct ids both survive', () {
-      final m = mergeLog(const [], [
+    test('identical-looking events with distinct ids both survive', () async {
+      final m = await mergeLog(const [], [
         {'id': 'e1', 'kind': 'approved'}
       ], [
         {'id': 'e2', 'kind': 'approved'}
@@ -448,8 +454,8 @@ void main() {
       expect(m[1], {'id': 'e2', 'kind': 'approved'});
     });
 
-    test('the same id dedups across base, local, and remote', () {
-      final m = mergeLog([
+    test('the same id dedups across base, local, and remote', () async {
+      final m = await mergeLog([
         {'id': 'e1', 'kind': 'approved'}
       ], [
         {'id': 'e1', 'kind': 'approved'},
@@ -461,8 +467,8 @@ void main() {
           reason: 'the shared id collapses while distinct ids survive');
     });
 
-    test('equal content with different ids stays distinct', () {
-      final m = mergeLog(const [], [
+    test('equal content with different ids stays distinct', () async {
+      final m = await mergeLog(const [], [
         {'id': 'a', 'kind': 'x'}
       ], [
         {'id': 'b', 'kind': 'x'}
@@ -472,8 +478,8 @@ void main() {
     });
 
     test('the first occurrence per id wins (base, then local, then remote)',
-        () {
-      final m = mergeLog([
+        () async {
+      final m = await mergeLog([
         {'id': 'e1', 'kind': 'from-base'}
       ], [
         {'id': 'e1', 'kind': 'from-local'}

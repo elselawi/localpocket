@@ -249,12 +249,6 @@ class SetUnionWithDeletionWinsResolver extends ConflictResolver {
   }
 }
 
-/// Previous name of [SetUnionWithDeletionWinsResolver].
-@Deprecated(
-    'Renamed to SetUnionWithDeletionWinsResolver: it is a deletion-wins set '
-    'union, not a true OR-set.')
-typedef SetUnionResolver = SetUnionWithDeletionWinsResolver;
-
 /// {@template localpocket.counter_resolver}
 /// Counter resolver:
 /// `base + (local − base) + (remote − base)`.
@@ -386,16 +380,6 @@ class AppendOnlyLinesResolver extends ConflictResolver {
     return parts.join('\n');
   }
 }
-
-/// Previous name of [AppendOnlyListResolver].
-///
-/// The former `AppendOnlyResolver` handled BOTH string values (line-based
-/// append) and list values; the two behaviours are now separate — use
-/// [AppendOnlyListResolver] for lists and [AppendOnlyLinesResolver] for text
-/// fields.
-@Deprecated('Split into AppendOnlyListResolver (list values) and '
-    'AppendOnlyLinesResolver (string values).')
-typedef AppendOnlyResolver = AppendOnlyListResolver;
 
 /// {@template localpocket.custom_resolver}
 /// Custom resolver wrapping a user-supplied function.

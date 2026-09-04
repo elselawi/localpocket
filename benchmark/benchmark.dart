@@ -17,7 +17,7 @@ import 'package:localpocket/src/kernel/sync/merge.dart'
         CounterResolver,
         MergePolicy,
         SetUnionWithDeletionWinsResolver,
-        merge3Way;
+        merge3WayAsync;
 import 'package:localpocket/src/runtime/runtime_client.dart'
     show LoopbackRuntimeClient;
 
@@ -356,7 +356,7 @@ Future<void> main() async {
 
     final sw = Stopwatch()..start();
     for (var i = 0; i < 1000; i++) {
-      final res = merge3Way(
+      final res = await merge3WayAsync(
         base: baseDocs[i],
         local: localDocs[i],
         remote: remoteDocs[i],

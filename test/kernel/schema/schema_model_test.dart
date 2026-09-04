@@ -309,7 +309,7 @@ void main() {
   });
 
   group('ConflictPolicy', () {
-    test('constructor and defaults factory preserve properties', () {
+    test('constructor preserves properties', () {
       const policy = ConflictPolicy(
         collectionResolver: LocalWinsResolver(),
         fieldOverrides: {'a': CounterResolver(), 'b': RemoteWinsResolver()},
@@ -321,15 +321,15 @@ void main() {
       expect(policy.fieldOverrides['b'], isA<RemoteWinsResolver>());
       expect(policy.editsUnarchive, isTrue);
 
-      final defaults = ConflictPolicy.defaults(
+      final configured = ConflictPolicy(
         collectionResolver: const CustomResolver(_noResolve),
         fieldOverrides: {'x': const AppendOnlyListResolver()},
         editsUnarchive: true,
       );
-      expect(defaults.collectionResolver, isA<CustomResolver>());
-      expect(defaults.fieldOverrides.keys, ['x']);
-      expect(defaults.fieldOverrides['x'], isA<AppendOnlyListResolver>());
-      expect(defaults.editsUnarchive, isTrue);
+      expect(configured.collectionResolver, isA<CustomResolver>());
+      expect(configured.fieldOverrides.keys, ['x']);
+      expect(configured.fieldOverrides['x'], isA<AppendOnlyListResolver>());
+      expect(configured.editsUnarchive, isTrue);
 
       const empty = ConflictPolicy();
       expect(empty.collectionResolver, isNull);

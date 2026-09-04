@@ -49,9 +49,9 @@ void main() {
           const ConflictPolicy().missingRemote, MissingRemotePolicy.conflict);
     });
 
-    test('ConflictPolicy.defaults carries the policy', () {
-      final policy =
-          ConflictPolicy.defaults(missingRemote: MissingRemotePolicy.recreate);
+    test('the const constructor carries the policy', () {
+      const policy =
+          ConflictPolicy(missingRemote: MissingRemotePolicy.recreate);
       expect(policy.missingRemote, MissingRemotePolicy.recreate);
     });
 

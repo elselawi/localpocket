@@ -1,5 +1,23 @@
 ## Unreleased
 
+### BREAKING
+
+- **Removed the deprecated resolver aliases `SetUnionResolver` and
+  `AppendOnlyResolver`.** Migration: use
+  `SetUnionWithDeletionWinsResolver` instead of `SetUnionResolver`; use
+  `AppendOnlyListResolver` (list values) or `AppendOnlyLinesResolver`
+  (string values) instead of `AppendOnlyResolver`.
+- **Removed `ConflictPolicy.defaults`.** It was a non-const duplicate of
+  the constructor. Migration: replace
+  `ConflictPolicy.defaults(collectionResolver: r, ...)` with
+  `ConflictPolicy(collectionResolver: r, ...)` (the constructor is const).
+- **Removed the synchronous merge entry points `merge3Way` and
+  `MergeEngine.runSync`.** Production merge paths (pull/push) already used
+  the async engine; the sync wrappers rejected async resolvers loudly and
+  duplicated the surface. Migration: replace `merge3Way(...)` with
+  `await merge3WayAsync(...)` and `MergeEngine.runSync(...)` with
+  `await MergeEngine.runAsync(...)` (make the enclosing function async).
+
 ### Fixed
 
 - **Web: `groupCommitWindow` and `txSessionTtl` are honored on the worker

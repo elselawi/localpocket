@@ -65,7 +65,7 @@ void main() {
       expect(await a.engine.syncStore.countPending(), 0);
     });
 
-    test('unknown keys preserved through merge', () {
+    test('unknown keys preserved through merge', () async {
       final base = {
         'id': 'rec1',
         'name': 'base_name',
@@ -86,7 +86,7 @@ void main() {
         'another_unknown': 'from_server',
       };
 
-      final res = merge3Way(base: base, local: local, remote: remote);
+      final res = await merge3WayAsync(base: base, local: local, remote: remote);
 
       // Local changed 'name'
       expect(res.merged['name'], 'local_edit');

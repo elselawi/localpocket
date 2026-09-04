@@ -308,7 +308,6 @@ lib/src/kernel/schema.dart::CollectionSchema.in
 lib/src/kernel/schema.dart::CollectionSchema.toJson
 lib/src/kernel/schema.dart::ConflictPolicy
 lib/src/kernel/schema.dart::ConflictPolicy.ConflictPolicy
-lib/src/kernel/schema.dart::ConflictPolicy.defaults
 lib/src/kernel/schema.dart::DocumentMigration
 lib/src/kernel/schema.dart::Field
 lib/src/kernel/schema.dart::Field.RegExp
@@ -371,7 +370,6 @@ lib/src/kernel/sync/merge.dart::AppendOnlyListResolver.Function
 lib/src/kernel/sync/merge.dart::AppendOnlyListResolver.RemoteWinsResolver
 lib/src/kernel/sync/merge.dart::AppendOnlyListResolver.resolve
 lib/src/kernel/sync/merge.dart::AppendOnlyListResolver.resolveField
-lib/src/kernel/sync/merge.dart::AppendOnlyResolver
 lib/src/kernel/sync/merge.dart::ConflictResolver
 lib/src/kernel/sync/merge.dart::ConflictResolver.ConflictResolver
 lib/src/kernel/sync/merge.dart::ConflictResolver.resolve
@@ -402,7 +400,6 @@ lib/src/kernel/sync/merge.dart::MergeResult.MergeResult
 lib/src/kernel/sync/merge.dart::RemoteWinsResolver
 lib/src/kernel/sync/merge.dart::RemoteWinsResolver.RemoteWinsResolver
 lib/src/kernel/sync/merge.dart::RemoteWinsResolver.resolve
-lib/src/kernel/sync/merge.dart::SetUnionResolver
 lib/src/kernel/sync/merge.dart::SetUnionWithDeletionWinsResolver
 lib/src/kernel/sync/merge.dart::SetUnionWithDeletionWinsResolver.RemoteWinsResolver
 lib/src/kernel/sync/merge.dart::SetUnionWithDeletionWinsResolver.SetUnionWithDeletionWinsResolver

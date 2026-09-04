@@ -669,24 +669,6 @@ class ConflictPolicy {
     this.missingRemote = MissingRemotePolicy.conflict,
   });
 
-  /// Creates the default policy with optional resolver overrides.
-  ///
-  /// {@macro localpocket.conflict_policy}
-  factory ConflictPolicy.defaults({
-    ConflictResolver? collectionResolver,
-    Map<String, ConflictResolver> fieldOverrides = const {},
-    bool editsUnarchive = false,
-    MissingRemotePolicy missingRemote = MissingRemotePolicy.conflict,
-  }) =>
-
-      /// {@macro localpocket.conflict_policy}
-      ConflictPolicy(
-        collectionResolver: collectionResolver,
-        fieldOverrides: fieldOverrides,
-        editsUnarchive: editsUnarchive,
-        missingRemote: missingRemote,
-      );
-
   /// Optional resolver for whole-record conflicts.
   final ConflictResolver? collectionResolver;
 

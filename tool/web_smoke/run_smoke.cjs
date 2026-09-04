@@ -58,12 +58,13 @@ async function run(name, browserType, pagePath, signal) {
     const pageExclude = process.env.SMOKE_EXCLUDE_PAGE;
     const browsers = [['Chromium', chromium], ['Firefox', firefox], ['WebKit', webkit]]
         .filter(([name]) => !browserFilter || name.toLowerCase() === browserFilter.toLowerCase());
-    const pages = [['web_api_smoke.html', '__api_smoke'],
-    ['web_blob_smoke.html', '__blob_smoke'],
-    ['web_cipher_smoke.html', '__cipher_smoke'],
-    ['web_compatibility_environment_smoke.html', '__compatibility_environment_smoke'],
-    ['web_durability_reopen_smoke.html', '__durability_reopen_smoke'],
-    ['web_sync_lifecycle_smoke.html', '__sync_lifecycle_smoke']]
+    // SINGLE SOURCE: the page manifest lives in pages.json next to this
+    // runner; the Dart gates (browser_web_gate.dart / sync_web_gate.dart)
+    // derive their compile lists and expected counts from the same file, so
+    // the runner and the gates cannot drift apart.
+    const manifest = JSON.parse(require('fs').readFileSync(`${__dirname}/pages.json`, 'utf8'));
+    const pages = manifest.pages
+        .map(p => [p.html, p.signal])
         .filter(([p]) => !pageFilter || p.includes(pageFilter))
         .filter(([p]) => !pageExclude || !p.includes(pageExclude));
     const filtered = Boolean(pageFilter || browserFilter);

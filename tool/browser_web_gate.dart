@@ -9,12 +9,18 @@ import 'dart:io';
 /// duplicating Playwright logic in the Dart release runner.
 Future<void> main() async {
   final root = Directory.current.absolute;
-  final smokeSources = <String>[
-    'api_smoke_main.dart',
-    'blob_smoke_main.dart',
-    'cipher_smoke_main.dart',
-    'compatibility_environment_smoke_main.dart',
-    'durability_reopen_smoke_main.dart',
+  // SINGLE SOURCE of truth: the page manifest shared with run_smoke.cjs
+  // (tool/web_smoke/pages.json). Compiling the smoke mains and counting the
+  // expected scenarios derive from the same entries the runner executes, so
+  // a page added to one side but not the other fails loudly instead of
+  // passing vacuously.
+  final manifest = jsonDecode(
+          File('tool/web_smoke/pages.json').readAsStringSync()) as Map<String, dynamic>;
+  final pages = (manifest['pages']! as List).cast<Map<String, dynamic>>();
+  final matrixPages =
+      pages.where((p) => p['browserMatrix'] == true).toList();
+  final smokeSources = [
+    for (final page in matrixPages) page['main']! as String,
   ];
 
   // Smoke HTML pages load these files from /build/web/<name>.js.
@@ -67,7 +73,7 @@ Future<void> main() async {
 
   try {
     await serverReady.future.timeout(const Duration(seconds: 10));
-    const browserPageCount = 5;
+    final browserPageCount = matrixPages.length;
     const browserCount = 3;
     stdout.writeln(
         'BROWSER MATRIX Chromium Firefox WebKit × $browserPageCount smoke pages ($browserCount browsers, ${browserPageCount * browserCount} scenarios)');

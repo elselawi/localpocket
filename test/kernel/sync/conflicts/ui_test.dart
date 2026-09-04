@@ -321,7 +321,7 @@ void main() {
         final local = {'title': 'v0', 'archived': true};
         final remote = {'title': 'v1_remote', 'archived': false};
 
-        final res = merge3Way(base: base, local: local, remote: remote);
+        final res = await merge3WayAsync(base: base, local: local, remote: remote);
         expect(res.merged['archived'], true);
         expect(res.merged['title'], 'v1_remote');
       }
@@ -334,7 +334,7 @@ void main() {
 
         final policy = MergePolicy(editsUnarchive: true);
         final res =
-            merge3Way(base: base, local: local, remote: remote, policy: policy);
+            await merge3WayAsync(base: base, local: local, remote: remote, policy: policy);
         expect(res.merged['archived'], false);
         expect(res.merged['title'], 'v1_edited');
       }
@@ -346,7 +346,7 @@ void main() {
         final remote = {
           'archived': false
         }; // unchanged relative to base, local wins
-        final res1 = merge3Way(base: base, local: local, remote: remote);
+        final res1 = await merge3WayAsync(base: base, local: local, remote: remote);
         expect(res1.merged['archived'], true);
 
         final base2 = {'archived': false};
@@ -354,7 +354,7 @@ void main() {
         final remote2 = {'archived': false};
         final policy2 = MergePolicy(
             fieldOverrides: {'archived': const LocalWinsResolver()});
-        final res2 = merge3Way(
+        final res2 = await merge3WayAsync(
             base: base2, local: local2, remote: remote2, policy: policy2);
         expect(res2.merged['archived'], true);
       }
