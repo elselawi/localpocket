@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:localpocket/src/adapters/pocketbase/backend.dart'
+    show PocketBaseSyncBackendFactory;
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:localpocket/src/kernel/capabilities.dart';
 import 'package:localpocket/src/kernel/database_adapter.dart';
 import 'package:localpocket/src/kernel/files/blob_store.dart';
@@ -14,6 +17,7 @@ import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
 import '../support/helpers.dart';
+import '../support/mock_pb_server.dart';
 import '../support/worker_harness.dart';
 
 /// File-family conformance: bounded upload sessions, credit-windowed
@@ -55,6 +59,7 @@ void main() {
             stores: [widgetsSchema()],
             platform: PlatformProfile.native,
             blobStore: MemoryBlobStore(),
+            syncBackendFactory: const PocketBaseSyncBackendFactory(),
           );
           addTearDown(db.close);
           runtime = runtimeName == 'direct'
@@ -189,6 +194,71 @@ void main() {
           runtime.send(const FileCreditRequest(stream: 'f9999', bytes: 1)),
           throwsA(isA<StateError>()),
         );
+      });
+
+      test('fileDownload hydrates a remote_only ref on every runtime',
+          () async {
+        // Seed an attachment on the server that the engine has never
+        // downloaded: pull observes it (no prefetch) and records a
+        // remote_only ref.
+        final server = await MockPbServer().start();
+        addTearDown(server.stop);
+        final bytes = utf8.encode('on-demand hydration payload');
+        final recId = server.seed(
+          store: 'widgets',
+          data: {'name': 'hydrated', 'qty': 1},
+          attachments: ['ondemand.bin'],
+        );
+        server.fileBytes['$recId/ondemand.bin'] = bytes;
+
+        await runtime.send(SyncStartRequest(
+          baseUrl: server.baseUrl.toString(),
+          scopeId: 'ff-download',
+        ));
+        await runtime.send(const SyncNowRequest());
+
+        final refsBefore = (await runtime.send(FilesListRequest(
+          store: 'widgets',
+          recordId: recId,
+        )))
+            .refs;
+        expect(refsBefore, hasLength(1));
+        expect(refsBefore.single.state, 'remote_only',
+            reason: 'a pull without prefetch records the remote file as '
+                'remote_only');
+
+        // Open fails typed while the bytes are absent.
+        await expectLater(
+          runtime.send(FileOpenRequest(
+            store: 'widgets',
+            recordId: recId,
+            refId: refsBefore.single.refId,
+          )),
+          throwsA(isA<RemoteOnlyError>()),
+        );
+
+        // On-demand download settles the ref synced with the real hash.
+        final after = (await runtime.send(FileDownloadRequest(
+          store: 'widgets',
+          recordId: recId,
+          field: refsBefore.single.field,
+          refId: refsBefore.single.refId,
+        )))
+            .ref!;
+        expect(after.state, 'synced');
+        expect(after.remoteName, 'ondemand.bin');
+        expect(after.hash, sha256.convert(bytes).toString());
+
+        // Replay short-circuits: no network, same ref bytes.
+        final replay = (await runtime.send(FileDownloadRequest(
+          store: 'widgets',
+          recordId: recId,
+          field: after.field,
+          refId: after.refId,
+        )))
+            .ref!;
+        expect(replay.hash, after.hash);
+        expect(replay.state, 'synced');
       });
     });
   }

@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart' show sha256;
+import 'package:localpocket/src/kernel/errors.dart'
+    show RecordNotFoundException, RemoteOnlyError, ValidationException;
 import 'package:localpocket/src/kernel/files/blob_store.dart';
+import 'package:localpocket/src/kernel/files/attachment_field.dart'
+    show attachmentFieldDefault;
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/kernel/sync/engine.dart';
@@ -240,6 +244,104 @@ void main() {
           await h.pocket.files.open(store: 'widgets', recordId: recId);
       final bytes = await stream.fold<List<int>>([], (p, c) => [...p, ...c]);
       expect(bytes, equals(utf8.encode('pdf bytes')));
+    });
+
+    test('downloadRef hydrates a remote_only ref and settles it synced',
+        () async {
+      final mock = MockSyncBackend();
+      final blobStore = MemoryBlobStore();
+      final h = await EngineHarness.create(
+        mock: mock,
+        config: convConfig(),
+        path: (await tempDbPath()).path,
+        blobStore: blobStore,
+      );
+      addTearDown(h.close);
+
+      final bytes = utf8.encode('cap-evicted bytes');
+      final recId = mock.seed(
+          store: 'widgets', data: {'name': 'w'}, attachments: ['evict.bin']);
+      mock.serverFiles['$recId/evict.bin'] = bytes;
+      // Observing without prefetch leaves the ref remote_only.
+      await h.engine.syncNow();
+      final ref =
+          (await h.pocket.files.list(store: 'widgets', recordId: recId)).single;
+      expect(ref.state, 'remote_only');
+      final evictedHash = ref.hash;
+
+      // The impossible open (typed)...
+      await expectLater(
+        h.pocket.files.open(store: 'widgets', recordId: recId),
+        throwsA(isA<RemoteOnlyError>()),
+      );
+
+      // ...then the on-demand hydration.
+      final settled = await h.engine.fileLane.downloadRef(
+        store: 'widgets',
+        recordId: recId,
+        field: attachmentFieldDefault,
+      );
+      expect(settled.refId, ref.refId);
+      expect(settled.state, 'synced');
+      expect(settled.hash, sha256.convert(bytes).toString(),
+          reason: 'the hash is the real content hash after download');
+      expect(await blobStore.exists(settled.hash), isTrue);
+
+      // The previously-impossible open now streams the exact bytes.
+      final stream =
+          await h.pocket.files.open(store: 'widgets', recordId: recId);
+      final roundTripped =
+          await stream.fold<List<int>>([], (p, c) => [...p, ...c]);
+      expect(roundTripped, bytes);
+
+      // Idempotent replay: the synced ref short-circuits (service returns
+      // without a second backend download).
+      final same = await h.engine.fileLane.downloadRef(
+        store: 'widgets',
+        recordId: recId,
+        field: attachmentFieldDefault,
+      );
+      expect(same.hash, settled.hash);
+      expect(evictedHash.startsWith('unknown_'), isTrue);
+    });
+
+    test('downloadRef throws typed for a ghost ref with no remote name',
+        () async {
+      final mock = MockSyncBackend();
+      final h = await EngineHarness.create(
+        mock: mock,
+        config: convConfig(),
+        path: (await tempDbPath()).path,
+        blobStore: MemoryBlobStore(),
+      );
+      addTearDown(h.close);
+      final recId = generateRecordId();
+      await h.pocket.collection('widgets').put({'id': recId, 'name': 'w'});
+
+      // A remote_only ref without a remote name can never be downloaded.
+      await h.pocket.db.insert('lp_file_refs', {
+        'ref_id': generateRecordId(),
+        'store': 'widgets',
+        'record_id': recId,
+        'field': 'attachments',
+        'hash': 'unknown_ghost.png',
+        'remote_name': null,
+        'state': 'remote_only',
+      });
+
+      await expectLater(
+        h.engine.fileLane.downloadRef(
+            store: 'widgets', recordId: recId, field: 'attachments'),
+        throwsA(isA<ValidationException>()),
+      );
+      // A field with no refs at all fails typed as a missing record.
+      await expectLater(
+        h.engine.fileLane.downloadRef(
+            store: 'widgets',
+            recordId: recId,
+            field: 'attachments_nonexistent'),
+        throwsA(isA<RecordNotFoundException>()),
+      );
     });
 
     test('prefetch policy matrix', () async {

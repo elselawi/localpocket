@@ -28,6 +28,7 @@ void main() {
     SchemaRegistrationError('x'): 'SchemaRegistrationError',
     SchemaTooNewError('x'): 'SchemaTooNewError',
     StorageError('x'): 'StorageError',
+    RemoteOnlyError('x'): 'RemoteOnlyError',
     RecordNotFoundException('x'): 'RecordNotFoundException',
     ConflictNotFoundException('x'): 'ConflictNotFoundException',
     StaleCursorError('x'): 'StaleCursorError',

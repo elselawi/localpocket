@@ -1,12 +1,17 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:localpocket/src/api/api.dart';
-import 'package:localpocket/src/kernel/errors.dart' show ValidationException;
+import 'package:localpocket/src/adapters/pocketbase/backend.dart'
+    show PocketBaseSyncBackendFactory;
+import 'package:localpocket/src/kernel/errors.dart'
+    show RemoteOnlyError, ValidationException;
 import 'package:localpocket/src/kernel/files/blob_store.dart'
     show MemoryBlobStore;
 import 'package:localpocket/src/api/writes.dart';
 import 'package:test/test.dart';
 
+import '../support/mock_pb_server.dart';
 import '../support/fixtures/tasks_store.dart';
 
 /// Files on the store facade over the direct runtime: attach, list, streamed
@@ -176,6 +181,29 @@ void main() {
       expect(cap, isA<int>());
     });
 
+    test('download without a started sync host fails typed', () async {
+      final db = await LocalPocket.open(LocalPocketOptions(
+        path: ':memory:',
+        stores: [Tasks.store],
+        blobStore: MemoryBlobStore(),
+      ));
+      addTearDown(db.close);
+      final files = db.store(Tasks.store).files;
+      final id = (await db.store(Tasks.store).put([Tasks.title.set('x')])).id;
+
+      final ref = await files.attach(
+        recordId: id,
+        source: FileSource.bytes([1, 2, 3], name: 'a.bin'),
+        allowVolatileBlobs: true,
+      );
+      // Download rides the sync engine's file lane: without a started sync
+      // host it fails typed instead of hanging or silently no-oping.
+      await expectLater(
+        files.download(ref),
+        throwsA(isA<ValidationException>()),
+      );
+    });
+
     test('files on the store facade use an immutable FileRef', () async {
       const ref = FileRef(
         refId: 'r1',
@@ -190,5 +218,95 @@ void main() {
       expect(ref.nextRetryAt, 0);
       expect(ref.toString(), contains('r1'));
     });
+
+    group('open(fetch: true)', () {
+      final tokens = _FetchTokens();
+
+      /// Opens a pocket with a started sync host against a fresh mock
+      /// server. Returns (db, sync, server).
+      Future<(LocalPocket, PocketBaseSync, MockPbServer)> syncedPocket() async {
+        final server = await MockPbServer().start();
+        addTearDown(server.stop);
+        final db = await LocalPocket.open(LocalPocketOptions(
+          path: ':memory:',
+          stores: [Tasks.store],
+          blobStore: MemoryBlobStore(),
+          syncBackendFactory: const PocketBaseSyncBackendFactory(),
+        ));
+        addTearDown(db.close);
+        final sync = db.attachPocketBaseSync(PocketBaseSyncOptions(
+          baseUrl: server.baseUrl,
+          tokenProvider: tokens,
+          identity: 'files-fetch-test',
+        ));
+        await sync.start();
+        return (db, sync, server);
+      }
+
+      test('hydrates a cap-evicted attachment and streams the bytes', () async {
+        final (db, sync, _) = await syncedPocket();
+        final files = db.store(Tasks.store).files;
+
+        final id =
+            (await db.store(Tasks.store).put([Tasks.title.set('doc')])).id;
+        final bytes = utf8.encode('fetch-on-open payload');
+        final ref = await files.attach(
+          recordId: id,
+          source: FileSource.bytes(bytes, name: 'doc.bin'),
+          allowVolatileBlobs: true,
+        );
+
+        // Push the record and its upload; the server mints the remote name.
+        final report = await sync.syncNow();
+        expect(report.hadError, isFalse);
+        final uploaded = await files.list(recordId: id);
+        expect(uploaded.single.state, 'synced');
+        expect(uploaded.single.remoteName, isNotNull);
+
+        // A second attachment (older last_access) keeps the target ref the
+        // LRU-eviction victim when the cap lands.
+        final keepId =
+            (await db.store(Tasks.store).put([Tasks.title.set('keep')])).id;
+        final keepRef = await files.attach(
+          recordId: keepId,
+          source: FileSource.bytes(List.filled(64, 7), name: 'keep.bin'),
+          allowVolatileBlobs: true,
+        );
+        await files
+            .open(keepRef)
+            .then((s) => s.fold<List<int>>(<int>[], (a, c) => a..addAll(c)));
+
+        final evicted = await files.enforceStorageCap(maxBytes: 0);
+        expect(evicted, 1, reason: 'exactly the doc.bin blob was evicted');
+        final evictedRef = (await files.list(recordId: id)).single;
+        expect(evictedRef.refId, ref.refId);
+        expect(evictedRef.state, 'remote_only');
+
+        // Plain open still refuses; fetch hydrates first and streams.
+        await expectLater(
+          files.open(evictedRef),
+          throwsA(isA<RemoteOnlyError>()),
+        );
+        final stream = await files.open(evictedRef, fetch: true);
+        final roundTripped = await stream
+            .fold<List<int>>(<int>[], (acc, chunk) => acc..addAll(chunk));
+        expect(roundTripped, bytes);
+
+        // The ref settled synced again; a fetch replay is a local no-op.
+        final after = (await files.list(recordId: id)).single;
+        expect(after.state, 'synced');
+        expect(after.hash, sha256.convert(bytes).toString());
+      });
+    });
   });
+}
+
+/// A fixed token provider for the fetch tests' sync host.
+class _FetchTokens implements TokenProvider {
+  @override
+  Future<Token> currentToken() async => Token('fetch-test-token');
+  @override
+  Future<Token> refreshToken(Token current) async => Token('fetch-test-token');
+  @override
+  String get identity => 'files-fetch-test';
 }

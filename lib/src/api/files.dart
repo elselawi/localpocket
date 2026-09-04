@@ -444,7 +444,19 @@ final class Files<S extends StoreDef<S>> {
       buffered.clear();
     } catch (error) {
       await sub.cancel();
-      if (!controller.isClosed) await controller.close();
+      // Surface the failure on the returned stream too, so a caller that
+      // listens still observes a typed failure instead of silence. Adding
+      // the error is safe before close; an unlistened controller is then
+      // discarded without awaiting its done future (nothing consumes it —
+      // awaiting close here would hang forever, the exact bug this path
+      // fixes).
+      if (!controller.isClosed) {
+        controller
+          ..addError(error)
+          // Fire-and-forget by design: nothing listens yet, and awaiting
+          // close would hang (the bug this path fixes).
+          ..close().ignore();
+      }
       rethrow;
     }
     return controller.stream;

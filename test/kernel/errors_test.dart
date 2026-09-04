@@ -284,6 +284,7 @@ void main() {
         PrimaryKeyConstraintException(),
         ForeignKeyConstraintException(),
         StorageError('boom'),
+        RemoteOnlyError('remote only'),
         ValidationException('bad', field: 'x'),
         RecordNotFoundException('gone'),
         SchemaRegistrationError('no'),
