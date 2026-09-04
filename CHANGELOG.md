@@ -86,7 +86,11 @@
   idempotency-transparent: `PushOp.opId` and client record ids cross
   untouched, and no retries are added. The top-level
   `LocalPocketOptions.syncBackendFactory` field remains rejected on web
-  (the worker configures its canonical PocketBase factory there).
+  (the worker configures its canonical PocketBase factory there). The
+  sync seam types (`SyncBackend`, `SyncBackendFactory`, `SyncTokenSource`,
+  `RemoteRecord`, `PushOp`, `PushResult`, `BackendHint`, the `SyncError`
+  taxonomy, `pbMaxPage`) are now exported from the package barrel, since
+  custom backends are a public extension point.
 
 - **`LocalPocketOptions.clockOffsetMs` — an injectable clock that works on
   web.** The injectable `now` closure remains native-only (code cannot

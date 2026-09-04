@@ -151,6 +151,66 @@ void main() async {
       });
     });
   });
+
+  group('PageCallbacks container slots (database-level, PAGE-EXECUTES)', () {
+    late final String pageCallbacksSource =
+        File('lib/src/kernel/page_callbacks.dart').readAsStringSync();
+
+    /// Every constructor parameter the [PageCallbacks] container declares,
+    /// extracted from the source like the options fields above.
+    Set<String> containerFields() {
+      final classStart =
+          pageCallbacksSource.indexOf('final class PageCallbacks');
+      expect(classStart, greaterThanOrEqualTo(0),
+          reason: 'PageCallbacks must exist in lib/src/kernel/page_callbacks.dart');
+      final ctorStart =
+          pageCallbacksSource.indexOf('const PageCallbacks(', classStart);
+      expect(ctorStart, greaterThanOrEqualTo(0));
+      final ctorEnd = pageCallbacksSource.indexOf('});', ctorStart);
+      expect(ctorEnd, greaterThan(ctorStart));
+      return RegExp(r'this\.(\w+)')
+          .allMatches(pageCallbacksSource.substring(ctorStart, ctorEnd))
+          .map((m) => m.group(1)!)
+          .toSet();
+    }
+
+    /// Database-level slots execute on the page through the callback
+    /// channel; a new slot without an entry here fails the suite.
+    const containerSlots = <String, String>{
+      'stores': 'callback_rpc',
+      'syncBackendFactory': 'syncBackend',
+      'blobStore': 'blobStore',
+    };
+
+    test('every PageCallbacks constructor field has a parity entry', () {
+      final unclassified =
+          containerFields().where((f) => !containerSlots.containsKey(f)).toList()
+            ..sort();
+      expect(unclassified, isEmpty,
+          reason: 'new PageCallbacks slots must be classified in '
+              'test/release/options_parity_test.dart: $unclassified');
+    });
+
+    test('the container table names only real constructor fields', () {
+      final unknown = containerSlots.keys
+          .where((f) => !containerFields().contains(f))
+          .toList()
+        ..sort();
+      expect(unknown, isEmpty,
+          reason: 'stale container parity entries must be removed: $unknown');
+    });
+
+    test('the page servers and open markers exist for the slots', () {
+      expect(openWebSource, contains('SyncBackendServer'),
+          reason: 'the sync slot must execute on a page server');
+      expect(openWebSource, contains('BlobStoreServer'),
+          reason: 'the blob slot must execute on a page server');
+      expect(openWebSource, contains("'syncProxy': true"),
+          reason: 'the sync slot must switch the worker to the proxy');
+      expect(openWebSource, contains("'blobProxy': true"),
+          reason: 'the blob slot must switch the worker to the proxy');
+    });
+  });
 }
 
 /// One web-parity classification for a [LocalPocketOptions] field.

@@ -1240,6 +1240,102 @@ native:
   await webDb.close();
 ```
 
+**Your own sync backend and blob store run on the page too.** The container
+holds two more database-level slots — `PageCallbacks.syncBackendFactory` and
+`PageCallbacks.blobStore`. Supply either and the web open succeeds: your
+object (and everything it closes over — HTTP clients, token providers, storage
+handles) stays on the page, and the worker receives a transparent proxy that
+forwards every call over the callback channel.
+
+```dart
+// A minimal sketch of each seam — your implementations keep their HTTP
+// client, token provider, and storage handles page-side.
+final class MySyncBackendFactory implements SyncBackendFactory {
+  @override
+  Future<SyncBackend> create({
+    required Uri baseUrl,
+    required SyncTokenSource tokenSource,
+    required List<String> stores,
+    required String identity,
+  }) async => throw UnimplementedError('build your backend here');
+
+  @override
+  Future<void> dispose(SyncBackend backend) async {}
+}
+
+final class MyBlobStore extends BlobStore {
+  @override
+  Future<String> put(Stream<List<int>> bytes,
+          {String? expectedSha256, int? expectedSize, String? key}) async =>
+      throw UnimplementedError('store the bytes here');
+
+  @override
+  Future<Stream<List<int>>> open(String hash) async =>
+      throw UnimplementedError('read the bytes back');
+
+  @override
+  Future<void> delete(String hash) async {}
+
+  @override
+  Future<bool> exists(String hash) async => false;
+
+  @override
+  Future<int?> size(String hash) async => null;
+
+  @override
+  Future<int> cleanTmp({Duration olderThan = const Duration(hours: 24)}) async =>
+      0;
+
+  @override
+  Future<List<String>> listHashes() async => const [];
+
+  @override
+  Future<int?> modifiedAt(String hash) async => null;
+
+  @override
+  Future<bool> get isDurable async => true;
+}
+```
+
+```dart
+  // The same web open, hosting your own backend and blob store on the page.
+  final proxiedDb = await LocalPocket.open(
+    LocalPocketOptions(
+      path: 'posts.db',
+      stores: [Posts.store],
+      pageCallbacks: PageCallbacks(
+        syncBackendFactory: MySyncBackendFactory(),
+        blobStore: MyBlobStore(),
+      ),
+    ),
+  );
+  await proxiedDb.close();
+```
+
+How the proxies behave:
+
+- **Typed errors survive the channel.** Every `SyncError` subtype
+  (`DuplicateIdError`, `RemoteVersionConflict` with its `current` record,
+  ...) and the blob errors (`BlobMissingError`, `BlobStorageException`)
+  reconstruct as the exact same types in the worker — never as strings.
+- **Bytes cross chunked (256 KiB) both ways.** Uploads and downloads use a
+  begin → N-chunk → finish session; `expectedSha256`/`expectedSize` are
+  verified where the bytes are reassembled on the page.
+- **Realtime hints stream page → worker.** Your backend's `hints()` stream
+  drives the engine's fast path exactly as the PocketBase SSE connection
+  does on the worker.
+- **Auth stays live.** The page backend reads the kernel's token source on
+  every read, so `sync.updateAuth(...)` reaches your backend without a
+  rebuild. Idempotency is untouched: `PushOp.opId` and client record ids
+  cross as-is, and the proxy adds no retries of its own.
+- **Honest metadata.** `modifiedAt` keeps its null (GC orphan-aging depends
+  on it) and `isDurable` reflects YOUR store's durability, not the worker's.
+
+Without these slots the worker keeps its defaults: the canonical PocketBase
+sync factory and the OPFS-backed blob store. The top-level
+`LocalPocketOptions.syncBackendFactory` / `blobStore` fields stay rejected on
+web — configure page-executed backends through the container instead.
+
 Constraints worth knowing: a page callback must answer with data and return
 data — querying or writing the same database from inside a callback is
 unsupported (the write queue and OPFS locks are held while it runs). One

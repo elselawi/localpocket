@@ -119,16 +119,21 @@ final class LocalPocketOptions {
   ///
   /// Primarily the native wiring: on web the worker configures its own
   /// backend (a non-PocketBase factory fails the web open typed instead of
-  /// being silently ignored). A runtime without a factory fails sync start
-  /// with a `StateError`.
+  /// being silently ignored). To host a CUSTOM backend on web, supply it
+  /// through [PageCallbacks.syncBackendFactory] instead: it then executes
+  /// entirely on the page and the worker receives a proxy over the callback
+  /// channel. A runtime without a factory fails sync start with a
+  /// `StateError`.
   final SyncBackendFactory? syncBackendFactory;
 
   /// The blob store holding attachment bytes for this database, or `null`
   /// when files are not used.
   ///
-  /// On web the worker resolves its own store (OPFS with a volatile fallback);
-  /// natively this is the storage adapter. Without one, file operations fail
-  /// with a `StateError`.
+  /// On web the worker resolves its own store (OPFS with a volatile fallback)
+  /// unless a page-hosted store is supplied through [PageCallbacks.blobStore]
+  /// (the bytes then cross chunked over the callback channel); natively this
+  /// is the storage adapter. Without one, file operations fail with a
+  /// `StateError`.
   final BlobStore? blobStore;
 
   /// Page callbacks that executable schema features resolve to on the

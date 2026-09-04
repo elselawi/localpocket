@@ -40,7 +40,8 @@ export 'src/kernel/sync/status.dart'
 // The blob-store types the facade's file configuration names
 // (`LocalPocketOptions.blobStore`): the interface plus the in-memory store
 // that backs native demos and tests. Real applications inject their own
-// platform store here.
+// platform store here — or host their store on the web page through
+// `PageCallbacks.blobStore`, which the worker reaches via a proxy.
 export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
 
 // The Database adapter type `LocalPocketOptions.nativeDatabaseFactory`
