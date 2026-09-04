@@ -6,6 +6,8 @@ import 'package:localpocket/src/kernel/cipher.dart';
 import 'package:localpocket/src/kernel/database_adapter.dart';
 import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/kernel_context.dart'
+    show defaultTxSessionTtl;
 import 'package:localpocket/src/kernel/page_callbacks.dart'
     show StorePageCallbacks, attachStorePolicy;
 import 'package:localpocket/src/kernel/schema.dart';
@@ -100,9 +102,13 @@ class WorkerHarness {
     RecordingSink? sink,
     Map<String, StorePageCallbacks>? pageCallbacks,
     Map<String, Object?>? storePolicies,
+    Duration? groupCommitWindow,
+    Duration? txSessionTtl,
+    Duration? callbackTimeout,
   }) async {
-    final callbackBridge =
-        storePolicies == null ? null : WorkerCallbackBridge();
+    final callbackBridge = storePolicies == null
+        ? null
+        : WorkerCallbackBridge(timeout: callbackTimeout ?? pageCallbackTimeout);
     final attachedStores = [
       for (final s in stores ?? [widgetsSchema()])
         attachStorePolicy(
@@ -125,6 +131,8 @@ class WorkerHarness {
       now: now,
       testHooks: testHooks,
       maxDocBytes: maxDocBytes,
+      groupCommitWindow: groupCommitWindow ?? Duration.zero,
+      txSessionTtl: txSessionTtl ?? defaultTxSessionTtl,
       syncBackendFactory: const PocketBaseSyncBackendFactory(),
       callbackInvoker: callbackBridge,
     );

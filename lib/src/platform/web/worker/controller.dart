@@ -14,6 +14,7 @@ import '../../../kernel/capabilities.dart';
 import '../../../kernel/database_adapter.dart';
 import '../../../kernel/errors.dart';
 import '../../../kernel/local_pocket.dart';
+import '../../../kernel/kernel_context.dart' show defaultTxSessionTtl;
 import '../../../kernel/page_callbacks.dart' show attachStorePolicy;
 import '../../../kernel/schema.dart';
 import 'blob_store.dart';
@@ -90,12 +91,23 @@ final class LocalPocketDatabaseController extends DatabaseController {
       final destructiveBackup = (options['destructiveBackup'] as bool?) ?? true;
       final storePolicies =
           options['storePolicies'] as Map<String, Object?>? ?? const {};
+      // Durability and callback tuning cross as millisecond ints. Absent
+      // keys fall back to the kernel defaults; present keys were already
+      // strict-validated by `parseOpenOptions`.
+      final groupCommitWindowMs = options['groupCommitWindowMs'] as int?;
+      final txSessionTtlMs = options['txSessionTtlMs'] as int?;
+      final callbackTimeoutMs = options['callbackTimeoutMs'] as int?;
 
       // The page-callback bridge: executable schema features (conflict
       // resolvers, validators, migration hooks) round-trip to the page
       // through it; the schemas must attach their channel-backed members
       // before the engine boots so manifest fingerprints match the page's.
-      final callbackBridge = WorkerCallbackBridge();
+      // The timeout mirrors the page→worker request bound when provided.
+      final callbackBridge = WorkerCallbackBridge(
+        timeout: callbackTimeoutMs == null
+            ? pageCallbackTimeout
+            : Duration(milliseconds: callbackTimeoutMs),
+      );
       final attachedStores = [
         for (final s in stores)
           attachStorePolicy(
@@ -134,6 +146,12 @@ final class LocalPocketDatabaseController extends DatabaseController {
         fieldCipher: fieldCipher,
         maxDocBytes: maxDocBytes,
         destructiveBackup: destructiveBackup,
+        groupCommitWindow: groupCommitWindowMs == null
+            ? Duration.zero
+            : Duration(milliseconds: groupCommitWindowMs),
+        txSessionTtl: txSessionTtlMs == null
+            ? defaultTxSessionTtl
+            : Duration(milliseconds: txSessionTtlMs),
         syncBackendFactory: const PocketBaseSyncBackendFactory(),
         callbackInvoker: callbackBridge,
       );

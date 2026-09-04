@@ -143,6 +143,16 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     'maxDocBytes': options.maxDocumentBytes,
     'destructiveBackup': true,
     'backupDbName': options.path,
+    // Durability and callback tuning cannot cross as code (Duration
+    // closures stay page-side), so the numeric values ride openArgs as
+    // millisecond ints; the worker strict-parses them back into the kernel.
+    'groupCommitWindowMs': options.groupCommitWindow.inMilliseconds,
+    'txSessionTtlMs': options.txSessionTtl.inMilliseconds,
+    // Worker→page callback round-trips honor the same bound the page
+    // applies to its own worker requests; a non-positive bound is absent
+    // so the worker keeps its documented default.
+    if (options.bootstrap.requestTimeout.inMilliseconds > 0)
+      'callbackTimeoutMs': options.bootstrap.requestTimeout.inMilliseconds,
     if (cipherEnvelope != null) 'fieldCipher': cipherEnvelope,
     if (storePolicies != null) 'storePolicies': storePolicies,
   };

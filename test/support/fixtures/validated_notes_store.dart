@@ -27,6 +27,6 @@ final class ValidatedNotes extends StoreDef<ValidatedNotes> {
       );
 
   @override
-  FutureOr<List<String>> Function(Map<String, Object?> record)?
-      get validator => validate;
+  FutureOr<List<String>> Function(Map<String, Object?> record)? get validator =>
+      validate;
 }

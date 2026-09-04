@@ -159,6 +159,58 @@ void main() {
           throwsA(isA<ProtocolEnvelopeException>()));
     });
 
+    test('millisecond durability options pass through strict-parsed', () {
+      final parsed = parseOpenOptions(const {
+        'groupCommitWindowMs': 12,
+        'txSessionTtlMs': 0,
+        'callbackTimeoutMs': 4500,
+      });
+      expect(parsed, {
+        'groupCommitWindowMs': 12,
+        'txSessionTtlMs': 0,
+        'callbackTimeoutMs': 4500,
+      });
+    });
+
+    test('millisecond options reject wrong types and sub-bound values', () {
+      for (final key in const [
+        'groupCommitWindowMs',
+        'txSessionTtlMs',
+        'callbackTimeoutMs',
+      ]) {
+        expect(() => parseOpenOptions({key: 'soon'}),
+            throwsA(isA<ProtocolEnvelopeException>()),
+            reason: '$key must reject a string');
+        expect(() => parseOpenOptions({key: 1.5}),
+            throwsA(isA<ProtocolEnvelopeException>()),
+            reason: '$key must reject a double');
+      }
+      expect(() => parseOpenOptions(const {'groupCommitWindowMs': -1}),
+          throwsA(isA<ProtocolEnvelopeException>()));
+      expect(() => parseOpenOptions(const {'txSessionTtlMs': -1}),
+          throwsA(isA<ProtocolEnvelopeException>()));
+      // Zero disables the tx sweeper natively, so it is a legal value.
+      expect(parseOpenOptions(const {'txSessionTtlMs': 0}),
+          containsPair('txSessionTtlMs', 0));
+      // A callback timeout must actually bound something.
+      expect(() => parseOpenOptions(const {'callbackTimeoutMs': 0}),
+          throwsA(isA<ProtocolEnvelopeException>()));
+    });
+
+    test(
+        'durability and callback bounds land in the worker kernel and bridge',
+        () async {
+      final h = await WorkerHarness.open(
+        groupCommitWindow: const Duration(milliseconds: 12),
+        txSessionTtl: const Duration(seconds: 7),
+        callbackTimeout: const Duration(milliseconds: 4500),
+        storePolicies: const {},
+      );
+      addTearDown(h.close);
+      expect(h.pocket.groupCommitWindow, const Duration(milliseconds: 12));
+      expect(h.pocket.txSessionTtl, const Duration(seconds: 7));
+    });
+
     test(
         'a malformed store descriptor fails the open instead of dropping '
         'every store', () {

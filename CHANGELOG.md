@@ -2,6 +2,16 @@
 
 ### Fixed
 
+- **Web: `groupCommitWindow` and `txSessionTtl` are honored on the worker
+  runtime.** Both options were silently dropped at the worker boundary and
+  the worker booted the kernel with defaults. They now cross the open
+  envelope as millisecond integers and are strict-parsed (a present
+  wrong-typed or out-of-range value fails the open with a typed error).
+- **Web: the page-callback channel honors `bootstrap.requestTimeout`.**
+  Worker→page callback invocations used a hardcoded 30-second bound; they
+  now use the same request timeout the page applies to its own worker
+  requests (`callbackTimeoutMs` in the open envelope). A non-positive
+  timeout is rejected; absent falls back to the documented default.
 - **Web: conflict policies no longer fail the open.** The page→worker schema
   reconstruction dropped the whole `conflictPolicy` (including the pure-data
   `editsUnarchive` and `missingRemote` options), so any non-default policy

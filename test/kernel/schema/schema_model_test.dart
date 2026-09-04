@@ -359,8 +359,7 @@ void main() {
           3: _incrementVersion,
         },
       );
-      final result = await applyDocumentMigrations(
-          schema, {'title': 'hello'},
+      final result = await applyDocumentMigrations(schema, {'title': 'hello'},
           from: 0, to: 3);
       expect(result, {
         'title': 'renamed:hello',
@@ -378,15 +377,19 @@ void main() {
           2: _renameTitle,
         },
       );
-      expect(await applyDocumentMigrations(schema, {'title': 'x'}, from: 0, to: 1),
+      expect(
+          await applyDocumentMigrations(schema, {'title': 'x'}, from: 0, to: 1),
           {'title': 'x', 'version': 1});
-      expect(await applyDocumentMigrations(schema, {'title': 'x'}, from: 1, to: 2),
+      expect(
+          await applyDocumentMigrations(schema, {'title': 'x'}, from: 1, to: 2),
           {'title': 'renamed:x'});
       // from == to -> no-op.
-      expect(await applyDocumentMigrations(schema, {'title': 'x'}, from: 2, to: 2),
+      expect(
+          await applyDocumentMigrations(schema, {'title': 'x'}, from: 2, to: 2),
           {'title': 'x'});
       // from > to -> no-op.
-      expect(await applyDocumentMigrations(schema, {'title': 'x'}, from: 3, to: 1),
+      expect(
+          await applyDocumentMigrations(schema, {'title': 'x'}, from: 3, to: 1),
           {'title': 'x'});
     });
 
