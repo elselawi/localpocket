@@ -1,41 +1,41 @@
 {
-  "pages": [
-    {
-      "html": "web_api_smoke.html",
-      "main": "api_smoke_main.dart",
-      "signal": "__api_smoke",
-      "browserMatrix": true
-    },
-    {
-      "html": "web_blob_smoke.html",
-      "main": "blob_smoke_main.dart",
-      "signal": "__blob_smoke",
-      "browserMatrix": true
-    },
-    {
-      "html": "web_cipher_smoke.html",
-      "main": "cipher_smoke_main.dart",
-      "signal": "__cipher_smoke",
-      "browserMatrix": true
-    },
-    {
-      "html": "web_compatibility_environment_smoke.html",
-      "main": "compatibility_environment_smoke_main.dart",
-      "signal": "__compatibility_environment_smoke",
-      "browserMatrix": true
-    },
-    {
-      "html": "web_durability_reopen_smoke.html",
-      "main": "durability_reopen_smoke_main.dart",
-      "signal": "__durability_reopen_smoke",
-      "browserMatrix": true
-    },
-    {
-      "html": "web_sync_lifecycle_smoke.html",
-      "main": "sync_lifecycle_smoke_main.dart",
-      "signal": "__sync_lifecycle_smoke",
-      "browserMatrix": false,
-      "comment": "needs its own fixture server (port 8125); run by sync_web_gate.dart"
-    }
-  ]
+    "pages": [
+        {
+            "html": "web_api_smoke.html",
+            "main": "api_smoke_main.dart",
+            "signal": "__api_smoke",
+            "browserMatrix": true
+        },
+        {
+            "html": "web_blob_smoke.html",
+            "main": "blob_smoke_main.dart",
+            "signal": "__blob_smoke",
+            "browserMatrix": true
+        },
+        {
+            "html": "web_cipher_smoke.html",
+            "main": "cipher_smoke_main.dart",
+            "signal": "__cipher_smoke",
+            "browserMatrix": true
+        },
+        {
+            "html": "web_compatibility_environment_smoke.html",
+            "main": "compatibility_environment_smoke_main.dart",
+            "signal": "__compatibility_environment_smoke",
+            "browserMatrix": true
+        },
+        {
+            "html": "web_durability_reopen_smoke.html",
+            "main": "durability_reopen_smoke_main.dart",
+            "signal": "__durability_reopen_smoke",
+            "browserMatrix": true
+        },
+        {
+            "html": "web_sync_lifecycle_smoke.html",
+            "main": "sync_lifecycle_smoke_main.dart",
+            "signal": "__sync_lifecycle_smoke",
+            "browserMatrix": false,
+            "comment": "needs its own fixture server (port 8125); run by sync_web_gate.dart"
+        }
+    ]
 }

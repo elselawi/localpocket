@@ -14,11 +14,11 @@ Future<void> main() async {
   // expected scenarios derive from the same entries the runner executes, so
   // a page added to one side but not the other fails loudly instead of
   // passing vacuously.
-  final manifest = jsonDecode(
-          File('tool/web_smoke/pages.json').readAsStringSync()) as Map<String, dynamic>;
+  final manifest =
+      jsonDecode(File('tool/web_smoke/pages.json').readAsStringSync())
+          as Map<String, dynamic>;
   final pages = (manifest['pages']! as List).cast<Map<String, dynamic>>();
-  final matrixPages =
-      pages.where((p) => p['browserMatrix'] == true).toList();
+  final matrixPages = pages.where((p) => p['browserMatrix'] == true).toList();
   final smokeSources = [
     for (final page in matrixPages) page['main']! as String,
   ];

@@ -19,12 +19,12 @@ import 'package:test/test.dart';
 ///   wasm module and the OPFS VFS has no cipher hooks. Documented, tested,
 ///   final.
 void main() async {
-  final optionsSource =
-      await File('lib/src/api/options.dart').readAsString();
+  final optionsSource = await File('lib/src/api/options.dart').readAsString();
   final openWebSource =
       await File('lib/src/platform/web/open_web.dart').readAsString();
   final openOptionsSource =
-      await File('lib/src/platform/web/worker/open_options.dart').readAsString();
+      await File('lib/src/platform/web/worker/open_options.dart')
+          .readAsString();
   final controllerSource =
       await File('lib/src/platform/web/worker/controller.dart').readAsString();
 
@@ -40,7 +40,8 @@ void main() async {
         wireKey: 'backupDbName',
         note: 'the worker resolves the OPFS directory from the original name'),
     'stores': Parity.crosses(
-        wireKey: 'stores', note: 'schema JSON; executable members ride '
+        wireKey: 'stores',
+        note: 'schema JSON; executable members ride '
             'storePolicies'),
     'encryption': Parity.crosses(
         wireKey: 'fieldCipher', note: 'AES-256-GCM key envelope'),
@@ -81,9 +82,10 @@ void main() async {
   });
 
   test('the parity table names only real constructor fields', () {
-    final unknown =
-        parity.keys.where((f) => !constructorFields().contains(f)).toList()
-          ..sort();
+    final unknown = parity.keys
+        .where((f) => !constructorFields().contains(f))
+        .toList()
+      ..sort();
     expect(unknown, isEmpty,
         reason: 'stale parity entries must be removed: $unknown');
   });
@@ -92,8 +94,7 @@ void main() async {
     for (final entry in parity.entries) {
       final p = entry.value;
       if (p is! _Crosses) continue;
-      test('${entry.key} crosses as "${p.wireKey}" and is strict-parsed',
-          () {
+      test('${entry.key} crosses as "${p.wireKey}" and is strict-parsed', () {
         expect(openWebSource, contains("'${p.wireKey}'"),
             reason: '${entry.key} must be carried in the open envelope');
         // The worker-side parse lives either in the pure option parser or
@@ -156,7 +157,8 @@ sealed class Parity {
   const Parity();
 
   /// The value (or a wire encoding of it) crosses the open envelope.
-  const factory Parity.crosses({required String wireKey, String note}) = _Crosses;
+  const factory Parity.crosses({required String wireKey, String note}) =
+      _Crosses;
 
   /// The value is code executing on the page through the callback channel.
   const factory Parity.pageExecutes({required String channel, String note}) =
@@ -166,8 +168,7 @@ sealed class Parity {
   const factory Parity.rejectedTyped({String note}) = _RejectedTyped;
 
   /// Not fixable on web: documented platform constraint.
-  const factory Parity.platformConstraint({String note}) =
-      _PlatformConstraint;
+  const factory Parity.platformConstraint({String note}) = _PlatformConstraint;
 }
 
 final class _Crosses extends Parity {

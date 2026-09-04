@@ -9,7 +9,8 @@ void main() {
       final local = {'title': 'local_edit', 'status': 'draft'};
       final remote = {'title': 'remote_edit', 'status': 'draft'};
 
-      final res = await merge3WayAsync(base: base, local: local, remote: remote);
+      final res =
+          await merge3WayAsync(base: base, local: local, remote: remote);
       expect(res.merged['title'], 'remote_edit');
       expect(res.merged['status'], 'draft');
       expect(res.needsReview, isFalse);
@@ -264,11 +265,13 @@ void main() {
     });
 
     test('null elements are treated as set members', () async {
-      final m = await mergeTags(['a', null], ['a', null, 'b'], ['a', null, 'c']);
+      final m =
+          await mergeTags(['a', null], ['a', null, 'b'], ['a', null, 'c']);
       expect(m.toSet(), {'a', null, 'b', 'c'});
     });
 
-    test('a base element missing from one side is treated as removed', () async {
+    test('a base element missing from one side is treated as removed',
+        () async {
       // Remote omits 'a' entirely -> remoteRemoved drops it even though local
       // kept it (concurrent-removal semantics).
       final m = await mergeTags(['a', 'b'], ['a', 'b'], ['b', 'c']);
@@ -311,7 +314,8 @@ void main() {
       expect(m.toSet(), {'c', 'd', 'e', 'f'});
     });
 
-    test('ordering preserves local, then remote, then base appearance', () async {
+    test('ordering preserves local, then remote, then base appearance',
+        () async {
       final m = await mergeTags(['a', 'b'], ['b', 'c', 'a'], ['a', 'b', 'd']);
       // Union set = {a,b,c,d}; appearance order: local(b,c,a), remote(d), base.
       expect(m, ['b', 'c', 'a', 'd']);
@@ -358,8 +362,7 @@ void main() {
       expect(m, 'a\nb');
     });
 
-    test('order is base, local, then remote; first occurrence wins',
-        () async {
+    test('order is base, local, then remote; first occurrence wins', () async {
       final m = await mergeNotes('a', 'b', 'c');
       expect(m, 'a\nb\nc');
       // A duplicate from a later side is dropped.
@@ -387,7 +390,7 @@ void main() {
         policy: const MergePolicy(
             fieldOverrides: {'log': AppendOnlyListResolver()}),
       );
-          final m = (res.merged['log'] as List).cast<Object?>();
+      final m = (res.merged['log'] as List).cast<Object?>();
       // List mode uses deep equality: all three {'x':1} instances collapse.
       expect(m, [shared, 'evt']);
     });
@@ -406,7 +409,7 @@ void main() {
         policy: const MergePolicy(
             fieldOverrides: {'log': AppendOnlyListResolver()}),
       );
-          final m = (res.merged['log'] as List).cast<Object?>();
+      final m = (res.merged['log'] as List).cast<Object?>();
       // List mode dedups by DEEP equality: 2 and 2.0 are deep-equal, so 2.0
       // is dropped.
       expect(m, [1, 2, 3]);
@@ -433,7 +436,7 @@ void main() {
         policy: const MergePolicy(
             fieldOverrides: {'log': AppendOnlyListResolver()}),
       );
-          final m = (res.merged['log'] as List).cast<Object?>();
+      final m = (res.merged['log'] as List).cast<Object?>();
       expect(m, [
         {'a': 1},
         {'b': 2},
@@ -448,8 +451,7 @@ void main() {
         base: {'count': b},
         local: {'count': l},
         remote: {'count': r},
-        policy:
-            const MergePolicy(fieldOverrides: {'count': CounterResolver()}),
+        policy: const MergePolicy(fieldOverrides: {'count': CounterResolver()}),
       );
       return res.merged['count'];
     }
@@ -500,76 +502,83 @@ void main() {
 
     test('optional min/max bounds clamp domain-invalid values', () async {
       // Both sides decrement below zero -> negative inventory is clamped to 0.
-      final low =(await merge3WayAsync(
+      final low = (await merge3WayAsync(
         base: {'count': 10},
         local: {'count': 5},
         remote: {'count': 4},
         policy: const MergePolicy(
             fieldOverrides: {'count': CounterResolver(min: 0)}),
-      )).merged['count'];
+      ))
+          .merged['count'];
       expect(low, 0, reason: '10 + (5-10) + (4-10) = -1 clamped to min 0');
 
       // Overflow above a cap is clamped to the max.
-      final high =(await merge3WayAsync(
+      final high = (await merge3WayAsync(
         base: {'count': 90},
         local: {'count': 100},
         remote: {'count': 95},
         policy: const MergePolicy(
             fieldOverrides: {'count': CounterResolver(max: 100)}),
-      )).merged['count'];
+      ))
+          .merged['count'];
       expect(high, 100,
           reason: '90 + (100-90) + (95-90) = 105 clamped to max 100');
 
       // A single-sided bound leaves the other side unconstrained.
-      final oneSided =(await merge3WayAsync(
+      final oneSided = (await merge3WayAsync(
         base: {'count': 1},
         local: {'count': 2},
         remote: {'count': 3},
         policy: const MergePolicy(
             fieldOverrides: {'count': CounterResolver(min: 0)}),
-      )).merged['count'];
+      ))
+          .merged['count'];
       expect(oneSided, 4, reason: '1 + (2-1) + (3-1) = 4 (no max bound)');
     });
 
     test('clamps apply to double bounds and negative minimums', () async {
       // Double bound: the clamped result is a double.
-      final d =(await merge3WayAsync(
+      final d = (await merge3WayAsync(
         base: {'count': 10.0},
         local: {'count': 5},
         remote: {'count': 4},
         policy: const MergePolicy(
             fieldOverrides: {'count': CounterResolver(min: 0.5)}),
-      )).merged['count'];
+      ))
+          .merged['count'];
       expect(d, 0.5, reason: '10 + (5-10) + (4-10) = -1 clamped to min 0.5');
 
       // Negative minimums are allowed and clamp upward.
-      final neg =(await merge3WayAsync(
+      final neg = (await merge3WayAsync(
         base: {'count': 0},
         local: {'count': -4},
         remote: {'count': -2},
         policy: const MergePolicy(
             fieldOverrides: {'count': CounterResolver(min: -5)}),
-      )).merged['count'];
+      ))
+          .merged['count'];
       expect(neg, -5, reason: '0 + (-4) + (-2) = -6 clamped to min -5');
 
       // Both bounds: an overflowing result is clamped to the max.
-      final both =(await merge3WayAsync(
+      final both = (await merge3WayAsync(
         base: {'count': 100},
         local: {'count': 110},
         remote: {'count': 105},
         policy: const MergePolicy(
             fieldOverrides: {'count': CounterResolver(min: 0, max: 100)}),
-      )).merged['count'];
+      ))
+          .merged['count'];
       expect(both, 100, reason: '100 + 10 + 5 = 115 clamped to max 100');
 
       // A result within bounds is untouched even when bounds are configured.
-      final within =(await merge3WayAsync(
+      final within = (await merge3WayAsync(
         base: {'count': 10},
         local: {'count': 12},
         remote: {'count': 13},
         policy: const MergePolicy(
             fieldOverrides: {'count': CounterResolver(min: 0, max: 100)}),
-      )).merged['count'];
+      ))
+          .merged['count'];
       expect(within, 15, reason: '10 + 2 + 3 = 15 (within bounds)');
     });
   });
@@ -581,8 +590,7 @@ void main() {
         base: base,
         local: local,
         remote: remote,
-        policy:
-            MergePolicy(collectionResolver: CustomResolver((ctx) => null)),
+        policy: MergePolicy(collectionResolver: CustomResolver((ctx) => null)),
       );
       return res.merged;
     }
@@ -653,7 +661,8 @@ void main() {
           reason: 'local unchanged (l == base) -> remote nested map wins');
     });
 
-    test('a field changed on both sides differently escalates to review', () async {
+    test('a field changed on both sides differently escalates to review',
+        () async {
       final res = await merge3WayAsync(
         base: {'v': 1},
         local: {'v': 2},
@@ -808,7 +817,8 @@ void main() {
               'escalates');
     });
 
-    test('a sync CustomResolver field override resolving wins the field', () async {
+    test('a sync CustomResolver field override resolving wins the field',
+        () async {
       final res = await merge3WayAsync(
         base: {'v': 0},
         local: {'v': 1},

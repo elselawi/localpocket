@@ -263,11 +263,11 @@ void main() {
       final callbacks = resolvePageCallbacks([schema], null)['widgets']!;
       expect(callbacks.resolvers.keys.toList(),
           ['widgets:collectionResolver', 'widgets:field:qty']);
-      expect(identical(callbacks.resolvers['widgets:collectionResolver'],
-          resolver), isTrue);
       expect(
           identical(
-              callbacks.resolvers['widgets:field:qty'], fieldResolver),
+              callbacks.resolvers['widgets:collectionResolver'], resolver),
+          isTrue);
+      expect(identical(callbacks.resolvers['widgets:field:qty'], fieldResolver),
           isTrue);
       expect(identical(callbacks.validator, _emptyValidator), isTrue);
       expect(callbacks.documentMigrations.keys, [2]);
@@ -302,8 +302,7 @@ void main() {
       final envelope = encodeStorePolicies([schema], merged)!;
       final store = _store(envelope);
       expect(store['validator'], isTrue);
-      expect(
-          (store['conflictPolicy'] as Map)['collectionResolver'],
+      expect((store['conflictPolicy'] as Map)['collectionResolver'],
           {'kind': 'custom', 'id': 'widgets:collectionResolver'});
       expect(store['documentMigrations'], [2]);
       expect(store['migrationTransforms'], [3]);
@@ -331,8 +330,7 @@ void main() {
       };
       final callbacks = resolvePageCallbacks([schema], explicit)['widgets']!;
       expect(
-          identical(
-              callbacks.resolvers['widgets:collectionResolver'],
+          identical(callbacks.resolvers['widgets:collectionResolver'],
               explicitResolver),
           isTrue);
       // Coverage gaps the explicit registry left are auto-filled.
@@ -353,12 +351,12 @@ void main() {
       // Only the explicit id remains: a duplicated auto id would surface as
       // an unused registration on the wire.
       expect(callbacks.resolvers.keys.toList(), ['review']);
-      final envelope = encodeStorePolicies([schema], {
+      final envelope = encodeStorePolicies([
+        schema
+      ], {
         'widgets': callbacks,
       })!;
-      expect(
-          (_store(envelope)['conflictPolicy']
-              as Map)['collectionResolver'],
+      expect((_store(envelope)['conflictPolicy'] as Map)['collectionResolver'],
           {'kind': 'custom', 'id': 'review'});
     });
 

@@ -92,8 +92,9 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
         ? 'no policy-level descriptor diverged — the divergence is inside '
             'the schema body itself'
         : diverging.join('; ');
-    final envelopeNote =
-        envelopeReceived ? '' : ' No store-policy envelope was received for '
+    final envelopeNote = envelopeReceived
+        ? ''
+        : ' No store-policy envelope was received for '
             'this store (a stale worker asset or a dropped envelope).';
     return 'Schema manifest mismatch for "$store": the page and the '
         'worker compiled different schemas. Diverging manifest '

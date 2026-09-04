@@ -6,11 +6,12 @@ Future<void> main() async {
   final root = Directory.current.absolute;
   // SINGLE SOURCE of truth: the page manifest shared with run_smoke.cjs and
   // browser_web_gate.dart (tool/web_smoke/pages.json).
-  final manifest = jsonDecode(
-          File('tool/web_smoke/pages.json').readAsStringSync())
-      as Map<String, dynamic>;
+  final manifest =
+      jsonDecode(File('tool/web_smoke/pages.json').readAsStringSync())
+          as Map<String, dynamic>;
   final syncMains = [
-    for (final page in (manifest['pages']! as List).cast<Map<String, dynamic>>())
+    for (final page
+        in (manifest['pages']! as List).cast<Map<String, dynamic>>())
       if (page['browserMatrix'] == false) page['main']! as String,
   ];
   for (final main in syncMains) {

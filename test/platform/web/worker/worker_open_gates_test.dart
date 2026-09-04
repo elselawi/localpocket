@@ -264,8 +264,7 @@ void main() {
       expect(shifted, greaterThan(wallClock - 10000));
     });
 
-    test(
-        'durability and callback bounds land in the worker kernel and bridge',
+    test('durability and callback bounds land in the worker kernel and bridge',
         () async {
       final h = await WorkerHarness.open(
         groupCommitWindow: const Duration(milliseconds: 12),

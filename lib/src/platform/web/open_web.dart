@@ -9,7 +9,8 @@ import '../../adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
 import '../../contract/contract.dart';
 import '../../kernel/schema_manifest.dart';
-import '../../kernel/page_callbacks.dart' show encodeStorePolicies, resolvePageCallbacks;
+import '../../kernel/page_callbacks.dart'
+    show encodeStorePolicies, resolvePageCallbacks;
 import '../../runtime/remote_runtime_client.dart';
 import 'crypto.dart';
 import 'page/assets.dart';

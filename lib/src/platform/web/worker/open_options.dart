@@ -64,7 +64,9 @@ Map<String, Object?> parseOpenOptions(Object? data) {
   _parseMsOption(stringMap, 'txSessionTtlMs', result,
       min: 0, what: 'the interactive-transaction idle deadline');
   _parseMsOption(stringMap, 'callbackTimeoutMs', result,
-      min: 1, what: 'the page-callback round-trip bound');  // The clock offset is a signed shift (negative = into the past), so only
+      min: 1,
+      what:
+          'the page-callback round-trip bound'); // The clock offset is a signed shift (negative = into the past), so only
   // the type is validated, never the sign.
   final clockOffsetMs = stringMap['clockOffsetMs'];
   if (clockOffsetMs != null) {
@@ -73,15 +75,16 @@ Map<String, Object?> parseOpenOptions(Object? data) {
           '"clockOffsetMs" must be an int (milliseconds).');
     }
     result['clockOffsetMs'] = clockOffsetMs;
-  }  return result;
+  }
+  return result;
 }
 
 /// Parses one millisecond-denominated integer option: absent keys are
 /// omitted (the caller applies its documented default), present-but-wrong
 /// values fail loudly, and a value below [min] is rejected — the wire
 /// never silently clamps a mis-scaled duration.
-void _parseMsOption(Map<String, Object?> source, String key,
-    Map<String, Object?> result,
+void _parseMsOption(
+    Map<String, Object?> source, String key, Map<String, Object?> result,
     {required int min, required String what}) {
   final raw = source[key];
   if (raw == null) return;

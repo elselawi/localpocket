@@ -58,7 +58,8 @@ void main() {
             final local = {'val': l};
             final remote = {'val': r};
 
-            final outcome = await merge3WayAsync(base: base, local: local, remote: remote);
+            final outcome =
+                await merge3WayAsync(base: base, local: local, remote: remote);
             final mergedVal = outcome.merged['val'];
 
             if (deepEquals(l, r)) {
@@ -91,7 +92,8 @@ void main() {
         final local = {'val': l, 'local_only': seed};
         final remote = {'val': r, 'remote_only': seed * 2};
 
-        final outcome = await merge3WayAsync(base: base, local: local, remote: remote);
+        final outcome =
+            await merge3WayAsync(base: base, local: local, remote: remote);
 
         if (deepEquals(l, r)) {
           expect(deepEquals(outcome.merged['val'], l), isTrue);
@@ -145,7 +147,8 @@ void main() {
       expect(res.merged['val'], 'y');
     });
 
-    test('remote drops the key, local changes it -> remote drop wins', () async {
+    test('remote drops the key, local changes it -> remote drop wins',
+        () async {
       // base = {val: 'x'}; local changes val; remote deletes val.
       // Both sides changed (1->y and 1->null) -> default remote wins, so the
       // deletion wins over the local edit.
@@ -156,7 +159,8 @@ void main() {
           reason: 'a remote deletion beats a local edit under remote-wins');
     });
 
-    test('key missing from base and unchanged on both sides stays null', () async {
+    test('key missing from base and unchanged on both sides stays null',
+        () async {
       final res = await merge3WayAsync(
           base: <String, Object?>{},
           local: <String, Object?>{'absent': null},
@@ -261,13 +265,15 @@ void main() {
         }
       };
       expect(identical(l, r), isFalse, reason: 'distinct instances');
-      final res = await merge3WayAsync(base: const {}, local: {'m': l}, remote: {'m': r});
+      final res = await merge3WayAsync(
+          base: const {}, local: {'m': l}, remote: {'m': r});
       expect(deepEquals(res.merged['m'], l), isTrue);
       // And the merged value is the LOCAL instance (l wins on l==r).
       expect(identical(res.merged['m'], l), isTrue);
     });
 
-    test('nested maps merge per-key: additions from both sides survive', () async {
+    test('nested maps merge per-key: additions from both sides survive',
+        () async {
       final base = {
         'cfg': {'a': 1, 'b': 2}
       };
@@ -279,7 +285,8 @@ void main() {
       };
       // Per-key recursion: unchanged keys follow their sides, and each
       // side's own additions survive as nested keys.
-      final res = await merge3WayAsync(base: base, local: local, remote: remote);
+      final res =
+          await merge3WayAsync(base: base, local: local, remote: remote);
       expect(res.merged['cfg'], {'a': 1, 'b': 2, 'l': true, 'r': true},
           reason: 'nested maps merge per-key (each side\'s nested additions '
               'survive)');
@@ -289,19 +296,21 @@ void main() {
       final l = {1: 'a', 2: 'b'};
       final r = {1: 'a', 2: 'b'};
       // l == r (deep equal) even with int keys.
-      final res1 = await merge3WayAsync(base: const {}, local: {'m': l}, remote: {'m': r});
+      final res1 = await merge3WayAsync(
+          base: const {}, local: {'m': l}, remote: {'m': r});
       expect(deepEquals(res1.merged['m'], l), isTrue);
 
       // Both changed with int-keyed maps -> remote wins whole.
       final r2 = {1: 'x'};
-      final res2 =
-          await merge3WayAsync(base: const {}, local: {'m': l}, remote: {'m': r2});
+      final res2 = await merge3WayAsync(
+          base: const {}, local: {'m': l}, remote: {'m': r2});
       expect(deepEquals(res2.merged['m'], r2), isTrue);
     });
   });
 
   group('dirty sets and input immutability', () {
-    test('dirtyLocal/dirtyRemote reflect actual base diffs (dot-notation)', () async {
+    test('dirtyLocal/dirtyRemote reflect actual base diffs (dot-notation)',
+        () async {
       final base = {
         'name': 'n',
         'meta': {'a': 1, 'b': 2},
@@ -318,7 +327,8 @@ void main() {
         'qty': 5
       };
 
-      final res = await merge3WayAsync(base: base, local: local, remote: remote);
+      final res =
+          await merge3WayAsync(base: base, local: local, remote: remote);
       expect(res.dirtyLocal, containsAll(['name', 'meta', 'meta.b']));
       expect(res.dirtyLocal, isNot(contains('qty')));
       expect(res.dirtyRemote, containsAll(['meta', 'meta.a']));
@@ -452,7 +462,8 @@ void main() {
       expect(collectionRes.merged['extra'], 'ok');
     });
 
-    test('MergeEngine respects collection precedence over field overrides', () async {
+    test('MergeEngine respects collection precedence over field overrides',
+        () async {
       final collection = CustomResolver((ctx) => MergeResult(
             merged: {'value': 'collection'},
           ));
@@ -471,7 +482,8 @@ void main() {
       expect(res.merged['value'], 'collection');
     });
 
-    test('dirty tracking includes nested paths and missing-key unions', () async {
+    test('dirty tracking includes nested paths and missing-key unions',
+        () async {
       final base = {
         'meta': {'a': 1, 'b': 2},
         'baseOnly': true,

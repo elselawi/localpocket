@@ -33,7 +33,8 @@ void main() {
           reason: 'only local unarchived -> local wins');
     });
 
-    test('the both-sides-changed branch is unreachable with booleans', () async {
+    test('the both-sides-changed branch is unreachable with booleans',
+        () async {
       // With boolean values, "l != r AND l != b AND r != b" is unsatisfiable:
       // if l != b and r != b then both are the OPPOSITE of b, so l == r.
       // Enumerate every boolean triple and verify the branch classification
@@ -58,7 +59,8 @@ void main() {
           reason: 'no boolean triple reaches the both-changed branch');
     });
 
-    test('archive is a simple boolean coercion (non-bool values coerce)', () async {
+    test('archive is a simple boolean coercion (non-bool values coerce)',
+        () async {
       // `archived` values that are not exactly `true` coerce to false.
       final res = await merge3WayAsync(
         base: {'archived': 0, 'name': 'n'},
@@ -69,7 +71,8 @@ void main() {
       expect(res.merged['archived'], false);
     });
 
-    test('editsUnarchive unarchives only when local made content edits', () async {
+    test('editsUnarchive unarchives only when local made content edits',
+        () async {
       // Local: content edit on an archived row (archive unchanged).
       // Both sides keep archived=true; local edits name -> merged true, then
       // editsUnarchive flips it to false.
@@ -119,7 +122,8 @@ void main() {
           reason: 'no local content change -> stays archived');
     });
 
-    test('archive field overrides only matter in the unreachable branch', () async {
+    test('archive field overrides only matter in the unreachable branch',
+        () async {
       // Reachable single-side-change cases are unaffected by a field override
       // on `archived` (the override only fires in the unreachable both-changed
       // branch). Document that with a LocalWins/RemoteWins override.
@@ -161,7 +165,8 @@ void main() {
       expect(res.merged['qty'], 1);
     });
 
-    test('merged map omits archived when it is false (payload convention)', () async {
+    test('merged map omits archived when it is false (payload convention)',
+        () async {
       // merge3Way sets `archived` explicitly; the canonical payload layer
       // omits a false `archived` (buildPayload adds it only when true).
       final res = await merge3WayAsync(

@@ -1218,7 +1218,8 @@ void main() {
       addTearDown(auto.close);
 
       final attached = auto.pocket.requireTable('gizmos').schema;
-      expect(attached.conflictPolicy.collectionResolver, isA<ProxiedResolver>());
+      expect(
+          attached.conflictPolicy.collectionResolver, isA<ProxiedResolver>());
       expect(attached.validator, isNotNull);
       await expectLater(
         auto.runtime.send(contract.MutateRequest(

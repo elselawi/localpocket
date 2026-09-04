@@ -249,8 +249,7 @@ String autoResolverId(String store) => '$store:collectionResolver';
 
 /// Deterministic auto-registration id for a store's `fieldOverrides` entry
 /// at [field] (a dotted path).
-String autoFieldResolverId(String store, String field) =>
-    '$store:field:$field';
+String autoFieldResolverId(String store, String field) => '$store:field:$field';
 
 /// Deterministic auto-registration id for a store's validator.
 String autoValidatorId(String store) => '$store:validator';
