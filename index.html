@@ -503,6 +503,10 @@
             align-items: start;
         }
 
+        .docs-wrap>div {
+            min-width: 0;
+        }
+
         @media (max-width: 900px) {
             .docs-wrap {
                 grid-template-columns: 1fr;
@@ -574,6 +578,8 @@
             border-radius: var(--radius);
             padding: clamp(1.4rem, 4vw, 2.8rem);
             min-width: 0;
+            max-width: 100%;
+            overflow-wrap: break-word;
         }
 
         .markdown> :first-child {
@@ -664,6 +670,7 @@
         .codeblock {
             position: relative;
             margin: 1.1rem 0;
+            max-width: 100%;
         }
 
         .codeblock .code-head {
@@ -721,6 +728,7 @@
             padding: 1.1rem 1.3rem;
             overflow-x: auto;
             line-height: 1.6;
+            max-width: 100%;
         }
 
         .markdown pre code {
@@ -732,6 +740,7 @@
 
         .markdown table {
             width: 100%;
+            max-width: 100%;
             border-collapse: collapse;
             font-size: 0.88rem;
             display: block;
