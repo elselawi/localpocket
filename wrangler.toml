@@ -1,0 +1,7 @@
+# Cloudflare Pages project config for the docs/benchmark site.
+# Build command is configured in Cloudflare Pages project settings, not inside
+# the [build] table for Pages. The repo build script is: npm run pages:build
+# and it stages the deployable output into _site/.
+name = "localpocket"
+compatibility_date = "2026-08-25"
+pages_build_output_dir = "_site"

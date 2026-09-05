@@ -5,6 +5,7 @@
         "playwright": "1.62.1"
     },
     "scripts": {
+        "pages:build": "node tool/deploy_site.mjs",
         "web-smoke": "node tool/web_smoke/run_smoke.cjs"
     }
 }
