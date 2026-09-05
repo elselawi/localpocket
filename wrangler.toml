@@ -1,5 +1,0 @@
-# Cloudflare Pages project config for the docs/benchmark site.
-# Only the files staged into _site/ are deployed — see tool/deploy_site.mjs.
-name = "localpocket"
-compatibility_date = "2026-08-25"
-pages_build_output_dir = "_site"
