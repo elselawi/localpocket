@@ -66,17 +66,10 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
         'it executes on the page.');
   }
   // A caller-injected clock closure is code and cannot cross into the
-  // worker. The DATA-style replacement is [LocalPocketOptions
-  // .clockOffsetMs]: a plain integer applied on top of the worker's system
-  // clock (carried in openArgs below), so deterministic-clock configs
-  // behave identically on web and native.
-  if (options.now != null) {
-    throw ValidationException(
-        'The injectable `now` clock cannot cross the web worker boundary: '
-        'the worker uses the system clock (shifted by clockOffsetMs). Use '
-        'the clockOffsetMs option on web, or run on a native runtime for '
-        'an injected clock.');
-  }
+  // worker; the public surface carries the DATA-style replacement instead:
+  // [LocalPocketOptions.clockOffsetMs], a plain integer applied on top of
+  // the worker's system clock (carried in openArgs below), so
+  // deterministic-clock configs behave identically on web and native.
   // Same for a caller-provided blob store: the worker builds its own
   // OPFS-backed store, and a caller store object (with its methods) cannot
   // cross the boundary. Failing typed keeps attachment bytes where the caller

@@ -54,8 +54,6 @@ void main() async {
         note: 'requestTimeout also bounds worker→page callbacks; asset '
             'paths and spawnTimeout stay page-side'),
     'maxDocumentBytes': Parity.crosses(wireKey: 'maxDocBytes'),
-    'now': Parity.rejectedTyped(
-        note: 'a clock closure is code; use clockOffsetMs on web'),
     'clockOffsetMs': Parity.crosses(
         wireKey: 'clockOffsetMs', note: 'data-style clock shift'),
     'groupCommitWindow': Parity.crosses(wireKey: 'groupCommitWindowMs'),

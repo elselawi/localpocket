@@ -2293,30 +2293,31 @@ stay small, or up when you store large JSON blobs:
   await boundedDb.close();
 ```
 
-### Clock control: `now` (native) and `clockOffsetMs` (web)
+### Clock control: `clockOffsetMs`
 
 The kernel clock drives outbox timestamps, conflict detection times,
-last-seen marks, and compaction cutoffs. Two ways to control it:
-
-- **`now` (native)** injects a closure — deterministic tests, simulated
-  time. It is code, so the web open rejects it with a typed error.
-- **`clockOffsetMs`** shifts the worker's system clock by a plain integer —
-  data, so it crosses the worker boundary on web. `0` (the default) means
-  no shift.
+last-seen marks, and compaction cutoffs. `clockOffsetMs` shifts that clock
+by a plain integer offset — data, not code — so it crosses the worker
+boundary and behaves **identically on web and native**:
 
 ```dart
   final clockDb = await LocalPocket.open(
     LocalPocketOptions(
       path: 'clock.db',
       stores: [Tasks.store],
-      // NATIVE only — deterministic time for tests:
-      // now: () => DateTime.parse('2026-01-01T00:00:00Z'),
-      // WEB (and native): shift the effective clock by an offset:
-      clockOffsetMs: 0,
+      // e.g. simulate a database whose clock sits 24h in the future:
+      // clockOffsetMs: 24 * 60 * 60 * 1000,
+      clockOffsetMs: 0, // default: the unshifted system clock
     ),
   );
   await clockDb.close();
 ```
+
+Because it's a *shift* rather than an absolute time, it composes with the
+real clock — far-future or far-past fixtures, deterministic-day tests, and
+clock-skew simulations all work the same on every platform. (Kernel-level
+tests that need an absolute fixed clock inject one through the internal
+engine seam; the public surface needs only this offset.)
 
 ### Web worker bootstrap: `BootstrapOptions`
 
@@ -2403,7 +2404,7 @@ Every `LocalPocketOptions` field, and where this document covers it:
 | `bootstrap` | Web worker bootstrap (above) |
 | `groupCommitWindow`, `txSessionTtl` | Commit batching / Interactive transactions (above) |
 | `maxDocumentBytes` | Document size limit (above) |
-| `now`, `clockOffsetMs` | Clock control (above) |
+| `clockOffsetMs` | Clock control (above) |
 | `blobStore`, `syncBackendFactory` (native) | Storage and sync seams on native (above) |
 
 ## License & Credit

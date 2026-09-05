@@ -147,15 +147,13 @@ final class LocalPocket {
   /// Escapes [value] for a single-quoted SQL string literal.
   static String _sqlQuoteLiteral(String value) => value.replaceAll("'", "''");
 
-  /// The kernel clock for [options]: the injected [LocalPocketOptions.now]
-  /// closure when supplied, shifted by [LocalPocketOptions.clockOffsetMs];
-  /// null leaves the kernel on its default system clock.
+  /// The kernel clock for [options]: the system clock shifted by
+  /// [LocalPocketOptions.clockOffsetMs]; null leaves the kernel on its
+  /// default unshifted system clock.
   static int Function()? _effectiveNow(LocalPocketOptions options) {
-    final injected = options.now;
     final offset = options.clockOffsetMs;
-    if (injected == null && offset == 0) return null;
-    return () =>
-        (injected?.call() ?? DateTime.now()).millisecondsSinceEpoch + offset;
+    if (offset == 0) return null;
+    return () => DateTime.now().millisecondsSinceEpoch + offset;
   }
 
   final RuntimeClient _runtime;

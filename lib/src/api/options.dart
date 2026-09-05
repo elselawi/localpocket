@@ -33,7 +33,6 @@ final class LocalPocketOptions {
     this.nativeDatabaseFactory,
     this.bootstrap = const BootstrapOptions(),
     this.maxDocumentBytes = 1900000,
-    this.now,
     this.clockOffsetMs = 0,
     this.groupCommitWindow = Duration.zero,
     this.txSessionTtl = defaultTxSessionTtl,
@@ -89,18 +88,16 @@ final class LocalPocketOptions {
   /// Upper bound for one persisted document, in bytes.
   final int maxDocumentBytes;
 
-  /// Injectable wall clock (tests). `null` uses the system clock.
-  final DateTime Function()? now;
-
   /// Fixed millisecond offset applied on top of the system clock for all
   /// persistence bookkeeping (outbox timestamps, conflicts, compaction
   /// cutoffs), or `0` for the unshifted system clock.
   ///
-  /// DATA, not code: unlike [now] (a closure that cannot cross the web
-  /// worker boundary and is rejected on web), this plain integer crosses
-  /// the open envelope on every platform — the worker applies it to its
-  /// system clock. Use it for deterministic-clock tests and for far-future
-  /// or far-past fixtures that must behave identically on web and native.
+  /// DATA, not code: this plain integer crosses the web worker's open
+  /// envelope on every platform — the worker applies it to its system
+  /// clock. Use it for deterministic-clock tests and for far-future or
+  /// far-past fixtures that behave identically on web and native. (The
+  /// kernel's internal test seam still accepts an absolute closure; the
+  /// public surface needs only this offset.)
   final int clockOffsetMs;
 
   /// Coalescing window for group commit: when positive, mutations from

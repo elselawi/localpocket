@@ -39,6 +39,15 @@
   duplicated the surface. Migration: replace `merge3Way(...)` with
   `await merge3WayAsync(...)` and `MergeEngine.runSync(...)` with
   `await MergeEngine.runAsync(...)` (make the enclosing function async).
+- **Removed `LocalPocketOptions.now`.** The injectable clock closure was
+  native-only (code cannot cross the worker boundary) and duplicated what
+  `clockOffsetMs` already provides as data on every platform. Migration:
+  replace `now: () => fixedTime` with the equivalent offset
+  (`clockOffsetMs: fixedTime.millisecondsSinceEpoch -
+  DateTime.now().millisecondsSinceEpoch`) — a shift composes with the real
+  clock identically on web and native. Kernel-level tests that need an
+  absolute fixed clock keep the internal engine seam (`LocalPocket.open`
+  in `src/kernel`, `now:` parameter).
 
 ### Fixed
 
