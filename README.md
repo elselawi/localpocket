@@ -1121,10 +1121,6 @@ final class Posts extends StoreDef<Posts> {
   @override
   List<FieldDef<Posts, Object?>> get fields => [title, views, tags];
 
-  // ---- automated resolution policy ----
-  // The exact resolver instance the page serves on web: auto-collected as
-  // 'posts:collectionResolver', or resolvable under your own id via an
-  // explicit LocalPocketOptions.pageCallbacks entry.
   static final reviewResolver = CustomResolver(customResolver);
 
   @override
@@ -1187,161 +1183,6 @@ equality — numbers match by value (`2` == `2.0`), and maps/lists match by
 identity only, so two equal-content maps count as different elements. If you
 need structural identity for list items, `AppendOnlyListResolver` with an
 `identity` function is the closer fit.
-
-### Executable features on web
-
-On the web the engine runs in a dedicated worker while your closures live on
-the page, so code-bearing configuration crosses a different bridge than on
-native:
-
-- **Data resolvers just work.** The closure-free built-ins
-  (`LocalWinsResolver`, `RemoteWinsResolver`, `CounterResolver`,
-  `SetUnionWithDeletionWinsResolver`, `AppendOnlyLinesResolver`, and
-  `AppendOnlyListResolver` without an `identity`) cross as data, are
-  reconstructed as the real classes in the worker, and resolve merges
-  exactly as they do natively. `editsUnarchive` and `missingRemote` are
-  plain data and work everywhere.
-- **Executable hooks run on the page.** A `CustomResolver` (and any resolver
-  carrying a closure, such as `AppendOnlyListResolver` with an `identity`
-  function), the store `validator`, document migrations, and backfill
-  `transform`s are invoked on the page over a callback channel: the worker
-  serializes the merge context (or record), the page executes your closure,
-  and the result rides back into the merge.
-- **Registration is automatic.** You do not have to register anything:
-  every executable feature a store declares is auto-collected at open time
-  under a deterministic id (`'<store>:collectionResolver'`,
-  `'<store>:field:<dotted.path>'`, `'<store>:validator'`,
-  `'<store>:documentMigration:<version>'`, `'<store>:transform:<toVersion>'`)
-  and served from the page. An explicit `LocalPocketOptions.pageCallbacks`
-  registry is merged over the auto-collected one — explicit entries win on
-  id conflict, auto-collected entries fill the gaps — and the coverage
-  checks still apply: an explicit registration the schema never uses fails
-  the open with a typed error, and a store whose executable features have
-  no callback channel fails with `UnsupportedSchemaFeatureError`. Native
-  platforms ignore the registry (hooks already run in-process).
-
-```dart
-  // The web open: registration is optional — the executable resolver below
-  // would also be auto-collected as 'posts:collectionResolver'. An explicit
-  // entry pins your own id (and wins over the auto id on conflict).
-  final webDb = await LocalPocket.open(
-    LocalPocketOptions(
-      path: 'posts.db',
-      stores: [Posts.store],
-      pageCallbacks: PageCallbacks(
-        stores: {
-          'posts': StorePageCallbacks(
-            resolvers: {'posts-review': Posts.reviewResolver},
-          ),
-        },
-      ),
-    ),
-  );
-  await webDb.close();
-```
-
-**Your own sync backend and blob store run on the page too.** The container
-holds two more database-level slots — `PageCallbacks.syncBackendFactory` and
-`PageCallbacks.blobStore`. Supply either and the web open succeeds: your
-object (and everything it closes over — HTTP clients, token providers, storage
-handles) stays on the page, and the worker receives a transparent proxy that
-forwards every call over the callback channel.
-
-```dart
-// A minimal sketch of each seam — your implementations keep their HTTP
-// client, token provider, and storage handles page-side.
-final class MySyncBackendFactory implements SyncBackendFactory {
-  @override
-  Future<SyncBackend> create({
-    required Uri baseUrl,
-    required SyncTokenSource tokenSource,
-    required List<String> stores,
-    required String identity,
-  }) async => throw UnimplementedError('build your backend here');
-
-  @override
-  Future<void> dispose(SyncBackend backend) async {}
-}
-
-final class MyBlobStore extends BlobStore {
-  @override
-  Future<String> put(Stream<List<int>> bytes,
-          {String? expectedSha256, int? expectedSize, String? key}) async =>
-      throw UnimplementedError('store the bytes here');
-
-  @override
-  Future<Stream<List<int>>> open(String hash) async =>
-      throw UnimplementedError('read the bytes back');
-
-  @override
-  Future<void> delete(String hash) async {}
-
-  @override
-  Future<bool> exists(String hash) async => false;
-
-  @override
-  Future<int?> size(String hash) async => null;
-
-  @override
-  Future<int> cleanTmp({Duration olderThan = const Duration(hours: 24)}) async =>
-      0;
-
-  @override
-  Future<List<String>> listHashes() async => const [];
-
-  @override
-  Future<int?> modifiedAt(String hash) async => null;
-
-  @override
-  Future<bool> get isDurable async => true;
-}
-```
-
-```dart
-  // The same web open, hosting your own backend and blob store on the page.
-  final proxiedDb = await LocalPocket.open(
-    LocalPocketOptions(
-      path: 'posts.db',
-      stores: [Posts.store],
-      pageCallbacks: PageCallbacks(
-        syncBackendFactory: MySyncBackendFactory(),
-        blobStore: MyBlobStore(),
-      ),
-    ),
-  );
-  await proxiedDb.close();
-```
-
-How the proxies behave:
-
-- **Typed errors survive the channel.** Every `SyncError` subtype
-  (`DuplicateIdError`, `RemoteVersionConflict` with its `current` record,
-  ...) and the blob errors (`BlobMissingError`, `BlobStorageException`)
-  reconstruct as the exact same types in the worker — never as strings.
-- **Bytes cross chunked (256 KiB) both ways.** Uploads and downloads use a
-  begin → N-chunk → finish session; `expectedSha256`/`expectedSize` are
-  verified where the bytes are reassembled on the page.
-- **Realtime hints stream page → worker.** Your backend's `hints()` stream
-  drives the engine's fast path exactly as the PocketBase SSE connection
-  does on the worker.
-- **Auth stays live.** The page backend reads the kernel's token source on
-  every read, so `sync.updateAuth(...)` reaches your backend without a
-  rebuild. Idempotency is untouched: `PushOp.opId` and client record ids
-  cross as-is, and the proxy adds no retries of its own.
-- **Honest metadata.** `modifiedAt` keeps its null (GC orphan-aging depends
-  on it) and `isDurable` reflects YOUR store's durability, not the worker's.
-
-Without these slots the worker keeps its defaults: the canonical PocketBase
-sync factory and the OPFS-backed blob store. The top-level
-`LocalPocketOptions.syncBackendFactory` / `blobStore` fields stay rejected on
-web — configure page-executed backends through the container instead.
-
-Constraints worth knowing: a page callback must answer with data and return
-data — querying or writing the same database from inside a callback is
-unsupported (the write queue and OPFS locks are held while it runs). One
-callback costs one round-trip (per contested merge, per validated write, per
-backfilled row), so prefer structural resolvers and keep page-side closures
-fast.
 
 ### Open conflicts
 
@@ -1410,15 +1251,6 @@ fast.
   `ConflictNotFoundException`, `acceptLocal`/`acceptRemote` a `StateError`;
   one of two racing resolutions wins, the other throws. Resolving a
   locally-purged record cleans up the stale conflict instead of throwing.
-
-6. **Web: executable resolvers resolve on the page** — closure-free built-ins
-  run in the worker as data; a `CustomResolver` (or any closure-bearing
-  resolver) is executed on the page during the merge, auto-collected under
-  a deterministic id (or resolved to your explicit
-  `LocalPocketOptions.pageCallbacks` entry). A store whose executable
-  features have no callback channel fails the web open with
-  `UnsupportedSchemaFeatureError`; `editsUnarchive`/`missingRemote` work
-  everywhere. See "Executable features on web" above.
 
 **Note: Concurrent edits on PocketBase are last-write-wins**
 PocketBase has no conditional (compare-and-swap) writes, so **concurrent
@@ -2166,10 +1998,9 @@ Destructive migrations follow a safe 12-step rebuild process:
    overwrite it and throws `DestructiveMigrationRefusedError` (remove the
    stale backup file to proceed).
 
-5. **Transforms run on the page on web workers.** Closures cannot be
-   serialized to the dedicated web worker: migration metadata
-   (`addedFields`, `toVersion`, `destructive`) crosses as data, but a
-   `transform` (and every other executable hook — validators, document
+5. **Transforms run on the page on web workers.** migration metadata
+   (`addedFields`, `toVersion`, `destructive`) crosses to the web worker
+   as data, but a `transform` (as well as: validators, document
    migrations, custom resolvers) executes on the page through the callback
    channel, auto-collected under a deterministic id (an explicit
    `LocalPocketOptions.pageCallbacks` entry wins over the auto id). Each
@@ -2196,6 +2027,384 @@ dart tool/release.dart
 # must be green before any release or pull request
 ```
 
+## Advanced concepts
+
+The sections above cover everything day-one usage needs. This section is the
+full control surface: every option, seam, and runtime knob the API exposes
+beyond that — interactive transactions, commit batching, clock control, the
+worker bootstrap, and how code-bearing configuration crosses the worker
+boundary on web.
+
+### Executable features on web
+
+On the web the engine runs in a dedicated worker while your closures live on
+the page, so code-bearing configuration crosses a different bridge than on
+native:
+
+- **Data resolvers just work.** The closure-free built-ins
+  (`LocalWinsResolver`, `RemoteWinsResolver`, `CounterResolver`,
+  `SetUnionWithDeletionWinsResolver`, `AppendOnlyLinesResolver`, and
+  `AppendOnlyListResolver` without an `identity`) cross as data, are
+  reconstructed as the real classes in the worker, and resolve merges
+  exactly as they do natively. `editsUnarchive` and `missingRemote` are
+  plain data and work everywhere.
+- **Executable hooks run on the page.** A `CustomResolver` (and any resolver
+  carrying a closure, such as `AppendOnlyListResolver` with an `identity`
+  function), the store `validator`, document migrations, and backfill
+  `transform`s are invoked on the page over a callback channel: the worker
+  serializes the merge context (or record), the page executes your closure,
+  and the result rides back into the merge.
+- **Registration is automatic.** You do not have to register anything:
+  every executable feature a store declares is auto-collected at open time
+  under a deterministic id (`'<store>:collectionResolver'`,
+  `'<store>:field:<dotted.path>'`, `'<store>:validator'`,
+  `'<store>:documentMigration:<version>'`, `'<store>:transform:<toVersion>'`)
+  and served from the page. An explicit `LocalPocketOptions.pageCallbacks`
+  registry is merged over the auto-collected one — explicit entries win on
+  id conflict, auto-collected entries fill the gaps — and the coverage
+  checks still apply: an explicit registration the schema never uses fails
+  the open with a typed error, and a store whose executable features have
+  no callback channel fails with `UnsupportedSchemaFeatureError`. Native
+  platforms ignore the registry (hooks already run in-process).
+
+```dart
+  // The web open: registration is optional — the executable resolver below
+  // would also be auto-collected as 'posts:collectionResolver'. An explicit
+  // entry pins your own id (and wins over the auto id on conflict).
+  final webDb = await LocalPocket.open(
+    LocalPocketOptions(
+      path: 'posts.db',
+      stores: [Posts.store],
+      pageCallbacks: PageCallbacks(
+        stores: {
+          'posts': StorePageCallbacks(
+            resolvers: {'posts-review': Posts.reviewResolver},
+          ),
+        },
+      ),
+    ),
+  );
+  await webDb.close();
+```
+
+**Your own sync backend and blob store run on the page too.** The container
+holds two more database-level slots — `PageCallbacks.syncBackendFactory` and
+`PageCallbacks.blobStore`. Supply either and the web open succeeds: your
+object (and everything it closes over — HTTP clients, token providers, storage
+handles) stays on the page, and the worker receives a transparent proxy that
+forwards every call over the callback channel.
+
+```dart
+// A minimal sketch of each seam — your implementations keep their HTTP
+// client, token provider, and storage handles page-side.
+final class MySyncBackendFactory implements SyncBackendFactory {
+  @override
+  Future<SyncBackend> create({
+    required Uri baseUrl,
+    required SyncTokenSource tokenSource,
+    required List<String> stores,
+    required String identity,
+  }) async => throw UnimplementedError('build your backend here');
+
+  @override
+  Future<void> dispose(SyncBackend backend) async {}
+}
+
+final class MyBlobStore extends BlobStore {
+  @override
+  Future<String> put(Stream<List<int>> bytes,
+          {String? expectedSha256, int? expectedSize, String? key}) async =>
+      throw UnimplementedError('store the bytes here');
+
+  @override
+  Future<Stream<List<int>>> open(String hash) async =>
+      throw UnimplementedError('read the bytes back');
+
+  @override
+  Future<void> delete(String hash) async {}
+
+  @override
+  Future<bool> exists(String hash) async => false;
+
+  @override
+  Future<int?> size(String hash) async => null;
+
+  @override
+  Future<int> cleanTmp({Duration olderThan = const Duration(hours: 24)}) async =>
+      0;
+
+  @override
+  Future<List<String>> listHashes() async => const [];
+
+  @override
+  Future<int?> modifiedAt(String hash) async => null;
+
+  @override
+  Future<bool> get isDurable async => true;
+}
+```
+
+```dart
+  // The same web open, hosting your own backend and blob store on the page.
+  final proxiedDb = await LocalPocket.open(
+    LocalPocketOptions(
+      path: 'posts.db',
+      stores: [Posts.store],
+      pageCallbacks: PageCallbacks(
+        syncBackendFactory: MySyncBackendFactory(),
+        blobStore: MyBlobStore(),
+      ),
+    ),
+  );
+  await proxiedDb.close();
+```
+
+How the proxies behave:
+
+- **Typed errors survive the channel.** Every `SyncError` subtype
+  (`DuplicateIdError`, `RemoteVersionConflict` with its `current` record,
+  ...) and the blob errors (`BlobMissingError`, `BlobStorageException`)
+  reconstruct as the exact same types in the worker — never as strings.
+- **Bytes cross chunked (256 KiB) both ways.** Uploads and downloads use a
+  begin → N-chunk → finish session; `expectedSha256`/`expectedSize` are
+  verified where the bytes are reassembled on the page.
+- **Realtime hints stream page → worker.** Your backend's `hints()` stream
+  drives the engine's fast path exactly as the PocketBase SSE connection
+  does on the worker.
+- **Auth stays live.** The page backend reads the kernel's token source on
+  every read, so `sync.updateAuth(...)` reaches your backend without a
+  rebuild. Idempotency is untouched: `PushOp.opId` and client record ids
+  cross as-is, and the proxy adds no retries of its own.
+- **Honest metadata.** `modifiedAt` keeps its null (GC orphan-aging depends
+  on it) and `isDurable` reflects YOUR store's durability, not the worker's.
+
+Without these slots the worker keeps its defaults: the canonical PocketBase
+sync factory and the OPFS-backed blob store. The top-level
+`LocalPocketOptions.syncBackendFactory` / `blobStore` fields stay rejected on
+web — configure page-executed backends through the container instead.
+
+Constraints worth knowing: a page callback must answer with data and return
+data — querying or writing the same database from inside a callback is
+unsupported (the write queue and OPFS locks are held while it runs). One
+callback costs one round-trip (per contested merge, per validated write, per
+backfilled row), so prefer structural resolvers and keep page-side closures
+fast.
+
+### Interactive transactions
+
+`putAll`/`patchAll` are atomic batches, but when several writes across
+**different stores** must succeed or fail together — or a write must depend
+on a read made moments earlier — open an interactive transaction. Every store
+view handed out by `tx.store(...)` is bound to the same session: its reads
+see its own uncommitted writes, and all of its writes join one commit that
+lands when the body completes.
+
+```dart
+  // The body returns a value; the open transaction hands it back after the
+  // commit succeeds.
+  final movedId = await db.transaction<String?>((tx) async {
+    final txTasks = tx.store(Tasks.store);
+    final txNotes = tx.store(Vault.store);
+
+    await txTasks.put([Tasks.title.set('phase one')]);
+
+    // Reads inside the body see this session's uncommitted writes.
+    final draft = await txTasks.get('task00000000002');
+
+    // Savepoints nest: roll back part of the body without losing the rest.
+    final sp = await tx.savepoint();
+    await txNotes.put([Vault.label.set('tentative')]);
+    await tx.rollbackTo(sp); // the tentative write is undone
+
+    return draft?.id;
+  });
+  // `movedId` resolves only after the COMMIT succeeds — a body that throws
+  // (or a failed commit) rolls everything back and rethrows.
+  print('moved record: $movedId');
+```
+
+A **read-only** transaction guarantees its stores cannot write at all — a
+write through the session fails with a typed `ReadOnlyTxError`:
+
+```dart
+  final snapshot = await db.read((tx) async {
+    final txTasks = tx.store(Tasks.store);
+    return txTasks.count(QuerySpec(
+      where: [Tasks.done.eq(false)],
+      limit: Limits.unbounded,
+    ));
+  });
+  print('open tasks at snapshot time: $snapshot');
+```
+
+**Gotchas:**
+
+1. **A session is a scarce resource.** The write queue has one slot; an
+   interactive session holds it until the body finishes. `txSessionTtl`
+   (see the options reference below) force-rolls back a session that sits
+   silent past its idle deadline, so an abandoned transaction can never
+   wedge the queue forever.
+2. **Events are ordered after the commit.** Watchers and `changes` listeners
+   observe the transaction's writes only once the commit has landed — inside
+   the body, nobody else sees them.
+3. **The body is not a re-entrant API.** Use the session's own store views
+   (`tx.store(...)`); store views taken outside the transaction keep their
+   ordinary auto-commit behavior.
+
+### Commit batching: `groupCommitWindow`
+
+By default every mutation commits at the end of its turn. With a positive
+`groupCommitWindow`, mutations from separate turns that arrive within the
+window share **one** SQLite transaction (one fsync) — a big latency win for
+bursty writers:
+
+```dart
+  final batchedDb = await LocalPocket.open(
+    LocalPocketOptions(
+      path: 'batched.db',
+      stores: [Tasks.store],
+      // writes landing within 5 ms of each other share one commit
+      groupCommitWindow: const Duration(milliseconds: 5),
+      // idle interactive sessions are force-rolled back after 2 minutes
+      txSessionTtl: const Duration(minutes: 2),
+    ),
+  );
+  await batchedDb.close();
+```
+
+The read-your-writes guarantee is preserved: a read issued during the window
+flushes the pending group first, so you never observe stale state.
+
+### Document size limit: `maxDocumentBytes`
+
+One canonical serialized document (one record) may not exceed this size; a
+write that exceeds it fails with a `ValidationException` naming the measured
+bytes. The default is 1,900,000 bytes — tune it down when documents should
+stay small, or up when you store large JSON blobs:
+
+```dart
+  final boundedDb = await LocalPocket.open(
+    LocalPocketOptions(
+      path: 'bounded.db',
+      stores: [Tasks.store],
+      maxDocumentBytes: 64 * 1024, // reject documents over 64 KiB
+    ),
+  );
+  await boundedDb.close();
+```
+
+### Clock control: `now` (native) and `clockOffsetMs` (web)
+
+The kernel clock drives outbox timestamps, conflict detection times,
+last-seen marks, and compaction cutoffs. Two ways to control it:
+
+- **`now` (native)** injects a closure — deterministic tests, simulated
+  time. It is code, so the web open rejects it with a typed error.
+- **`clockOffsetMs`** shifts the worker's system clock by a plain integer —
+  data, so it crosses the worker boundary on web. `0` (the default) means
+  no shift.
+
+```dart
+  final clockDb = await LocalPocket.open(
+    LocalPocketOptions(
+      path: 'clock.db',
+      stores: [Tasks.store],
+      // NATIVE only — deterministic time for tests:
+      // now: () => DateTime.parse('2026-01-01T00:00:00Z'),
+      // WEB (and native): shift the effective clock by an offset:
+      clockOffsetMs: 0,
+    ),
+  );
+  await clockDb.close();
+```
+
+### Web worker bootstrap: `BootstrapOptions`
+
+On web the facade spawns a dedicated worker and hands it a SQLite WASM
+module. `bootstrap` controls where those assets come from and how long a
+round-trip may take before it fails typed instead of hanging:
+
+```dart
+  final bootstrappedDb = await LocalPocket.open(
+    LocalPocketOptions(
+      path: 'app.db',
+      stores: [Tasks.store],
+      bootstrap: BootstrapOptions(
+        // defaults work out of the box; override when bundling your own
+        // workerAssetPath: 'assets/localpocket_worker.js',
+        // wasmAssetPath: 'assets/sqlite3.wasm',
+        requestTimeout: const Duration(seconds: 30),
+        spawnTimeout: const Duration(seconds: 60),
+      ),
+    ),
+  );
+  await bootstrappedDb.close();
+```
+
+`requestTimeout` also bounds worker→page callback round-trips (the
+executable-feature channel above). `spawnTimeout` bounds the worker spawn +
+connect handshake; a wedged spawn fails the open with a
+`DatabaseWorkerTimeoutException` instead of hanging forever. One more
+platform note: `:memory:` is native-only — a web database needs a real name
+(it becomes its OPFS directory).
+
+### Storage and sync seams on native
+
+The web hosts caller storage/backends on the page (above). Natively the same
+seams are plain options:
+
+- **`blobStore`** — where attachment bytes live. Required for the `files`
+  API: ship a durable `BlobStore` subclass for production (the interface
+  sketch in "Executable features on web" shows every method); use
+  `MemoryBlobStore` only for tests and volatile data.
+- **`syncBackendFactory`** — replaces the PocketBase adapter's backend with
+  your own `SyncBackend` implementation, powering `attachPocketBaseSync`
+  against any server. This is the native twin of
+  `PageCallbacks.syncBackendFactory`; on web it stays rejected in favor of
+  the page-hosted slot.
+
+```dart
+  final nativeDb = await LocalPocket.open(
+    LocalPocketOptions(
+      path: 'native.db',
+      stores: [Tasks.store],
+      // volatile on purpose here — production ships a durable store
+      blobStore: MemoryBlobStore(),
+      // syncBackendFactory: MySyncBackendFactory(),
+    ),
+  );
+  await nativeDb.close();
+```
+
+### Runtime diagnostics: `db.capabilities`
+
+A snapshot of the engine's live facts as observed at open time — useful for
+feature detection and for asserting your storage setup in tests:
+
+```dart
+  final caps = await db.capabilities;
+  print(caps.sqliteVersion); // the engine's SQLite version
+  print(caps.hasFts5); // full-text search available?
+  print(caps.isWeb); // running on the worker runtime?
+  print(caps.storage); // where the database lives
+  print(caps.durable); // does storage survive process death?
+  print(caps.journal); // journal mode ('wal' native, 'truncate' web)
+```
+
+### Options reference
+
+Every `LocalPocketOptions` field, and where this document covers it:
+
+| Option | Documented in |
+| --- | --- |
+| `path`, `stores` | Quick start |
+| `encryption`, `databaseEncryption`, `nativeDatabaseFactory` | Encryption |
+| `pageCallbacks` | Executable features on web (above) |
+| `bootstrap` | Web worker bootstrap (above) |
+| `groupCommitWindow`, `txSessionTtl` | Commit batching / Interactive transactions (above) |
+| `maxDocumentBytes` | Document size limit (above) |
+| `now`, `clockOffsetMs` | Clock control (above) |
+| `blobStore`, `syncBackendFactory` (native) | Storage and sync seams on native (above) |
 
 ## License & Credit
 
