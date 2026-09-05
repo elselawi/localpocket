@@ -67,9 +67,10 @@ export 'src/kernel/schema.dart'
 // the resolver interface, the five built-in resolvers, and the custom
 // wrapper. The kernel's `MergePolicy` mirror and the engine internals stay
 // internal. Closure-free built-in resolvers run in the web worker as-is;
-// anything executable must be registered per store in `pageCallbacks` (see
-// UnsupportedSchemaFeatureError, which still fails a worker runtime when no
-// callback channel serves the store's executable features).
+// executable members auto-register to the page callback channel (an
+// explicit `PageCallbacks` registry overrides the defaults), and
+// UnsupportedSchemaFeatureError still fails a worker runtime when no
+// callback channel serves the store's executable features.
 export 'src/kernel/sync/merge.dart'
     show
         AppendOnlyLinesResolver,
