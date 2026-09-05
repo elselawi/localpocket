@@ -3,11 +3,10 @@
 // The Cloudflare Pages "build output directory" should be set to `_site`.
 //
 // Deploy set:
-//   - index.html            (docs page; fetches README.md at runtime)
-//   - benchmark.html        (benchmark page; fetches a baseline JSON)
-//   - README.md             (loaded by index.html)
-//   - graphics/             (logo.svg project mark + merge.png README image)
-//   - icon.jpg              (favicon)
+//   - index.html                (docs page; fetches README.md at runtime)
+//   - benchmark.html            (benchmark page; fetches benchmark JSON)
+//   - README.md                 (loaded by index.html)
+//   - graphics/                 (logo.svg, merge.png, icon.png, etc.)
 //   - benchmark/baseline/*.json (baseline data for benchmark.html)
 import { cpSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -21,11 +20,11 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "benchmark", "baseline"), { recursive: true });
 
 // Top-level pages.
-for (const file of ["index.html", "benchmark.html", "README.md", "icon.jpg"]) {
+for (const file of ["index.html", "benchmark.html", "README.md"]) {
     cpSync(join(root, file), join(out, file));
 }
 
-// Graphics: the project mark and the README's decision-flow image.
+// Graphics: the project mark, README images, and favicon.
 cpSync(join(root, "graphics"), join(out, "graphics"), { recursive: true });
 
 // Benchmark baselines (all *.json under benchmark/baseline/).

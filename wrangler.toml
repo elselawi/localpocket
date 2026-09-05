@@ -3,6 +3,3 @@
 name = "localpocket"
 compatibility_date = "2026-08-25"
 pages_build_output_dir = "_site"
-
-[build]
-command = "node tool/deploy_site.mjs"
