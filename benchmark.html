@@ -186,6 +186,12 @@
             color: #101112 !important;
         }
 
+        @media (max-width: 640px) {
+            nav .links a:not(.nav-cta) {
+                display: none;
+            }
+        }
+
         /* ---------- Hero ---------- */
         .hero {
             position: relative;
@@ -273,7 +279,7 @@
         .wrap {
             max-width: var(--max-w);
             margin: 0 auto;
-            padding: 1.5rem 1.5rem 5rem;
+            padding: 1.5rem clamp(1rem, 4vw, 1.5rem) 5rem;
         }
 
         /* ---------- Meta strip ---------- */
@@ -306,6 +312,7 @@
             font-family: var(--mono);
             font-size: 0.85rem;
             color: var(--text);
+            overflow-wrap: anywhere;
         }
 
         /* ---------- Controls ---------- */
@@ -423,6 +430,7 @@
             font-family: var(--mono);
             font-size: 0.76rem;
             color: var(--text-muted);
+            overflow-wrap: anywhere;
         }
 
         /* bars */
@@ -495,6 +503,13 @@
             white-space: nowrap;
             padding-left: calc(100% + 10px);
             pointer-events: none;
+        }
+
+        /* long bars: keep the label inside the track so it never clips */
+        .bar-value.inside {
+            padding-left: 0;
+            right: 8px;
+            color: #101112;
         }
 
         .bar-badge {
@@ -769,6 +784,7 @@
             text-align: center;
             color: var(--text-muted);
             font-size: 0.85rem;
+            overflow-wrap: anywhere;
         }
 
         footer a {
@@ -1108,6 +1124,7 @@
 
                         const valLabel = document.createElement("div");
                         valLabel.className = "bar-value";
+                        if (frac > 0.8) valLabel.classList.add("inside");
                         valLabel.textContent = fmtVal(v, metric);
                         track.appendChild(valLabel);
 
