@@ -488,20 +488,6 @@ class _AsyncResolverAdapter extends _ResolverAdapter {
       resolver.resolve(ctx);
 }
 
-class _SyncResolverAdapter extends _ResolverAdapter {
-  const _SyncResolverAdapter();
-
-  @override
-  FutureOr<MergeResult?> invoke(ConflictResolver resolver, MergeContext ctx) {
-    final value = resolver.resolve(ctx);
-    if (value is Future) {
-      throw StateError(
-          'Async ConflictResolver used in sync merge path; use merge3WayAsync');
-    }
-    return value;
-  }
-}
-
 /// Canonical merge engine with async/sync resolver adapters.
 class MergeEngine {
   const MergeEngine._();
@@ -524,31 +510,6 @@ class MergeEngine {
         policy: policy,
         adapter: const _AsyncResolverAdapter(),
       );
-
-  /// Runs the same core merge logic with sync-only custom resolvers.
-  static MergeResult runSync({
-    required Map<String, Object?> base,
-    required Map<String, Object?> local,
-    required Map<String, Object?> remote,
-    String store = '',
-    String recordId = '',
-    MergePolicy? policy,
-  }) {
-    final result = _runWithAdapter(
-      base: base,
-      local: local,
-      remote: remote,
-      store: store,
-      recordId: recordId,
-      policy: policy,
-      adapter: const _SyncResolverAdapter(),
-    );
-    if (result is Future<MergeResult>) {
-      throw StateError(
-          'Async ConflictResolver used in sync merge3Way; use merge3WayAsync');
-    }
-    return result;
-  }
 
   static FutureOr<MergeResult> _runWithAdapter({
     required Map<String, Object?> base,
@@ -872,24 +833,6 @@ FutureOr<MergeResult> merge3WayAsync({
   MergePolicy? policy,
 }) =>
     MergeEngine.runAsync(
-      base: base,
-      local: local,
-      remote: remote,
-      store: store,
-      recordId: recordId,
-      policy: policy,
-    );
-
-/// Synchronous 3-way merge wrapper (for non-async resolver chains or legacy calls).
-MergeResult merge3Way({
-  required Map<String, Object?> base,
-  required Map<String, Object?> local,
-  required Map<String, Object?> remote,
-  String store = '',
-  String recordId = '',
-  MergePolicy? policy,
-}) =>
-    MergeEngine.runSync(
       base: base,
       local: local,
       remote: remote,

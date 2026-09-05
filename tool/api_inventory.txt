@@ -393,7 +393,6 @@ lib/src/kernel/sync/merge.dart::MergeContext.MergeContext
 lib/src/kernel/sync/merge.dart::MergeContext.computeDirtyFields
 lib/src/kernel/sync/merge.dart::MergeEngine
 lib/src/kernel/sync/merge.dart::MergeEngine.runAsync
-lib/src/kernel/sync/merge.dart::MergeEngine.runSync
 lib/src/kernel/sync/merge.dart::MergeOutcome
 lib/src/kernel/sync/merge.dart::MergePolicy
 lib/src/kernel/sync/merge.dart::MergePolicy.MergePolicy
