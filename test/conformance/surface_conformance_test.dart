@@ -236,8 +236,7 @@ void main() {
             },
           );
           final pipe = _PipeSink(
-            callbackServer:
-                PageCallbackServer(stores: pageCallbacks.stores),
+            callbackServer: PageCallbackServer(stores: pageCallbacks.stores),
           );
           harness = await WorkerHarness.open(
             stores: [schema],

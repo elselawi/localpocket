@@ -309,9 +309,9 @@ void main() {
         push: (Map<String, Object?> args) => invoker.push(args),
       );
       hub = ProxyBackendHub();
-      invoker =
-          ServerCallbackInvoker(server.serve, onPush: (envelope) => hub
-              .pageCall((envelope['a'] as Map).cast<String, Object?>()));
+      invoker = ServerCallbackInvoker(server.serve,
+          onPush: (envelope) =>
+              hub.pageCall((envelope['a'] as Map).cast<String, Object?>()));
       proxyFactory = ProxySyncBackendFactory(invoker: invoker, hub: hub);
       final backend = await proxyFactory.create(
         baseUrl: Uri.parse('http://pb.test'),
@@ -322,7 +322,8 @@ void main() {
       return backend as ProxySyncBackend;
     }
 
-    test('create forwards baseUrl/stores/identity and caches the sync '
+    test(
+        'create forwards baseUrl/stores/identity and caches the sync '
         'facts', () async {
       final proxy = await create();
       expect(factory.creates.single.baseUrl, Uri.parse('http://pb.test'));
@@ -374,7 +375,8 @@ void main() {
       expect(await proxy.getRecord('missing'), isNull);
     });
 
-    test('createRecord is idempotency-transparent; a duplicate-id replay '
+    test(
+        'createRecord is idempotency-transparent; a duplicate-id replay '
         'fails with the exact typed error', () async {
       final proxy = await create();
       final backend = factory.backend;
@@ -385,13 +387,15 @@ void main() {
       // The replay (lost response) fails exactly as the page backend did.
       backend.throwOnCreate = DuplicateIdError('already there');
       await expectLater(
-        proxy.createRecord(id: 'rec1', store: 'widgets', dataJson: '{"name":"x"}'),
+        proxy.createRecord(
+            id: 'rec1', store: 'widgets', dataJson: '{"name":"x"}'),
         throwsA(isA<DuplicateIdError>()
             .having((e) => e.message, 'message', 'already there')),
       );
     });
 
-    test('updateRecord reconstructs RemoteVersionConflict with its current '
+    test(
+        'updateRecord reconstructs RemoteVersionConflict with its current '
         'record', () async {
       final proxy = await create();
       final backend = factory.backend;
@@ -408,8 +412,7 @@ void main() {
       expect(backend.updated.single.baseUpdated, 'stale');
     });
 
-    test('file uploads and downloads cross chunked and byte-equal',
-        () async {
+    test('file uploads and downloads cross chunked and byte-equal', () async {
       final proxy = await create();
       final backend = factory.backend;
       // One byte past the chunk size forces a two-chunk upload.
@@ -432,25 +435,31 @@ void main() {
       expect(record.data['received'], 1);
       expect(
         invoker.sent.map((m) => m['method']),
-        containsAllInOrder(['uploadBegin', 'uploadChunk', 'uploadChunk',
-            'updateRecordFilesStream']),
+        containsAllInOrder([
+          'uploadBegin',
+          'uploadChunk',
+          'uploadChunk',
+          'updateRecordFilesStream'
+        ]),
       );
 
       // The buffered (non-stream) upload path crosses the same way.
-      await proxy.updateRecordFiles(id: 'r1', uploads: {'bytes': [1, 2, 3]});
+      await proxy.updateRecordFiles(id: 'r1', uploads: {
+        'bytes': [1, 2, 3]
+      });
       expect(backend.receivedFiles['bytes'], [1, 2, 3]);
 
       // Download streams chunk by chunk and reassembles byte-equal.
       backend.downloadable['a.bin'] = big;
-      final Stream<List<int>> stream = await proxy
-          .downloadFile(recordId: 'r1', filename: 'a.bin', thumb: '100x100');
+      final Stream<List<int>> stream = await proxy.downloadFile(
+          recordId: 'r1', filename: 'a.bin', thumb: '100x100');
       final chunks = await stream.toList();
       expect(chunks.expand((List<int> c) => c), big);
       expect(backend.downloadCalls.single.thumb, '100x100');
       expect(
         invoker.sent.map((m) => m['method']),
-        containsAllInOrder(['downloadBegin', 'downloadChunk', 'downloadChunk',
-            'downloadEnd']),
+        containsAllInOrder(
+            ['downloadBegin', 'downloadChunk', 'downloadChunk', 'downloadEnd']),
       );
     });
 
@@ -523,13 +532,15 @@ void main() {
       addTearDown(sub.cancel);
       await pumpEventQueue();
 
-      backend.emitHint(BackendHint('widgets', BackendHintKind.changed,
+      backend.emitHint(BackendHint(
+          'widgets',
+          BackendHintKind.changed,
           RemoteRecord(
-        id: 'r9',
-        store: 'widgets',
-        updated: '2026-01-01 00:00:00.000Z',
-        data: const {'name': 'fast'},
-      )));
+            id: 'r9',
+            store: 'widgets',
+            updated: '2026-01-01 00:00:00.000Z',
+            data: const {'name': 'fast'},
+          )));
       backend.emitHint(const BackendHint('widgets', BackendHintKind.deleted));
       await pumpEventQueue();
 
@@ -544,14 +555,14 @@ void main() {
     test('the page backend reads the live token source through the channel',
         () async {
       final proxy = await create();
-      final first = await proxy.createRecord(
-          id: 'r1', store: 'widgets', dataJson: '{}');
+      final first =
+          await proxy.createRecord(id: 'r1', store: 'widgets', dataJson: '{}');
       expect(first.data['token'], 'jwt-1');
       // An auth update on the worker reaches the page backend without a
       // rebuild: the read happens per call.
       tokens.token = 'jwt-2';
-      final second = await proxy.createRecord(
-          id: 'r2', store: 'widgets', dataJson: '{}');
+      final second =
+          await proxy.createRecord(id: 'r2', store: 'widgets', dataJson: '{}');
       expect(second.data['token'], 'jwt-2');
     });
 
@@ -567,7 +578,8 @@ void main() {
       );
     });
 
-    test('page-side non-sync failures reconstruct as typed validation '
+    test(
+        'page-side non-sync failures reconstruct as typed validation '
         'errors', () async {
       await create();
       // A method for an unknown backend instance fails typed on the page.
@@ -613,8 +625,7 @@ void main() {
       expect(put.key, 'k1');
       expect(
         invoker.sent.map((m) => m['method']),
-        containsAllInOrder(
-            ['putBegin', 'putChunk', 'putChunk', 'putFinish']),
+        containsAllInOrder(['putBegin', 'putChunk', 'putChunk', 'putFinish']),
       );
     });
 
@@ -626,12 +637,12 @@ void main() {
       expect(received, big);
       expect(
         invoker.sent.map((m) => m['method']),
-        containsAllInOrder(
-            ['openBegin', 'openChunk', 'openChunk', 'openEnd']),
+        containsAllInOrder(['openBegin', 'openChunk', 'openChunk', 'openEnd']),
       );
     });
 
-    test('metadata methods round-trip with honest nulls and page '
+    test(
+        'metadata methods round-trip with honest nulls and page '
         'durability', () async {
       expect(await proxy.exists('c' * 64), isFalse);
       expect(await proxy.size('c' * 64), isNull);
@@ -666,8 +677,8 @@ void main() {
       // Missing-blob classification survives the channel.
       await expectLater(
         proxy.open('d' * 64),
-        throwsA(isA<BlobMissingError>().having(
-            (e) => e.hash, 'hash', 'd' * 64)),
+        throwsA(
+            isA<BlobMissingError>().having((e) => e.hash, 'hash', 'd' * 64)),
       );
       await expectLater(
         proxy.delete('d' * 64),
@@ -684,24 +695,26 @@ void main() {
   });
 
   group('sync_wire strict decoding', () {
-    test('every wrong-typed field fails with a ValidationException naming '
+    test(
+        'every wrong-typed field fails with a ValidationException naming '
         'the location', () {
       void expectThrows(Object? Function() f, String fragment) {
-        expect(f, throwsA(isA<ValidationException>()
-            .having((e) => e.message, 'message', contains(fragment))));
+        expect(
+            f,
+            throwsA(isA<ValidationException>()
+                .having((e) => e.message, 'message', contains(fragment))));
       }
 
       // Response envelope.
-      expectThrows(() => decodeBackendResponse('nope', where: 'w'),
-          'must be a map');
-      expectThrows(() => decodeBackendResponse({'ok': 'yes'}, where: 'w'),
-          '"ok"');
       expectThrows(
-          () => decodeBackendResponse({'ok': false}, where: 'w'),
+          () => decodeBackendResponse('nope', where: 'w'), 'must be a map');
+      expectThrows(
+          () => decodeBackendResponse({'ok': 'yes'}, where: 'w'), '"ok"');
+      expectThrows(() => decodeBackendResponse({'ok': false}, where: 'w'),
           'exactly one');
       expectThrows(
-          () => decodeBackendResponse(
-              {'ok': false, 'pageError': 5}, where: 'w'),
+          () =>
+              decodeBackendResponse({'ok': false, 'pageError': 5}, where: 'w'),
           '"pageError"');
 
       // Sync errors.
@@ -709,8 +722,8 @@ void main() {
       expectThrows(
           () => decodeSyncError({'kind': 'nope'}, where: 'w'), 'Unknown');
       expectThrows(
-          () => decodeSyncError(
-              {'kind': 'serverBusy', 'retryAfter': 5}, where: 'w'),
+          () => decodeSyncError({'kind': 'serverBusy', 'retryAfter': 5},
+              where: 'w'),
           '"retryAfter"');
       expectThrows(
           () => decodeSyncError({
@@ -720,41 +733,38 @@ void main() {
           'current');
 
       // Records and ops.
-      expectThrows(
-          () => decodeRemoteRecord({'id': 5}, where: 'w'), '"id"');
+      expectThrows(() => decodeRemoteRecord({'id': 5}, where: 'w'), '"id"');
       expect(
-          decodeRemoteRecord(
-                  <String, Object?>{
-                    'id': 'a',
-                    'store': 's',
-                    'updated': 'u',
-                    'data': <String, Object?>{},
-                  },
-                  where: 'w')
+          decodeRemoteRecord(<String, Object?>{
+            'id': 'a',
+            'store': 's',
+            'updated': 'u',
+            'data': <String, Object?>{},
+          }, where: 'w')
               .attachments,
           isEmpty,
           reason: 'attachments is absent-optional');
       expectThrows(
-          () => decodeRemoteRecord(
-              <String, Object?>{
+          () => decodeRemoteRecord(<String, Object?>{
                 'id': 'a',
                 'store': 's',
                 'updated': 'u',
                 'data': <String, Object?>{},
                 'attachments': [5],
-              },
-              where: 'w'),
+              }, where: 'w'),
           '"attachments"');
       expectThrows(() => decodePushOp({'opId': 1}, where: 'w'), '"opId"');
       expectThrows(
-          () => decodePushOp(
-              {'opId': 'o', 'store': 's', 'id': 'i', 'dataJson': 'd',
-               'upsert': 'yes'},
-              where: 'w'),
+          () => decodePushOp({
+                'opId': 'o',
+                'store': 's',
+                'id': 'i',
+                'dataJson': 'd',
+                'upsert': 'yes'
+              }, where: 'w'),
           '"upsert"');
       expectThrows(
-          () => decodePushResult(
-              {'opId': 'o', 'ok': 'x'}, where: 'w'), '"ok"');
+          () => decodePushResult({'opId': 'o', 'ok': 'x'}, where: 'w'), '"ok"');
       expectThrows(
           () => decodeBackendCapabilities({'maxPage': 'x'}, where: 'w'),
           '"maxPage"');
@@ -820,8 +830,7 @@ final List<(SyncError, Matcher)> _syncErrorCases = [
     isA<BatchFailedError>().having((e) => e.message, 'message', 'poison'),
   ),
   (
-    RemoteVersionConflict(
-        message: 'moved', current: _conflictCurrent()),
+    RemoteVersionConflict(message: 'moved', current: _conflictCurrent()),
     isA<RemoteVersionConflict>()
         .having((e) => e.message, 'message', 'moved')
         .having((e) => e.current!.id, 'current.id', 'cur1')

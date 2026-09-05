@@ -103,8 +103,7 @@ Object? decodeBackendResponse(
   if (pageError is! String) {
     throw ValidationException('"pageError" at $where must be a string.');
   }
-  throw ValidationException(
-      'The page-side $where failed: $pageError');
+  throw ValidationException('The page-side $where failed: $pageError');
 }
 
 // ---------------------------------------------------------------------------
@@ -177,10 +176,9 @@ SyncError decodeSyncError(Object? raw, {required String where}) {
     case 'batchFailed':
       return BatchFailedError(m ?? 'batch failed');
     case 'remoteVersionConflict':
-      final current =
-          map.containsKey('current') && map['current'] != null
-              ? decodeRemoteRecord(map['current'], where: '$where.current')
-              : null;
+      final current = map.containsKey('current') && map['current'] != null
+          ? decodeRemoteRecord(map['current'], where: '$where.current')
+          : null;
       return RemoteVersionConflict(
           message: m ?? 'version conflict', current: current);
     default:
@@ -207,8 +205,9 @@ Map<String, Object?> encodeRemoteRecord(RemoteRecord record) => {
 RemoteRecord decodeRemoteRecord(Object? raw, {required String where}) {
   final map = _requireMap(raw, where);
   final attachments = map['attachments'];
-  final List<Object?>? rawAttachments =
-      attachments == null ? null : _requireList(attachments, where, 'attachments');
+  final List<Object?>? rawAttachments = attachments == null
+      ? null
+      : _requireList(attachments, where, 'attachments');
   return RemoteRecord(
     id: _requireString(map['id'], where, 'id'),
     store: _requireString(map['store'], where, 'store'),
@@ -217,8 +216,11 @@ RemoteRecord decodeRemoteRecord(Object? raw, {required String where}) {
     attachments: [
       if (rawAttachments != null)
         for (final item in rawAttachments)
-          if (item is String) item else throw ValidationException(
-              '"attachments" at $where must contain only strings.'),
+          if (item is String)
+            item
+          else
+            throw ValidationException(
+                '"attachments" at $where must contain only strings.'),
     ],
   );
 }
@@ -312,10 +314,9 @@ BackendCapabilities decodeBackendCapabilities(Object? raw,
     {required String where}) {
   final map = _requireMap(raw, where);
   return BackendCapabilities(
-    batchEnabled:
-        map.containsKey('batchEnabled') && map['batchEnabled'] != null
-            ? _requireBool(map['batchEnabled'], where, 'batchEnabled')
-            : false,
+    batchEnabled: map.containsKey('batchEnabled') && map['batchEnabled'] != null
+        ? _requireBool(map['batchEnabled'], where, 'batchEnabled')
+        : false,
     maxBatch: map.containsKey('maxBatch') && map['maxBatch'] != null
         ? _requireInt(map['maxBatch'], where, 'maxBatch')
         : 25,
@@ -346,9 +347,7 @@ BackendHint decodeBackendHint(Object? raw, {required String where}) {
   return BackendHint(
     _requireString(map['store'], where, 'store'),
     BackendHintKind.values.firstWhere((k) => k.name == kind),
-    record == null
-        ? null
-        : decodeRemoteRecord(record, where: '$where.record'),
+    record == null ? null : decodeRemoteRecord(record, where: '$where.record'),
   );
 }
 

@@ -431,8 +431,11 @@ final class SyncBackendServer {
     }
     return [
       for (final item in value)
-        if (item is String) item else throw ValidationException(
-            'Backend argument "$key" must contain only strings.'),
+        if (item is String)
+          item
+        else
+          throw ValidationException(
+              'Backend argument "$key" must contain only strings.'),
     ];
   }
 
@@ -478,8 +481,8 @@ class _ChannelTokenSource implements SyncTokenSource {
       throw ValidationException(
           'The token read failed: ${response.error!.message}');
     }
-    final token = decodeBackendResponse(response.result,
-        where: 'currentToken()');
+    final token =
+        decodeBackendResponse(response.result, where: 'currentToken()');
     if (token is! String) {
       throw ValidationException('The token read answer must be a string.');
     }

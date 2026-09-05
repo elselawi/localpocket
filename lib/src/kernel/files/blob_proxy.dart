@@ -44,12 +44,15 @@ final class ProxyBlobStore extends BlobStore {
     String? key,
   }) async {
     final sessionId = 'p${_nextSession++}';
-    await _answer('putBegin', {
-      'sessionId': sessionId,
-      if (expectedSha256 != null) 'expectedSha256': expectedSha256,
-      if (expectedSize != null) 'expectedSize': expectedSize,
-      if (key != null) 'key': key,
-    }, where: 'put()');
+    await _answer(
+        'putBegin',
+        {
+          'sessionId': sessionId,
+          if (expectedSha256 != null) 'expectedSha256': expectedSha256,
+          if (expectedSize != null) 'expectedSize': expectedSize,
+          if (key != null) 'key': key,
+        },
+        where: 'put()');
     var sent = 0;
     try {
       await for (final chunk in bytes) {
@@ -58,15 +61,18 @@ final class ProxyBlobStore extends BlobStore {
               ? chunk.length
               : offset + proxyChunkBytes;
           final slice = chunk.sublist(offset, end);
-          await _answer('putChunk', {
-            'sessionId': sessionId,
-            'index': sent++,
-            'bytes': encodeBytes(slice),
-          }, where: 'put() chunk');
+          await _answer(
+              'putChunk',
+              {
+                'sessionId': sessionId,
+                'index': sent++,
+                'bytes': encodeBytes(slice),
+              },
+              where: 'put() chunk');
         }
       }
-      final raw = await _answer('putFinish', {'sessionId': sessionId},
-          where: 'put()');
+      final raw =
+          await _answer('putFinish', {'sessionId': sessionId}, where: 'put()');
       return decodeBlobString(raw, where: 'put().hash');
     } catch (e) {
       // Best-effort: the original failure propagates; this only releases
@@ -100,8 +106,7 @@ final class ProxyBlobStore extends BlobStore {
           throw ValidationException(
               '"done" at open("$hash") chunk must be a bool.');
         }
-        yield decodeBytes(map['bytes'],
-            where: 'open("$hash") chunk bytes');
+        yield decodeBytes(map['bytes'], where: 'open("$hash") chunk bytes');
       }
     } finally {
       // Releases the page's stream iterator; a lost release leaks one
@@ -132,9 +137,12 @@ final class ProxyBlobStore extends BlobStore {
 
   @override
   Future<int> cleanTmp({Duration olderThan = const Duration(hours: 24)}) async {
-    final raw = await _answer('cleanTmp', {
-      'olderThanMs': olderThan.inMilliseconds,
-    }, where: 'cleanTmp()');
+    final raw = await _answer(
+        'cleanTmp',
+        {
+          'olderThanMs': olderThan.inMilliseconds,
+        },
+        where: 'cleanTmp()');
     return decodeBlobInt(raw, where: 'cleanTmp()');
   }
 
@@ -166,7 +174,8 @@ final class ProxyBlobStore extends BlobStore {
       'method': method,
       ...args,
     });
-    return decodeBackendResponse(raw, where: where, decodeError: decodeBlobError);
+    return decodeBackendResponse(raw,
+        where: where, decodeError: decodeBlobError);
   }
 }
 

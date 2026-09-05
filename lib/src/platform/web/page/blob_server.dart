@@ -28,6 +28,7 @@ final class BlobStoreServer {
   final Map<String, _PutSession> _puts = {};
   final Map<String, StreamIterator<List<int>>> _opens = {};
   int _nextSessionId = 0;
+
   /// Whether [channel] belongs to this server (the open's dispatch routes
   /// by channel before calling [serve]).
   bool handles(String channel) => channel == callbackChannelBlobStore;
@@ -96,8 +97,7 @@ final class BlobStoreServer {
         if (olderThanMs is! int) {
           throw ValidationException('"olderThanMs" must be an int.');
         }
-        return _store.cleanTmp(
-            olderThan: Duration(milliseconds: olderThanMs));
+        return _store.cleanTmp(olderThan: Duration(milliseconds: olderThanMs));
       case 'listHashes':
         return await _store.listHashes();
       case 'modifiedAt':
@@ -135,8 +135,7 @@ final class BlobStoreServer {
       throw ValidationException('"index" must be an int.');
     }
     if (index != session.nextIndex) {
-      throw ValidationException(
-          'Chunk index $index arrived out of order '
+      throw ValidationException('Chunk index $index arrived out of order '
           '(expected ${session.nextIndex}).');
     }
     session.builder.add(decodeBytes(args['bytes'], where: 'putChunk bytes'));

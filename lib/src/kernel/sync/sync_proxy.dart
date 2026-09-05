@@ -76,8 +76,8 @@ final class ProxyBackendHub {
     }
     switch (call) {
       case 'hint':
-        backend.acceptHint(
-            decodeBackendHint(args['hint'], where: 'backend hint'));
+        backend
+            .acceptHint(decodeBackendHint(args['hint'], where: 'backend hint'));
         return const {'ok': true};
       case 'currentToken':
         try {
@@ -155,20 +155,23 @@ final class ProxySyncBackend implements SyncBackend {
     String? idPrefix,
     int perPage = 200,
   }) async {
-    final result = await _answer('listChanges', {
-      'store': store,
-      if (fromUpdated != null) 'fromUpdated': fromUpdated,
-      if (fromId != null) 'fromId': fromId,
-      if (idPrefix != null) 'idPrefix': idPrefix,
-      'perPage': perPage,
-    }, where: 'listChanges("$store")');
+    final result = await _answer(
+        'listChanges',
+        {
+          'store': store,
+          if (fromUpdated != null) 'fromUpdated': fromUpdated,
+          if (fromId != null) 'fromId': fromId,
+          if (idPrefix != null) 'idPrefix': idPrefix,
+          'perPage': perPage,
+        },
+        where: 'listChanges("$store")');
     return decodeRemoteRecordList(result, where: 'listChanges("$store")');
   }
 
   @override
   Future<RemoteRecord?> getRecord(String id) async {
-    final result = await _answer('getRecord', {'id': id},
-        where: 'getRecord("$id")');
+    final result =
+        await _answer('getRecord', {'id': id}, where: 'getRecord("$id")');
     // Absent result = the record does not exist remotely (the page encodes
     // null explicitly); a present record decodes strictly.
     return result == null
@@ -182,11 +185,14 @@ final class ProxySyncBackend implements SyncBackend {
     required String store,
     required String dataJson,
   }) async {
-    final result = await _answer('createRecord', {
-      'id': id,
-      'store': store,
-      'dataJson': dataJson,
-    }, where: 'createRecord("$id")');
+    final result = await _answer(
+        'createRecord',
+        {
+          'id': id,
+          'store': store,
+          'dataJson': dataJson,
+        },
+        where: 'createRecord("$id")');
     return decodeRemoteRecord(result, where: 'createRecord("$id")');
   }
 
@@ -196,11 +202,14 @@ final class ProxySyncBackend implements SyncBackend {
     required String dataJson,
     String? baseUpdated,
   }) async {
-    final result = await _answer('updateRecord', {
-      'id': id,
-      'dataJson': dataJson,
-      if (baseUpdated != null) 'baseUpdated': baseUpdated,
-    }, where: 'updateRecord("$id")');
+    final result = await _answer(
+        'updateRecord',
+        {
+          'id': id,
+          'dataJson': dataJson,
+          if (baseUpdated != null) 'baseUpdated': baseUpdated,
+        },
+        where: 'updateRecord("$id")');
     return decodeRemoteRecord(result, where: 'updateRecord("$id")');
   }
 
@@ -218,19 +227,20 @@ final class ProxySyncBackend implements SyncBackend {
             files: [
               for (final e in uploads.entries)
                 _UploadDescriptor(
-                    field: e.key,
-                    filename: e.key,
-                    bytes: e.value),
+                    field: e.key, filename: e.key, bytes: e.value),
             ],
           );
     try {
-      final result = await _answer('updateRecordFiles', {
-        'id': id,
-        if (dataJson != null) 'dataJson': dataJson,
-        if (session != null) 'session': session,
-        if (keepNames != null) 'keepNames': keepNames,
-        if (removeNames != null) 'removeNames': removeNames,
-      }, where: 'updateRecordFiles("$id")');
+      final result = await _answer(
+          'updateRecordFiles',
+          {
+            'id': id,
+            if (dataJson != null) 'dataJson': dataJson,
+            if (session != null) 'session': session,
+            if (keepNames != null) 'keepNames': keepNames,
+            if (removeNames != null) 'removeNames': removeNames,
+          },
+          where: 'updateRecordFiles("$id")');
       return decodeRemoteRecord(result, where: 'updateRecordFiles("$id")');
     } catch (e) {
       await _abortUpload(session);
@@ -264,14 +274,18 @@ final class ProxySyncBackend implements SyncBackend {
       session = await _uploadSession(files: descriptors);
     }
     try {
-      final result = await _answer('updateRecordFilesStream', {
-        'id': id,
-        if (dataJson != null) 'dataJson': dataJson,
-        if (session != null) 'session': session,
-        if (keepNames != null) 'keepNames': keepNames,
-        if (removeNames != null) 'removeNames': removeNames,
-      }, where: 'updateRecordFilesStream("$id")');
-      return decodeRemoteRecord(result, where: 'updateRecordFilesStream("$id")');
+      final result = await _answer(
+          'updateRecordFilesStream',
+          {
+            'id': id,
+            if (dataJson != null) 'dataJson': dataJson,
+            if (session != null) 'session': session,
+            if (keepNames != null) 'keepNames': keepNames,
+            if (removeNames != null) 'removeNames': removeNames,
+          },
+          where: 'updateRecordFilesStream("$id")');
+      return decodeRemoteRecord(result,
+          where: 'updateRecordFilesStream("$id")');
     } catch (e) {
       await _abortUpload(session);
       rethrow;
@@ -284,14 +298,17 @@ final class ProxySyncBackend implements SyncBackend {
     required String filename,
     String? thumb,
   }) async {
-    final result = await _answer('downloadBegin', {
-      'recordId': recordId,
-      'filename': filename,
-      if (thumb != null) 'thumb': thumb,
-    }, where: 'downloadFile("$recordId", "$filename")');
+    final result = await _answer(
+        'downloadBegin',
+        {
+          'recordId': recordId,
+          'filename': filename,
+          if (thumb != null) 'thumb': thumb,
+        },
+        where: 'downloadFile("$recordId", "$filename")');
     final map = _requireMapAt(result, 'downloadFile("$recordId", "$filename")');
-    final sessionId = _stringAt(map['sessionId'],
-        'downloadFile("$recordId", "$filename").sessionId');
+    final sessionId = _stringAt(
+        map['sessionId'], 'downloadFile("$recordId", "$filename").sessionId');
     return _downloadChunks(recordId, sessionId);
   }
 
@@ -320,9 +337,12 @@ final class ProxySyncBackend implements SyncBackend {
 
   @override
   Future<List<PushResult>> pushBatch(List<PushOp> ops) async {
-    final result = await _answer('pushBatch', {
-      'ops': [for (final op in ops) encodePushOp(op)],
-    }, where: 'pushBatch');
+    final result = await _answer(
+        'pushBatch',
+        {
+          'ops': [for (final op in ops) encodePushOp(op)],
+        },
+        where: 'pushBatch');
     return decodePushResultList(result, where: 'pushBatch');
   }
 
@@ -342,23 +362,33 @@ final class ProxySyncBackend implements SyncBackend {
   Future<String> _uploadSession(
       {required List<_UploadDescriptor> files}) async {
     final sessionId = 'u$backendId-${_nextSession++}';
-    await _answer('uploadBegin', {
-      'sessionId': sessionId,
-      'files': [
-        for (final f in files)
-          {'field': f.field, 'filename': f.filename, 'length': f.bytes.length},
-      ],
-    }, where: 'uploadBegin');
+    await _answer(
+        'uploadBegin',
+        {
+          'sessionId': sessionId,
+          'files': [
+            for (final f in files)
+              {
+                'field': f.field,
+                'filename': f.filename,
+                'length': f.bytes.length
+              },
+          ],
+        },
+        where: 'uploadBegin');
     for (final f in files) {
       for (var offset = 0; offset < f.bytes.length; offset += proxyChunkBytes) {
         final end = offset + proxyChunkBytes > f.bytes.length
             ? f.bytes.length
             : offset + proxyChunkBytes;
-        await _answer('uploadChunk', {
-          'sessionId': sessionId,
-          'field': f.field,
-          'bytes': encodeBytes(f.bytes.sublist(offset, end)),
-        }, where: 'uploadChunk("${f.field}")');
+        await _answer(
+            'uploadChunk',
+            {
+              'sessionId': sessionId,
+              'field': f.field,
+              'bytes': encodeBytes(f.bytes.sublist(offset, end)),
+            },
+            where: 'uploadChunk("${f.field}")');
       }
     }
     return sessionId;
@@ -410,7 +440,8 @@ class _UploadDescriptor {
 final class ProxySyncBackendFactory implements SyncBackendFactory {
   /// Creates a proxy factory over [invoker]; created backends register in
   /// [hub] so the worker engine can route page pushes to them.
-  ProxySyncBackendFactory({required CallbackInvoker invoker, required ProxyBackendHub hub})
+  ProxySyncBackendFactory(
+      {required CallbackInvoker invoker, required ProxyBackendHub hub})
       : _invoker = invoker,
         _hub = hub;
 
@@ -432,8 +463,7 @@ final class ProxySyncBackendFactory implements SyncBackendFactory {
       'identity': identity,
       'stores': stores,
     });
-    final result =
-        decodeBackendResponse(raw, where: 'sync backend create()');
+    final result = decodeBackendResponse(raw, where: 'sync backend create()');
     final map = _requireMapAt(result, 'sync backend create()');
     final backend = ProxySyncBackend._(
       backendId: backendId,

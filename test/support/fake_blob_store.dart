@@ -99,8 +99,7 @@ class ScriptedBlobStore extends BlobStore {
 List<Uint8List> _slices(List<int> bytes, int size) {
   final out = <Uint8List>[];
   for (var offset = 0; offset < bytes.length; offset += size) {
-    final end =
-        offset + size > bytes.length ? bytes.length : offset + size;
+    final end = offset + size > bytes.length ? bytes.length : offset + size;
     out.add(Uint8List.fromList(bytes.sublist(offset, end)));
   }
   return out;

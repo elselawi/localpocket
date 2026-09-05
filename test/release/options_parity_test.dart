@@ -162,7 +162,8 @@ void main() async {
       final classStart =
           pageCallbacksSource.indexOf('final class PageCallbacks');
       expect(classStart, greaterThanOrEqualTo(0),
-          reason: 'PageCallbacks must exist in lib/src/kernel/page_callbacks.dart');
+          reason:
+              'PageCallbacks must exist in lib/src/kernel/page_callbacks.dart');
       final ctorStart =
           pageCallbacksSource.indexOf('const PageCallbacks(', classStart);
       expect(ctorStart, greaterThanOrEqualTo(0));
@@ -183,9 +184,10 @@ void main() async {
     };
 
     test('every PageCallbacks constructor field has a parity entry', () {
-      final unclassified =
-          containerFields().where((f) => !containerSlots.containsKey(f)).toList()
-            ..sort();
+      final unclassified = containerFields()
+          .where((f) => !containerSlots.containsKey(f))
+          .toList()
+        ..sort();
       expect(unclassified, isEmpty,
           reason: 'new PageCallbacks slots must be classified in '
               'test/release/options_parity_test.dart: $unclassified');

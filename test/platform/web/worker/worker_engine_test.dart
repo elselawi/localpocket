@@ -1325,11 +1325,9 @@ void main() {
         ),
       ));
       await waitUntil(() async =>
-          (await h.get('widgets', 'ccccccccccccccc'))?['name'] ==
-              'fast-path');
+          (await h.get('widgets', 'ccccccccccccccc'))?['name'] == 'fast-path');
       expect(
-        h.pageToWorkerRequests
-            .where((m) => m['op'] == WireOp.backendCall),
+        h.pageToWorkerRequests.where((m) => m['op'] == WireOp.backendCall),
         isNotEmpty,
       );
 
@@ -1337,7 +1335,8 @@ void main() {
       expect(pageFactory.backend.disposed, isTrue);
     });
 
-    test('the full chain reaches a wire server: kernel → proxy → page '
+    test(
+        'the full chain reaches a wire server: kernel → proxy → page '
         'PocketBase backend → HTTP', () async {
       final server = await MockPbServer().start();
       addTearDown(server.stop);
@@ -1417,14 +1416,12 @@ void main() {
       final payload = utf8.encode('proxy blob payload');
       final session = await beginContractUpload(h, id, payload.length);
       await h.runtime.send(contract.FileChunkRequest(
-          session: session,
-          chunk: Uint8List.fromList(payload.sublist(0, 7))));
+          session: session, chunk: Uint8List.fromList(payload.sublist(0, 7))));
       await h.runtime.send(contract.FileChunkRequest(
-          session: session,
-          chunk: Uint8List.fromList(payload.sublist(7))));
-      final ref = (await h.runtime
-              .send(contract.FileFinishRequest(session: session)))
-          .ref!;
+          session: session, chunk: Uint8List.fromList(payload.sublist(7))));
+      final ref =
+          (await h.runtime.send(contract.FileFinishRequest(session: session)))
+              .ref!;
       expect(pageStore.blobs[ref.hash], payload,
           reason: 'the page store must have received the exact bytes');
       expect(ref.state, 'pending_upload');
@@ -1432,8 +1429,8 @@ void main() {
       // Reads stream back through ProxyBlobStore.open as chunk events.
       final opened = await h.runtime.send(contract.FileOpenRequest(
           store: 'widgets', recordId: id, refId: ref.refId));
-      await waitUntil(() async => contractChunkEvents(h, opened.stream)
-          .isNotEmpty);
+      await waitUntil(
+          () async => contractChunkEvents(h, opened.stream).isNotEmpty);
       final events = contractChunkEvents(h, opened.stream);
       expect(
         utf8.decode(events.expand((e) => e.chunk).toList()),
@@ -1447,7 +1444,8 @@ void main() {
         pageCallbacks: PageCallbacks(blobStore: pageStore),
       );
       addTearDown(h.close);
-      final status = await h.runtime.send(const contract.StorageStatusRequest());
+      final status =
+          await h.runtime.send(const contract.StorageStatusRequest());
       expect(status.durable, isTrue,
           reason: 'isDurable must reflect the page store, not the worker');
 

@@ -260,8 +260,7 @@ void main() {
           StoreMigration(toVersion: 3, transform: (row) => row),
         ],
       );
-      final callbacks =
-          resolvePageCallbacks([schema], null).stores['widgets']!;
+      final callbacks = resolvePageCallbacks([schema], null).stores['widgets']!;
       expect(callbacks.resolvers.keys.toList(),
           ['widgets:collectionResolver', 'widgets:field:qty']);
       expect(
@@ -282,8 +281,7 @@ void main() {
           fieldOverrides: {'qty': const CounterResolver(min: 0)},
         ),
       );
-      final callbacks =
-          resolvePageCallbacks([schema], null).stores['widgets']!;
+      final callbacks = resolvePageCallbacks([schema], null).stores['widgets']!;
       expect(callbacks.resolvers, isEmpty);
     });
 
@@ -391,10 +389,8 @@ void main() {
 
     test('an explicit store outside the open call fails the open', () {
       expect(
-        () => resolvePageCallbacks(
-            [_schema()],
-            const PageCallbacks(
-                stores: {'ghosts': StorePageCallbacks()})),
+        () => resolvePageCallbacks([_schema()],
+            const PageCallbacks(stores: {'ghosts': StorePageCallbacks()})),
         throwsA(isA<ValidationException>()
             .having((e) => e.message, 'message', contains('ghosts'))),
       );

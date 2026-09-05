@@ -106,8 +106,11 @@ List<String> decodeBlobHashList(Object? raw, {required String where}) {
   }
   return [
     for (final item in raw)
-      if (item is String) item else throw ValidationException(
-          'The result at $where must contain only strings.'),
+      if (item is String)
+        item
+      else
+        throw ValidationException(
+            'The result at $where must contain only strings.'),
   ];
 }
 

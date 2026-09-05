@@ -14,7 +14,8 @@ class FakeSyncBackend implements SyncBackend {
     this.scopeId = 'fake-scope',
     BackendCapabilities? capabilities,
   }) : capabilities = capabilities ??
-            const BackendCapabilities(batchEnabled: true, maxBatch: 10, maxPage: 300);
+            const BackendCapabilities(
+                batchEnabled: true, maxBatch: 10, maxPage: 300);
 
   @override
   BackendCapabilities capabilities;
@@ -29,8 +30,14 @@ class FakeSyncBackend implements SyncBackend {
   int prepareCalls = 0;
   bool disposed = false;
 
-  final List<({String store, String? fromUpdated, String? fromId, String? idPrefix, int perPage})>
-      listChangesCalls = [];
+  final List<
+      ({
+        String store,
+        String? fromUpdated,
+        String? fromId,
+        String? idPrefix,
+        int perPage
+      })> listChangesCalls = [];
   List<RemoteRecord> changes = const [];
 
   final List<({String id, String store, String dataJson})> created = [];
@@ -166,8 +173,7 @@ class FakeSyncBackend implements SyncBackend {
       await for (final chunk in stream) {
         builder.addAll(chunk);
       }
-      receivedStreams[e.key] =
-          (filename: e.value.filename, bytes: builder);
+      receivedStreams[e.key] = (filename: e.value.filename, bytes: builder);
     }
     return _filesRecord(id, dataJson);
   }

@@ -177,8 +177,7 @@ final class LocalPocketDatabaseController extends DatabaseController {
         // factory; with it, the page-hosted backend is reached through the
         // proxy (kernel-pure, over the callback channel).
         syncBackendFactory: syncProxy
-            ? ProxySyncBackendFactory(
-                invoker: callbackBridge, hub: backendHub!)
+            ? ProxySyncBackendFactory(invoker: callbackBridge, hub: backendHub!)
             : const PocketBaseSyncBackendFactory(),
         callbackInvoker: callbackBridge,
       );

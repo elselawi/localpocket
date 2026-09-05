@@ -10,8 +10,7 @@ import 'package:localpocket/src/kernel/kernel_context.dart'
     show defaultTxSessionTtl;
 import 'package:localpocket/src/kernel/page_callbacks.dart'
     show PageCallbacks, attachStorePolicy;
-import 'package:localpocket/src/kernel/errors.dart'
-    show ValidationException;
+import 'package:localpocket/src/kernel/errors.dart' show ValidationException;
 import 'package:localpocket/src/kernel/files/blob_proxy.dart'
     show ProxyBlobStore;
 import 'package:localpocket/src/kernel/schema.dart';
@@ -187,8 +186,7 @@ class WorkerHarness {
       database: adapter,
       stores: attachedStores,
       platform: platform,
-      blobStore:
-          effectiveBlobStore ?? MemoryBlobStore(),
+      blobStore: effectiveBlobStore ?? MemoryBlobStore(),
       fieldCipher: fieldCipher,
       now: now,
       testHooks: testHooks,
@@ -197,8 +195,7 @@ class WorkerHarness {
       txSessionTtl: txSessionTtl ?? defaultTxSessionTtl,
       syncBackendFactory: backendHub == null
           ? const PocketBaseSyncBackendFactory()
-          : ProxySyncBackendFactory(
-              invoker: callbackBridge!, hub: backendHub),
+          : ProxySyncBackendFactory(invoker: callbackBridge!, hub: backendHub),
       callbackInvoker: callbackBridge,
     );
     final harness = WorkerHarness._(
