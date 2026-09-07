@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'find_repo_root.dart';
 
-/// Compile-fail corpus runner (plan §13.4).
+/// Compile-fail corpus runner
 ///
 /// The corpus lives in `test/compile_fail/`: standalone Dart files that MUST
 /// fail to compile, each annotated with `// expect-error: <analyzer code>`
