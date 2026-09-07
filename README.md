@@ -706,12 +706,21 @@ either all of them or none.
    arithmetic. Every operator (`between`, `startsWith`, `inValues`, ...) may
    appear anywhere inside the tree.
 
-3. **"Field is empty" is `.isNull()` (or `.eq(null)`).** A raw SQL `= NULL`
+3. **Cross-store conditions are compile-time errors.** `Cond<S>` and every
+   field descriptor carry their owning store as a phantom type, so a
+   `Tasks.done.eq(false)` condition is a `Cond<Tasks>`, not a generic
+   predicate you can mix into a `Notes` query. The suite includes a compile-fail
+   fixture for this exact case; a wrong-store condition is rejected before the
+   query reaches the runtime. There is still a defensive owner check when the
+   predicate is lowered to SQL, but that is the backstop for a cast that defeats
+   the type system, not the normal path.
+
+4. **"Field is empty" is `.isNull()` (or `.eq(null)`).** A raw SQL `= NULL`
    comparison never matches anything, so the typed layer rewrites `eq(null)`
    into a proper IS NULL check for you. `.isNull()` exists on optional fields
    only — required fields can never be null.
 
-4. **Pagination never re-states slots in-session; persisted cursors do.**
+5. **Pagination never re-states slots in-session; persisted cursors do.**
    A page captures the exact `where`/`orderBy`/`select`/scope it was fetched
    with — `next()` and `prev()` re-run it verbatim, so a shape mismatch
    cannot happen by construction, and `limit` stays fixed for the chain.
@@ -723,27 +732,27 @@ either all of them or none.
    a cursor minted by a different shape (or a corrupted one) throws
    `StaleCursorError` instead of returning a wrong page.
 
-5. **`get` is the odd one out.** It returns the row even when it is archived
+6. **`get` is the odd one out.** It returns the row even when it is archived
    or hidden (every other read excludes them by default), and a missing id
    gives `null` instead of a throw — unlike `patch`, `archive` and `restore`.
 
-6. **Aggregates take number fields only.** `sum`/`min`/`max`/`avg` accept
+7. **Aggregates take number fields only.** `sum`/`min`/`max`/`avg` accept
    `integer`, `real` and `date` descriptors; anything else won't compile.
    They return `null` when no rows match — there is nothing to add up.
 
-7. **`distinct` quietly caps at 1000 values** unless you pass `limit:` yourself.
+8. **`distinct` quietly caps at 1000 values** unless you pass `limit:` yourself.
    `countDistinct` has no cap — it counts in the database.
 
-8. **A projected row only carries what you selected.** After `select:`,
+9. **A projected row only carries what you selected.** After `select:`,
    reading any other field throws — including `row.id` — so list every field
    the call site needs. Projections are for hot paths, not everyday reads.
 
-9. **The same slots repeat on every read.** `where`, `orderBy`, `limit`,
-   `includeArchived:` and `includeHidden:` mean the same thing across
-   `query`, `ids`, `count`, `distinct`, the aggregates and
-   `watch` — build a condition once and reuse it on all of them (`count`
-   simply has no ordering or paging slots). Watches are live snapshots and
-   have no pagination surface at all.
+10. **The same slots repeat on every read.** `where`, `orderBy`, `limit`,
+    `includeArchived:` and `includeHidden:` mean the same thing across
+    `query`, `ids`, `count`, `distinct`, the aggregates and
+    `watch` — build a condition once and reuse it on all of them (`count`
+    simply has no ordering or paging slots). Watches are live snapshots and
+    have no pagination surface at all.
 
 ## Reactive Queries
 
