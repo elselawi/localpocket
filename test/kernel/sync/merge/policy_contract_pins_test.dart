@@ -47,7 +47,8 @@ void main() {
       expect(res.needsReview, isFalse);
     });
 
-    test('MergeContext exposes dirtyLocal and dirtyRemote to resolvers', () async {
+    test('MergeContext exposes dirtyLocal and dirtyRemote to resolvers',
+        () async {
       final base = {
         'name': 'n',
         'meta': {'a': 1, 'b': 2},
@@ -98,7 +99,8 @@ void main() {
       expect(seenRecordId, 'rec-1');
     });
 
-    test('a field-aware collection resolver keeps local-only changes', () async {
+    test('a field-aware collection resolver keeps local-only changes',
+        () async {
       // The recommended pattern for a collection resolver that means "remote
       // wins conflicts": consult `ctx.dirtyLocal`/`ctx.dirtyRemote` and only
       // let remote win fields it actually changed.
@@ -197,7 +199,8 @@ void main() {
           reason: 'the nested local-only change survives');
     });
 
-    test('a dotted override beats the top-level policy at its exact key', () async {
+    test('a dotted override beats the top-level policy at its exact key',
+        () async {
       // Both nested keys conflict; the dotted override flips `name` back to
       // local while `city` still follows the top-level remote policy.
       final res = await merge3WayAsync(
@@ -221,7 +224,8 @@ void main() {
 
     test('without a policy nested maps merge per-key (remote wins per key)',
         () async {
-      final res = await merge3WayAsync(base: base, local: local, remote: remote);
+      final res =
+          await merge3WayAsync(base: base, local: local, remote: remote);
 
       final meta = res.merged['meta']! as Map<String, Object?>;
       expect(meta['name'], 'nR', reason: 'both-changed nested key -> remote');
@@ -264,7 +268,8 @@ void main() {
           reason: 'deletion wins over a re-add of the same value');
     });
 
-    test('a new element equal to the removed one is treated as a re-add', () async {
+    test('a new element equal to the removed one is treated as a re-add',
+        () async {
       // Remote re-adds `a` AND adds a genuinely new `b`. `a` is treated as
       // the removed original (value identity — no tombstone), so only `b`
       // (a true addition) survives.
@@ -322,7 +327,8 @@ void main() {
       expect(m, contains('y'));
     });
 
-    test('a one-sided duplicate survives verbatim (no resolver pass)', () async {
+    test('a one-sided duplicate survives verbatim (no resolver pass)',
+        () async {
       // remote == base, so the engine\'s r == b branch takes the local list
       // wholesale — the set-union resolver never runs and the duplicate 2.0
       // is NOT collapsed into 2.
@@ -356,7 +362,8 @@ void main() {
           reason: 'identical events from both sides are one element');
     });
 
-    test('the resolver dedups an identical event across all three sides', () async {
+    test('the resolver dedups an identical event across all three sides',
+        () async {
       // A genuine two-sided change (local and remote both add their own
       // event) runs the resolver, which collapses the repeated 'approved'
       // present in base, local, AND remote into a single element.
@@ -367,11 +374,13 @@ void main() {
               'identical event across base, local, and remote');
     });
 
-    test('a one-sided duplicate survives verbatim (no resolver pass)', () async {
+    test('a one-sided duplicate survives verbatim (no resolver pass)',
+        () async {
       // remote == base, so the engine\'s r == b branch takes the local list
       // wholesale — the append-only resolver never runs and the local
       // duplicate survives.
-      final m = await mergeLog(['approved'], ['approved', 'approved'], ['approved']);
+      final m =
+          await mergeLog(['approved'], ['approved', 'approved'], ['approved']);
       expect(m, ['approved', 'approved'],
           reason: 'content dedup only applies when the resolver actually '
               'runs, i.e. on a genuine two-sided change');
@@ -395,7 +404,8 @@ void main() {
               'joining');
     });
 
-    test('embedded newlines are split into separate lines and deduped', () async {
+    test('embedded newlines are split into separate lines and deduped',
+        () async {
       // A multi-line addition is line-split; the resulting lines dedup
       // against the existing base lines.
       expect(await mergeNotes('a', 'a\nb\nc', ''), 'a\nb\nc',
@@ -404,7 +414,8 @@ void main() {
       expect(await mergeNotes('a\nb', 'x\ny', ''), 'a\nb\nx\ny');
     });
 
-    test('string mode splits lines while list mode keeps items atomic', () async {
+    test('string mode splits lines while list mode keeps items atomic',
+        () async {
       // Same content, two modes: a string value 'x\ny' becomes two lines,
       // whereas a list item 'x\ny' is a single atomic element that is never
       // split.
@@ -420,7 +431,7 @@ void main() {
         policy: const MergePolicy(
             fieldOverrides: {'log': AppendOnlyListResolver()}),
       );
-          final m = (res.merged['log'] as List).cast<Object?>();
+      final m = (res.merged['log'] as List).cast<Object?>();
       expect(m, ['x\ny'],
           reason: 'list mode appends the item atomically — the embedded '
               'newline stays inside the element');

@@ -86,7 +86,8 @@ void main() {
         'another_unknown': 'from_server',
       };
 
-      final res = await merge3WayAsync(base: base, local: local, remote: remote);
+      final res =
+          await merge3WayAsync(base: base, local: local, remote: remote);
 
       // Local changed 'name'
       expect(res.merged['name'], 'local_edit');
