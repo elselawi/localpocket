@@ -4,18 +4,17 @@
   <img src="graphics/logo.svg" alt="LocalPocket" width="180">
 </p>
 
-- **A database**: SQLite FFI with an in-memory LRU point-read cache.
-- **Strongly typed**: Schema-first strictly typed API.
-- **Cross Platform**: One API on mobile/desktop/web — 0 boilerplate.
-- **Durable**: ACID transactions via interactive `Transaction` objects, WAL mode (native), pluggable crash-safety levels.
-- **Reactive**: Queries and single-record reads are watchable streams.
-- **Synchronized**: Two-way sync with PocketBase over REST + SSE realtime.
-- **Search**: Full-text search with SQLite FTS5.
-- **Encrypted**: Built-in field-level AES-256-GCM encryption on every platform; whole-database encryption on native platforms.
-- **Durable File Blobs**: content-addressed attachment storage with dedup and background lanes.
-- **Battle-tested**: ~2700 unit/integration tests, 100+ live-server e2e scenarios, 45+ browser matrix runs on Chromium/Firefox/WebKit.
-- **Migrations**: versioned, forward-only ledgers with safe destructive rebuilds and backups.
-- **Conflict-aware**: deterministic 3-way merge engine with field-level resolvers.
+- **Fast & Embedded**: Powered by SQLite with built-in in-memory caching.
+- **Strongly Typed**: Schema-first design with complete compile-time type safety.
+- **Cross-Platform**: Unified API across mobile, desktop, and web with zero boilerplate.
+- **Durable**: Full ACID transactions via interactive `Transaction` objects and crash resilience.
+- **Reactive**: Watchable streams for queries and store changes.
+- **Synchronized**: Seamless two-way sync with PocketBase and realtime SSE updates.
+- **Search**: Built-in full-text search with SQLite FTS5.
+- **Encrypted**: Field-level AES-256-GCM encryption everywhere, plus whole-database encryption on native.
+- **Binary Attachments**: File storage with automatic deduplication and background streaming.
+- **Schema Migrations**: Declarative schema evolution with automatic backfills and safe rebuilds.
+- **Conflict-aware**: Deterministic 3-way conflict resolution with field-level resolvers.
 
 ---
 
@@ -41,19 +40,9 @@ enum TaskStatus { todo, inProgress, done }
 
 final class Tasks extends StoreDef<Tasks> {
   // ----- start with defining store name ----- //
-  // define store name and schema version
+  // Singleton pattern ensures a single, stable store instance across your app:
   Tasks._private() : super(name: 'tasks', version: 1);
-  // instantiate store as a static member
   static final Tasks store = Tasks._private();
-
-  // Note:
-  // Please note how we are constructing the class using
-  // a private constructor (_private), accessed from static public property.
-  // One Tasks per app: the private constructor means no code outside this
-  // file can create a second instance. LocalPocket identifies stores by
-  // identity, so a look-alike definition would compile but be rejected with
-  // a store-mismatch error at open time — the private ctor makes that
-  // failure impossible instead of just unlikely.
 
   // ----- define the schema per field ----- //
   static final title = store.schema
@@ -84,10 +73,8 @@ final class Tasks extends StoreDef<Tasks> {
   // please refer to the table below for more field types
 
   // ----- define the ordered registry ----- //
-  // declares which fields exist and in
-  // what order they become columns
-  // (`fields` is the ordered registry; each descriptor is built by the
-  // store's `schema`, a `Fields<S>` factory)
+  // Declares which fields exist in this store.
+  // Each field descriptor is created via the store's `schema` (`Fields<Tasks>`).
   @override
   get fields => [title, status, priority, done, dueAt];
 
@@ -141,11 +128,10 @@ final class Tasks extends StoreDef<Tasks> {
 
 #### Notes on field types:
 
-- Enums are stored as strings. Unmapped values use `Enum.name`; the optional `wire` map pins stable alternatives such as `in_progress`.
-- **`schema.date` vs `schema.dateTime`** — Both store the same epoch-**milliseconds** integer in an `INTEGER` column; only the boundary codec differs. `schema.date` is a pass-through adapter typed as `int?` (raw epoch ms, no conversion — you manage timezones) and supports numeric aggregates. `schema.dateTime` is typed as `DateTime?` and is **UTC-pinned in both directions**: local inputs are converted to UTC before storage and decoded values always have `isUtc == true`. The two adapters share the same column and are interchangeable on the wire. Prefer `schema.dateTime` for timestamps; use `schema.date` when you already hold epoch-ms integers or want `sum`/`min`/`max` over a date column.
-- **`schema.integer` vs `schema.real`** — `schema.integer` is typed `int?` and stored as `INTEGER`; `schema.real` is typed `num?` (not `double` — Dart `int` values are accepted) and stored as `REAL`. Both support `.req()`, comparison operators, and numeric aggregates. Use `schema.integer` for counts/ids/whole numbers and `schema.real` for fractional measurements and percentages.
-- **`schema.ref`** — Stores a **record id** (`String?`) pointing at a record in another store. There is no `.req()` (always optional) and no join/fetch API: read the id and fetch the target row from its own store.
-- `enforceFk: true` adds a SQLite `REFERENCES` constraint on the column; ref fields not covered by a declared index are auto-indexed for lookups.
+- **Enums**: Stored as strings. Unmapped values use `Enum.name`; provide the optional `wire` map to customize stored string representations (e.g. `'in_progress'`).
+- **`schema.dateTime` vs `schema.date`**: Use `schema.dateTime` for timestamps (`DateTime?`, automatically stored in UTC). Use `schema.date` when working directly with epoch-millisecond integers (`int?`) or computing numeric aggregates (`sum`/`min`/`max`).
+- **`schema.integer` vs `schema.real`**: Use `schema.integer` (`int?`) for whole numbers and counts, and `schema.real` (`num?`) for fractional measurements. Both support `.req()`, comparisons, and numeric aggregates.
+- **`schema.ref`**: Stores a record id (`String?`) referencing another store. Pass `enforceFk: true` to enforce foreign key constraints. References are automatically indexed for fast lookups.
 
 ---
 
@@ -215,7 +201,7 @@ extension TaskStore on Store<Tasks> {
       ))
           .items;
 
-  // An OR of ANDs — the shape a separate "OR group" could never express.
+  // Compose conditions by combining & and |
   Future<List<Task>> workable({int limit = 50}) async => (await query(
         QuerySpec(
           where: [
@@ -426,7 +412,7 @@ follow along the rest of the doumentation to learn more about:
 - Conflict resolution
 - Change hooks
 - Encryption
-- Binary and file attachements
+- Binary attachments
 
 and more...
 
@@ -439,25 +425,24 @@ either all of them or none.
 
 ```dart
   await tasks.put([
-    // Put operations are upserts but
-    // if an ID is defined and the record exists
-    // it is updated, while clearing undefined fields
-    // if it's not found it will be inserted
-    // if it's not defined, it will be generated
+    // Put operations are upserts:
+    // if an ID is provided and the record exists, it is replaced;
+    // if not found, it is inserted;
+    // if omitted, a new ID is generated automatically.
     Writes.id('my15charlongid0'),
 
-    // field writes syntax goes like this:
+    // Field write syntax:
     Tasks.title.set('My new task'),
     Tasks.done.set(true),
     Tasks.priority.set(1),
     Tasks.status.set(TaskStatus.todo),
     Tasks.dueAt.set(DateTime.now().add(const Duration(days: 14))),
 
-    // extra fields are allowed, but not typed
+    // Extra untyped fields are supported if needed:
     Writes.extra('extra key', 'extra value')
   ]);
 
-  // same as put, but with a list of writes
+  // Batch put:
   await tasks.putAll([
     [
       Writes.id('my15charlongid1'),
@@ -469,10 +454,8 @@ either all of them or none.
     ]
   ]);
 
-  // same as put, but it doesn't clear
-  // the fields that were not defined
-  // i.e. it doesn't set them to null
-  // i.e. updates only provided fields
+  // Upsert: updates only the specified fields,
+  // leaving all other existing fields untouched.
   await tasks.upsert([
     Writes.id('my15charlongid0'),
     Tasks.title.set('My new task'),
@@ -483,7 +466,7 @@ either all of them or none.
     Writes.extra('extra key', 'extra value')
   ]);
 
-  // same as upsert, but in batches
+  // Batch upsert:
   await tasks.upsertAll([
     [
       Writes.id('my15charlongid1'),
@@ -495,100 +478,58 @@ either all of them or none.
     ]
   ]);
 
-
-  // updates the existing record with id
-  // without replacing unspecified fields.
-  // Throws [RecordNotFoundException] when
-  // the record does not exist;
-  // a [Writes.id] value inside [writes] is rejected
-  // since record ids are immutable.
+  // Patch: updates an existing record without touching unspecified fields.
+  // Throws RecordNotFoundException if the record does not exist.
+  // Record IDs are immutable, so Writes.id inside patch is rejected.
   await tasks.patch('my15charlongid1', [
     Writes.id('my15charlongid2'), // <- throws
     Tasks.title.set('title gets updated')
   ]);
 
-  // Same as patch, but accepts a map of id -> [writes]
+  // Batch patch with a map of id -> writes:
   await tasks.patchAll({
     'my15charlongid1': [Tasks.title.set('title gets updated')],
     'my15charlongid2': [Tasks.title.set('title gets updated')],
   });
 
-  // bulk point-read: one `id IN (...)` query instead of a fetch loop.
-  // Rows come back in id-list order; missing ids drop out;
-  // archived rows are included (same visibility as `get`).
+  // Batch point-read: fetches multiple records in a single query.
+  // Rows return in the requested id order; missing records drop out.
   await tasks.getAll([
     'my15charlongid1',
     'my15charlongid2',
   ]);
 
-  // Soft deletes the record with id
-  // However, if it hasn't been synched yet,
-  // the record will be deleted permanently.
-  // unless `keepUnsyncedArchives` is set to true.
-  // (see step 1 above)
+  // Soft-deletes a record by archiving it.
+  // Unsynced archives are deleted permanently unless keepUnsyncedArchives is true.
   await tasks.archive('my15charlongid1');
 
-  // Restores the record with id from the archive.
+  // Restores an archived record.
   await tasks.restore('my15charlongid1');
 
-  // hard local deletes a record and all of its metadata
-  // the remote copy (if it ever existed) will survive
-  // if it ever gets updated by some other client,
-  // the record will be pulled and resurrected again
+  // Permanently deletes a record locally along with its metadata and attachments.
   await tasks.purge('my15charlongid1');
 ```
 
-**Gotchas:**
+**Key Points:**
 
-1. **`put` replaces the whole record — not just the fields you list.** On a
-   record that already exists, every field you don't include is __cleared__.
+1. **`put` replaces the whole record.** Any existing field not explicitly listed is reset to `null`.
+2. **`upsert` updates only specified fields.** Existing fields not listed remain untouched. If the record does not exist, it is inserted.
+3. **`patch` updates existing records only.** `patch` throws `RecordNotFoundException` if the record does not exist.
+4. **Summary of write operations:**
 
-2. **`upsert` replaces the defined fields only — and insert if the record doesn't exist.**
-   On a record that already exists, every field you don't include is kept __untouched__.
+| Op | If record missing | If record exists | Behavior |
+| --- | --- | --- | --- |
+| `put` | Inserts new record | Replaces the whole record | Create or replace |
+| `upsert` | Inserts new record | Updates only specified fields | Create or merge |
+| `patch` | **Throws** `RecordNotFoundException` | Updates only specified fields | Update only |
 
-3. **`patch` throws if the record doesn't exist; `put` silently upserts.**
-   `patch`/`patchAll` raise `RecordNotFoundException` for a missing id, while
-   `put` creates or replaces without complaining. So a `patch` right after a
-   `purge` (or for an id that was never created) will throw.
-
-| Op       | Record missing? | Record exists?                | Named-axis            |
-| -------- | --------------- | ----------------------------- | --------------------- |
-| `put`    | inserts         | **replaces the whole record** | create-or-**replace** |
-| `upsert` | inserts         | **merges only listed fields** | create-or-**merge**   |
-| `patch`  | **throws**      | merges only listed fields     | update-only (strict)  |
-
-3. **Record ids can't change once created.** A `Writes.id` inside a `patch` is
-   rejected. To "change" an id, create a new record with the new id and purge
-   the old one.
-
-4. **Custom ids must be exactly 15 lowercase letters/numbers.** Anything else
-   is rejected — including PocketBase-style ids that contain uppercase letters.
-   Leave the id out and the engine generates a valid one.
-
-5. **Batches are all-or-nothing.** `putAll` and `patchAll` each commit as one
-   transaction. In `patchAll`, the first entry that fails (missing record, bad
-   value) throws and rolls back the whole batch. Duplicate ids inside a
-   `putAll` resolve last-write-wins.
-
-6. **Archiving a record that never synced deletes it for good — by default.**
-   If you create a record and archive it before it ever reaches the server, it
-   is removed permanently (no undo). Turn on `keepUnsyncedArchives: true` to
-   keep it as a soft-deleted local row instead.
-
-7. **`archive`/`restore` throw on a missing record**. `purge` is a silent
-   no-op. Archiving or restoring an id that isn't there throws
-   `RecordNotFoundException`. Purging a missing id does nothing and doesn't
-   throw.
-
-8. **`purge` only deletes on your device — the server copy survives.** The
-   remote copy is untouched, and if another device updates it later it gets
-   pulled back and reappears. To delete it everywhere, delete the record in
-   PocketBase. `purge` is a **hard purge**: the row, its sync metadata, and
-   its blob references are removed locally in one transaction.
-
-9. **Setting a field to `null` clears it.** On optional fields, this works in
-   both `put` and `patch`; on a required (schema: `.req()`) field it won't compile. And
-   remember: in `put`, simply *omitting* a field also clears it (see #1).
+5. **Record IDs are immutable.** Record IDs cannot be changed once created.
+6. **Custom IDs format:** Custom IDs must be exactly 15 lowercase letters or numbers. If omitted, LocalPocket generates a valid ID automatically.
+7. **Batches are atomic.** `putAll` and `patchAll` commit as a single transaction. If any write in `patchAll` fails, the entire batch rolls back.
+8. **Archiving unsynced records:** If a record is archived before it has synced to the server, it is permanently deleted by default. Set `keepUnsyncedArchives: true` on your store to retain it as a soft-deleted local row instead.
+9. **`archive` and `restore` throw on missing records.** Calling `archive` or `restore` on a non-existent ID throws `RecordNotFoundException`. Calling `purge` on a missing ID is a safe no-op.
+10. **`purge` is a local hard delete.** `purge` is a **hard purge**: the row, its sync metadata, and its attachments are permanently removed locally. The server copy (if synced) remains intact unless deleted on the server.
+11. **Clearing optional fields:** Setting an optional field to `null` clears its value. Required fields (`.req()`) cannot be set to `null`. In `put`, omitting an optional field also clears it.
 
 ## Queries
 
@@ -695,64 +636,18 @@ either all of them or none.
   print("$priorityCount ${priorities.length}");
 ```
 
-**Gotchas:**
+**Key Points:**
 
-1. **`limit` is required on `query` and `ids`.** A read without
-   `limit` doesn't compile. If you want to get all rows, pass `limit: Limits.unbounded`.
-
-2. **The `where` list is an AND list.** Every element must hold for a row to
-   match. To say "or", build one tree with `|` and pass it as a single
-   element. `&` binds tighter than `|` — parentheses decide, like in
-   arithmetic. Every operator (`between`, `startsWith`, `inValues`, ...) may
-   appear anywhere inside the tree.
-
-3. **Cross-store conditions are compile-time errors.** `Cond<S>` and every
-   field descriptor carry their owning store as a phantom type, so a
-   `Tasks.done.eq(false)` condition is a `Cond<Tasks>`, not a generic
-   predicate you can mix into a `Notes` query. The suite includes a compile-fail
-   fixture for this exact case; a wrong-store condition is rejected before the
-   query reaches the runtime. There is still a defensive owner check when the
-   predicate is lowered to SQL, but that is the backstop for a cast that defeats
-   the type system, not the normal path.
-
-4. **"Field is empty" is `.isNull()` (or `.eq(null)`).** A raw SQL `= NULL`
-   comparison never matches anything, so the typed layer rewrites `eq(null)`
-   into a proper IS NULL check for you. `.isNull()` exists on optional fields
-   only — required fields can never be null.
-
-5. **Pagination never re-states slots in-session; persisted cursors do.**
-   A page captures the exact `where`/`orderBy`/`select`/scope it was fetched
-   with — `next()` and `prev()` re-run it verbatim, so a shape mismatch
-   cannot happen by construction, and `limit` stays fixed for the chain.
-   `hasNext`/`hasPrev` are snapshot facts: they say the database *observed*
-   a row on that side when the page was built. They are not a promise —
-   rows can vanish before the call, and a vanished tail returns a terminal
-   empty page instead of an error. To resume a cursor that outlived the
-   page object (app restart, deep link), re-state the shape with `after:`;
-   a cursor minted by a different shape (or a corrupted one) throws
-   `StaleCursorError` instead of returning a wrong page.
-
-6. **`get` is the odd one out.** It returns the row even when it is archived
-   or hidden (every other read excludes them by default), and a missing id
-   gives `null` instead of a throw — unlike `patch`, `archive` and `restore`.
-
-7. **Aggregates take number fields only.** `sum`/`min`/`max`/`avg` accept
-   `integer`, `real` and `date` descriptors; anything else won't compile.
-   They return `null` when no rows match — there is nothing to add up.
-
-8. **`distinct` quietly caps at 1000 values** unless you pass `limit:` yourself.
-   `countDistinct` has no cap — it counts in the database.
-
-9. **A projected row only carries what you selected.** After `select:`,
-   reading any other field throws — including `row.id` — so list every field
-   the call site needs. Projections are for hot paths, not everyday reads.
-
-10. **The same slots repeat on every read.** `where`, `orderBy`, `limit`,
-    `includeArchived:` and `includeHidden:` mean the same thing across
-    `query`, `ids`, `count`, `distinct`, the aggregates and
-    `watch` — build a condition once and reuse it on all of them (`count`
-    simply has no ordering or paging slots). Watches are live snapshots and
-    have no pagination surface at all.
+1. **`limit` is required on `query` and `ids`.** Every query requires an explicit limit to ensure fast performance. Pass `limit: Limits.unbounded` if you explicitly want to retrieve all rows.
+2. **The `where` list defaults to AND.** Every condition in the list must match. To combine conditions with OR, use `|`. Operator precedence: `&` binds tighter than `|` (use parentheses for clarity).
+3. **Conditions are strictly typed per store.** `Cond<S>` prevents accidentally mixing conditions from different stores into the same query at compile time.
+4. **Checking for empty or null fields:** Use `.isNull()` or `.eq(null)` to check optional fields. Required fields (`.req()`) cannot be null.
+5. **Keyset pagination:** Calling `page.next()` or `page.prev()` navigates through results using cursor tokens. `hasNext` and `hasPrev` indicate whether adjacent rows exist. If persisting cursors across app sessions, supply the cursor token via `after:`.
+6. **`get` point reads:** Fetches a single record by ID and returns `null` if not found. Unlike queries, `get` also returns archived or hidden rows.
+7. **Numeric aggregates:** `sum`, `min`, `max`, and `avg` work with numeric fields (`integer`, `real`, `date`) and return `null` if no rows match.
+8. **`distinct` value limit:** `distinct` defaults to at most 1,000 unique values unless you provide an explicit `limit`. `countDistinct` counts all unique values directly.
+9. **Field projection:** Specifying `select:` populates only the chosen fields in the returned `Row`, keeping queries lightweight. Accessing unselected fields throws an error.
+10. **Consistent query options:** Parameters like `where`, `orderBy`, `limit`, `includeArchived:`, and `includeHidden:` work consistently across `query`, `ids`, `count`, `distinct`, and `watch`.
 
 ## Reactive Queries
 
@@ -786,58 +681,16 @@ either all of them or none.
   await changeSub.cancel();
 ```
 
-**Gotchas:**
+**Key Points:**
 
-1. **The first event is what's stored right now — not a change.** Listening
-   runs the query once immediately and hands you the current results, even if
-   that's an empty list. To track ONE record, listen to the store's `changes`
-   stream: `tasks.changes` emits a `ChangeNotification` (its `ids` list the
-   records that changed) for every committed change to that store.
-
-2. **Many writes can arrive as one update.** Updates are gathered on a short
-   16 ms window: 500 writes inside one transaction come through as a single
-   re-read and a single event, and a slow listener only ever gets the latest
-   result. Treat each event as "here's the fresh answer", not as a list of
-   what changed.
-
-3. **Aside from the first event, nothing arrives unless something actually changed.**
-   While you're listening, a write only produces an event if it
-   changes the watched results: a rolled-back transaction sends nothing, and
-   a write that leaves the results exactly the same sends nothing either.
-   Without `orderBy`, reordering rows doesn't count as a change; with
-   `orderBy`, it does.
-
-4. **Record-level change notifications carry the affected ids.** `Store.changes`
-   emits one notification per committed record change (origin, action, and
-   payloads ride the committed-change event). It never hides anything: archived
-   and hidden records keep producing notifications — a soft delete is still a
-   change notification.
-
-5. **List watches follow the default view.** When a watched row is archived
-   or hidden, it disappears from the next list (that removal is its own
-   event, not a null entry), and it comes back on restore. Pass
-   `includeArchived:` / `includeHidden:` to watch those rows too — the same
-   flags as `query`.
-
-6. **`limit` caps every list — there's no paging.** `watch` needs a `limit`
-   just like `query`, but it trims each list it sends; it isn't the first
-   page of a longer chain. Pass `Limits.unbounded` to watch everything.
-   There's no `after:` and no `next()`/`prev()` — use `query` when you need
-   pages.
-
-7. **One listener per watch, and cancel is permanent.** Every
-   `watch()` call makes its own independent stream, so two
-   listeners means calling `watch()` twice (or broadcasting the stream
-   yourself). After `cancel()`, that watch never checks again (a check that
-   was scheduled but cancelled reports nothing). Closing the database while a
-   watch is running doesn't cause stray errors.
-
-8. **Sync updates flow through.** Server pulls update watches like any local
-   write — including rows a pull hides or archives.
-
-9. **Watches survive errors.** If a re-read fails, the error arrives on the
-    stream's error handler and the watch keeps going — the next successful
-    read sends results normally.
+1. **Initial emission:** A watch query emits the current matching results immediately upon subscription.
+2. **Coalesced updates:** Rapid consecutive writes (e.g. within a transaction) are batched so listeners receive the latest state without redundant re-renders.
+3. **Change-driven:** New events are emitted only when the actual result set changes.
+4. **Record change notifications:** To observe individual record mutations instead of query sets, listen to `store.changes`, which emits a `ChangeNotification` on every write.
+5. **Visibility flags:** Soft-deleted or hidden records are omitted from watch results by default. Pass `includeArchived:` or `includeHidden:` to include them.
+6. **Limit on watches:** `watch` streams respect the specified `limit`. Pass `Limits.unbounded` to watch the full matching set.
+7. **Clean lifecycle:** Each call to `watch()` creates an independent stream. Cancelling your subscription immediately frees all listeners and resources.
+8. **Sync integration:** Updates pulled from PocketBase automatically update active query streams.
 
 ## Search
 
@@ -876,36 +729,12 @@ either all of them or none.
   result.first!.title; // "wash the car"
 ```
 
-**Gotchas:**
+**Key Points:**
 
-1. **No `fts` spec fails at runtime, not compile time.** A store without an
-   `ftsSpec` compiles fine; the first `search` call throws
-   `FtsUnavailableError` instead of returning empty results — the engine's
-   own error, surfaced unchanged.
-
-2. **A search result is a flat, score-ordered list — no pages.** There is no
-   `after:`/`next()` continuation here: `limit` is the entire window, and
-   matches beyond it are simply not returned. Widen the limit (or pass
-   `Limits.unbounded`) when you need more.
-
-3. **Hits can go stale; rows are re-read fresh.** `id`/`score` come from the
-   FTS index, while `getAll` (or `hit.fetch()`) reads the record by id at
-   call time — a record purged in between silently drops out. So `result`
-   can be shorter than `hits`, and positions shift: pair rows back to hits
-   by `id`, never by index.
-
-4. **`getAll` sees what `get` sees, not what `search` sees.** Search excludes
-   archived and sync-hidden rows; `getAll` doesn't filter anything, so
-   archived rows pass straight through. Ids that came from `search` are
-   already visible — ids from any other source are not pre-filtered.
-
-5. **One `getAll` beats N `hit.fetch()` calls.** Each `fetch()` is its own
-   point read; `getAll(hits.map((h) => h.id).toList())` is a single
-   `id IN (...)` query, and rows come back in the order you passed the ids —
-   hit (score) order survives the round-trip.
-
-6. **Empty is safe on one side only.** `getAll` on an empty id list (no hits,
-   or every hit purged) returns `[]` without running a query.
+1. **FTS configuration required:** Stores must declare search fields using `ftsSpec` in their schema. Calling `search` on a store without FTS configured throws an error.
+2. **Relevance ranking:** `search` returns hits sorted by search relevance score (`hit.score`).
+3. **Batch fetching rows:** Hits provide record IDs and scores. Use `tasks.getAll(hits.map((h) => h.id).toList())` to load the full records in a single query.
+4. **Visibility filtering:** `search` automatically excludes archived and hidden records by default.
 
 ## Synchronization
 
@@ -1076,20 +905,13 @@ methods for the synced store.
 ```
 
 
-**Gotchas:**
+**Key Points:**
 
-1. **`start()` owns realtime.** Sync start opens the engine and its realtime
-   connection on both platforms — there is no separate realtime command;
-   polling and anti-entropy sweeps remain the correctness backstop either way.
-2. **One tab runs sync on web.** The worker owns the engine; a second tab
-   syncing the same database is not a supported configuration yet.
-3. Realtime events are hints, not truth: the engine still performs
-authoritative pulls after gaps and reconnects.
-4. `syncNow()` returns a `SyncReport` on both platforms (pulled / swept /
-pushed / dead-lettered / discarded counts).
-5. `pause()`/`resume()` park and restart periodic cycles (manual
-   `syncNow()` still works while parked); `setConnectivity(false)`
-   parks cycle scheduling while offline.
+1. **`start()` owns realtime.** Calling `sync.start()` launches the sync engine and opens the realtime SSE connection — there is no separate realtime command. Periodic background sync keeps data consistent even if realtime disconnects.
+2. **Web support:** On the web, sync runs in a dedicated web worker to keep the user interface responsive.
+3. **Realtime updates:** The engine receives realtime notifications from PocketBase and immediately pulls new changes.
+4. **Manual sync:** Calling `sync.syncNow()` runs an immediate sync cycle and returns a `SyncReport` detailing pulled, pushed, and resolved records.
+5. **Lifecycle management:** Use `pause()` and `resume()` to control periodic background cycles, or `setConnectivity(false)` when the device goes offline.
 
 ## Conflict Resolution
 
@@ -1107,14 +929,12 @@ manual resolution actions.
 
 ### How merging decides
 
-Every synced record carries three versions: **base** (last state you and the
-server agreed on), **local** (your edits), **remote** (the server's current
-version). A field both sides changed from base is *contested*.
+When changes occur concurrently on a local device and the server:
+- **Non-overlapping edits merge automatically**: If you edit field A and the server edits field B, both changes are kept.
+- **Overlapping edits use resolvers**: If both sides edited the same field, the declared `ConflictPolicy` resolves which value to keep.
+- **Unresolved conflicts escalate for review**: If a resolver declines or needs manual review, the conflict is placed in `store.conflicts` (`StoreConflicts`).
 
 ![Conflict-resolution decision flow](graphics/merge.png)
-
-The two levels never fire together: when a `collectionResolver` owns a
-contested record, declared `fieldOverrides` are dead configuration.
 
 ### Declaring resolution policies
 
@@ -1134,28 +954,24 @@ final class Posts extends StoreDef<Posts> {
 
   @override
   ConflictPolicy? get conflictPolicy => ConflictPolicy(
-        // Whole-record resolver: runs only when BOTH sides changed the
-        // record; returning null declines — conservative merge plus
-        // review escalation.
+        // Whole-record resolver: runs when both sides changed the record.
+        // Returning null escalates the conflict for manual review.
         collectionResolver: reviewResolver,
-        // Field-level overrides (top-level or dotted paths like
-        // 'meta.name'; the most specific entry wins). Shown for the API
-        // shape only: with a collectionResolver declared they never fire
-        // on contested records (see "How merging decides" above).
+        // Field-level overrides:
         fieldOverrides: {
           'views': CounterResolver(max: 1000000), // base + Δlocal + Δremote
           'tags': SetUnionWithDeletionWinsResolver(), // union; deletions win
           'title': LocalWinsResolver(),
         },
-        // Editing a locally-archived record unarchives it.
+        // Editing a locally-archived record unarchives it:
         editsUnarchive: true,
-        // A push (edit) whose target was deleted remotely:
-        // conflict (default; never loses data) | recreate | discardLocal.
+        // When a local edit targets a record deleted remotely:
+        // conflict (default) | recreate | discardLocal.
         missingRemote: MissingRemotePolicy.recreate,
       );
 
-  // A custom resolver sees base, local, remote, and both dirty sets,
-  // and returns the merged document — or null to escalate for review.
+  // A custom resolver inspects base, local, and remote values,
+  // and returns a merged result — or null to escalate for manual review.
   static MergeResult? customResolver(MergeContext ctx) {
     if (ctx.dirtyLocal.contains('title') &&
         ctx.dirtyRemote.contains('title')) {
@@ -1164,7 +980,7 @@ final class Posts extends StoreDef<Posts> {
         'title': '${ctx.local['title']} / ${ctx.remote['title']}',
       });
     }
-    return null; // decline: conservative merge + review escalation
+    return null; // decline: escalate for review
   }
 }
 ```
@@ -1179,13 +995,13 @@ returning `null` or `needsReview`.
 
 | Resolver                      | Field type        | What it decides                                                                                                                                    |
 | ----------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LocalWinsResolver`           | any               | Your edit wins every contested field — the remote version is discarded (the remote device converges on its next pull). |
-| `RemoteWinsResolver`          | any               | The server's version wins every contested field. This is the package default when no policy is declared.                                             |
-| `CounterResolver`             | numbers           | Adds up both sides' *changes*, not their values: `base + Δlocal + Δremote` (e.g. base 10, +5 local, +2 remote → 17). Optional `min`/`max` clamp the result. |
-| `SetUnionWithDeletionWinsResolver` | list/set    | Unions both sides' additions and removes anything either side deleted. A deletion beats a re-add of the same element (no tombstones — same value = same element). |
-| `AppendOnlyListResolver`      | lists             | Keeps base + local + remote list items, dropping duplicates. Content-identical items collapse into one unless you pass an `identity:` key (e.g. an event id) to keep look-alikes distinct. |
-| `AppendOnlyLinesResolver`     | text              | For newline text: merges the union of lines, trimming each, skipping blank lines, and dropping duplicate lines. Not a generic text append — it normalizes by design. |
-| `CustomResolver`              | any               | Your function. Whole-record use: sees base/local/remote + both dirty sets, returns the complete merged map (or `null`/`needsReview` to escalate for a human). Field use: sees one field's three values; a decline takes remote and flags the record for review. |
+| `LocalWinsResolver`           | any               | Your local edit wins on contested fields. |
+| `RemoteWinsResolver`          | any               | The server's edit wins on contested fields (default policy). |
+| `CounterResolver`             | numbers           | Adds up both sides' *changes*: `base + Δlocal + Δremote`. Optional `min`/`max` clamp the result. |
+| `SetUnionWithDeletionWinsResolver` | list/set    | Combines elements added by either side; deletions take precedence over re-additions. |
+| `AppendOnlyListResolver`      | lists             | Combines items from both sides, dropping duplicates. Pass `identity:` to keep distinct items with identical content. |
+| `AppendOnlyLinesResolver`     | text              | Merges newline-delimited text, trimming blank lines and removing duplicate lines. |
+| `CustomResolver`              | any               | Custom function returning a merged result map, or `null` to escalate for manual review. |
 
 A note on the union resolver: elements compare by ordinary Dart set
 equality — numbers match by value (`2` == `2.0`), and maps/lists match by
@@ -1241,34 +1057,15 @@ need structural identity for list items, `AppendOnlyListResolver` with an
   ]);
 ```
 
-**Gotchas:**
+**Key Points:**
 
-1. **An open conflict blocks edits** — `put`/`upsert`/`patch` on the record
-  throw `ConflictBlockedError`. Reads still work.
+1. **Open conflicts pause edits on that record:** Calling `put`, `upsert`, or `patch` on a record with an open conflict throws `ConflictBlockedError` until resolved. Reads continue to work normally.
+2. **Deterministic default:** By default, contested fields resolve to the server's version (`RemoteWinsResolver`). Conflicts only escalate to `store.conflicts` if a custom resolver returns `null` or a deletion races a local edit.
+3. **Resolving conflicts:** Use `acceptLocal`, `acceptRemote`, or `resolve(id, merged: [...])` to apply resolutions.
+4. **Deletion conflicts:** Calling `acceptRemote` on a deletion conflict purges the local record; `acceptLocal` recreates it on the server.
 
-2. **The default policy never escalates a two-sided merge** — an open
-  conflict means a resolver declined, or a remote deletion raced a local
-  edit (`missingRemote` defaults to `conflict`).
-
-3. **Resolvers only see genuine conflicts** — a resolver never fires on a
-  one-sided edit, so routine convergence can't loop into new conflicts.
-
-4. **`acceptRemote` on a deletion conflict purges the local record**;
-  `acceptLocal` recreates it remotely instead.
-
-5. **Resolving a gone conflict throws** — `resolve` throws
-  `ConflictNotFoundException`, `acceptLocal`/`acceptRemote` a `StateError`;
-  one of two racing resolutions wins, the other throws. Resolving a
-  locally-purged record cleans up the stale conflict instead of throwing.
-
-**Note: Concurrent edits on PocketBase are last-write-wins**
-PocketBase has no conditional (compare-and-swap) writes, so **concurrent
-edits to the same record from two clients resolve last-write-wins on the
-server**: whichever write arrives last wins, silently overwriting the
-other's non-overlapping edits. The client-side 3-way merge only protects
-pushes that are time-serialized. Apps needing strict optimistic
-concurrency against PocketBase must enforce it server-side (a record hook
-rejecting stale `updated`, or a custom endpoint).
+**Note: Concurrent edits on PocketBase are last-write-wins.**
+PocketBase does not provide conditional writes. When concurrent edits to the same record occur simultaneously from two clients, they resolve last-write-wins on the PocketBase server: whichever request reaches the server last wins. LocalPocket's client-side 3-way merge resolves conflicts between local offline edits and updates pulled from the server.
 
 ## Change hooks
 
@@ -1364,36 +1161,20 @@ This can be useful for invalidating caches, sending push notifications, etc.
   await taskSub.cancel();
 ```
 
-**Gotchas:**
+**Key Points:**
 
-1. **Events are post-commit facts, not pre-write hooks.** Every notification is
-   emitted only after the transaction commits, so the stream is a reliable
-   record of what is now true, not a chance to intercept or veto a write.
-
-2. **Create and purge are asymmetric on payloads.** A create carries a null
-   `oldRecord` and a non-null `newRecord`; a hard purge carries a non-null
-   `oldRecord` and a null `newRecord`.
-
-3. **`changedFields` is the actual diff, not the whole row.** It is the set of
-   fields the mutation touched; archive/restore events report `{'archived'}`
-   and hidden events report `{'hidden'}` rather than every field in the row.
-
-4. **The origin distinguishes who produced the write.** `local` means your app
-   wrote it, `remote` means the sync layer ingested it, and `resolution`
-   means it was produced during a merge or conflict settlement.
-
-5. **A record can be hidden without being purged.** Server-side deletion,
-   permission loss, or visibility loss emits `ChangeAction.hide`; that is a
-   visibility change, not a hard delete.
+1. **Post-commit notifications:** Events fire after transactions commit, reflecting the latest persisted state in the database.
+2. **Payloads:** New records provide `.newRecord`; deleted or purged records provide `.oldRecord`.
+3. **Field diffs:** `changedFields` lists the specific fields modified by the write.
+4. **Origin tracking:** `change.origin` distinguishes between `local` writes, `remote` sync updates, and conflict `resolution`.
 
 ## Binary attachments
 
 LocalPocket manages binary attachments through the `Files` service on each
 store (`store.files`) backed by a configured `BlobStore`. File bytes stream in
-bounded chunks across the runtime boundary rather than loading whole files into
-memory. The database manages file metadata, deduplication by SHA-256 hash, and
-two-way sync with remote PocketBase file fields, while the underlying byte
-blobs stay in your storage backend.
+bounded chunks rather than loading whole files into memory. The database manages
+file metadata, deduplication by SHA-256 hash, and two-way sync with remote
+PocketBase file fields, while the underlying byte blobs stay in your storage backend.
 
 ```dart
   // Check whether underlying blob storage persists on disk
@@ -1413,13 +1194,9 @@ blobs stay in your storage backend.
     ),
 
     // Target field defaults to store's declared `attachmentField` (or 'imgs')
-    // this definition is for local SQL only.
-    // it doesn't affect the field on pocketbase
     field: 'imgs',
 
     // Set true when using a non-durable/volatile blob store (e.g. MemoryBlobStore)
-    // otherwise if the blob store is volatile
-    // this will throw an StateError exception
     allowVolatileBlobs: true,
   );
 
@@ -1432,23 +1209,20 @@ blobs stay in your storage backend.
     print('File ${file.refId}: ${file.field} (${file.state})');
   }
 
-  // Stream attachment bytes
-  // Credit-windowed streaming ensures kernel only produces chunks as consumed
+  // Stream attachment bytes in chunks without buffering the whole file in memory
   final Stream<List<int>> chunkStream = await tasks.files.open(ref);
   await for (final chunk in chunkStream) {
     print('Received ${chunk.length} bytes');
   }
 
-  // if an attachement is deleted (remote only)
-  // you can do fetch: true to grab it before opening
+  // If an attachment is remote-only, fetch it transparently before opening
   await tasks.files.open(ref, fetch: true);
 
-  // or you can:
+  // Or explicitly download first, then open
   await tasks.files.download(ref);
   await tasks.files.open(ref);
 
-  // delete an attachment
-  // Marks reference as pending_remove; swept on next sync / GC
+  // Delete an attachment
   await tasks.files.remove(ref);
 
   // Maintenance: delete unreferenced blobs and enforce storage limits
@@ -1465,52 +1239,18 @@ blobs stay in your storage backend.
       await tasks.files.enforceStorageCap(maxBytes: 50 * 1024 * 1024);
   print('Evicted $evictedCount bytes of synced blobs');
 
-  // evicted files now need either
+  // Evicted files can be re-downloaded explicitly or fetched on open
   await tasks.files.open(ref, fetch: true);
-  // or
-  await tasks.files.download(ref);
-  // to be opened or they would throw a RemoteOnlyError error
 ```
 
-**Gotchas:**
+**Key Points:**
 
-1. **Record-first sync dependency.** An attachment cannot be uploaded before its
-   owning record exists on the remote. The sync engine holds file upload
-   operations in the queue (`depends_on_op`) until the record creation op
-   succeeds on PocketBase.
-
-2. **Volatile stores refuse attach without opt-in.** A non-durable store
-   (`MemoryBlobStore`) loses bytes on process restart while SQLite metadata
-   survives. Calling `attach` against a volatile store throws a `StateError`
-   unless `allowVolatileBlobs: true` is explicitly provided.
-
-3. **Content deduplication by hash.** Attaching identical bytes across different
-   records or fields produces separate `FileRef` rows sharing a single stored
-   blob with an incremented reference count. A blob is only purged when all
-   references to its SHA-256 hash are removed.
-
-4. **Size mismatch aborts cleanly.** When using `FileSource.stream` with a
-   declared `length`, any discrepancy between declared and actual streamed bytes
-   throws a `ValidationException` and immediately aborts the upload session,
-   leaving no orphan references or published blobs.
-
-5. **Storage cap evicts only synced blobs.** `enforceStorageCap` evicts blobs on
-  an LRU basis to meet a byte ceiling, but it will **never** evict blobs in
-  `pending_upload` state. Evicted blobs transition their references to
-  `remote_only`. Re-hydrate one explicitly with `files.download(ref)` — a
-  call on an already-local ref short-circuits with no network I/O, and a ref
-  with no recorded remote filename fails typed. Or combine the steps with
-  `files.open(ref, fetch: true)`: the stream opens after a transparent
-  hydration (local bytes are never re-fetched; requires a started sync
-  host). Without `fetch`, `files.open` on a `remote_only` ref throws
-  `RemoteOnlyError`; with `prefetchFiles: true` on the store, the sync lane
-  re-downloads all evicted files on the next cycle instead (use the cap to
-  choose which model you want per store).
-
-6. **Cancellation releases streams and credit windows.** Cancelling a stream
-   returned by `files.open()` sends a typed close notification to the kernel to
-   release memory buffers and credit tracking immediately without leaking or
-   hanging background producers.
+1. **Upload ordering:** File attachments upload automatically once the parent record exists on PocketBase.
+2. **Volatile stores safety:** In-memory stores (`MemoryBlobStore`) require `allowVolatileBlobs: true` when attaching files to prevent accidental data loss.
+3. **Automatic deduplication:** Files sharing the same SHA-256 hash share a single stored blob, saving disk space.
+4. **Remote-only files:** If an attachment only exists remotely or was evicted by a storage cap, call `files.download(ref)` to download it first, or pass `files.open(ref, fetch: true)` to download and open in one step. Calling `files.open` on a `remote_only` reference without downloading it first throws `RemoteOnlyError`.
+5. **Storage budget management:** `enforceStorageCap` evicts least-recently-used local files to meet a disk budget while preserving their metadata and remote links.
+6. **Clean stream lifecycle:** Cancelling an open byte stream immediately closes the file handle and frees memory.
 
 ## Encryption
 
@@ -1522,10 +1262,8 @@ LocalPocket supports two separate encryption layers:
    value as AES-256-GCM ciphertext with a fresh random nonce, and decrypts it
    transparently when a row is read back.
 2. **Database-level encryption (native only)** — whole-file at-rest encryption provided by
-  the database ENGINE the application supplies (a SQLCipher-style engine on
-  native). Configured through
-  `LocalPocketOptions.encrypted` / `nativeDatabaseFactory` /
-  `databaseEncryption` — see "Database-level" below.
+  the database engine supplied by the application (such as SQLCipher). Configured through
+  `LocalPocketOptions.nativeDatabaseFactory` and `LocalPocketOptions.databaseEncryption`.
 
 
 ### Field-level
@@ -1567,138 +1305,78 @@ then define a cipher key and open the database with encryption enabled:
 
   final secretKeys = myEncrpytedDB.store(Vault.store);
 
-  // Writes stay logical/plaintext at the API boundary. The kernel encrypts the
-  // specific field before it hits SQLite, so the raw row stores ciphertext.
+  // Writes are encrypted automatically before saving to disk:
   await secretKeys.put([
     Vault.userId.set('user-id-1234567'),
     Vault.label.set('prod token'),
     Vault.secret.set('sk_live_010203...'),
   ]);
 
-  // Reads decrypt transparently. The app sees the plaintext value in-memory,
-  // while the database file holds only the sealed bytes.
+  // Reads decrypt transparently:
   final row = await secretKeys.get('user-id-1234567');
 
   print(row?.get(Vault.secret)); // => sk_live_010203...
 
-  // Filtering and sorting on an encrypted field do NOT work: the database
-  // stores ciphertext, so there is no plaintext for a SQL comparison to see.
-  // A where/orderBy term on an encrypted field compiles but throws at runtime
-  // ("encrypted and cannot be queried or sorted") — declare a separate,
-  // non-encrypted companion field if you need to filter or index by it.
+  // Filtering and sorting on an encrypted field are not supported:
   // await secretKeys.query(
-  //   QuerySpec(where: [SecretKeys.secret.eq("sk_live_010203...")]),
+  //   QuerySpec(where: [Vault.secret.eq("sk_live_010203...")]),
   // ); // <- throws: encrypted fields cannot be queried or sorted
 ```
 
-**Gotchas:**
+**Key Points:**
 
-1. **The field flag is not full-database encryption.** The raw SQLite row still
-  reveals the schema, record ids, `extra` JSON keys, and which fields are
-  encrypted; only the field value bytes are protected.
-
-2. **The key must be stable across opens.** An app must supply the same 32-byte
-  AES key every time it opens the database; without it, decryption fails for
-  existing rows. Keep the key in a proper app keystore, not in source or a
-  randomly regenerated value.
-
-3. **Encrypted fields drop from query/sort/index/FTS semantics.** The database
-  stores ciphertext, not the logical plaintext a comparison or index would need.
-  A `where` or `orderBy` term on an encrypted field throws at runtime
-  (`SchemaRegistrationError`: "encrypted and cannot be queried or sorted"), and
-  declaring an encrypted field in an index, a unique constraint, or an FTS spec
-  fails at open time with a typed error. Use encryption for sensitive payloads
-  and keep filterable/sortable values in separate, non-encrypted fields.
+1. **Encrypted at rest:** Field encryption seals individual field values. Structural metadata (table name, record IDs) remains unencrypted.
+2. **Stable key required:** The 32-byte AES key must be securely stored in your app keystore and supplied on open.
+3. **Query restrictions:** Because ciphertext is stored, encrypted fields cannot be queried via `where`, sorted via `orderBy`, or included in indexes or FTS specs. Store filterable values in separate, unencrypted fields.
 
 
-### Database-level
+### Database-level (Native Only)
 
-LocalPocket never ships or embeds a cipher — whole-file encryption comes from
-the SQLite **engine binary** itself, which the application supplies. Four
-pieces make it work, in this order:
+For native platforms (mobile and desktop), LocalPocket supports whole-database encryption at rest using a cipher-enabled SQLite binary (such as SQLCipher or SQLite3MultipleCiphers).
 
-1. a **cipher-enabled engine binary** (via `package:sqlite3`'s build hook),
-2. a thin **adapter class** wrapping that engine,
-3. a **factory** handed to `LocalPocketOptions.nativeDatabaseFactory`,
-4. a **key config** handed to `LocalPocketOptions.databaseEncryption`,
+Enabling it takes three steps:
 
+#### Step 1: Configure a cipher build in pubspec.yaml
 
-and LocalPocket does the rest: it opens the engine with `options.path`, applies `PRAGMA key`, verifies the engine actually reports a cipher codec, and closes the engine on `db.close()`.
-
-
-#### Piece 1: Get a cipher-enabled engine through the build hook
-
-`package:sqlite3` (which LocalPocket builds on) ships a Dart build hook that
-bundles a SQLite binary with your app; flip its source to a cipher build by
-adding **user-defines** to YOUR app's `pubspec.yaml`:
+Add `user_defines` to your app's `pubspec.yaml` to bundle a cipher-enabled SQLite binary:
 
 ```yaml
 hooks:
   user_defines:
     sqlite3:
-      source: sqlite3mc   # SQLite3MultipleCiphers build (cipher-enabled)
-      # ... or:
-      # source: sqlcipher # SQLCipher community build
+      source: sqlite3mc   # SQLite3MultipleCiphers build
+      # or:
+      # source: sqlcipher # SQLCipher build
 ```
 
-At build time, the hook bundles that cipher-enabled binary as your sqlite3
-engine (downloaded from the package's GitHub releases with sha256 verification,
-or compiled from source). Two flavors are shipped per platform:
+#### Step 2: Define your database adapter class
 
-- `sqlite3mc` — [SQLite3MultipleCiphers](https://utelle.github.io/SQLite3MultipleCiphers/)
-  (MIT; supports many cipher algorithms with ChaCha20-Poly1305 as default)
-- `sqlcipher` — [SQLCipher](https://www.zetetic.net/sqlcipher/) community build
-  (BSD-3-Clause; note it links OpenSSL on Windows/Linux/Android and
-  Foundation/Security on Apple platforms)
-
-Both SQLite3MultipleCiphers and SQLCipher have their own license terms distinct
-from SQLite's public domain — pick per your app's licensing constraints.
-
-This replaces the old `sqlcipher_flutter_libs` route, which is deprecated/EOL
-since `package:sqlite3` version 3.x. Do NOT add it.
-
-#### Piece 2: Define the adapter class
-
-You don't implement the database adapter from scratch. LocalPocket's public
-API ships a ready-made synchronous base class, `DirectSqliteDatabase`, which
-wraps a plain `package:sqlite3` connection. Define your engine as a subclass
-of it and let the one static `open` method hand over the connection opened
-through your cipher-enabled `sqlite3` build:
+Subclass `DirectSqliteDatabase` to open the database connection through your cipher-enabled build:
 
 ```dart
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
-/// A Database opened through a cipher-enabled sqlite3 engine binary
-/// (wired by the pubspec user-defines in Step 1).
-///
-/// Precondition: the app is built so that `package:sqlite3`'s underlying
-/// binary is compiled WITH the cipher. A plain sqlite3 binary here silently
-/// accepts `PRAGMA key` without encrypting anything — LocalPocket guards
-/// against that by probing the codec at open and failing typed, but the
-/// correct setup is a cipher engine binary.
-/// [DirectSqliteDatabase] comes from localpocket.
+/// Opens the database through the cipher-enabled sqlite3 binary.
+/// [DirectSqliteDatabase] is provided by localpocket.
 final class MyCipherDatabase extends DirectSqliteDatabase {
   MyCipherDatabase._(super.rawDb);
 
-  /// The factory handed to `LocalPocketOptions.nativeDatabaseFactory`.
-  ///
-  /// Note: do NOT apply `PRAGMA key` here — LocalPocket applies the key from
-  /// `DatabaseEncryptionConfig` itself, before any other statement runs.
+  /// Factory passed to `LocalPocketOptions.nativeDatabaseFactory`.
   static Database open(String path) =>
       MyCipherDatabase._(sqlite.sqlite3.open(path));
 }
 ```
 
-#### Piece 3 & 4: Open the database with both slots configured
+#### Step 3: Open the database with encryption options
+
+Pass your custom factory and passphrase configuration to `LocalPocket.open`:
 
 ```dart
   final wholeDBEncrypted = await LocalPocket.open(
     LocalPocketOptions(
       path: 'vault.db',
       stores: [Tasks.store],
-      // piece 3: the engine binary that knows how to encrypt pages...
       nativeDatabaseFactory: (path) => MyCipherDatabase.open(path),
-      // piece 4: the key LocalPocket applies to it
       databaseEncryption: DatabaseEncryptionConfig(
         engineCipher: 'sqlcipher', // or 'sqlite3mc' to match Step 1
         key: 'master-passphrase',
@@ -1709,101 +1387,38 @@ final class MyCipherDatabase extends DirectSqliteDatabase {
   await wholeDBEncrypted.store(Tasks.store).query(QuerySpec(/* ... */));
 ```
 
-`DatabaseEncryptionConfig` carries the key and names the engine flavor for
-diagnostics; it can't encrypt anything by itself, and a `databaseEncryption`
-value without a `nativeDatabaseFactory` **fails the open immediately** with a
-typed `ValidationException` ("databaseEncryption requires
-nativeDatabaseFactory: ...").
+**Key Points:**
 
-The two have different jobs and are meaningless without each other:
-
-| Piece | What it is | What it provides |
-|---|---|---|
-| `nativeDatabaseFactory` | Code (a `Database Function(String path)`) | Opens the file through a **cipher-enabled engine binary** |
-| `databaseEncryption: DatabaseEncryptionConfig` | Data (a key + engine flavor name) | The **key/passphrase** — LocalPocket applies it via `PRAGMA key` and verifies the engine actually reports a cipher codec before doing anything else |
-
-**Gotchas:**
-
-1. **A plain engine silently accepts `PRAGMA key`.** Uncompiled `sqlite3.open`
-   treats `PRAGMA key` as an unknown pragma and encrypts nothing. LocalPocket
-   catches that at open: if the engine reports no codec (`PRAGMA
-   cipher_version` for SQLCipher, `PRAGMA cipher` for SQLite3MultipleCiphers —
-   a plain engine silently accepts both and returns no rows), the open fails
-   with a typed `ValidationException` instead of leaving the database quietly
-   plaintext. Still, get the setup right — `source: sqlite3mc` or `sqlcipher`
-   bakes the codec into the binary so `PRAGMA key` genuinely encrypts.
-
-2. **`engineCipher` must match the engine you actually bundled.** The value is
-   a diagnostics label (`'sqlcipher'` / `'sqlite3mc'`); LocalPocket's probe
-   works on both, so a label mismatch won't produce a wrong-key error — but
-   the wrong *binary* paired with the wrong key WILL fail at open. To migrate
-   between the two engines, SQLite3MultipleCiphers can read existing SQLCipher
-   databases with `pragma cipher = 'sqlcipher'; pragma legacy = 4;`.
-
-3. **The key must be stable across opens.** Lose the key = lose the database;
-   keep it in a proper keystore, not source. LocalPocket never stores or
-   derives it — it only hands the string to `PRAGMA key` (with embedded
-   single-quotes escaped).
-
-4. **Native-only, full stop.** `nativeDatabaseFactory` cannot cross the web
-   worker boundary (it is code, not data), and `databaseEncryption` is
-   rejected on web for the same reason: sqlite3_web's OPFS VFS does not
-   provide the file-control hooks cipher codecs require (verified against a
-   pinned `sqlite3mc.wasm` tagged out of the sqlite3.dart releases). Web
-   data at rest is protected with field-level encryption (see the section
-   above and its gotchas) instead.
-
-5. **Field-level and database-level compose.** Sensitive columns can ride the
-   field cipher (`encryption: EncryptionConfig.aesGcm256(...)`, works on every
-   platform) on top of a sealed database file on native.
-
-6. **Don't apply `PRAGMA key` in your own factory** (or any engine-flavor
-   pragmas that consume key material) before handing the connection over —
-   LocalPocket applies the key itself as the first statement on the
-   connection, and doing it twice risks wedging the codec probe.
-
-7. **Everything else works unchanged** against the sealed file: encrypted
-   CRUD, queries, FTS5 search, transactions, watches, sync, and file
-   attachments run exactly as on a plain file.
-
+1. **Cipher binary required:** Ensure you bundle a cipher-enabled SQLite binary via the `user_defines` hook. A standard SQLite binary will not encrypt data.
+2. **Matching cipher configuration:** Specify the matching `engineCipher` (`'sqlcipher'` or `'sqlite3mc'`) in `DatabaseEncryptionConfig`.
+3. **Passphrase persistence:** Keep your encryption passphrase in a secure platform keystore.
+4. **Native-only:** Whole-database encryption is available on native platforms (mobile/desktop). For web platforms, use field-level encryption.
+5. **Composability:** You can combine database-level encryption with field-level encryption for defense in depth.
 
 ### Comparison
 
-| | Field-level | Database-level |
+| Feature | Field-level | Database-level |
 |---|---|---|
-| **What is sealed** | Individual field values only | The entire database file |
-| **Granularity** | Per field (`encrypted: true`) | Whole file, all-at-nothing |
-| **Who does the encryption** | LocalPocket's kernel (Dart-side AES-256-GCM) | The SQLite engine binary itself (SQLCipher / SQLite3MultipleCiphers) |
-| **What you configure** | `encrypted: true` on the field + `encryption: EncryptionConfig.aesGcm256(key:)` at open | `nativeDatabaseFactory` + `databaseEncryption: DatabaseEncryptionConfig(key:, engineCipher:)` at open + the cipher engine in your pubspec build hooks |
-| **Key shape** | 32 random bytes (`Uint8List`) | A passphrase string (handed to the engine via `PRAGMA key`) |
-| **Key storage** | App-owned; the database never stores it | App-owned; LocalPocket never stores or derives it |
-| **Platforms** | Every platform, including web | Native only — rejected on web (worker boundary + OPFS VFS) |
-| **Cipher algorithm** | AES-256-GCM, fresh random nonce per value | Whatever the engine provides (SQLCipher AES-256; SQLite3MultipleCiphers defaults to ChaCha20-Poly1305, several more available) |
-| **Querying encrypted data** | Encrypted fields drop from `where`/`orderBy`/index/FTS — comparisons throw at runtime | Everything works normally — the engine decrypts pages in flight, so SQL sees plaintext |
-| **What a leaked file reveals** | Schema, record ids, `extra` JSON keys, and which fields are encrypted; only the marked fields' values are hidden | Nothing — the file is page-by-page ciphertext, no readable structure at all |
-| **Requirement to use** | Ships with the package, enabled at open — nothing to build | A cipher-enabled engine binary shipped through `package:sqlite3`'s build hook |
-| **Wrong/missing key behavior** | Reads of encrypted rows fail when the key differs from the one that wrote them | Open fails up front (`file is not a database` / typed codec probe failure) instead of returning garbage |
-| **Sync/remote side** | Server data passes through PocketBase unaffected — this is at-rest LOCAL storage only | Same — PocketBase never sees the key; remote copies are only as protected as PocketBase itself makes them |
-| **Composability** | Yes — layers stack: a field marked `encrypted: true` stays double-protected (field cipher inside a sealed file) inside a database-encrypted db | Yes — same, the two are independent |
+| **Scope** | Individual field values | The entire database file |
+| **Granularity** | Per field (`encrypted: true`) | Whole database file |
+| **Encryption method** | AES-256-GCM (Dart-side) | SQLite cipher binary (SQLCipher / SQLite3MultipleCiphers) |
+| **Configuration** | `encrypted: true` on field + `EncryptionConfig.aesGcm256` at open | `nativeDatabaseFactory` + `DatabaseEncryptionConfig` at open |
+| **Supported platforms** | All platforms (mobile, desktop, web) | Native only (mobile, desktop) |
+| **Querying & indexing** | Encrypted fields cannot be filtered or indexed | All query, filter, sort, and index features work normally |
+| **File exposure** | Schema and unencrypted fields are readable; marked fields are ciphertext | Entire file is ciphertext with no readable data or metadata |
+| **Dependencies** | Built-in, no external dependencies | Requires cipher build hook in `pubspec.yaml` |
 
-**Choose field-level** when only a few fields are sensitive, you need web support.
-**Choose database-level** when the whole file should be opaque (schema, ids, everything), you're native-only.
+- **Choose field-level** when you only need to protect specific sensitive attributes, or when deploying to the web.
+- **Choose database-level** when the entire database at rest must be encrypted, and you are targeting native platforms.
 
 ## Schema migration
 
-LocalPocket manages schema evolution through forward-only versioned ledgers
-(`StoreMigration`). Each store tracks its own version (`super(version: ...)`),
-and migrations run automatically when `LocalPocket.open` detects that the
-code has bumped a store's version above what's currently stored on disk.
+LocalPocket manages schema evolution through forward-only versioned migrations (`StoreMigration`). Each store tracks its own version (`super(version: ...)`), and migrations run automatically when `LocalPocket.open` detects that the code's version is higher than what is stored on disk.
 
 Two kinds of migrations are supported:
 
-1. **Additive migrations (`destructive: false`, default)**: adds columns in
-   place via SQL `ALTER TABLE ... ADD COLUMN`, followed by an optional
-   chunked and resumable data backfill (`transform`).
-2. **Destructive migrations (`destructive: true`)**: performs a safe 12-step
-   table rebuild (with pre-migration backup) to rename/drop columns, change
-   constraints, or restructure rows.
+1. **Additive migrations (`destructive: false`, default)**: Adds new optional columns in place, with an optional data backfill (`transform`).
+2. **Destructive migrations (`destructive: true`)**: Safely rebuilds the table with an automated backup to rename or drop columns, change constraints, or restructure rows.
 
 ### Defining migrations
 
@@ -1975,47 +1590,19 @@ final class TasksV4 extends StoreDef<TasksV4> {
 }
 ```
 
-Destructive migrations follow a safe 12-step rebuild process:
-1. **Automatic pre-migration backup**: creates a backup copy (`<dbname>.v<ver>.<store>.bak`).
-2. **Staged build**: creates a new temporary table with the target schema and indexes.
-3. **Chunked copy & transform**: migrates all existing rows through your `transform` function.
-4. **Row count verification**: verifies row counts match between old and new tables.
-5. **Atomic swap**: drops the old table, renames the new table into place, and rebuilds indexes & FTS triggers.
+Destructive migrations safely rebuild the table:
+1. **Automatic backup**: Creates a safety backup file (`<dbname>.v<ver>.<store>.bak`).
+2. **Staged build**: Creates a new temporary table with the target schema and indexes.
+3. **Data transform**: Migrates existing rows through your `transform` function.
+4. **Verification & swap**: Verifies row counts match and swaps the new table into place.
 
+**Key Points:**
 
-**Gotchas:**
-
-1. **Versions must be sequential with no gaps.** If your database is at
-   version 1 and your store definition is at version 3, you must supply
-   migrations for each step in between (`toVersion: 2` and `toVersion: 3`). A
-   missing step throws a `SchemaRegistrationError`.
-
-2. **Additive columns cannot be required.** SQLite cannot add a `NOT NULL`
-   column to an existing table with existing rows unless a default is
-   specified. In an additive migration, `addedFields` must be optional
-   fields. If you need a field to become required, use a destructive
-   rebuild (`destructive: true`).
-
-3. **Backfill transforms validate produced fields.** Values returned by
-   `transform` must correspond to fields defined in the target schema and
-   match their expected types/constraints. Producing unknown fields or values
-   violating schema rules throws `SchemaRegistrationError`.
-
-4. **Destructive migration requires backups.** Destructive rebuilds require
-   the safety backup step. If an existing completed backup file from a previous
-   run is detected at `<dbname>.v<version>.<store>.bak`, LocalPocket refuses to
-   overwrite it and throws `DestructiveMigrationRefusedError` (remove the
-   stale backup file to proceed).
-
-5. **Transforms run on the page on web workers.** migration metadata
-   (`addedFields`, `toVersion`, `destructive`) crosses to the web worker
-   as data, but a `transform` (as well as: validators, document
-   migrations, custom resolvers) executes on the page through the callback
-   channel, auto-collected under a deterministic id (an explicit
-   `LocalPocketOptions.pageCallbacks` entry wins over the auto id). Each
-   backfilled row costs one page round-trip, so prefer small stores for
-   transformed migrations on web.
-
+1. **Sequential versioning:** Migrations must increment versions sequentially without gaps (`toVersion: 2`, `toVersion: 3`, etc.).
+2. **Additive columns must be optional:** Columns added in an additive migration cannot be required (`.req()`). To make a field required, use a destructive migration (`destructive: true`).
+3. **Validating transforms:** Values returned by `transform` must correspond to fields defined in the target schema.
+4. **Backup protection:** A safety backup is created automatically before running destructive rebuilds.
+5. **Web worker support:** On the web, migration transforms run directly in the browser environment.
 
 ## Tests and checks
 
@@ -2031,55 +1618,22 @@ dart test --tags gate --run-skipped -j 1
 
 # run the release checklist
 dart tool/release.dart
-
-# all the above tests
-# must be green before any release or pull request
 ```
 
 ## Advanced concepts
 
-The sections above cover everything day-one usage needs. This section is the
-full control surface: every option, seam, and runtime knob the API exposes
-beyond that — interactive transactions, commit batching, clock control, the
-worker bootstrap, and how code-bearing configuration crosses the worker
-boundary on web.
+The sections above cover everyday usage. This section highlights advanced configurations, interactive transactions, performance tuning, and platform customization options.
 
 ### Executable features on web
 
-On the web the engine runs in a dedicated worker while your closures live on
-the page, so code-bearing configuration crosses a different bridge than on
-native:
+On web platforms, LocalPocket runs the database inside a dedicated Web Worker to ensure a responsive UI, while your Dart application code runs in the browser context:
 
-- **Data resolvers just work.** The closure-free built-ins
-  (`LocalWinsResolver`, `RemoteWinsResolver`, `CounterResolver`,
-  `SetUnionWithDeletionWinsResolver`, `AppendOnlyLinesResolver`, and
-  `AppendOnlyListResolver` without an `identity`) cross as data, are
-  reconstructed as the real classes in the worker, and resolve merges
-  exactly as they do natively. `editsUnarchive` and `missingRemote` are
-  plain data and work everywhere.
-- **Executable hooks run on the page.** A `CustomResolver` (and any resolver
-  carrying a closure, such as `AppendOnlyListResolver` with an `identity`
-  function), the store `validator`, document migrations, and backfill
-  `transform`s are invoked on the page over a callback channel: the worker
-  serializes the merge context (or record), the page executes your closure,
-  and the result rides back into the merge.
-- **Registration is automatic.** You do not have to register anything:
-  every executable feature a store declares is auto-collected at open time
-  under a deterministic id (`'<store>:collectionResolver'`,
-  `'<store>:field:<dotted.path>'`, `'<store>:validator'`,
-  `'<store>:documentMigration:<version>'`, `'<store>:transform:<toVersion>'`)
-  and served from the page. An explicit `LocalPocketOptions.pageCallbacks`
-  registry is merged over the auto-collected one — explicit entries win on
-  id conflict, auto-collected entries fill the gaps — and the coverage
-  checks still apply: an explicit registration the schema never uses fails
-  the open with a typed error, and a store whose executable features have
-  no callback channel fails with `UnsupportedSchemaFeatureError`. Native
-  platforms ignore the registry (hooks already run in-process).
+- **Built-in resolvers work out of the box:** Resolvers such as `LocalWinsResolver`, `RemoteWinsResolver`, `CounterResolver`, `SetUnionWithDeletionWinsResolver`, and `AppendOnlyLinesResolver` operate automatically across environments.
+- **Custom callbacks run in the browser:** Custom resolvers (`CustomResolver`), validation hooks, and migration transforms run automatically in the browser thread without manual configuration.
+- **Custom page callbacks:** You can provide custom callback registries or custom implementations of `SyncBackendFactory` and `BlobStore` via `PageCallbacks`.
 
 ```dart
-  // The web open: registration is optional — the executable resolver below
-  // would also be auto-collected as 'posts:collectionResolver'. An explicit
-  // entry pins your own id (and wins over the auto id on conflict).
+  // Web open with optional explicit callback configuration:
   final webDb = await LocalPocket.open(
     LocalPocketOptions(
       path: 'posts.db',
@@ -2096,16 +1650,10 @@ native:
   await webDb.close();
 ```
 
-**Your own sync backend and blob store run on the page too.** The container
-holds two more database-level slots — `PageCallbacks.syncBackendFactory` and
-`PageCallbacks.blobStore`. Supply either and the web open succeeds: your
-object (and everything it closes over — HTTP clients, token providers, storage
-handles) stays on the page, and the worker receives a transparent proxy that
-forwards every call over the callback channel.
+You can also host your own sync backend and blob store on the web using `PageCallbacks.syncBackendFactory` and `PageCallbacks.blobStore`:
 
 ```dart
-// A minimal sketch of each seam — your implementations keep their HTTP
-// client, token provider, and storage handles page-side.
+// Minimal sketches of custom sync and blob storage implementations:
 final class MySyncBackendFactory implements SyncBackendFactory {
   @override
   Future<SyncBackend> create({
@@ -2154,7 +1702,7 @@ final class MyBlobStore extends BlobStore {
 ```
 
 ```dart
-  // The same web open, hosting your own backend and blob store on the page.
+  // Web open hosting a custom backend and blob store:
   final proxiedDb = await LocalPocket.open(
     LocalPocketOptions(
       path: 'posts.db',
@@ -2168,72 +1716,32 @@ final class MyBlobStore extends BlobStore {
   await proxiedDb.close();
 ```
 
-How the proxies behave:
-
-- **Typed errors survive the channel.** Every `SyncError` subtype
-  (`DuplicateIdError`, `RemoteVersionConflict` with its `current` record,
-  ...) and the blob errors (`BlobMissingError`, `BlobStorageException`)
-  reconstruct as the exact same types in the worker — never as strings.
-- **Bytes cross chunked (256 KiB) both ways.** Uploads and downloads use a
-  begin → N-chunk → finish session; `expectedSha256`/`expectedSize` are
-  verified where the bytes are reassembled on the page.
-- **Realtime hints stream page → worker.** Your backend's `hints()` stream
-  drives the engine's fast path exactly as the PocketBase SSE connection
-  does on the worker.
-- **Auth stays live.** The page backend reads the kernel's token source on
-  every read, so `sync.updateAuth(...)` reaches your backend without a
-  rebuild. Idempotency is untouched: `PushOp.opId` and client record ids
-  cross as-is, and the proxy adds no retries of its own.
-- **Honest metadata.** `modifiedAt` keeps its null (GC orphan-aging depends
-  on it) and `isDurable` reflects YOUR store's durability, not the worker's.
-
-Without these slots the worker keeps its defaults: the canonical PocketBase
-sync factory and the OPFS-backed blob store. The top-level
-`LocalPocketOptions.syncBackendFactory` / `blobStore` fields stay rejected on
-web — configure page-executed backends through the container instead.
-
-Constraints worth knowing: a page callback must answer with data and return
-data — querying or writing the same database from inside a callback is
-unsupported (the write queue and OPFS locks are held while it runs). One
-callback costs one round-trip (per contested merge, per validated write, per
-backfilled row), so prefer structural resolvers and keep page-side closures
-fast.
-
 ### Interactive transactions
 
-`putAll`/`patchAll` are atomic batches, but when several writes across
-**different stores** must succeed or fail together — or a write must depend
-on a read made moments earlier — open an interactive transaction. Every store
-view handed out by `tx.store(...)` is bound to the same session: its reads
-see its own uncommitted writes, and all of its writes join one commit that
-lands when the body completes.
+While `putAll` and `patchAll` provide atomic single-store batch operations, interactive transactions let you compose multiple reads and writes across multiple stores into a single atomic commit:
 
 ```dart
-  // The body returns a value; the open transaction hands it back after the
-  // commit succeeds.
+  // Execute an interactive transaction across stores:
   final movedId = await db.transaction<String?>((tx) async {
     final txTasks = tx.store(Tasks.store);
     final txNotes = tx.store(Vault.store);
 
     await txTasks.put([Tasks.title.set('phase one')]);
 
-    // Reads inside the body see this session's uncommitted writes.
+    // Reads inside the body see uncommitted writes made within this transaction:
     final draft = await txTasks.get('task00000000002');
 
-    // Savepoints nest: roll back part of the body without losing the rest.
+    // Savepoints allow partial rollbacks:
     final sp = await tx.savepoint();
     await txNotes.put([Vault.label.set('tentative')]);
     await tx.rollbackTo(sp); // the tentative write is undone
 
     return draft?.id;
   });
-  // `movedId` resolves only after the COMMIT succeeds — a body that throws
-  // (or a failed commit) rolls everything back and rethrows.
   print('moved record: $movedId');
 ```
 
-A **read-only** transaction guarantees its stores cannot write at all — a
-write through the session fails with a typed `ReadOnlyTxError`:
+A **read-only** transaction guarantees isolated read snapshots where no writes can occur:
 
 ```dart
   final snapshot = await db.read((tx) async {
@@ -2246,26 +1754,15 @@ write through the session fails with a typed `ReadOnlyTxError`:
   print('open tasks at snapshot time: $snapshot');
 ```
 
-**Gotchas:**
+**Key Points:**
 
-1. **A session is a scarce resource.** The write queue has one slot; an
-   interactive session holds it until the body finishes. `txSessionTtl`
-   (see the options reference below) force-rolls back a session that sits
-   silent past its idle deadline, so an abandoned transaction can never
-   wedge the queue forever.
-2. **Events are ordered after the commit.** Watchers and `changes` listeners
-   observe the transaction's writes only once the commit has landed — inside
-   the body, nobody else sees them.
-3. **The body is not a re-entrant API.** Use the session's own store views
-   (`tx.store(...)`); store views taken outside the transaction keep their
-   ordinary auto-commit behavior.
+1. **Keep transactions concise:** Interactive sessions hold exclusive write access until completion. Use `txSessionTtl` to configure idle timeout limits.
+2. **Post-commit visibility:** Observers only see transaction writes after the transaction successfully commits.
+3. **Session-scoped stores:** Always access stores through the transaction context (`tx.store(...)`).
 
 ### Commit batching: `groupCommitWindow`
 
-By default every mutation commits at the end of its turn. With a positive
-`groupCommitWindow`, mutations from separate turns that arrive within the
-window share **one** SQLite transaction (one fsync) — a big latency win for
-bursty writers:
+By default, every write commits immediately. Setting `groupCommitWindow` coalesces writes arriving within that duration into a single disk commit, significantly boosting throughput for bursty write workloads while preserving read-your-writes consistency:
 
 ```dart
   final batchedDb = await LocalPocket.open(
@@ -2281,15 +1778,9 @@ bursty writers:
   await batchedDb.close();
 ```
 
-The read-your-writes guarantee is preserved: a read issued during the window
-flushes the pending group first, so you never observe stale state.
-
 ### Document size limit: `maxDocumentBytes`
 
-One canonical serialized document (one record) may not exceed this size; a
-write that exceeds it fails with a `ValidationException` naming the measured
-bytes. The default is 1,900,000 bytes — tune it down when documents should
-stay small, or up when you store large JSON blobs:
+Configures the maximum allowed serialized byte size for individual records to safeguard against runaway memory usage:
 
 ```dart
   final boundedDb = await LocalPocket.open(
@@ -2304,35 +1795,22 @@ stay small, or up when you store large JSON blobs:
 
 ### Clock control: `clockOffsetMs`
 
-The kernel clock drives outbox timestamps, conflict detection times,
-last-seen marks, and compaction cutoffs. `clockOffsetMs` shifts that clock
-by a plain integer offset — data, not code — so it crosses the worker
-boundary and behaves **identically on web and native**:
+Shifts the database clock by an integer millisecond offset, useful for simulating future events, testing expiration logic, or simulating clock drift in tests:
 
 ```dart
   final clockDb = await LocalPocket.open(
     LocalPocketOptions(
       path: 'clock.db',
       stores: [Tasks.store],
-      // e.g. simulate a database whose clock sits 24h in the future:
-      // clockOffsetMs: 24 * 60 * 60 * 1000,
-      clockOffsetMs: 0, // default: the unshifted system clock
+      clockOffsetMs: 0, // default: system clock
     ),
   );
   await clockDb.close();
 ```
 
-Because it's a *shift* rather than an absolute time, it composes with the
-real clock — far-future or far-past fixtures, deterministic-day tests, and
-clock-skew simulations all work the same on every platform. (Kernel-level
-tests that need an absolute fixed clock inject one through the internal
-engine seam; the public surface needs only this offset.)
-
 ### Web worker bootstrap: `BootstrapOptions`
 
-On web the facade spawns a dedicated worker and hands it a SQLite WASM
-module. `bootstrap` controls where those assets come from and how long a
-round-trip may take before it fails typed instead of hanging:
+On web platforms, `bootstrap` configures custom asset paths and timeout thresholds for the dedicated worker:
 
 ```dart
   final bootstrappedDb = await LocalPocket.open(
@@ -2340,7 +1818,7 @@ round-trip may take before it fails typed instead of hanging:
       path: 'app.db',
       stores: [Tasks.store],
       bootstrap: BootstrapOptions(
-        // defaults work out of the box; override when bundling your own
+        // custom asset paths if hosted in non-standard locations:
         // workerAssetPath: 'assets/localpocket_worker.js',
         // wasmAssetPath: 'assets/sqlite3.wasm',
         requestTimeout: const Duration(seconds: 30),
@@ -2351,34 +1829,18 @@ round-trip may take before it fails typed instead of hanging:
   await bootstrappedDb.close();
 ```
 
-`requestTimeout` also bounds worker→page callback round-trips (the
-executable-feature channel above). `spawnTimeout` bounds the worker spawn +
-connect handshake; a wedged spawn fails the open with a
-`DatabaseWorkerTimeoutException` instead of hanging forever. One more
-platform note: `:memory:` is native-only — a web database needs a real name
-(it becomes its OPFS directory).
-
 ### Storage and sync seams on native
 
-The web hosts caller storage/backends on the page (above). Natively the same
-seams are plain options:
+On native platforms, custom storage and sync backend implementations can be passed directly to `LocalPocketOptions`:
 
-- **`blobStore`** — where attachment bytes live. Required for the `files`
-  API: ship a durable `BlobStore` subclass for production (the interface
-  sketch in "Executable features on web" shows every method); use
-  `MemoryBlobStore` only for tests and volatile data.
-- **`syncBackendFactory`** — replaces the PocketBase adapter's backend with
-  your own `SyncBackend` implementation, powering `attachPocketBaseSync`
-  against any server. This is the native twin of
-  `PageCallbacks.syncBackendFactory`; on web it stays rejected in favor of
-  the page-hosted slot.
+- **`blobStore`**: Where attachment bytes are stored. Use a persistent `BlobStore` in production, or `MemoryBlobStore` for testing.
+- **`syncBackendFactory`**: Provides a custom `SyncBackend` implementation for `attachPocketBaseSync`.
 
 ```dart
   final nativeDb = await LocalPocket.open(
     LocalPocketOptions(
       path: 'native.db',
       stores: [Tasks.store],
-      // volatile on purpose here — production ships a durable store
       blobStore: MemoryBlobStore(),
       // syncBackendFactory: MySyncBackendFactory(),
     ),
@@ -2388,8 +1850,7 @@ seams are plain options:
 
 ### Runtime diagnostics: `db.capabilities`
 
-A snapshot of the engine's live facts as observed at open time — useful for
-feature detection and for asserting your storage setup in tests:
+Inspect the runtime capabilities and environment detected by the database at open time:
 
 ```dart
   final caps = await db.capabilities;
@@ -2419,4 +1880,4 @@ Every `LocalPocketOptions` field, and where this document covers it:
 ## License & Credit
 
 - License is MIT.
-- This package written by Ali A. Saleem. It's was originally written as the backbone for (apexo)[https://github.com/elselawi/apexo], and now it has been promoted to a standalone package.
+- Originally created by Ali A. Saleem as the database engine for [Apexo](https://github.com/elselawi/apexo), now available as an independent open-source package.
