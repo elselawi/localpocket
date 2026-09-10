@@ -1,0 +1,11 @@
+# Default owner for everything in the repository.
+* @elselawi
+
+# The shipped web worker embeds the compiled kernel. Changes here can silently
+# serve stale worker code in browsers, so they always need a maintainer review
+# plus a recompile of assets/localpocket_worker.js.
+/assets/ @elselawi
+
+# Release evidence and API surface snapshots. A change here is a claim about
+# what the package ships or promises.
+/tool/api_snapshot.txt @elselawi
