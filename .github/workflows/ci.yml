@@ -1,0 +1,174 @@
+name: CI
+
+# Mirrors the deterministic subset of `tool/release.dart` — the same gates the
+# release runner executes, minus the ones that need live credentials (`--real`),
+# local performance baselines (`--perf`), or a long-running soak (`--long`).
+#
+# The shipped web worker embeds the compiled kernel, so the asset gates below
+# are what catch a stale `assets/localpocket_worker.js` that `dart test` alone
+# would not.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: Gates, tests, coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The API contract gate diffs tool/api_snapshot.txt against the base
+          # commit, so the base refs have to be present.
+          fetch-depth: 0
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Formatting
+        run: dart format --output=none --set-exit-if-changed lib test tool example
+
+      - name: Static analysis
+        run: dart analyze lib test tool example
+
+      - name: Offline lint and layering
+        run: dart run tool/offline_lint.dart
+
+      - name: Security review
+        run: dart run tool/security_review.dart
+
+      - name: Public API traceability
+        run: dart run tool/traceability_check.dart
+
+      - name: API snapshot is current
+        run: |
+          dart run tool/api_snapshot.dart
+          git diff --exit-code -- tool/api_snapshot.txt
+
+      - name: Public API contract gate
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+          else
+            BASE="HEAD^"
+          fi
+          dart run tool/api_contract_gate.dart --base="$BASE"
+
+      - name: Public API inventory
+        run: dart run tool/api_surface_scanner.dart
+
+      - name: Raw record-map API growth
+        run: dart run tool/raw_api_gate.dart
+
+      - name: Dependency bounds and lockfile compatibility
+        run: dart run tool/dependency_check.dart
+
+      - name: Documentation and examples drift
+        run: dart run tool/docs_examples_test.dart
+
+      - name: Version and CHANGELOG consistency
+        run: dart run tool/version_check.dart
+
+      - name: README installation version
+        run: dart run tool/readme_version_check.dart
+
+      - name: Core web compilation smoke
+        run: dart run tool/core_web_compile_smoke.dart
+
+      - name: Supported web surface gate
+        run: dart run tool/web_gate.dart
+
+      - name: Production web worker, facade, and asset gate
+        run: dart run tool/local_web_gate.dart
+
+      - name: Package metadata and required web assets
+        run: dart run tool/package_release_gate.dart
+
+      - name: Shipped asset checksums
+        run: dart run tool/web_asset_gate.dart
+
+      - name: Shipped worker is current
+        run: dart run tool/worker_asset_current_gate.dart
+
+      - name: Full hermetic test suite
+        # Retried once on purpose, mirroring `retryOnFailure: true` in
+        # tool/release.dart: the full parallel run intermittently trips a
+        # pre-existing timing-sensitive flake (see AGENTS.md). A real
+        # regression fails twice and still blocks the gate.
+        run: |
+          dart test --reporter=compact || dart test --reporter=compact
+
+      - name: Release and web gate tests
+        # Same retry rationale as the suite above; these spawn nested `dart`
+        # processes and must run serially.
+        run: |
+          dart test --tags gate --run-skipped -j 1 test/release/ test/platform/web/ \
+            || dart test --tags gate --run-skipped -j 1 test/release/ test/platform/web/
+
+      - name: Coverage collection
+        # Same retry rationale as the suite above.
+        run: |
+          dart test test --coverage=coverage --reporter=compact \
+            || dart test test --coverage=coverage --reporter=compact
+
+      - name: Coverage LCOV formatting
+        run: dart run coverage:format_coverage --lcov --in=coverage -o coverage/lcov.info --report-on=lib
+
+      - name: Coverage threshold
+        run: dart run tool/coverage_gate.dart coverage/lcov.info --min-line=90.0
+
+      - name: Package publish dry-run
+        run: dart pub publish --dry-run
+
+  browser:
+    name: Browser smoke matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          dart pub get
+          npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      # Chromium, Firefox, and WebKit across every smoke page. Compiles the
+      # smoke mains, boots tool/web_smoke_server.dart, and drives the checked-in
+      # runner (tool/web_smoke/run_smoke.cjs) through `npm run web-smoke`.
+      - name: Chromium, Firefox, and WebKit smoke matrix
+        run: dart run tool/browser_web_gate.dart
+
+      - name: Browser sync, auth, and realtime lifecycle smoke
+        run: dart run tool/sync_web_gate.dart
