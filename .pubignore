@@ -1,0 +1,60 @@
+# Files that `dart pub publish` leaves out of the published archive.
+#
+# The published package is the library (`lib/`), the two shipped web assets
+# (`assets/`), the README images (`graphics/`), the example app source, and the
+# metadata files. Everything else in this repository is development tooling,
+# benchmark harnesses, or release evidence that consumers never need.
+#
+# NOTE: when `.pubignore` exists it *replaces* `.gitignore` for the publish file
+# listing, so exclusions that used to come from `.gitignore` (build output,
+# scratch files, secrets, native peer libraries) are repeated here.
+
+# --- Development tooling -----------------------------------------------------
+tool/
+benchmark/
+test/
+.github/
+_probe/
+_site/
+coverage/
+build/
+.dart_tool/
+.vscode/
+node_modules/
+
+# --- Benchmark and demo-site scaffolding -------------------------------------
+benchmark.html
+index.html
+wrangler.toml
+package.json
+package-lock.json
+
+# --- Agent / editor / CI configuration ---------------------------------------
+AGENTS.md
+devtools_options.yaml
+dart_test.yaml
+
+# --- Example: keep the app source, drop the platform scaffolding -------------
+# The example app is what pub.dev renders; the generated runner projects for
+# each platform are several hundred files of boilerplate with no value to a
+# consumer of the package.
+example/.metadata
+example/.idea/
+example/*.iml
+example/build/
+example/.dart_tool/
+example/android/
+example/ios/
+example/linux/
+example/macos/
+example/windows/
+example/web/
+example/test/
+example/pubspec.lock
+
+# --- Never publish scratch files, local secrets, or native peer libraries ----
+*.log
+_*.md
+secret.dart
+**/secret.dart
+*.dll

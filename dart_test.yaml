@@ -1,9 +1,10 @@
 # Test configuration.
 #
 # Tests tagged `real` hit the live PocketBase server configured in
-# `test/secret.dart`. They need network access and valid credentials, so they
-# are skipped in the default run to keep the local verification hermetic and
-# offline-safe.
+# `test/support/secret.dart`. That file is gitignored, so a fresh clone has to
+# create it first — copy `test/support/secret.dart.example` and fill it in.
+# These tests need network access and valid credentials, so they are skipped in
+# the default run to keep the local verification hermetic and offline-safe.
 #
 # Tests tagged `gate` start nested `dart` processes for the release and web
 # checks. They cannot run in the normal parallel test pass because the nested

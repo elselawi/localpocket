@@ -22,7 +22,13 @@ probe/
 # Basename patterns have no slash, so they keep matching even if a result file
 # is moved outside benchmark/results/.
 benchmark/results/
+
+# Native peer libraries downloaded locally to run the comparative benchmarks
+# against other engines (see benchmark/comparative_peers.dart) and the isar
+# probes. They are build artifacts of the local machine, not part of the
+# library, the package, or the test suite.
 benchmark/*.dll
+tool/*.dll
 
 # auditing and planning documents
 _*.md

@@ -147,6 +147,24 @@
   failure. The class name, message, and `toString()` are unchanged;
   existing `is WebCipherUnsupportedError` handlers keep working.
 
+### Packaging
+
+- **The published archive carries the library, not the workshop.** A
+  `.pubignore` now keeps development tooling (`tool/`, `benchmark/`,
+  `test/`, `.github/`), the benchmark and Cloudflare demo-site scaffolding,
+  and the example app's generated per-platform runner projects out of
+  `dart pub publish` output. What is left is `lib/`, the two shipped web
+  assets with their checksum manifests, `graphics/` (the README images), the
+  example app source, and the metadata files.
+- **`tool/isar.dll` is no longer tracked.** The 1 MB Windows native library
+  used by the local isar benchmark probes is a machine-local build artifact;
+  it stays on disk, but it is now ignored like the other peer native
+  libraries rather than committed.
+- **The `real`-tagged suites have a checked-in template.**
+  `test/support/secret.dart.example` documents the three values the live
+  PocketBase suites need, so a fresh clone can compile them after copying it
+  to the gitignored `test/support/secret.dart`.
+
 ## 0.2.0
 
 - major refactors, prepearing for release
