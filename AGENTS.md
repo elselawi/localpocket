@@ -18,10 +18,15 @@ typed contract commands on both paths.
 dart analyze lib test tool example   # must be error/warning-clean
 dart test                            # full suite, ~2.5k tests, ~15 s
 dart test test/<dir>                 # layer-scoped runs during development
-dart run tool/web_worker_compile.dart          # recompile the web worker (see Gotchas)
-dart run tool/web_asset_gate.dart              # verify shipped asset checksums
+dart run tool/release.dart --no-coverage   # the full pre-release gate set
+dart run tool/web_worker_compile.dart      # recompile the web worker (see Gotchas)
+dart run tool/web_asset_gate.dart          # verify shipped asset checksums
 dart run tool/worker_asset_current_gate.dart   # verify shipped worker is current
 ```
+
+The `real`-tagged suites additionally need `test/support/secret.dart`, which is
+untracked — copy `test/support/secret.dart.example` and fill it in. Without it
+those suites do not compile.
 
 The full release gate set lives in `test/release/` and `tool/` (api surface,
 dependency policy, compile-fail corpus, doc examples, readme version, asset
@@ -198,9 +203,12 @@ references in code comments.
 
 ## Testing conventions
 
-- `test/` mirrors `lib/src/` one directory per layer; `e2e/`, `perf/`,
-  `release/`, `conformance/`, and a single `test/support/` for shared helpers
-  (`openPocket` engine helpers, `MockPbServer`, fake transports, fixtures).
+- `test/` mirrors `lib/src/` one directory per layer — with one exception:
+  `lib/src/schema/` has no `test/schema/`, its tests live under
+  `test/kernel/schema/` next to the code that compiles the descriptors. `e2e/`,
+  `perf/`, `release/`, `conformance/`, and a single `test/support/` for shared
+  helpers (`openPocket` engine helpers, `MockPbServer`, fake transports,
+  fixtures).
 - Tests use the real in-memory engine (`openPocket()` helpers); no mocking of
   the kernel itself. Sync tests run against `MockPbServer` (a faithful local
   mock) or the fake HTTP transport; real-server tests under `test/e2e/real/`
@@ -213,4 +221,9 @@ references in code comments.
 
 ## Dart/Flutter tooling
 
-See ./.github/copilot-instructions.md — required tool usage for Dart code in this repo (semantic refactoring, analysis, quality gate).
+Dart code is changed through the language service, never by text edit. The
+routing table — task to `dartSemantic_*` tool, plus the `activate_dart_*` group
+that unlocks each one — is in `.github/instructions/dart-semantic-tools.instructions.md`;
+the always-on summary is in `.github/copilot-instructions.md`. Renaming a symbol,
+rewriting an import block, extracting a method, or reflowing a `.dart` file by
+hand is a review failure even when the resulting text is correct.

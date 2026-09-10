@@ -1,3 +1,18 @@
+# Repository agent rules
+
+**Dart changes are tool-routed, not text-edited.** Any change that touches a
+`.dart` file must follow `.github/instructions/dart-semantic-tools.instructions.md`
+(auto-loaded for `**/*.dart`). Renaming a symbol, rewriting an import block,
+extracting a method, or reflowing code with text edits is a failed change even
+when the resulting text happens to be correct.
+
+**Activate the tool group before concluding a tool is missing.** Most
+`dartSemantic_*` tools are not callable until their group is activated:
+`activate_dart_semantic_analysis_tools`, `activate_dart_refactoring_tools`,
+`activate_dart_extraction_tools`, `activate_dart_file_management_tools`,
+`activate_dart_quality_assurance_tools`. Skipping this is why agents conclude the
+semantic tools are unavailable and fall back to grep and hand edits.
+
 <!-- dart-semantic-tools:begin -->
 # Dart/Flutter agent instructions
 
