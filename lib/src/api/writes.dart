@@ -10,6 +10,8 @@
 /// to clear.
 library;
 
+import 'package:localpocket/src/kernel/errors.dart';
+import 'package:localpocket/src/kernel/schema.dart' show FieldKind;
 import '../schema/field_def.dart';
 import '../schema/store_def.dart';
 
@@ -101,4 +103,90 @@ final class Writes {
   /// when the write is applied.
   static Write<S> extra<S extends StoreDef<S>>(String key, Object? value) =>
       ExtraWrite<S>(key, value);
+
+  /// Maps one JSON document onto typed writes — the "adopt my existing
+  /// records as-is" entry point.
+  ///
+  /// - **Declared** keys become typed [FieldWrite]s. The value may be either
+  ///   the logical Dart value `field.set(...)` takes (a `DateTime`, an enum
+  ///   value) or the RAW stored form (`Row.toJson()`: epoch-ms int, enum wire
+  ///   string). A `date` field additionally accepts an ISO-8601 string, which
+  ///   is how PocketBase's own REST payload carries timestamps.
+  /// - **Undeclared** keys become [extra] writes and round-trip losslessly.
+  /// - `id` becomes [id].
+  /// - `archived` is SKIPPED: archive state is owned by `archive()`/
+  ///   `restore()`, not by writes. When the source document was archived, call
+  ///   `store.archive(id)` after the put.
+  ///
+  /// A missing required field is NOT rejected here — the write fails typed at
+  /// apply time naming the field, exactly as a hand-built `put` would. A value
+  /// that fits no accepted form fails here with a field-naming
+  /// [ValidationException], never a raw cast error.
+  ///
+  /// ```dart
+  /// await tasks.put(Writes.fromJson(Tasks.store, jsonDoc));
+  /// ```
+  static List<Write<S>> fromJson<S extends StoreDef<S>>(
+    S def,
+    Map<String, Object?> doc,
+  ) {
+    final declared = <String, FieldDef<S, Object?>>{
+      for (final f in def.fields) f.name: f,
+    };
+    final writes = <Write<S>>[];
+    for (final entry in doc.entries) {
+      final key = entry.key;
+      if (key == 'id') {
+        final value = entry.value;
+        if (value is! String) {
+          throw ValidationException(
+              'Document "id" must be a String, got ${value.runtimeType}.',
+              field: 'id');
+        }
+        writes.add(IdWrite<S>(value));
+        continue;
+      }
+      if (key == 'archived') continue;
+      final field = declared[key];
+      if (field == null) {
+        writes.add(ExtraWrite<S>(key, entry.value));
+      } else {
+        writes.add(FieldWrite<S>(
+            def, key, _encodeDocumentValue<S>(field, entry.value)));
+      }
+    }
+    return writes;
+  }
+
+  /// Encodes one document value for [field], accepting the logical Dart form,
+  /// the raw stored form, and (for dates) an ISO-8601 string.
+  static Object? _encodeDocumentValue<S extends StoreDef<S>>(
+    FieldDef<S, Object?> field,
+    Object? value,
+  ) {
+    if (value == null) return null;
+    if (field.toField().kind == FieldKind.date && value is String) {
+      final parsed = DateTime.tryParse(value);
+      if (parsed == null) {
+        throw ValidationException(
+            'Document value for "${field.name}" is not an ISO-8601 date: '
+            '"$value".',
+            field: field.name);
+      }
+      return parsed.toUtc().millisecondsSinceEpoch;
+    }
+    try {
+      return field.encode(value);
+    } on TypeError {
+      // Not the logical Dart value — the document may hold the raw form.
+    }
+    try {
+      return field.encode(field.decode(value));
+    } on TypeError {
+      throw ValidationException(
+          'Document value for "${field.name}" (${value.runtimeType}) is '
+          'neither the field\'s logical value nor its raw stored form.',
+          field: field.name);
+    }
+  }
 }

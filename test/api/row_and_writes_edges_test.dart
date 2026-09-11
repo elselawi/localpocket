@@ -26,6 +26,23 @@ final class Beta extends StoreDef<Beta> {
   List<FieldDef<Beta, Object?>> get fields => [title];
 }
 
+enum Level { low, high }
+
+/// A store whose fields need real conversion (date + enum), so the
+/// `Writes.fromJson` value-normalization is actually exercised.
+final class Gamma extends StoreDef<Gamma> {
+  Gamma._() : super(name: 'gamma', version: 1);
+  static final Gamma store = Gamma._();
+
+  static final title = store.schema.text('title').req();
+  static final dueAt = store.schema.dateTime('due_at');
+  static final level =
+      store.schema.enumOf('level', Level.values, wire: {Level.high: 'HIGH'});
+
+  @override
+  List<FieldDef<Gamma, Object?>> get fields => [title, dueAt, level];
+}
+
 void main() {
   group('Row read guards', () {
     final map = {'id': 'a1', 'name': 'x', 'archived': 0};
@@ -183,6 +200,95 @@ void main() {
         ]),
         throwsA(isA<ValidationException>()),
       );
+    });
+  });
+
+  group('Writes.fromJson', () {
+    test('splits declared keys, extras, and the id; skips archived', () {
+      final writes = Writes.fromJson(Gamma.store, {
+        'id': 'abcde1234567890',
+        'title': 'Adopted',
+        'due_at': '2026-01-02T03:04:05.000Z',
+        'level': 'HIGH',
+        'legacy': 7,
+        'archived': true,
+      });
+
+      expect(writes.whereType<IdWrite<Gamma>>().single.id, 'abcde1234567890');
+      final fields = {
+        for (final w in writes.whereType<FieldWrite<Gamma>>())
+          w.name: w.encoded,
+      };
+      expect(fields['title'], 'Adopted');
+      // ISO-8601 (PocketBase's own wire form) normalizes to epoch ms.
+      expect(fields['due_at'],
+          DateTime.utc(2026, 1, 2, 3, 4, 5).millisecondsSinceEpoch);
+      // An enum wire string resolves through the descriptor's wire mapping.
+      expect(fields['level'], 'HIGH');
+      final extras = writes.whereType<ExtraWrite<Gamma>>().toList();
+      expect(extras.single.key, 'legacy');
+      expect(extras.single.value, 7);
+      expect(
+        writes.any((w) =>
+            (w is FieldWrite<Gamma> && w.name == 'archived') ||
+            (w is ExtraWrite<Gamma> && w.key == 'archived')),
+        isFalse,
+        reason: 'archive state is owned by archive()/restore()',
+      );
+    });
+
+    test('accepts the logical Dart values too', () {
+      final writes = Writes.fromJson(Gamma.store, {
+        'title': 'x',
+        'due_at': DateTime.utc(2026, 1, 2),
+        'level': Level.high,
+      });
+      final fields = {
+        for (final w in writes.whereType<FieldWrite<Gamma>>())
+          w.name: w.encoded,
+      };
+      expect(fields['due_at'], DateTime.utc(2026, 1, 2).millisecondsSinceEpoch);
+      expect(fields['level'], 'HIGH');
+    });
+
+    test('a non-String id is a field-naming validation error, not a cast', () {
+      expect(
+        () => Writes.fromJson(Gamma.store, {'id': 5}),
+        throwsA(
+            isA<ValidationException>().having((e) => e.field, 'field', 'id')),
+      );
+    });
+
+    test('an unparseable date fails naming the field', () {
+      expect(
+        () => Writes.fromJson(
+            Gamma.store, {'title': 'x', 'due_at': 'not a date'}),
+        throwsA(isA<ValidationException>()
+            .having((e) => e.field, 'field', 'due_at')),
+      );
+    });
+
+    test('the writes apply through put and read back typed', () async {
+      final db = await LocalPocket.open(
+          LocalPocketOptions(path: ':memory:', stores: [Gamma.store]));
+      addTearDown(db.close);
+      final gamma = db.store(Gamma.store);
+      final id = generateRecordId();
+
+      await gamma.put(Writes.fromJson(Gamma.store, {
+        'id': id,
+        'title': 'Adopted',
+        'due_at': '2026-01-02T03:04:05.000Z',
+        'level': 'HIGH',
+        'legacy': 7,
+      }));
+
+      final row = (await gamma.get(id))!;
+      expect(row.get(Gamma.title), 'Adopted');
+      expect(row.get(Gamma.dueAt), DateTime.utc(2026, 1, 2, 3, 4, 5));
+      expect(row.get(Gamma.level), Level.high);
+      expect(row.extra['legacy'], 7,
+          reason: 'undeclared keys ride the record extra');
     });
   });
 
