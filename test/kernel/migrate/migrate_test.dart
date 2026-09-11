@@ -1278,5 +1278,145 @@ void main() {
         expect(await resumed.collection('widgets').get(id), isNotNull);
       }
     });
+
+    test(
+        'a field promoted from `extra` backfills the column, stays queryable, '
+        'and survives a read-modify-write', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+
+      // v1 does not declare `title`: the value lives only in the `extra`
+      // blob, exactly like a record adopted from an existing JSON document.
+      final v1 = await openPocket(path: t.path);
+      final id = generateRecordId();
+      await v1.collection('widgets').put(record(
+            id: id,
+            name: 'keep',
+            extra: {'title': 'Survives?', 'other': 42},
+          ));
+      final rawV1 =
+          await v1.db.rawQuery('SELECT extra FROM widgets WHERE id = ?', [id]);
+      expect(rawV1.single['extra'], contains('Survives?'),
+          reason: 'the value starts in `extra`, not a column');
+      await v1.close();
+
+      // v2 DECLARES `title`. The freshly added column is NULL on every old
+      // row, so the migration must promote the `extra` value into it.
+      final v2Schema = widgetsSchema(
+        version: 2,
+        extraFields: [Field.text('title')],
+        migrations: [
+          StoreMigration(toVersion: 2, addedFields: [Field.text('title')]),
+        ],
+      );
+      final v2 = await openPocket(path: t.path, stores: [v2Schema]);
+      addTearDown(v2.close);
+
+      final physical =
+          await v2.db.rawQuery('SELECT title FROM widgets WHERE id = ?', [id]);
+      expect(physical.single['title'], 'Survives?',
+          reason: 'the migration backfilled the physical column from extra');
+
+      final doc = (await v2.collection('widgets').get(id))!;
+      expect(doc['title'], 'Survives?');
+      expect(doc['other'], 42, reason: 'undeclared keys still round-trip');
+
+      final hits = await v2
+          .collection('widgets')
+          .query()
+          .where('title', eq: 'Survives?')
+          .all()
+          .count();
+      expect(hits, 1, reason: 'a typed query sees the promoted value');
+
+      // A full-record write must not lose the promoted value (the old
+      // behavior stripped declared keys from `extra` without having written
+      // the column).
+      await v2.collection('widgets').put(record(
+            id: id,
+            name: 'changed',
+            extra: {'title': 'Survives?', 'other': 43},
+          ));
+      await v2.close();
+
+      final reopened = await openPocket(path: t.path, stores: [v2Schema]);
+      addTearDown(reopened.close);
+      final reopenedDoc = (await reopened.collection('widgets').get(id))!;
+      expect(reopenedDoc['name'], 'changed');
+      expect(reopenedDoc['title'], 'Survives?',
+          reason: 'the promoted value survives a rewrite and reopen');
+      expect(reopenedDoc['other'], 43);
+    });
+
+    test(
+        'a destructive rebuild promotes a field that was declared after the '
+        'row was written', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+      final backup = Migrator.backupPath(t.path, 'widgets', 2);
+      addTearDown(() {
+        final f = File(backup);
+        if (f.existsSync()) f.deleteSync();
+      });
+
+      final v1 = await openPocket(path: t.path);
+      final id = generateRecordId();
+      await v1.collection('widgets').put(record(
+            id: id,
+            name: 'keep',
+            extra: {'title': 'Survives?'},
+          ));
+      await v1.close();
+
+      // The rebuild copies rows through decodeDbRow/encodeDbRow with the NEW
+      // schema. Without the extra fallback the new column is written NULL.
+      final v2Schema = widgetsSchema(
+        version: 2,
+        extraFields: [Field.text('title')],
+        migrations: [StoreMigration(toVersion: 2, destructive: true)],
+      );
+      final v2 = await openPocket(path: t.path, stores: [v2Schema]);
+      addTearDown(v2.close);
+
+      final physical =
+          await v2.db.rawQuery('SELECT title FROM widgets WHERE id = ?', [id]);
+      expect(physical.single['title'], 'Survives?',
+          reason: 'the rebuild carried the promoted value into the new table');
+      expect((await v2.collection('widgets').get(id))!['title'], 'Survives?');
+    });
+
+    test(
+        'a promoted value that does not match the declared field kind fails '
+        'loudly instead of being silently dropped', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+
+      final v1 = await openPocket(path: t.path);
+      final id = generateRecordId();
+      await v1.collection('widgets').put(record(
+            id: id,
+            name: 'keep',
+            extra: {'title': 42},
+          ));
+      await v1.close();
+
+      final v2Schema = widgetsSchema(
+        version: 2,
+        extraFields: [Field.text('title')],
+        migrations: [
+          StoreMigration(toVersion: 2, addedFields: [Field.text('title')]),
+        ],
+      );
+      await expectLater(
+        openPocket(path: t.path, stores: [v2Schema]),
+        throwsA(
+          isA<StorageError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('title'), contains('text')),
+          ),
+        ),
+      );
+    });
   });
 }

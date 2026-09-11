@@ -115,8 +115,87 @@ class Migrator {
       // not issue the same ALTER TABLE statement twice.
       existingColumns.add(f.name);
     }
+    // Promote any value the new columns are shadowing out of `extra` BEFORE
+    // the transform runs, so the transform sees the promoted values in the
+    // typed columns (not just through the decode fallback).
+    if (m.addedFields.isNotEmpty) {
+      await _promoteExtras(pocket, schema, m.addedFields);
+    }
     if (m.transform != null) {
       await _chunkedBackfill(pocket, schema, m);
+    }
+  }
+
+  /// Moves values that live in a record's `extra` JSON blob into a typed
+  /// column an additive migration just created.
+  ///
+  /// Undeclared fields are stored only in `extra`; declaring one therefore has
+  /// to move its value into the new physical column. Without this step the
+  /// freshly added NULL column masks the value on every read
+  /// (`decodeDbRow` prefers the declared column) and the next full-record
+  /// write strips it from `extra` too — silent local data loss. Runs
+  /// read-modify-write in the same chunk size as the transform backfill and is
+  /// idempotent, so a crash before the schema-version bump simply re-runs it.
+  ///
+  /// A value that does not match the declared field's kind is a hard
+  /// [StorageError]: writing it into the typed column would corrupt typed
+  /// queries, and skipping it silently is the failure mode this whole path
+  /// exists to remove.
+  static Future<void> _promoteExtras(
+    LocalPocket pocket,
+    CollectionSchema<Object?> schema,
+    List<Field> addedFields,
+  ) async {
+    final db = pocket.db;
+    var cursor = 0;
+    while (true) {
+      final rows = await db.rawQuery(
+          'SELECT rowid, * FROM ${DdlCompiler.quote(schema.name)} '
+          'WHERE rowid > ? ORDER BY rowid LIMIT ?',
+          [cursor, backfillChunk]);
+      if (rows.isEmpty) break;
+
+      final updates = <(int, Map<String, Object?>)>[];
+      var lastRowid = cursor;
+      for (final r in rows) {
+        lastRowid = r['rowid']! as int;
+        final recordId = r['id'] as String? ?? '';
+        final logical = decodeDbRow(schema, r,
+            cipher: pocket.fieldCipher, cryptoProvider: pocket.cryptoProvider);
+        final set = <String, Object?>{};
+        for (final f in addedFields) {
+          // A non-NULL column already holds the value; the NULL-column +
+          // non-NULL-extra pair is the promotion candidate (decodeDbRow's
+          // fallback put the extra value into `logical`).
+          if (r[f.name] != null) continue;
+          final value = logical[f.name];
+          if (value == null) continue;
+          final violation = fieldKindViolation(f, value);
+          if (violation != null) {
+            throw StorageError(
+                'Cannot promote "${f.name}" on "${schema.name}" record '
+                '"$recordId": the value in `extra` does not match the declared '
+                '${f.kind.name} field (${violation.name}). Fix the value or '
+                'remove the `extra` entry before migrating.');
+          }
+          set[f.name] = encodeFieldValue(schema, f, value,
+              cipher: pocket.fieldCipher,
+              cryptoProvider: pocket.cryptoProvider,
+              recordId: recordId);
+        }
+        if (set.isNotEmpty) updates.add((lastRowid, set));
+      }
+
+      if (updates.isNotEmpty) {
+        await db.transaction((txn) async {
+          for (final (rowid, set) in updates) {
+            await txn.update(schema.name, set,
+                where: 'rowid = ?', whereArgs: [rowid]);
+          }
+        });
+      }
+      if (rows.length < backfillChunk) break;
+      cursor = lastRowid;
     }
   }
 

@@ -225,11 +225,24 @@ Map<String, Object?> decodeDbRow(
   }
   logical['id'] = dbRow['id'];
   for (final f in schema.fields) {
-    logical[f.name] = _decodeStoredValue(f, dbRow[f.name],
+    final stored = _decodeStoredValue(f, dbRow[f.name],
         cipher: cipher,
         cryptoProvider: cryptoProvider,
         store: schema.name,
         recordId: (dbRow['id'] as String?) ?? '');
+    // The declared column wins — EXCEPT when it is NULL and `extra` still
+    // carries a value. That is exactly the shape of a field declared after
+    // this row was written: `extra` is where undeclared values live, so the
+    // freshly added column is NULL while the real value sits in the blob.
+    // Letting the NULL win would mask the value on every read, and the next
+    // full-record write would strip it from `extra` too (encodeDbRow drops
+    // declared keys), destroying it. [Migrator] backfills the column
+    // physically; this fallback keeps the read correct before that runs and
+    // makes the destructive-rebuild copy lossless. It cannot resurrect a
+    // deliberately-cleared field: a rewrite always removes declared keys
+    // from `extra`, so a stale copy only ever exists pre-promotion.
+    if (stored == null && logical[f.name] != null) continue;
+    logical[f.name] = stored;
   }
   logical['archived'] = dbRow['archived'] == 1;
   return logical;
