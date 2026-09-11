@@ -81,6 +81,10 @@ lib/src/api/local_pocket.dart::LocalPocket.replaceAll
 lib/src/api/local_pocket.dart::LocalPocket.vacuum
 lib/src/api/local_pocket.dart::LocalPocket.walCheckpoint
 lib/src/api/local_pocket.dart::LocalPocket.where
+lib/src/api/local_pocket.dart::LocalPocket.wipe
+lib/src/api/local_pocket.dart::WipeResult
+lib/src/api/local_pocket.dart::WipeResult.WipeResult
+lib/src/api/local_pocket.dart::WipeResult.toString
 lib/src/api/options.dart::BootstrapOptions
 lib/src/api/options.dart::BootstrapOptions.BootstrapOptions
 lib/src/api/options.dart::DatabaseEncryptionConfig
