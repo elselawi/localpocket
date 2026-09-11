@@ -248,8 +248,9 @@ class Collection with ChangeBusAwareStore {
   /// Soft-deletes a record by setting `archived` to `true`.
   ///
   /// Archived records are excluded from default queries but remain available
-  /// with `query().includeArchived()`. A never-pushed record is dropped
-  /// entirely (no remote delete exists) unless `keepUnsyncedArchives` is set.
+  /// with `query().includeArchived()`. A never-pushed record is soft-archived
+  /// like any other; set `keepUnsyncedArchives: false` on the store to drop
+  /// such rows entirely instead (they have no remote delete to push).
   Future<void> archive(String id,
       {DurabilityClass durability = DurabilityClass.normal}) {
     if (_tx != null) return mutateDirect(MutationAction.archive, id: id);

@@ -271,13 +271,15 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   FutureOr<List<String>> Function(Map<String, Object?> record)? get validator =>
       null;
 
-  /// Whether archived records that never existed remotely stay archived
-  /// locally (soft archive) instead of vanishing on [Collection.archive].
+  /// Whether archived records that were never synced stay archived locally
+  /// (soft archive) instead of vanishing on [Collection.archive].
   ///
-  /// The database drops such rows (no network operation recorded them);
-  /// override to keep them locally. Forwarded verbatim like every schema
-  /// extra.
-  bool get keepUnsyncedArchives => false;
+  /// Defaults to `true`: archiving is a delete semantic, and a record that
+  /// has not reached the server yet has no remote copy to restore from, so
+  /// dropping it would be irreversible local data loss. Override to `false`
+  /// to hard-delete never-synced archives (they have no remote delete to
+  /// push). Forwarded verbatim like every schema extra.
+  bool get keepUnsyncedArchives => true;
 
   /// Whether remote file references on this store should be prefetched
   /// during sync pulls. Forwarded verbatim like every other schema extra;

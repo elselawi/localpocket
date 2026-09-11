@@ -696,7 +696,7 @@ class CollectionSchema<T> {
     this.indexes = const [],
     this.conflictPolicy = const ConflictPolicy(),
     this.prefetchFiles = false,
-    this.keepUnsyncedArchives = false,
+    this.keepUnsyncedArchives = true,
     this.fts,
     this.migrations = const [],
     this.documentMigrations = const {},
@@ -752,7 +752,10 @@ class CollectionSchema<T> {
   /// Whether remote file references should be prefetched.
   final bool prefetchFiles;
 
-  /// Whether records created and archived offline should remain pushable.
+  /// Whether records created and archived offline survive as soft-deleted
+  /// local rows. Defaults to `true` (a never-synced record is soft-archived,
+  /// never hard-deleted) — set `false` to restore the old
+  /// delete-on-archive behavior for never-pushed records.
   final bool keepUnsyncedArchives;
 
   /// Optional FTS5 configuration.
