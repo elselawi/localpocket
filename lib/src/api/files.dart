@@ -201,6 +201,13 @@ final class Files<S extends StoreDef<S>> {
   /// reference (or the existing one when the kernel deduplicates an
   /// identical attachment).
   ///
+  /// Deduplication is keyed on `(record, field, SHA-256 of the bytes)`, so the
+  /// bytes decide identity: re-attaching bytes that are already attached to
+  /// this record and field returns the **stored** reference and ignores
+  /// [group] and the source's name. To re-label an attachment, remove and
+  /// re-attach it; to keep two attachments whose bytes are identical but which
+  /// are logically distinct, give the second one its own [field].
+  ///
   /// Bytes stream in bounded chunks: with [FileSource.length] declared,
   /// chunks cross the boundary as they are consumed and memory stays bounded
   /// no matter how large the file. Without a declared length the source is

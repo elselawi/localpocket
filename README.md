@@ -1279,7 +1279,29 @@ PocketBase file fields, while the underlying byte blobs stay in your storage bac
 6. **Clean stream lifecycle:** Cancelling an open byte stream immediately closes the file handle and frees memory.
 7. **`FileRef.name` is the filename YOU supplied, and `FileRef.group` is your own label.** Both are local metadata persisted on the reference: they never cross to the server, and they survive the upload. Read a set back with `files.list(recordId: id, group: 'label')` to pair files that share one remote field (e.g. a DICOM original plus its generated `.png` preview). `FileRef.field` is also a LOCAL label — every reference of a store maps to ONE remote PocketBase file field (the adapter's, default `imgs`), so it is not a remote sub-field name.
 8. **PocketBase rewrites filenames.** Every upload is stored server-side with a random 10-character suffix (`img001_intraoral.jpg` → `img001_intraoral_pu2g7u5gov.jpg`), even for a first, unique upload. `FileRef.remoteName` is the server's name and is NOT derivable from `FileRef.name` (nor the reverse), so never derive pairing from filenames — use `group`.
-9. **Dedup keys on bytes, not metadata.** Re-attaching identical bytes to the same record/field returns the EXISTING reference with its stored `name`/`group`; the new `name`/`group` arguments are ignored. Different `group` labels with identical bytes are therefore one reference.
+9. **Dedup keys on bytes, not metadata.** Re-attaching identical bytes to the same record/field returns the EXISTING reference and ignores the new `name`/`group` — see [Deduplication is byte-keyed](#deduplication-is-byte-keyed).
+
+### Deduplication is byte-keyed
+
+An attachment is deduplicated on `(record, field, SHA-256 of the bytes)`. Metadata
+is not part of that key, which has three consequences worth planning around:
+
+- **You cannot re-label by re-attaching.** Attaching the same bytes again to the
+  same record and field returns the existing reference carrying its **stored**
+  `name` and `group`; the new `name`/`group` arguments are discarded. To change
+  them, `files.remove(ref)` and attach again.
+- **Identical bytes collapse into one reference.** Two logically-distinct files
+  with identical content (a re-export, a second copy of the same scan) are one
+  reference — and different `group` labels do not separate them.
+- **`field` IS part of the key.** Distinct local `field` labels keep distinct
+  references, which is the way to pair an original with a generated file that
+  happens to share its bytes (e.g. an uncompressed export plus its byte-identical
+  preview): attach the second one under its own `field`, then read each back with
+  `files.list(recordId: id, field: 'photos')` / `files.list(recordId: id, field: 'previews')`.
+  Use `group` — not `field` — when the pairing is a filename-level label over one
+  shared remote field (see [Key Points](#binary-attachments) 7 and 8).
+
+The stored blob is shared either way: one SHA-256, one set of bytes on disk.
 
 ## Encryption
 
