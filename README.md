@@ -97,9 +97,9 @@ final class Tasks extends StoreDef<Tasks> {
       );
 
   // if an archived record hasn't syched yet
-  // true: keep it in the local store.
+  // true: keep it in the local store (soft archive).
   // false: delete it from the local store.
-  // default: false
+  // default: true
   @override
   bool get keepUnsyncedArchives => true;
 
@@ -500,7 +500,8 @@ either all of them or none.
   ]);
 
   // Soft-deletes a record by archiving it.
-  // Unsynced archives are deleted permanently unless keepUnsyncedArchives is true.
+  // A never-synced archive is soft-deleted too (default).
+  // Set keepUnsyncedArchives: false to hard-delete it locally instead.
   await tasks.archive('my15charlongid1');
 
   // Restores an archived record.
@@ -524,12 +525,21 @@ either all of them or none.
 | `patch` | **Throws** `RecordNotFoundException` | Updates only specified fields | Update only |
 
 5. **Record IDs are immutable.** Record IDs cannot be changed once created.
-6. **Custom IDs format:** Custom IDs must be exactly 15 lowercase letters or numbers. If omitted, LocalPocket generates a valid ID automatically.
+6. **Custom IDs format:** Custom IDs must be exactly 15 characters drawn from letters, digits, or underscore (PocketBase's system `id` pattern, `^[a-zA-Z0-9_]{15}$`). If omitted, LocalPocket generates a valid ID automatically.
 7. **Batches are atomic.** `putAll` and `patchAll` commit as a single transaction. If any write in `patchAll` fails, the entire batch rolls back.
-8. **Archiving unsynced records:** If a record is archived before it has synced to the server, it is permanently deleted by default. Set `keepUnsyncedArchives: true` on your store to retain it as a soft-deleted local row instead.
+8. **Archiving unsynced records:** If a record is archived before it has synced to the server, it is kept as a soft-deleted local row by default, so a user "delete" before the first sync is never lost. Set `keepUnsyncedArchives: false` on your store to hard-delete such records locally instead (they have no remote delete to push).
 9. **`archive` and `restore` throw on missing records.** Calling `archive` or `restore` on a non-existent ID throws `RecordNotFoundException`. Calling `purge` on a missing ID is a safe no-op.
 10. **`purge` is a local hard delete.** `purge` is a **hard purge**: the row, its sync metadata, and its attachments are permanently removed locally. The server copy (if synced) remains intact unless deleted on the server.
 11. **Clearing optional fields:** Setting an optional field to `null` clears its value. Required fields (`.req()`) cannot be set to `null`. In `put`, omitting an optional field also clears it.
+12. **`Row.toJson()` is not the pushed payload.** `toJson()` is the local logical snapshot: it always carries `archived` and every declared field, including declared-but-null ones. The sync payload omits nulls and only emits `archived` when it is true, so a pushed record can be a strict subset (e.g. `{id, title}`). Use `toJson()` for local reads; inspect `db.changes`/`SyncBackend` payloads when you need the wire form.
+
+### Adopting existing JSON documents
+
+A store may declare **zero fields** and still hold arbitrary JSON: undeclared keys travel through `Writes.extra` and round-trip losslessly. That is the supported way to migrate an existing JSON collection in phases.
+
+- **Write a document as-is:** `db.store(Legacy.store).put([...])` with `Writes.id(doc['id'])` plus `Writes.extra(key, value)` for every other key — or in one call, `Writes.fromJson(Legacy.store, doc)`, which splits `id` into `Writes.id`, declared keys into typed writes (encoding ISO dates and enum wire strings for you), and unknown keys into `Writes.extra`. `archived` is skipped: call `store.archive(id)` yourself if the source document was archived.
+- **Promote keys later:** declare the keys you want to query on and add a `StoreMigration(toVersion: n, addedFields: [...])` (bump the store `version`). The migration **backfills the new columns from `extra`**, so no value is lost when a key becomes a typed column. A value in `extra` that does not match the declared field kind fails the migration loudly, naming the record and field.
+- **Convert single values by hand** with the boundary codec pair `FieldDef.encode` / `FieldDef.decode`, e.g. `FieldWrite(owner, name, field.encode(value))`.
 
 ## Queries
 
@@ -689,6 +699,7 @@ either all of them or none.
 4. **Record change notifications:** To observe individual record mutations instead of query sets, listen to `store.changes`, which emits a `ChangeNotification` on every write.
 5. **Visibility flags:** Soft-deleted or hidden records are omitted from watch results by default. Pass `includeArchived:` or `includeHidden:` to include them.
 6. **Limit on watches:** `watch` streams respect the specified `limit`. Pass `Limits.unbounded` to watch the full matching set.
+   - **Performance warning:** an unbounded watch re-runs its query and re-emits the WHOLE result set on every change. On a 20 000-row store the first emission took ~730 ms and a single `patch` triggered two further emissions totalling ~805 ms. If you are using `watch` to maintain a cache of a large store, prefer `store.changes` (one notification per committed change, ids only) and refresh incrementally.
 7. **Clean lifecycle:** Each call to `watch()` creates an independent stream. Cancelling your subscription immediately frees all listeners and resources.
 8. **Sync integration:** Updates pulled from PocketBase automatically update active query streams.
 
@@ -912,6 +923,9 @@ methods for the synced store.
 3. **Realtime updates:** The engine receives realtime notifications from PocketBase and immediately pulls new changes.
 4. **Manual sync:** Calling `sync.syncNow()` runs an immediate sync cycle and returns a `SyncReport` detailing pulled, pushed, and resolved records.
 5. **Lifecycle management:** Use `pause()` and `resume()` to control periodic background cycles, or `setConnectivity(false)` when the device goes offline.
+6. **`report.pulled` counts records APPLIED, not candidates read.** A record the realtime fast path already applied before the cycle started (or a re-delivered record recognized as already applied) is `skipped`, so `pulled` can legitimately be `{store: 0}` on a cycle whose data is present locally. Use `db.changes` when you need every applied change.
+7. **Quarantined records are visible.** A remote record the engine rejects (malformed payload, foreign id) is set aside instead of applied. `SyncReport.quarantined` reports the count per store, and `SyncStatus.quarantined` / `SyncStatus.quarantineError` carry the count and the stored reason, so a dropped record never looks like a successful empty pull.
+8. **Anonymous/pre-login reads:** `identity` is required and must be stable per account. For data readable without auth (e.g. rendering a login screen), pass an explicit constant such as `identity: 'anonymous'` — it is a real sync scope like any other, just one you manage deliberately.
 
 ## Conflict Resolution
 
@@ -1196,11 +1210,18 @@ PocketBase file fields, while the underlying byte blobs stay in your storage bac
     // Target field defaults to store's declared `attachmentField` (or 'imgs')
     field: 'imgs',
 
+    // Optional local grouping label: pair related files that share one remote
+    // field (e.g. an original plus its generated preview).
+    group: 'avatar-set',
+
     // Set true when using a non-durable/volatile blob store (e.g. MemoryBlobStore)
     allowVolatileBlobs: true,
   );
 
   print('Attached: ${ref.refId}, state: ${ref.state}, hash: ${ref.hash}');
+  // The caller's filename is kept on the reference: PocketBase rewrites the
+  // REMOTE name (random suffix), so `ref.name` is the only record of yours.
+  print('Local name: ${ref.name} (remote: ${ref.remoteName ?? 'not uploaded'})');
   // ref.state starts as 'pending_upload' until the next sync cycle completes
 
   // List attachments for a specific record
@@ -1208,6 +1229,11 @@ PocketBase file fields, while the underlying byte blobs stay in your storage bac
   for (final file in attachments) {
     print('File ${file.refId}: ${file.field} (${file.state})');
   }
+
+  // ...or read one group back: the pairing primitive for files in one field
+  final List<FileRef> set =
+      await tasks.files.list(recordId: myTask.id, group: 'avatar-set');
+  print('${set.length} files carry the avatar-set label');
 
   // Stream attachment bytes in chunks without buffering the whole file in memory
   final Stream<List<int>> chunkStream = await tasks.files.open(ref);
@@ -1251,6 +1277,9 @@ PocketBase file fields, while the underlying byte blobs stay in your storage bac
 4. **Remote-only files:** If an attachment only exists remotely or was evicted by a storage cap, call `files.download(ref)` to download it first, or pass `files.open(ref, fetch: true)` to download and open in one step. Calling `files.open` on a `remote_only` reference without downloading it first throws `RemoteOnlyError`.
 5. **Storage budget management:** `enforceStorageCap` evicts least-recently-used local files to meet a disk budget while preserving their metadata and remote links.
 6. **Clean stream lifecycle:** Cancelling an open byte stream immediately closes the file handle and frees memory.
+7. **`FileRef.name` is the filename YOU supplied, and `FileRef.group` is your own label.** Both are local metadata persisted on the reference: they never cross to the server, and they survive the upload. Read a set back with `files.list(recordId: id, group: 'label')` to pair files that share one remote field (e.g. a DICOM original plus its generated `.png` preview). `FileRef.field` is also a LOCAL label — every reference of a store maps to ONE remote PocketBase file field (the adapter's, default `imgs`), so it is not a remote sub-field name.
+8. **PocketBase rewrites filenames.** Every upload is stored server-side with a random 10-character suffix (`img001_intraoral.jpg` → `img001_intraoral_pu2g7u5gov.jpg`), even for a first, unique upload. `FileRef.remoteName` is the server's name and is NOT derivable from `FileRef.name` (nor the reverse), so never derive pairing from filenames — use `group`.
+9. **Dedup keys on bytes, not metadata.** Re-attaching identical bytes to the same record/field returns the EXISTING reference with its stored `name`/`group`; the new `name`/`group` arguments are ignored. Different `group` labels with identical bytes are therefore one reference.
 
 ## Encryption
 
@@ -1715,6 +1744,38 @@ final class MyBlobStore extends BlobStore {
   );
   await proxiedDb.close();
 ```
+
+### Resetting local state: `wipe()`
+
+`db.wipe()` drops **every piece of local data**: every row of every store
+(archived and hidden ones included), all sync bookkeeping (outbox ops, sync
+rows, conflicts, dead letters, file references, blob metadata) and the per-scope
+sync cursors. Tracked blob bytes are deleted through the blob store too, so disk
+is actually reclaimed.
+
+The database keeps its **identity**: store registrations, schema versions and the
+migration ledger survive, so the same handle stays usable and the next sync cycle
+re-pulls the whole remote collection. That makes it the "restore from the
+server", "switch accounts" and "clear the local cache" operation. It is a local
+reset only — nothing is deleted on the server.
+
+```dart
+  // Drop everything local, then pull the server state back down.
+  final reset = await db.wipe();
+  print('dropped ${reset.rowsCleared} rows and ${reset.blobsCleared} blobs');
+
+  final fresh = await sync.syncNow(); // re-pulls from scratch
+  print('re-pulled: ${fresh.pulled}');
+```
+
+**Key Points:**
+
+1. **Local only.** No remote record is touched; the server still holds everything.
+2. **Cursors go too.** The next cycle re-pulls from the epoch, which is what makes this the "restore from server" path.
+3. **Identity survives.** Store definitions, schema versions and migrations are kept, so no reopen is required — and no schema migration re-runs.
+4. **Blob bytes are deleted, best-effort.** Byte deletion happens after the metadata commit; if a byte delete fails, the leftover is unreferenced and `files.gc()` reclaims it. A wipe can never leave a reference pointing at missing bytes.
+5. **Watchers refresh.** Active `watch()` streams re-run and see the emptied stores.
+6. **Want a brand-new FILE instead of an emptied one?** Natively you can close the handle and delete the database path (plus its `-wal`/`-shm` siblings) yourself. `wipe()` is the portable equivalent that also works on web, where the storage entry is owned by the worker — and it needs no reopen.
 
 ### Interactive transactions
 
