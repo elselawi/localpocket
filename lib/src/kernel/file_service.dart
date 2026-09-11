@@ -26,6 +26,8 @@ class FileRef {
     required this.field,
     required this.hash,
     required this.state,
+    this.name,
+    this.group,
     this.remoteName,
     this.nextRetryAt = 0,
     this.attemptCount = 0,
@@ -46,6 +48,18 @@ class FileRef {
 
   /// Content hash used to locate the blob.
   final String hash;
+
+  /// The caller's filename, as supplied at attach time.
+  ///
+  /// Local metadata only. PocketBase rewrites uploaded filenames with a
+  /// random suffix, so this is never derivable from [remoteName] and never
+  /// equal to it after an upload.
+  final String? name;
+
+  /// Optional caller-supplied grouping label (e.g. pairing a DICOM original
+  /// with its generated `.png` preview). Local metadata only: it never
+  /// crosses to the remote.
+  final String? group;
 
   /// Remote filename, when known.
   final String? remoteName;
@@ -71,6 +85,8 @@ class FileRef {
           recordId: row['record_id']! as String,
           field: row['field']! as String,
           hash: row['hash']! as String,
+          name: row['local_name'] as String?,
+          group: row['ref_group'] as String?,
           remoteName: row['remote_name'] as String?,
           state: row['state']! as String,
           nextRetryAt: row['next_retry_at'] as int? ?? 0,
@@ -127,6 +143,10 @@ class LocalPocketFiles {
 
   /// Lists file references attached to a record field.
   ///
+  /// Pass [group] to narrow the result to references carrying that local
+  /// group label — the way to pair files that share one remote field (e.g. a
+  /// DICOM original and its generated preview).
+  ///
   /// ```dart
   /// final refs = await db.files.list(
   ///   store: 'tasks',
@@ -137,11 +157,19 @@ class LocalPocketFiles {
     required String store,
     required String recordId,
     String? field,
+    String? group,
   }) async {
     final rows = await _ex.query(
       'lp_file_refs',
-      where: 'store = ? AND record_id = ? AND field = ?',
-      whereArgs: [store, recordId, _fieldFor(store, field)],
+      where: group == null
+          ? 'store = ? AND record_id = ? AND field = ?'
+          : 'store = ? AND record_id = ? AND field = ? AND ref_group = ?',
+      whereArgs: [
+        store,
+        recordId,
+        _fieldFor(store, field),
+        if (group != null) group,
+      ],
     );
     return rows.map(FileRef.fromRow).toList();
   }
@@ -162,6 +190,7 @@ class LocalPocketFiles {
     required Stream<List<int>> bytes,
     String? field,
     String? name,
+    String? group,
     int? expectedSize,
     String? expectedSha256,
     bool allowVolatileBlobs = false,
@@ -189,7 +218,8 @@ class LocalPocketFiles {
 
       // Dedup: an identical (store, record_id, field, hash) attachment is the
       // SAME logical file — return the existing live ref without creating a
-      // duplicate ref/op or double-counting the blob refcount.
+      // duplicate ref/op or double-counting the blob refcount. The stored
+      // name/group win: they describe the file that is already there.
       final existingRef = await exec.query(
         'lp_file_refs',
         columns: [
@@ -198,6 +228,8 @@ class LocalPocketFiles {
           'record_id',
           'field',
           'hash',
+          'local_name',
+          'ref_group',
           'remote_name',
           'state',
           'next_retry_at',
@@ -241,6 +273,11 @@ class LocalPocketFiles {
             'record_id': recordId,
             'field': resolvedField,
             'hash': hash,
+            // The caller's filename, kept locally: PocketBase rewrites the
+            // remote name with a random suffix, so this is the only record of
+            // what the caller called the file.
+            'local_name': name,
+            'ref_group': group,
             'remote_name': null,
             'state': 'pending_upload',
           },
@@ -271,6 +308,8 @@ class LocalPocketFiles {
         recordId: recordId,
         field: resolvedField,
         hash: hash,
+        name: name,
+        group: group,
         remoteName: null,
         state: 'pending_upload',
       );

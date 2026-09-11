@@ -73,7 +73,8 @@ void main() {
         addTearDown(eventSub!.cancel);
       });
 
-      Future<String> attach(String recordId, List<int> payload) async {
+      Future<String> attach(String recordId, List<int> payload,
+          {String? name, String? group}) async {
         await db
             .collection('widgets')
             .put({'id': recordId, 'name': 'with-file', 'qty': 1});
@@ -81,6 +82,8 @@ void main() {
           store: 'widgets',
           recordId: recordId,
           size: payload.length,
+          name: name ?? 'blob.bin',
+          group: group,
           allowVolatileBlobs: true,
         )))
             .session;
@@ -117,6 +120,41 @@ void main() {
         expect(refs.single.store, 'widgets');
         expect(refs.single.recordId, id);
         expect(refs.single.field, 'imgs');
+      });
+
+      test('the caller filename and group label persist on the reference',
+          () async {
+        final id = generateRecordId();
+        final refId = await attach(id, utf8.encode('grouped payload'),
+            name: 'scan001_pano.dcm', group: 'study-42');
+
+        final refs = (await runtime.send(FilesListRequest(
+          store: 'widgets',
+          recordId: id,
+        )))
+            .refs;
+        expect(refs.single.refId, refId);
+        expect(refs.single.name, 'scan001_pano.dcm',
+            reason: 'the caller name survives the upload path');
+        expect(refs.single.group, 'study-42',
+            reason: 'the local group label survives too');
+
+        // The group filter is the pairing primitive: same-field files read
+        // back together, and an unrelated label matches nothing.
+        final paired = (await runtime.send(FilesListRequest(
+          store: 'widgets',
+          recordId: id,
+          group: 'study-42',
+        )))
+            .refs;
+        expect([for (final r in paired) r.refId], [refId]);
+        final other = (await runtime.send(FilesListRequest(
+          store: 'widgets',
+          recordId: id,
+          group: 'study-43',
+        )))
+            .refs;
+        expect(other, isEmpty);
       });
 
       test('download streams credit-windowed chunks with a terminal event',

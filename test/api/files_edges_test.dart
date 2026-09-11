@@ -49,6 +49,63 @@ void main() {
     });
   });
 
+  group('attachment name and group', () {
+    test('the caller name and group survive attach and list', () async {
+      final id = (await tasks.put([Tasks.title.set('with-files')])).id;
+      final original = await tasks.files.attach(
+        recordId: id,
+        source: FileSource.bytes(payload(32, 1), name: 'scan001_pano.dcm'),
+        group: 'study-42',
+        allowVolatileBlobs: true,
+      );
+      final preview = await tasks.files.attach(
+        recordId: id,
+        source: FileSource.bytes(payload(16, 99), name: 'scan001_pano.png'),
+        group: 'study-42',
+        allowVolatileBlobs: true,
+      );
+
+      // PocketBase rewrites remote filenames with a random suffix, so the
+      // reference is the only place the caller's name can live.
+      expect(original.name, 'scan001_pano.dcm');
+      expect(original.group, 'study-42');
+      expect(original.remoteName, isNull);
+
+      final all = await tasks.files.list(recordId: id);
+      expect(all.map((r) => r.name),
+          containsAll(['scan001_pano.dcm', 'scan001_pano.png']));
+
+      // Pairing a DICOM original with its generated preview is exactly what
+      // the group filter is for.
+      final paired = await tasks.files.list(recordId: id, group: 'study-42');
+      expect(paired.map((r) => r.refId),
+          containsAll([original.refId, preview.refId]));
+      expect(await tasks.files.list(recordId: id, group: 'study-43'), isEmpty);
+    });
+
+    test('re-attaching identical bytes keeps the stored name and group',
+        () async {
+      final id = (await tasks.put([Tasks.title.set('dedup')])).id;
+      final first = await tasks.files.attach(
+        recordId: id,
+        source: FileSource.bytes(payload(8, 5), name: 'first.bin'),
+        group: 'g1',
+        allowVolatileBlobs: true,
+      );
+      final again = await tasks.files.attach(
+        recordId: id,
+        source: FileSource.bytes(payload(8, 5), name: 'second.bin'),
+        group: 'g2',
+        allowVolatileBlobs: true,
+      );
+
+      expect(again.refId, first.refId, reason: 'same bytes dedup to one ref');
+      expect(again.name, 'first.bin',
+          reason: 'the stored metadata describes the file already there');
+      expect(again.group, 'g1');
+    });
+  });
+
   group('buffered upload path', () {
     test('a stream without a declared length buffers, chunks, and finishes',
         () async {

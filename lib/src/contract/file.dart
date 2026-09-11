@@ -14,6 +14,8 @@ final class FileRefData {
     required this.field,
     required this.hash,
     required this.state,
+    this.name,
+    this.group,
     this.remoteName,
     this.nextRetryAt = 0,
     this.attemptCount = 0,
@@ -28,6 +30,8 @@ final class FileRefData {
         field: _wireString(json['field'], 'field'),
         hash: _wireString(json['hash'], 'hash'),
         state: _wireString(json['state'], 'state'),
+        name: _optWireString(json['name'], 'name'),
+        group: _optWireString(json['group'], 'group'),
         remoteName: _optWireString(json['remoteName'], 'remoteName'),
         nextRetryAt: _optWireInt(json['nextRetryAt'], 'nextRetryAt', 0),
         attemptCount: _optWireInt(json['attemptCount'], 'attemptCount', 0),
@@ -48,6 +52,16 @@ final class FileRefData {
 
   /// Content hash used to locate the blob.
   final String hash;
+
+  /// The caller's filename, as supplied at attach time.
+  ///
+  /// Local only: PocketBase rewrites uploaded filenames with a random suffix,
+  /// so this is NOT derivable from (and never equal to) [remoteName].
+  final String? name;
+
+  /// Optional caller-supplied grouping label (e.g. pairing a DICOM original
+  /// with its generated preview). Local metadata only; never sent remote.
+  final String? group;
 
   /// Remote filename, when known.
   final String? remoteName;
@@ -72,6 +86,8 @@ final class FileRefData {
         'recordId': recordId,
         'field': field,
         'hash': hash,
+        if (name != null) 'name': name,
+        if (group != null) 'group': group,
         if (remoteName != null) 'remoteName': remoteName,
         'state': state,
         'nextRetryAt': nextRetryAt,
@@ -96,6 +112,7 @@ final class FileBeginUploadRequest extends Request<FileUploadSessionResult> {
     required this.size,
     this.field = attachmentFieldDefault,
     this.name = 'blob.bin',
+    this.group,
     this.expectedSha256,
     this.allowVolatileBlobs = false,
   });
@@ -111,6 +128,10 @@ final class FileBeginUploadRequest extends Request<FileUploadSessionResult> {
 
   /// Remote filename for the uploaded blob.
   final String name;
+
+  /// Optional caller-supplied grouping label, persisted on the file reference
+  /// so [FilesListRequest] can filter by it. Local metadata only.
+  final String? group;
 
   /// Declared upload size in bytes.
   final int size;
@@ -134,6 +155,7 @@ final class FileBeginUploadRequest extends Request<FileUploadSessionResult> {
         'size': size,
         'field': field,
         'name': name,
+        if (group != null) 'group': group,
         if (expectedSha256 != null) 'expectedSha256': expectedSha256,
         if (allowVolatileBlobs) 'allowVolatileBlobs': true,
       };
@@ -236,6 +258,7 @@ final class FilesListRequest extends Request<FileRefsResult> {
     required this.store,
     required this.recordId,
     this.field = attachmentFieldDefault,
+    this.group,
   });
 
   /// Store owning the record.
@@ -247,14 +270,21 @@ final class FilesListRequest extends Request<FileRefsResult> {
   /// Attachment field name.
   final String field;
 
+  /// When set, only references carrying this group label are returned.
+  final String? group;
+
   @override
   String get tag => 'filesList';
   @override
   String get resultTag => FileRefsResult.tagValue;
 
   @override
-  Map<String, Object?> toJson() =>
-      {'store': store, 'recordId': recordId, 'field': field};
+  Map<String, Object?> toJson() => {
+        'store': store,
+        'recordId': recordId,
+        'field': field,
+        if (group != null) 'group': group,
+      };
 }
 
 /// Opens a download stream for one attachment: chunks arrive as

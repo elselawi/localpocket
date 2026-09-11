@@ -58,6 +58,7 @@ class FileUploadSession {
     required this.expiresAt,
     this.field = attachmentFieldDefault,
     this.name = 'blob.bin',
+    this.group,
     this.expectedSha256,
     this.allowVolatileBlobs = false,
   });
@@ -76,6 +77,9 @@ class FileUploadSession {
 
   /// File name reported to the storage backend.
   final String name;
+
+  /// Optional caller-supplied grouping label persisted on the file reference.
+  final String? group;
 
   /// Declared upload size in bytes.
   final int expectedSize;
@@ -157,6 +161,7 @@ class FileUploadSessionRegistry {
     required int expectedSize,
     String field = attachmentFieldDefault,
     String name = 'blob.bin',
+    String? group,
     String? expectedSha256,
     bool allowVolatileBlobs = false,
   }) {
@@ -180,6 +185,7 @@ class FileUploadSessionRegistry {
       recordId: recordId,
       field: field,
       name: name,
+      group: group,
       expectedSize: expectedSize,
       expectedSha256: expectedSha256,
       allowVolatileBlobs: allowVolatileBlobs,

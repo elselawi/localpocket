@@ -297,6 +297,7 @@ class KernelCommandHandler implements CommandHandler {
           :final size,
           :final field,
           :final name,
+          :final group,
           :final expectedSha256,
           :final allowVolatileBlobs,
         ) =>
@@ -306,6 +307,7 @@ class KernelCommandHandler implements CommandHandler {
             size,
             field,
             name,
+            group,
             expectedSha256,
             allowVolatileBlobs,
           ),
@@ -319,9 +321,11 @@ class KernelCommandHandler implements CommandHandler {
           :final store,
           :final recordId,
           :final field,
+          :final group,
         ) =>
           context.database.files
-              .list(store: store, recordId: recordId, field: field)
+              .list(
+                  store: store, recordId: recordId, field: field, group: group)
               .then((refs) => FileRefsResult(
                     [for (final ref in refs) _fileRefData(ref)],
                   )),
@@ -873,6 +877,7 @@ class KernelCommandHandler implements CommandHandler {
     int size,
     String field,
     String name,
+    String? group,
     String? expectedSha256,
     bool allowVolatileBlobs,
   ) async {
@@ -884,6 +889,7 @@ class KernelCommandHandler implements CommandHandler {
       expectedSize: size,
       field: field,
       name: name,
+      group: group,
       expectedSha256: expectedSha256,
       allowVolatileBlobs: allowVolatileBlobs,
     );
@@ -915,6 +921,7 @@ class KernelCommandHandler implements CommandHandler {
       bytes: stream(),
       field: upload.field,
       name: upload.name,
+      group: upload.group,
       expectedSize: upload.expectedSize,
       expectedSha256: upload.expectedSha256,
       allowVolatileBlobs: upload.allowVolatileBlobs,
@@ -1056,6 +1063,8 @@ class KernelCommandHandler implements CommandHandler {
         recordId: ref.recordId,
         field: ref.field,
         hash: ref.hash,
+        name: ref.name,
+        group: ref.group,
         remoteName: ref.remoteName,
         state: ref.state,
         nextRetryAt: ref.nextRetryAt,

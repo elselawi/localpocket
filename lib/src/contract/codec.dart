@@ -61,11 +61,11 @@ abstract final class ContractCodec {
       AcceptLocalRequest(store: 's', id: 'i'),
       AcceptRemoteRequest(store: 's', id: 'i'),
       ConflictsWatchRequest(),
-      FileBeginUploadRequest(store: 's', recordId: 'i', size: 3),
+      FileBeginUploadRequest(store: 's', recordId: 'i', size: 3, group: 'g'),
       FileFinishRequest(session: 'x'),
       FileCloseRequest(stream: 'x'),
       FileAbortRequest(session: 'x'),
-      FilesListRequest(store: 's', recordId: 'i'),
+      FilesListRequest(store: 's', recordId: 'i', group: 'g'),
       FileOpenRequest(store: 's', recordId: 'i'),
       FileDownloadRequest(store: 's', recordId: 'i'),
       FileCreditRequest(stream: 'x', bytes: 1),
@@ -246,6 +246,7 @@ abstract final class ContractCodec {
           field: _optWireStringFallback(
               m['field'], 'field', attachmentFieldDefault),
           name: _optWireStringFallback(m['name'], 'name', 'blob.bin'),
+          group: _optWireString(m['group'], 'group'),
           expectedSha256: _optWireString(m['expectedSha256'], 'expectedSha256'),
           allowVolatileBlobs: _optWireBool(
               m['allowVolatileBlobs'], 'allowVolatileBlobs', false),
@@ -266,6 +267,7 @@ abstract final class ContractCodec {
           recordId: _required(m, 'recordId'),
           field: _optWireStringFallback(
               m['field'], 'field', attachmentFieldDefault),
+          group: _optWireString(m['group'], 'group'),
         );
       case 'fileOpen':
         return FileOpenRequest(

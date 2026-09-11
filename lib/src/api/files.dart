@@ -28,6 +28,8 @@ final class FileRef {
     required this.field,
     required this.hash,
     required this.state,
+    this.name,
+    this.group,
     this.remoteName,
     this.nextRetryAt = 0,
     this.attemptCount = 0,
@@ -42,6 +44,8 @@ final class FileRef {
         field: data.field,
         hash: data.hash,
         state: data.state,
+        name: data.name,
+        group: data.group,
         remoteName: data.remoteName,
         nextRetryAt: data.nextRetryAt,
         attemptCount: data.attemptCount,
@@ -62,6 +66,20 @@ final class FileRef {
 
   /// Content hash used to locate the blob.
   final String hash;
+
+  /// The filename you supplied when attaching, or `null` when you did not.
+  ///
+  /// This is the ONLY record of your chosen name: PocketBase rewrites every
+  /// uploaded filename with a random 10-character suffix, so [remoteName] is
+  /// never derivable from it (and vice versa).
+  final String? name;
+
+  /// The optional grouping label you attached the file with, or `null`.
+  ///
+  /// Use it to pair files that share one remote field — e.g. a DICOM original
+  /// and its generated `.png` preview — and read it back with
+  /// `files.list(recordId: id, group: 'study-42')`.
+  final String? group;
 
   /// Remote filename, when known.
   final String? remoteName;
@@ -194,6 +212,7 @@ final class Files<S extends StoreDef<S>> {
     required String recordId,
     required FileSource source,
     String? field,
+    String? group,
     bool allowVolatileBlobs = false,
   }) async {
     _ensureOpen();
@@ -204,6 +223,7 @@ final class Files<S extends StoreDef<S>> {
         recordId: recordId,
         source: source,
         field: resolvedField,
+        group: group,
         declared: declared,
         allowVolatileBlobs: allowVolatileBlobs,
       );
@@ -219,6 +239,7 @@ final class Files<S extends StoreDef<S>> {
       size: payload.length,
       field: resolvedField,
       name: source.name ?? 'blob.bin',
+      group: group,
       allowVolatileBlobs: allowVolatileBlobs,
     ));
     try {
@@ -252,6 +273,7 @@ final class Files<S extends StoreDef<S>> {
     required String field,
     required int declared,
     required bool allowVolatileBlobs,
+    String? group,
   }) async {
     final session = await _send(FileBeginUploadRequest(
       store: name,
@@ -259,6 +281,7 @@ final class Files<S extends StoreDef<S>> {
       size: declared,
       field: field,
       name: source.name ?? 'blob.bin',
+      group: group,
       allowVolatileBlobs: allowVolatileBlobs,
     ));
     try {
@@ -322,16 +345,19 @@ final class Files<S extends StoreDef<S>> {
   }
 
   /// The file references attached to [recordId] in [field], in kernel order.
-  /// [field] defaults to the store's declared attachment field.
+  /// [field] defaults to the store's declared attachment field. Pass [group]
+  /// to narrow the result to references attached with that group label.
   Future<List<FileRef>> list({
     required String recordId,
     String? field,
+    String? group,
   }) async {
     _ensureOpen();
     final result = await _send(FilesListRequest(
       store: name,
       recordId: recordId,
       field: field ?? defaultField,
+      group: group,
     ));
     return [for (final ref in result.refs) FileRef.fromData(ref)];
   }

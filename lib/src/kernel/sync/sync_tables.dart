@@ -157,6 +157,8 @@ const List<String> syncSystemDdl = [
   record_id TEXT NOT NULL,
   field    TEXT NOT NULL,
   hash     TEXT NOT NULL,
+  local_name TEXT,
+  ref_group TEXT,
   remote_name TEXT,
   state    TEXT NOT NULL DEFAULT 'pending_upload',
   next_retry_at INTEGER NOT NULL DEFAULT 0,
