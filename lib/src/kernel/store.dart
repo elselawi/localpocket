@@ -529,7 +529,7 @@ class Collection with ChangeBusAwareStore {
       final rid = (record!['id'] as String?) ?? generateRecordId();
       if (!isValidRecordId(rid)) {
         throw ValidationException(
-            'Invalid record id "$rid"; expected [a-z0-9]{15}.',
+            'Invalid record id "$rid"; expected [A-Za-z0-9_]{15}.',
             field: 'id');
       }
       recordId = rid;
@@ -548,7 +548,7 @@ class Collection with ChangeBusAwareStore {
       final rid = (record!['id'] as String?) ?? generateRecordId();
       if (!isValidRecordId(rid)) {
         throw ValidationException(
-            'Invalid record id "$rid"; expected [a-z0-9]{15}.',
+            'Invalid record id "$rid"; expected [A-Za-z0-9_]{15}.',
             field: 'id');
       }
       recordId = rid;
@@ -755,7 +755,7 @@ class Collection with ChangeBusAwareStore {
       final rid = (explicit as String?) ?? generateRecordId();
       if (!isValidRecordId(rid)) {
         throw ValidationException(
-            'Invalid record id "$rid"; expected [a-z0-9]{15}.',
+            'Invalid record id "$rid"; expected [A-Za-z0-9_]{15}.',
             field: 'id');
       }
       resolved.add((rid, record));
