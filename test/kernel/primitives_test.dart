@@ -163,13 +163,24 @@ void main() {
   });
 
   group('isValidRecordId', () {
-    test('accepts well-formed lowercase alphanumeric ids', () {
+    test('accepts every 15-char id PocketBase accepts ([A-Za-z0-9_])', () {
       expect(isValidRecordId('a' * 15), isTrue);
       expect(isValidRecordId('0' * 15), isTrue);
       expect(isValidRecordId('z' * 15), isTrue);
       expect(isValidRecordId('9' * 15), isTrue);
       expect(isValidRecordId('a1b2c3d4e5f6a7b'), isTrue);
       expect(isValidRecordId(generateRecordId(random: Random(5))), isTrue);
+      // PocketBase's system id field pattern is ^[a-zA-Z0-9_]+$ with
+      // min == max == 15, so uppercase and underscore are legal.
+      expect(isValidRecordId('A' * 15), isTrue);
+      expect(isValidRecordId('aAAAAAAAAAAAAAA'), isTrue);
+      expect(isValidRecordId('ABCDEFGHIJKLMNO'), isTrue);
+      expect(isValidRecordId('a' * 14 + '_'), isTrue);
+      // Real-world human-readable keys (Apexo settings_global) that a live
+      // PocketBase accepts.
+      expect(isValidRecordId('currency_______'), isTrue);
+      expect(isValidRecordId('ISO_country____'), isTrue);
+      expect(isValidRecordId('ai_services_ena'), isTrue);
     });
 
     test('rejects empty and wrong-length ids', () {
@@ -177,17 +188,12 @@ void main() {
       expect(isValidRecordId('a' * 14), isFalse);
       expect(isValidRecordId('a' * 16), isFalse);
       expect(isValidRecordId('a' * 0), isFalse);
+      expect(isValidRecordId('currency______'), isFalse);
+      expect(isValidRecordId('currency________'), isFalse);
     });
 
-    test('rejects uppercase ids', () {
-      expect(isValidRecordId('A' * 15), isFalse);
-      expect(isValidRecordId('aAaaaaaaaaaaaa'), isFalse);
-      expect(isValidRecordId('ABCDEFGHIJKLMNO'), isFalse);
-    });
-
-    test('rejects punctuation and symbols', () {
+    test('rejects punctuation other than the accepted underscore', () {
       expect(isValidRecordId('a' * 14 + '-'), isFalse);
-      expect(isValidRecordId('a' * 14 + '_'), isFalse);
       expect(isValidRecordId('a' * 14 + '.'), isFalse);
       expect(isValidRecordId('a' * 14 + '!'), isFalse);
       expect(isValidRecordId('a' * 14 + '~'), isFalse);
@@ -204,13 +210,20 @@ void main() {
     });
 
     test('rejects ids that mix valid chars with invalid ones', () {
-      expect(isValidRecordId('${'a' * 7}Z${'a' * 7}'), isFalse);
+      expect(isValidRecordId('${'a' * 7}-${'a' * 7}'), isFalse);
       expect(isValidRecordId('${'a' * 7} ${'a' * 7}'), isFalse);
     });
 
     test('recordIdPattern agrees with isValidRecordId', () {
-      final good = ['a' * 15, '0' * 15, 'a1b2c3d4e5f6a7b'];
-      final bad = ['', 'a' * 14, 'A' * 15, 'a' * 14 + '!', 'é' * 15];
+      final good = [
+        'a' * 15,
+        '0' * 15,
+        'a1b2c3d4e5f6a7b',
+        'A' * 15,
+        'a' * 14 + '_',
+        'ISO_country____',
+      ];
+      final bad = ['', 'a' * 14, 'a' * 14 + '-', 'a' * 14 + '!', 'é' * 15];
       for (final id in good) {
         expect(recordIdPattern.hasMatch(id), isTrue);
         expect(isValidRecordId(id), isTrue);

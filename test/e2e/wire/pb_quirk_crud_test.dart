@@ -147,18 +147,40 @@ void main() {
 
     // -------------------------------------------------------------- #13 --
     wireTest(
-        'uppercase id rejected raw + engine dead-letters an invalid '
-        'locally-minted id without stalling the drain', (s) async {
-      // RAW WIRE: an uppercase id violates the PB pattern even though its
-      // length is right — the length-only tests never pinned case.
+        'PB id pattern: uppercase/underscore ids are accepted; a structurally '
+        'invalid locally-minted id dead-letters without stalling the drain',
+        (s) async {
+      // RAW WIRE: PocketBase's system id field is `^[a-zA-Z0-9_]{15}$`, so an
+      // uppercase id and an underscore id are VALID. The old engine pattern
+      // `[a-z0-9]{15}` rejected them and silently quarantined them on pull.
       final upperId = 'A${generateRecordId().substring(1)}'; // 15 chars
-      final (badStatus, _) =
+      final (upperStatus, _) =
           await rawSend(s, 'POST', '/api/collections/data/records', body: {
         'id': upperId,
         'store': s.store,
         'data': {'name': 'x'}
       });
-      expect(badStatus, 400, reason: 'an uppercase id violates [a-z0-9]{15}');
+      expect(upperStatus, 200,
+          reason: 'uppercase is legal in a PocketBase record id');
+      const underscoreId = 'ISO_country____';
+      final (underscoreStatus, _) =
+          await rawSend(s, 'POST', '/api/collections/data/records', body: {
+        'id': underscoreId,
+        'store': s.store,
+        'data': {'name': 'y'}
+      });
+      expect(underscoreStatus, 200, reason: 'underscore is legal too');
+
+      // RAW WIRE: a wrong-LENGTH id is still rejected.
+      final shortId = generateRecordId().substring(0, 14);
+      final (badStatus, _) =
+          await rawSend(s, 'POST', '/api/collections/data/records', body: {
+        'id': shortId,
+        'store': s.store,
+        'data': {'name': 'x'}
+      });
+      expect(badStatus, 400,
+          reason: 'a 14-character id violates the 15-character length');
 
       // ENGINE LEVEL (mock only): a pending create whose STORED record_id
       // violates the pattern must dead-letter while healthy neighbors still
@@ -189,25 +211,26 @@ void main() {
       // from the canonical column lists so every column survives the move).
       await a.pocket.db.insert('lp_outbox', {
         for (final c in outboxColumns) c: opRows.single[c],
-        'record_id': upperId,
+        'record_id': shortId,
       });
       await a.pocket.db.insert('lp_sync_row', {
         for (final c in syncRowColumns) c: srRows.single[c],
-        'record_id': upperId,
+        'record_id': shortId,
       });
 
+      final before = await s.countRecords(s.store);
       await a.engine.syncNow();
 
       // The poison dead-lettered (batch mode fails its whole request, so
       // the binary-split isolates it as batch_poison; per-record mode would
       // answer validation_push — both are terminal dead letters)…
       final dls = await a.pocket.db.query('lp_dead_letter',
-          where: 'record_id = ?', whereArgs: [upperId]);
+          where: 'record_id = ?', whereArgs: [shortId]);
       expect(dls.length, 1, reason: 'the invalid-id op dead-lettered');
       expect(dls.single['kind'], anyOf('validation_push', 'batch_poison'));
       // …and the healthy neighbor landed anyway: the drain did not stall.
-      expect(await s.countRecords(s.store), 1);
-      expect(mock.records[upperId], isNull,
+      expect(await s.countRecords(s.store), before + 1);
+      expect(mock.records[shortId], isNull,
           reason: 'an invalid-id create never lands on the server');
       expect(await a.pocket.collection(s.store).get(good), isNotNull);
       expect(await a.engine.syncStore.countPending(), 0);

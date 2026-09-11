@@ -308,9 +308,10 @@ void main() {
       for (final bad in [
         '',
         'a' * 14,
-        'A' * 15,
+        'a' * 16,
         'bad-id!',
         'name with space',
+        'a' * 14 + '-',
         'é' * 15
       ]) {
         await expectLater(
@@ -321,9 +322,20 @@ void main() {
         );
       }
 
+      // PocketBase's system id field is `^[a-zA-Z0-9_]+$` with min == max == 15,
+      // so uppercase letters and underscores are legal record ids — they exist
+      // on live servers (e.g. human-readable settings keys) and the engine
+      // accepts them rather than quarantining them on pull.
+      for (final good in ['A' * 15, 'ISO_country____', 'currency_______']) {
+        await col.put({'id': good, 'name': 'x'});
+        expect(await col.get(good), isNotNull,
+            reason: 'id "$good" must be accepted');
+      }
+
       // No id: a valid 15-char id is generated.
       await col.put({'name': 'generated'});
-      final rows = await col.query().all().fetch();
+      final rows =
+          await col.query().where('name', eq: 'generated').all().fetch();
       expect(rows.items.single['id'], hasLength(15));
       expect(isValidRecordId(rows.items.single['id'] as String), isTrue);
     });

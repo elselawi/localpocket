@@ -1,12 +1,25 @@
 import 'dart:math';
 
-/// Lowercase 15-char `[a-z0-9]` record ids. PocketBase enforces this
-/// shape for record ids regardless of the collection's declared pattern.
+/// The alphabet [generateRecordId] draws from: lowercase letters and digits.
+/// Generated ids are deliberately a strict subset of [recordIdPattern] (no
+/// uppercase, no underscore) so they stay sortable and filesystem-safe.
 const String _idAlphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
 final Random _recordIdRandom = Random.secure();
 
-/// Validates PocketBase-compatible lowercase 15-character record IDs.
-final RegExp recordIdPattern = RegExp(r'^[a-z0-9]{15}$');
+/// The record-id shape PocketBase actually enforces: exactly 15 characters
+/// drawn from `[A-Za-z0-9_]`.
+///
+/// PocketBase's default system `id` field is declared as
+/// `{"min": 15, "max": 15, "pattern": "^[a-zA-Z0-9_]+$"}` and applies to every
+/// collection, so a server accepts hand-supplied ids such as
+/// `currency_______`, `ISO_country____`, or `ai_services_ena`. The engine
+/// accepts the same shape: an id this pattern rejects would be rejected by
+/// PocketBase on push and (before this contract was aligned) silently
+/// quarantined on pull.
+///
+/// [generateRecordId] still emits only lowercase `[a-z0-9]` ids — a strict
+/// subset — because the monotonic, sortable prefix relies on that alphabet.
+final RegExp recordIdPattern = RegExp(r'^[A-Za-z0-9_]{15}$');
 
 /// Monotonic counter for the time-prefix of generated ids. Seeded from the
 /// wall clock at startup and incremented per id, so ids generated in the
@@ -40,5 +53,6 @@ String generateRecordId({Random? random}) {
   return (prefix + suffix).substring(0, 15);
 }
 
-/// Returns whether [id] has the required PocketBase record-ID format.
+/// Returns whether [id] has the required PocketBase record-ID format
+/// (15 characters from `[A-Za-z0-9_]`; see [recordIdPattern]).
 bool isValidRecordId(String id) => recordIdPattern.hasMatch(id);
