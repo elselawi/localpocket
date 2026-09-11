@@ -52,6 +52,7 @@ abstract final class ContractCodec {
       AnalyzeRequest(),
       WalCheckpointRequest(),
       VacuumRequest(),
+      WipeRequest(),
       PruneOutboxRequest(),
       CompactRequest(store: 's', olderThanMs: 0),
       RunMaintenanceRequest(compactOlderThanMs: 0),
@@ -117,6 +118,7 @@ abstract final class ContractCodec {
     WatchStartedResult(subscription: 'x'),
     PruneOutboxResult(removed: 0),
     CompactResult(removed: 0),
+    WipeResultData(rowsCleared: 0, blobsCleared: 0),
     ConflictsResult([]),
     ConflictResult(null),
     FileUploadSessionResult(session: 'x', maxChunkBytes: 1),
@@ -486,6 +488,8 @@ abstract final class ContractCodec {
         return const VacuumRequest();
       case 'pruneOutbox':
         return const PruneOutboxRequest();
+      case 'wipe':
+        return const WipeRequest();
       case 'compact':
         final store = m['store'];
         final olderThanMs = m['olderThanMs'];
@@ -667,6 +671,14 @@ abstract final class ContractCodec {
         return tag == PruneOutboxResult.tagValue
             ? PruneOutboxResult(removed: removed)
             : CompactResult(removed: removed);
+      case WipeResultData.tagValue:
+        final rowsCleared = m['rowsCleared'];
+        final blobsCleared = m['blobsCleared'];
+        if (rowsCleared is! int || blobsCleared is! int) {
+          throw WireException('Malformed wipe payload.');
+        }
+        return WipeResultData(
+            rowsCleared: rowsCleared, blobsCleared: blobsCleared);
       case ConflictsResult.tagValue:
         final conflicts = m['conflicts'];
         if (conflicts is! List) {

@@ -732,6 +732,29 @@ final class VacuumRequest extends Request<OkResult> {
   Map<String, Object?> toJson() => const {};
 }
 
+/// {@template localpocket.wipe_request}
+/// Drops EVERY piece of local data in this database: every store's rows, all
+/// sync/outbox/conflict/dead-letter state, all file references, and the sync
+/// cursors — then deletes the tracked blob bytes.
+///
+/// Schema bookkeeping (`lp_stores`, `lp_migrations`, `lp_meta`) is preserved,
+/// so the database keeps its identity and store registrations and re-syncs
+/// from scratch on the next cycle (`syncNow`), which is the "restore from the
+/// server" / "switch account" / "clear local cache" operation. It is a local
+/// reset only: nothing is deleted on the server.
+/// {@endtemplate}
+final class WipeRequest extends Request<WipeResultData> {
+  /// {@macro localpocket.wipe_request}
+  const WipeRequest();
+
+  @override
+  String get tag => 'wipe';
+  @override
+  String get resultTag => WipeResultData.tagValue;
+  @override
+  Map<String, Object?> toJson() => const {};
+}
+
 /// {@template localpocket.prune_outbox_request}
 /// Deletes settled outbox ops (rows whose records are clean or gone).
 /// {@endtemplate}

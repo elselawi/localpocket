@@ -6,6 +6,8 @@ import 'package:localpocket/src/kernel/database_adapter.dart';
 import 'package:localpocket/src/kernel/files/blob_store.dart';
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/local_pocket.dart';
+import 'package:localpocket/src/kernel/maintenance_service.dart';
+import 'package:localpocket/src/kernel/schema.dart' show FtsSpec;
 import 'package:localpocket/src/kernel/sync/sync_tables.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:test/test.dart';
@@ -431,6 +433,100 @@ void main() {
               [recB]))
           .single;
       expect(refB['state'], 'pending_upload');
+    });
+  });
+
+  group('wipe', () {
+    test('drops every row, all bookkeeping and the cursors; schema survives',
+        () async {
+      // keepUnsyncedArchives keeps the offline-archived row around, so the
+      // wipe has to remove an ARCHIVED row as well as a live one.
+      final pocket =
+          await openPocket(stores: [widgetsSchema(keepUnsyncedArchives: true)]);
+      addTearDown(pocket.close);
+      final col = pocket.collection('widgets');
+
+      final a = generateRecordId();
+      final b = generateRecordId();
+      await col.put(record(id: a, name: 'a'));
+      await col.put(record(id: b, name: 'b'));
+      await col.archive(a);
+      await pocket.outbox
+          .ack('widgets', b, serverUpdated: '2026-01-01 00:00:00.000Z');
+      await pocket.db.insert('lp_sync_state', {
+        'scope': 's',
+        'store': 'widgets',
+        'cursor_updated': '2026-01-01 00:00:00.000Z',
+        'cursor_id': b,
+      });
+      // Warm the point-read cache: a wipe must invalidate it even though its
+      // change sets carry no ids.
+      expect(await col.get(b), isNotNull);
+
+      final result = await pocket.maintenance.wipe();
+
+      expect(result.rows, 2, reason: 'archived rows are wiped too');
+      expect(await col.query().includeArchived().count(), 0);
+      expect(await col.get(b), isNull,
+          reason: 'the point-read cache was cleared');
+      for (final table in MaintenanceService.wipedTables) {
+        expect(await pocket.db.query(table), isEmpty,
+            reason: '$table survives a wipe');
+      }
+      // Schema bookkeeping is what keeps the database usable afterwards.
+      expect(await pocket.db.query('lp_stores'), hasLength(1));
+      expect(await pocket.db.query('lp_migrations'), isNotEmpty);
+      final c = generateRecordId();
+      await col.put(record(id: c, name: 'after'));
+      expect((await col.get(c))!['name'], 'after');
+    });
+
+    test('deletes tracked blob bytes through the blob store', () async {
+      final blobs = MemoryBlobStore();
+      final pocket = await openPocket(blobStore: blobs);
+      addTearDown(pocket.close);
+      final id = generateRecordId();
+      await pocket.collection('widgets').put(record(id: id, name: 'with-file'));
+      final ref = await pocket.files.attach(
+        store: 'widgets',
+        recordId: id,
+        bytes: Stream.value(List<int>.filled(8, 7)),
+        name: 'avatar.png',
+        group: 'pair-1',
+        allowVolatileBlobs: true,
+      );
+      expect(ref.name, 'avatar.png');
+      expect(await blobs.listHashes(), isNotEmpty);
+
+      final result = await pocket.maintenance.wipe();
+
+      expect(result.blobs, greaterThanOrEqualTo(1));
+      expect(await blobs.listHashes(), isEmpty,
+          reason: 'the bytes go too, not just the metadata');
+      expect(await pocket.files.list(store: 'widgets', recordId: id), isEmpty);
+    });
+
+    test('wiping an FTS store empties the index and leaves it usable',
+        () async {
+      final pocket = await openPocket(stores: [
+        widgetsSchema(fts: const FtsSpec(['name']))
+      ]);
+      addTearDown(pocket.close);
+      final col = pocket.collection('widgets');
+      final a = generateRecordId();
+      await col.put(record(id: a, name: 'findable one'));
+      expect((await col.search('findable').limit(5).fetch()).single.id, a);
+
+      await pocket.maintenance.wipe();
+
+      expect(await col.query().count(), 0);
+      expect(await col.search('findable').limit(5).fetch(), isEmpty,
+          reason: 'the index was emptied with the rows');
+      final b = generateRecordId();
+      await col.put(record(id: b, name: 'findable two'));
+      final hits = await col.search('findable').limit(5).fetch();
+      expect(hits.single.id, b,
+          reason: 'the FTS triggers still maintain the index after a wipe');
     });
   });
 }

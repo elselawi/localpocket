@@ -261,6 +261,8 @@ class KernelCommandHandler implements CommandHandler {
         PruneOutboxRequest() => context.database.maintenance
             .pruneOutbox()
             .then((int removed) => PruneOutboxResult(removed: removed)),
+        WipeRequest() => context.database.maintenance.wipe().then(
+            (r) => WipeResultData(rowsCleared: r.rows, blobsCleared: r.blobs)),
         CompactRequest(:final store, :final olderThanMs) => context
             .database.maintenance
             .compact(store, olderThan: Duration(milliseconds: olderThanMs))

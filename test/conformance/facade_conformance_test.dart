@@ -587,6 +587,27 @@ void main() {
         final fetched = await hits.first.fetch();
         expect(fetched!.id, hits.first.id);
       });
+
+      test('wipe resets local state identically on every runtime', () async {
+        db = await open();
+        addTearDown(db.close);
+        final tasks = db.store(Tasks.store);
+        final a = (await tasks.put([Tasks.title.set('a')])).id;
+        final b = (await tasks.put([Tasks.title.set('b')])).id;
+        await tasks.archive(a);
+        expect(await tasks.get(b), isNotNull); // warm the point-read cache
+
+        final result = await db.wipe();
+
+        expect(result.rowsCleared, 2,
+            reason: 'both the live and the archived row are dropped');
+        expect(result.blobsCleared, 0, reason: 'no blob store configured');
+        expect(await tasks.get(b), isNull);
+        expect((await tasks.query(const QuerySpec(limit: 10))).items, isEmpty);
+        // The wipe is a reset, not a teardown: the handle keeps working.
+        final c = (await tasks.put([Tasks.title.set('after')])).id;
+        expect((await tasks.get(c))!.get(Tasks.title), 'after');
+      });
     });
   }
 }

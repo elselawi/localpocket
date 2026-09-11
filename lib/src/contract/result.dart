@@ -482,3 +482,28 @@ final class CompactResult extends Result {
   @override
   Map<String, Object?> toJson() => {'removed': removed};
 }
+
+/// {@template localpocket.wipe_result_data}
+/// Outcome of a local reset: how many domain rows and blob bytes were dropped.
+/// {@endtemplate}
+final class WipeResultData extends Result {
+  /// {@macro localpocket.wipe_result_data}
+  const WipeResultData({required this.rowsCleared, required this.blobsCleared});
+
+  /// Stable wire tag for this result type.
+  static const String tagValue = 'wipe';
+  @override
+  String get tag => tagValue;
+
+  /// Domain rows deleted across every registered store.
+  final int rowsCleared;
+
+  /// Blob bytes deleted through the configured blob store.
+  final int blobsCleared;
+
+  @override
+  Map<String, Object?> toJson() => {
+        'rowsCleared': rowsCleared,
+        'blobsCleared': blobsCleared,
+      };
+}

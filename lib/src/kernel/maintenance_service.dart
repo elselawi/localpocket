@@ -209,4 +209,79 @@ class MaintenanceService {
     }
     return count;
   }
+
+  /// Bookkeeping tables a [wipe] empties, after every store's domain table.
+  ///
+  /// Schema bookkeeping (`lp_stores`, `lp_migrations`, `lp_meta`) is
+  /// deliberately absent: it is what lets the wiped database reopen with the
+  /// same identity and store registrations.
+  static const List<String> wipedTables = [
+    'lp_sync_row',
+    'lp_outbox',
+    'lp_op_queue',
+    'lp_conflicts',
+    'lp_dead_letter',
+    'lp_sync_state',
+    'lp_file_refs',
+    'lp_blobs',
+  ];
+
+  /// Drops every piece of local data: all domain rows (archived and hidden
+  /// ones included), all sync bookkeeping, every file reference and blob row,
+  /// and the per-scope sync cursors. Tracked blob BYTES are then deleted
+  /// through the configured blob store.
+  ///
+  /// The reset is LOCAL ONLY — nothing is deleted on the server — and it is
+  /// the operation behind "restore from the server", "switch account" and
+  /// "clear the local cache": because the cursors go too, the next cycle
+  /// re-pulls the whole remote collection.
+  ///
+  /// Returns the number of domain rows and blob bytes removed. Byte deletion
+  /// happens after the metadata commit and is best-effort per blob: a failure
+  /// leaves an unreferenced blob behind (never a dangling reference), which
+  /// `files.gc()` reclaims through its orphan healing.
+  Future<({int rows, int blobs})> wipe() async {
+    var rows = 0;
+    var hashes = const <String>[];
+    await context.database.transaction((tx) async {
+      final exec = tx.executor;
+      // Stores can reference each other; defer the checks to COMMIT so the
+      // order the tables are emptied in cannot trip a foreign key.
+      await exec.execute('PRAGMA defer_foreign_keys = ON');
+      final blobRows = await exec.query('lp_blobs', columns: ['hash']);
+      hashes = [for (final r in blobRows) r['hash']! as String];
+      for (final store in context.database.storeNames) {
+        rows += await exec.delete(store);
+      }
+      for (final table in wipedTables) {
+        await exec.execute('DELETE FROM $table');
+      }
+      for (final store in context.database.storeNames) {
+        // Conservative refresh: the affected ids are the whole store, so
+        // watchers re-run instead of diffing against a stale snapshot.
+        tx.addChange(ChangeSet(store, const {}));
+      }
+    });
+    // The point-read cache is keyed by record id and invalidated from
+    // ChangeSet ids — which a wipe deliberately leaves empty — so clear it
+    // wholesale here.
+    for (final table in context.tables.values) {
+      table.readCache.clear();
+    }
+    // Bytes go AFTER the metadata commit; a failure can only leak an
+    // unreferenced blob, never leave a reference to a deleted blob.
+    var blobs = 0;
+    final store = context.blobStore;
+    if (store != null) {
+      for (final hash in hashes) {
+        try {
+          await store.delete(hash);
+          blobs++;
+        } catch (_) {
+          // Best-effort: files.gc() reclaims the leftover bytes.
+        }
+      }
+    }
+    return (rows: rows, blobs: blobs);
+  }
 }

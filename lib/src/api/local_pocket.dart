@@ -302,6 +302,32 @@ final class LocalPocket {
     return result.removed;
   }
 
+  /// Drops every piece of LOCAL data and reports what was removed: every row
+  /// of every store (archived and hidden ones included), all sync bookkeeping
+  /// (outbox ops, sync rows, conflicts, dead letters, file references and blob
+  /// metadata) and the per-scope sync cursors. Tracked blob bytes are deleted
+  /// through the runtime's blob store as well.
+  ///
+  /// The database keeps its IDENTITY: store registrations, schema versions and
+  /// the migration ledger survive, so this handle stays usable and the next
+  /// [PocketBaseSync.syncNow] re-pulls the whole remote collection. That makes
+  /// it the "restore from the server", "switch accounts" and "clear the
+  /// local cache" operation. It is a local reset ONLY — nothing is deleted on
+  /// the server.
+  ///
+  /// ```dart
+  /// final result = await db.wipe();
+  /// print('dropped ${result.rowsCleared} rows');
+  /// await sync.syncNow(); // pull everything back down
+  /// ```
+  Future<WipeResult> wipe() async {
+    final result = await _send(const WipeRequest());
+    return WipeResult(
+      rowsCleared: result.rowsCleared,
+      blobsCleared: result.blobsCleared,
+    );
+  }
+
   /// Closes the database. Subsequent sends fail with a `StateError`; live
   /// event and watch streams end. The platform opener's onClose hook (web:
   /// flush OPFS via the worker connection) runs after the close command.
@@ -366,6 +392,25 @@ final class LocalPocket {
       throw StateError('LocalPocket has been closed.');
     }
   }
+}
+
+/// {@template localpocket.wipe_result}
+/// Outcome of [LocalPocket.wipe]: how many domain rows and blob bytes were
+/// dropped.
+/// {@endtemplate}
+final class WipeResult {
+  /// {@macro localpocket.wipe_result}
+  const WipeResult({required this.rowsCleared, required this.blobsCleared});
+
+  /// Domain rows deleted across every registered store.
+  final int rowsCleared;
+
+  /// Blob bytes deleted through the configured blob store.
+  final int blobsCleared;
+
+  @override
+  String toString() =>
+      'WipeResult(rowsCleared: $rowsCleared, blobsCleared: $blobsCleared)';
 }
 
 /// {@template localpocket.engine_capabilities}

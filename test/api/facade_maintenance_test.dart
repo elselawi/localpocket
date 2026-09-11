@@ -38,6 +38,52 @@ void main() {
       final removed = await db.compact(Tasks.store, olderThan: Duration.zero);
       expect(removed, greaterThanOrEqualTo(0));
     });
+
+    test('wipe drops local rows and the handle stays usable', () async {
+      final tasks = db.store(Tasks.store);
+      final a = (await tasks.put([Tasks.title.set('a')])).id;
+      final b = (await tasks.put([Tasks.title.set('b')])).id;
+      await tasks.archive(a);
+      expect(await tasks.get(b), isNotNull); // warm the point-read cache
+
+      final result = await db.wipe();
+
+      expect(result.rowsCleared, 2, reason: 'archived rows count too');
+      expect(result.blobsCleared, 0, reason: 'no blob store configured');
+      expect(await tasks.get(b), isNull,
+          reason: 'the point-read cache is invalidated by the reset');
+      expect((await tasks.query(const QuerySpec(limit: 10))).items, isEmpty);
+
+      // The database keeps its identity and store registrations, so the same
+      // handle keeps working and the next sync cycle re-pulls from scratch.
+      final c = (await tasks.put([Tasks.title.set('after wipe')])).id;
+      expect((await tasks.get(c))!.get(Tasks.title), 'after wipe');
+    });
+
+    test('wipe deletes tracked blob bytes', () async {
+      final blobs = MemoryBlobStore();
+      final pocket = await LocalPocket.open(LocalPocketOptions(
+        path: ':memory:',
+        stores: [Tasks.store],
+        blobStore: blobs,
+      ));
+      addTearDown(pocket.close);
+      final tasks = pocket.store(Tasks.store);
+      final id = (await tasks.put([Tasks.title.set('with file')])).id;
+      await tasks.files.attach(
+        recordId: id,
+        source: FileSource.bytes([1, 2, 3, 4], name: 'avatar.png'),
+        group: 'study-42',
+        allowVolatileBlobs: true,
+      );
+      expect(await blobs.listHashes(), isNotEmpty);
+
+      final result = await pocket.wipe();
+
+      expect(result.blobsCleared, greaterThanOrEqualTo(1));
+      expect(await blobs.listHashes(), isEmpty);
+      expect(await tasks.files.list(recordId: id), isEmpty);
+    });
   });
 
   group('close lifecycle', () {
