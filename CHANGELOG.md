@@ -1,3 +1,15 @@
+## 0.3.1
+
+- Fixed: a field promoted out of `extra` could never be cleared. The migration
+  now removes the promoted key from the blob and every write re-encodes
+  `extra`, so a stale copy can no longer resurrect the old value after
+  `patch(field, null)` (the read path's NULL-column fallback used to serve it,
+  and the next read-modify-write re-committed it).
+- README: attachment deduplication is documented as byte-keyed identity —
+  re-attaching identical bytes to the same record/field returns the stored
+  reference and ignores the new `name`/`group`, and `field` is the scope that
+  keeps two byte-identical files distinct.
+
 ## 0.3.0
 
 - Declaring a field that already lived in `extra` no longer loses the value:
