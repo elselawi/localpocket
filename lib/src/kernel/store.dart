@@ -427,9 +427,12 @@ class Collection with ChangeBusAwareStore {
         _dirtyFields(currentPayload, merged, MutationAction.update);
 
     // Targeted single-field UPDATE: when exactly one declared field changed,
-    // write only that column plus `hidden=0` instead of re-encoding every
-    // column and `extra`. Statement shape stays canonical so the
-    // prepared-statement cache stays hot.
+    // write only that column plus `extra` and `hidden=0` instead of re-encoding
+    // every column. `extra` is rewritten because it is the ONE place a stale
+    // shadow of a declared field can hide: a key promoted out of `extra` by a
+    // migration would otherwise survive here and `decodeDbRow`'s NULL-column
+    // fallback would resurrect it after a deliberate `field: null`. Statement
+    // shape stays canonical so the prepared-statement cache stays hot.
     Map<String, Object?> row;
     if (dirtyFields.length == 1 &&
         _schema.declaredFieldNames.contains(dirtyFields.single)) {
@@ -439,6 +442,7 @@ class Collection with ChangeBusAwareStore {
             cipher: _pocket.fieldCipher,
             cryptoProvider: _pocket.cryptoProvider,
             recordId: id),
+        'extra': encodeExtraColumn(_schema, merged),
         'hidden': 0,
       };
     } else {
@@ -632,7 +636,10 @@ class Collection with ChangeBusAwareStore {
     final dirtyFields = _dirtyFields(existingRow, logical, action);
 
     // Same single-field UPDATE fast path as the dirty-patch path: one
-    // changed declared field writes only that column plus `hidden=0`.
+    // changed declared field writes only that column plus `extra` and
+    // `hidden=0`. `extra` is included for the same reason as there — it must
+    // never keep a shadow copy of a declared field, or a promoted key would
+    // come back through `decodeDbRow`'s NULL-column fallback.
     Map<String, Object?> writeRow;
     if (existingRow != null &&
         dirtyFields.length == 1 &&
@@ -643,6 +650,7 @@ class Collection with ChangeBusAwareStore {
             cipher: _pocket.fieldCipher,
             cryptoProvider: _pocket.cryptoProvider,
             recordId: recordId),
+        'extra': row['extra'],
         'hidden': 0,
       };
     } else {

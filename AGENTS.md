@@ -102,6 +102,14 @@ raw errors escaping the worker/contract boundary are undiagnosable.
 NEVER silently defaulted (that's how a filtered query once became unfiltered);
 absence may legitimately default.
 
+**`extra` holds UNDECLARED keys only.** `encodeExtraColumn` (codec) is the one
+encoder; every domain write re-encodes `extra`, including the single-field
+targeted UPDATE, and `Migrator._promoteExtras` deletes the key it promoted.
+`decodeDbRow`'s NULL-column fallback serves an `extra` copy when a promoted
+column is empty, so a stale copy left behind makes the field impossible to
+clear (`patch(f, null)` reads back the old value while a typed query sees
+null). Do not reintroduce a write path that skips the `extra` column.
+
 **Sealed request/result/event families.** Adding a contract variant requires:
 a case in `KernelCommandHandler.handle` (the switch is exhaustive — the
 compiler enforces it), a case in `ContractCodec` encode/decode for requests,

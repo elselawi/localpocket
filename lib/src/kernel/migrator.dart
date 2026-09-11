@@ -127,7 +127,8 @@ class Migrator {
   }
 
   /// Moves values that live in a record's `extra` JSON blob into a typed
-  /// column an additive migration just created.
+  /// column an additive migration just created, and drops the promoted keys
+  /// from the blob in the same write.
   ///
   /// Undeclared fields are stored only in `extra`; declaring one therefore has
   /// to move its value into the new physical column. Without this step the
@@ -136,6 +137,13 @@ class Migrator {
   /// write strips it from `extra` too — silent local data loss. Runs
   /// read-modify-write in the same chunk size as the transform backfill and is
   /// idempotent, so a crash before the schema-version bump simply re-runs it.
+  ///
+  /// Removing the key matters as much as filling the column: `decodeDbRow`
+  /// serves the `extra` copy when the column is NULL (the pre-backfill shape),
+  /// so a leftover copy would resurrect the old value the moment the user
+  /// clears the field (`patch(field, null)` writes the column NULL and leaves
+  /// the blob alone). Promotion is the point where the typed column becomes
+  /// authoritative, so the blob must stop carrying the key here.
   ///
   /// A value that does not match the declared field's kind is a hard
   /// [StorageError]: writing it into the typed column would corrupt typed
@@ -147,6 +155,7 @@ class Migrator {
     List<Field> addedFields,
   ) async {
     final db = pocket.db;
+    final promoted = {for (final f in addedFields) f.name};
     var cursor = 0;
     while (true) {
       final rows = await db.rawQuery(
@@ -182,6 +191,14 @@ class Migrator {
               cipher: pocket.fieldCipher,
               cryptoProvider: pocket.cryptoProvider,
               recordId: recordId);
+        }
+        // Drop every promoted key from `extra`, for this row and for rows whose
+        // column was already filled by an interrupted run (the value there is
+        // authoritative, the blob copy is stale either way).
+        final storedExtra = r['extra'];
+        if (storedExtra is String) {
+          final stripped = stripExtraKeys(storedExtra, promoted);
+          if (stripped != storedExtra) set['extra'] = stripped;
         }
         if (set.isNotEmpty) updates.add((lastRowid, set));
       }

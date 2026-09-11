@@ -8,9 +8,12 @@ import 'package:test/test.dart';
 import '../../support/helpers.dart';
 
 /// P1.A targeted dirty-patch UPDATEs: a single-field change emits a minimal
-/// `SET "field" = ?, "hidden" = 0` on the domain table (no full-row
-/// re-encode, no `extra` rewrite), while any other shape keeps the full-row
-/// update. Behavior must be byte-identical for callers either way.
+/// `SET "field" = ?, "extra" = ?, "hidden" = 0` on the domain table (no
+/// full-row re-encode), while any other shape keeps the full-row update.
+/// `extra` stays in the minimal shape on purpose: it is the one place a stale
+/// shadow of a declared field can survive, and the read path's NULL-column
+/// fallback would serve it after the field is deliberately cleared. Behavior
+/// must be byte-identical for callers either way.
 void main() {
   Future<DirectSqliteDatabase> openTraced(LocalPocket pocket) async {
     final db = pocket.db as DirectSqliteDatabase;
@@ -45,13 +48,64 @@ void main() {
       expect(sql, contains('"hidden"'));
       expect(sql, isNot(contains('"name"')),
           reason: 'unchanged declared columns must not be rewritten');
-      expect(sql, isNot(contains('"extra"')),
-          reason: 'the extra JSON blob must not be rebuilt');
+      expect(sql, contains('"extra"'),
+          reason: 'extra is rewritten so a promoted key cannot linger in it');
 
       final r = await col.get(id);
       expect(r!['qty'], 5);
       expect(r['name'], 'a');
       expect(r['phone'], 'p');
+    });
+
+    test('a single-field patch strips a promoted key from `extra`', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+
+      // v1 stores `title` only in the JSON blob, like a record adopted from an
+      // existing document.
+      final v1 = await openPocket(path: t.path);
+      final id = generateRecordId();
+      await v1.collection('widgets').put(record(
+            id: id,
+            name: 'keep',
+            extra: {'title': 'Original value', 'tag': 'keepme'},
+          ));
+      await v1.close();
+
+      final v2 = await openPocket(
+        path: t.path,
+        stores: [
+          widgetsSchema(
+            version: 2,
+            extraFields: [Field.text('title')],
+            migrations: [
+              StoreMigration(toVersion: 2, addedFields: [Field.text('title')]),
+            ],
+          ),
+        ],
+      );
+      addTearDown(v2.close);
+
+      final col = v2.collection('widgets');
+      // Recreate the shape a pre-strip build left behind: the promoted key is
+      // still in the blob, which is exactly what the read fallback serves.
+      // (The migration above removes it going forward; this pins the write-side
+      // heal for databases that were promoted before that.)
+      await v2.db.execute('UPDATE widgets SET extra = ? WHERE id = ?',
+          ['{"tag":"keepme","title":"stale copy"}', id]);
+      expect((await col.get(id))!['title'], 'Original value',
+          reason: 'the typed column still wins while it holds a value');
+
+      // The row is dirty (never synced), so this takes the single-column fast
+      // path.
+      await col.patch(id, {'title': null});
+
+      final raw =
+          await v2.db.rawQuery('SELECT extra FROM widgets WHERE id = ?', [id]);
+      expect(raw.single['extra'], isNot(contains('title')),
+          reason: 'the fast path must drop the stale shadow copy');
+      expect((await col.get(id))!['title'], isNull);
+      expect((await col.get(id))!['tag'], 'keepme');
     });
 
     test('multi-field or extra-key patches keep the full-row update', () async {

@@ -93,13 +93,29 @@ Map<String, Object?> encodeDbRow(
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
 }) {
-  final declared = schema.declaredFieldNames;
   final row = <String, Object?>{'id': id};
   for (final f in schema.fields) {
     final fc = cipher ?? cryptoProvider?.getFieldCipher(schema.name, f.name);
     row[f.name] = _encodeValue(f, logical[f.name],
         cipher: fc, aad: fieldAad(schema.name, f.name, id));
   }
+  row['extra'] = encodeExtraColumn(schema, logical);
+  row['archived'] = archived ? 1 : 0;
+  row['hidden'] = 0;
+  return row;
+}
+
+/// Encodes the `extra` column value for [logical]: every key that is not a
+/// declared field (nor `id`/`archived`), as canonical JSON, or `''` when there
+/// are none.
+///
+/// Declared names are ALWAYS excluded, so the blob can never hold a shadow copy
+/// of a typed column — including for a key that was promoted from `extra` by a
+/// schema revision (`decodeDbRow` would otherwise keep serving that copy
+/// through its NULL-column fallback after the column is deliberately cleared).
+String encodeExtraColumn(
+    CollectionSchema<Object?> schema, Map<String, Object?> logical) {
+  final declared = schema.declaredFieldNames;
   final extra = <String, Object?>{};
   for (final e in logical.entries) {
     if (e.key == 'id' || e.key == 'archived' || declared.contains(e.key)) {
@@ -107,10 +123,30 @@ Map<String, Object?> encodeDbRow(
     }
     extra[e.key] = e.value;
   }
-  row['extra'] = extra.isEmpty ? '' : canonicalize(extra);
-  row['archived'] = archived ? 1 : 0;
-  row['hidden'] = 0;
-  return row;
+  return extra.isEmpty ? '' : canonicalize(extra);
+}
+
+/// Removes [extraKeys] from an `extra` column JSON blob, re-canonicalizing the
+/// remainder.
+///
+/// Returns [extraJson] unchanged when it is not a JSON object, when decoding
+/// fails, or when no listed key is present (so callers can compare identities
+/// to decide whether a write is needed) and `''` once nothing is left. Used by
+/// the migrator to drop keys it has just promoted into typed columns.
+String stripExtraKeys(String extraJson, Set<String> extraKeys) {
+  if (extraJson.isEmpty) return extraJson;
+  final Object? parsed;
+  try {
+    parsed = jsonDecode(extraJson);
+  } on FormatException {
+    return extraJson;
+  }
+  if (parsed is! Map) return extraJson;
+  final remaining = Map<String, Object?>.from(parsed);
+  final before = remaining.length;
+  remaining.removeWhere((key, _) => extraKeys.contains(key));
+  if (remaining.length == before) return extraJson;
+  return remaining.isEmpty ? '' : canonicalize(remaining);
 }
 
 /// Encodes a single declared field's value exactly as [encodeDbRow] would
@@ -142,22 +178,14 @@ void appendDomainValues(
   FieldCipher? cipher,
   CryptoProvider? cryptoProvider,
 }) {
-  final declared = schema.declaredFieldNames;
   target.add(id);
   for (final f in schema.fields) {
     final fc = cipher ?? cryptoProvider?.getFieldCipher(schema.name, f.name);
     target.add(_encodeValue(f, logical[f.name],
         cipher: fc, aad: fieldAad(schema.name, f.name, id)));
   }
-  final extra = <String, Object?>{};
-  for (final e in logical.entries) {
-    if (e.key == 'id' || e.key == 'archived' || declared.contains(e.key)) {
-      continue;
-    }
-    extra[e.key] = e.value;
-  }
   target
-    ..add(extra.isEmpty ? '' : canonicalize(extra))
+    ..add(encodeExtraColumn(schema, logical))
     ..add(archived ? 1 : 0)
     ..add(0);
 }
@@ -209,10 +237,9 @@ Map<String, Object?> decodeDbRow(
 }) {
   final logical = <String, Object?>{};
   // Extra keys are merged FIRST so a declared field (or `id`/`archived`)
-  // promoted from an older schema revision's extra column always decodes
-  // from its typed physical column — the declared column wins, never the
-  // stale extra copy. Reserved engine columns never enter the logical row
-  // from extra.
+  // promoted from an older schema revision's extra column decodes from its
+  // typed physical column whenever that column holds a value. Reserved engine
+  // columns never enter the logical row from extra.
   final extra = dbRow['extra'];
   if (extra is String && extra.isNotEmpty) {
     final parsed = jsonDecode(extra);
@@ -238,9 +265,12 @@ Map<String, Object?> decodeDbRow(
     // full-record write would strip it from `extra` too (encodeDbRow drops
     // declared keys), destroying it. [Migrator] backfills the column
     // physically; this fallback keeps the read correct before that runs and
-    // makes the destructive-rebuild copy lossless. It cannot resurrect a
-    // deliberately-cleared field: a rewrite always removes declared keys
-    // from `extra`, so a stale copy only ever exists pre-promotion.
+    // makes the destructive-rebuild copy lossless.
+    //
+    // The fallback is only safe while a stale copy cannot outlive promotion,
+    // which is why promotion REMOVES the key it moved (Migrator._promoteExtras)
+    // and every write re-encodes `extra` (encodeExtraColumn) — otherwise a
+    // deliberate `field: null` would be overwritten by the copy here.
     if (stored == null && logical[f.name] != null) continue;
     logical[f.name] = stored;
   }

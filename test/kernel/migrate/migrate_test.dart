@@ -1316,6 +1316,12 @@ void main() {
           await v2.db.rawQuery('SELECT title FROM widgets WHERE id = ?', [id]);
       expect(physical.single['title'], 'Survives?',
           reason: 'the migration backfilled the physical column from extra');
+      final blob =
+          await v2.db.rawQuery('SELECT extra FROM widgets WHERE id = ?', [id]);
+      expect(blob.single['extra'], isNot(contains('title')),
+          reason: 'the promoted key is removed from `extra`, not just copied');
+      expect(blob.single['extra'], contains('42'),
+          reason: 'undeclared keys are untouched');
 
       final doc = (await v2.collection('widgets').get(id))!;
       expect(doc['title'], 'Survives?');
@@ -1346,6 +1352,51 @@ void main() {
       expect(reopenedDoc['title'], 'Survives?',
           reason: 'the promoted value survives a rewrite and reopen');
       expect(reopenedDoc['other'], 43);
+    });
+
+    test(
+        'clearing a promoted field after migration is not resurrected by a '
+        'stale `extra` copy', () async {
+      final t = await tempDbPath();
+      addTearDown(t.cleanup);
+
+      // Schemaless first: `title` lives only in the JSON blob.
+      final v1 = await openPocket(path: t.path);
+      final id = generateRecordId();
+      await v1.collection('widgets').put(record(
+            id: id,
+            name: 'keep',
+            extra: {'title': 'Original value', 'tag': 'keepme'},
+          ));
+      await v1.close();
+
+      final v2Schema = widgetsSchema(
+        version: 2,
+        extraFields: [Field.text('title')],
+        migrations: [
+          StoreMigration(toVersion: 2, addedFields: [Field.text('title')]),
+        ],
+      );
+      final v2 = await openPocket(path: t.path, stores: [v2Schema]);
+      addTearDown(v2.close);
+
+      // The user clears the field. `decodeDbRow` serves the `extra` copy while
+      // the column is NULL, so a key left in the blob would come straight back.
+      await v2.collection('widgets').patch(id, {'title': null});
+
+      expect((await v2.collection('widgets').get(id))!['title'], isNull,
+          reason: 'a cleared promoted field must read back as null');
+      expect((await v2.collection('widgets').get(id))!['tag'], 'keepme');
+      final cleared =
+          await v2.db.rawQuery('SELECT extra FROM widgets WHERE id = ?', [id]);
+      expect(cleared.single['extra'], isNot(contains('title')));
+      await v2.close();
+
+      final reopened = await openPocket(path: t.path, stores: [v2Schema]);
+      addTearDown(reopened.close);
+      final doc = (await reopened.collection('widgets').get(id))!;
+      expect(doc['title'], isNull, reason: 'the clear survives a reopen');
+      expect(doc['tag'], 'keepme');
     });
 
     test(
@@ -1382,6 +1433,10 @@ void main() {
           await v2.db.rawQuery('SELECT title FROM widgets WHERE id = ?', [id]);
       expect(physical.single['title'], 'Survives?',
           reason: 'the rebuild carried the promoted value into the new table');
+      final rebuiltBlob =
+          await v2.db.rawQuery('SELECT extra FROM widgets WHERE id = ?', [id]);
+      expect(rebuiltBlob.single['extra'], isNot(contains('title')),
+          reason: 'the rebuild drops the promoted key from `extra` too');
       expect((await v2.collection('widgets').get(id))!['title'], 'Survives?');
     });
 

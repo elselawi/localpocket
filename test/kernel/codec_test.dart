@@ -310,6 +310,36 @@ void main() {
     });
   });
 
+  group('extra column encoding', () {
+    test('declared names never enter `extra`, even as stale copies', () {
+      final v2 = widgetsSchema(version: 2, extraFields: [Field.text('title')]);
+      final logical = record(
+        id: 'aaaaaaaaaaaaaaa',
+        name: 'x',
+        qty: 1,
+        extra: {'title': 'promoted value', 'tag': 'keepme'},
+      );
+      final encoded = encodeExtraColumn(v2, logical);
+      expect(encoded, isNot(contains('title')),
+          reason: 'a promoted key must not survive in the blob');
+      expect(encoded, contains('keepme'));
+    });
+
+    test('strips promoted keys and keeps the rest of the blob', () {
+      expect(stripExtraKeys('{"tag":"keepme","title":"v"}', {'title'}),
+          '{"tag":"keepme"}');
+      expect(stripExtraKeys('{"title":"v"}', {'title'}), '');
+    });
+
+    test('returns the blob unchanged when there is nothing to strip', () {
+      const blob = '{"tag":"keepme"}';
+      expect(stripExtraKeys(blob, {'title'}), blob);
+      expect(stripExtraKeys('', {'title'}), '');
+      expect(stripExtraKeys('[1,2,3]', {'title'}), '[1,2,3]');
+      expect(stripExtraKeys('not json', {'title'}), 'not json');
+    });
+  });
+
   group('decodeDbRows (batch and async)', () {
     test('batch decode matches individual decodes', () {
       final rows = [
