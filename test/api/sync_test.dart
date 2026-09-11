@@ -63,21 +63,28 @@ void main() {
       expect(sync.isRunning, isFalse);
     });
 
-    test('a runtime without a sync backend fails start typed', () async {
+    test('a native open supplies the PocketBase backend by default', () async {
+      final server = await MockPbServer().start();
+      addTearDown(server.stop);
+      // No `syncBackendFactory`: the native open path wires the canonical
+      // PocketBase adapter itself, so callers never import it from `src/`
+      // (the reviewer's blocker — sync used to fail with "No sync backend"
+      // unless the adapter was imported from an implementation path).
       final db = await LocalPocket.open(LocalPocketOptions(
         path: ':memory:',
         stores: [Tasks.store],
       ));
       addTearDown(db.close);
       final sync = db.attachPocketBaseSync(PocketBaseSyncOptions(
-        baseUrl: Uri.parse('http://127.0.0.1:9'),
+        baseUrl: server.baseUrl,
         tokenProvider: _FakeTokens('jwt'),
+        identity: 'default-backend',
       ));
-      await expectLater(
-        sync.start(),
-        throwsA(isA<ValidationException>()
-            .having((e) => e.message, 'message', contains('No sync backend'))),
-      );
+      await sync.start();
+      expect(sync.isRunning, isTrue,
+          reason:
+              'the default backend makes start work with no factory import');
+      await sync.stop();
     });
 
     test('start without an identity fails typed instead of sharing a scope',

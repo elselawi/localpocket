@@ -24,10 +24,10 @@ import 'package:test/test.dart';
 ///       `dart:io`, `dart:html`, `dart:js*`, or `package:http` — it must stay
 ///       web-clean and transport-free.
 ///   R3  The ONLY adapter touch-points outside `lib/src/adapters/pocketbase/**`
-///       are the two pinned files below (the web worker's backend-factory
-///       wiring, and the web open path that rejects non-PocketBase
-///       factories). Everything else under `lib/src/` must not reference
-///       the adapter.
+///       are the three pinned files below (the web worker's backend-factory
+///       wiring, the web open path that rejects non-PocketBase factories, and
+///       the native open path that installs the default backend). Everything
+///       else under `lib/src/` must not reference the adapter.
 ///   R4  The public barrel `lib/localpocket.dart` stays free of `dart:io`
 ///       and `package:http`, and there are no auxiliary barrels.
 ///
@@ -83,18 +83,22 @@ void main() {
     }
   });
 
-  test('the only adapter touch-points are the pinned two (R3)', () {
+  test('the only adapter touch-points are the pinned three (R3)', () {
     // Everything under lib/src must not reference the adapter except these
-    // two documented touch-points:
+    // three documented touch-points:
     //  - lib/src/platform/web/worker/controller.dart  wires the concrete
     //    PocketBaseSyncBackendFactory into the worker's sync start
     //  - lib/src/platform/web/open_web.dart  rejects a caller-configured
     //    non-PocketBase sync backend factory instead of silently ignoring it
-    // (Token/TokenProvider live on the kernel sync seam; the api layer no
-    // longer reaches into the adapter for them.)
+    //  - lib/src/platform/native/open_native.dart  supplies the same factory
+    //    as the DEFAULT backend for native opens, so `attachPocketBaseSync`
+    //    works there without callers importing the (internal) adapter
+    // (Token/TokenProvider live on the kernel sync seam; the api layer never
+    // reaches into the adapter for them.)
     const allowed = {
       'lib/src/platform/web/worker/controller.dart',
       'lib/src/platform/web/open_web.dart',
+      'lib/src/platform/native/open_native.dart',
     };
     final refPattern =
         RegExp(r"""^\s*(import|export)\s+'[^']*pocketbase""", multiLine: true);

@@ -114,13 +114,17 @@ final class LocalPocketOptions {
   /// Builds the sync backend the kernel uses for sync start commands, or
   /// `null` when sync is not used on this database.
   ///
-  /// Primarily the native wiring: on web the worker configures its own
-  /// backend (a non-PocketBase factory fails the web open typed instead of
-  /// being silently ignored). To host a CUSTOM backend on web, supply it
-  /// through [PageCallbacks.syncBackendFactory] instead: it then executes
-  /// entirely on the page and the worker receives a proxy over the callback
-  /// channel. A runtime without a factory fails sync start with a
-  /// `StateError`.
+  /// Optional on every shipped runtime: the open path already supplies the
+  /// canonical PocketBase backend (the native opener directly, the web worker
+  /// internally), so `attachPocketBaseSync(...).start()` works without this.
+  /// Supply it to substitute a different backend — the adapter itself stays
+  /// internal, so a caller who needs custom field names or a non-PocketBase
+  /// transport configures one here.
+  ///
+  /// On web a caller-supplied non-PocketBase factory fails the open typed
+  /// instead of being silently ignored; host a CUSTOM backend with
+  /// [PageCallbacks.syncBackendFactory] instead, which executes entirely on
+  /// the page and reaches the worker as a proxy over the callback channel.
   final SyncBackendFactory? syncBackendFactory;
 
   /// The blob store holding attachment bytes for this database, or `null`

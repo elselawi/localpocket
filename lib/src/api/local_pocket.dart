@@ -10,6 +10,7 @@ import '../kernel/local_pocket.dart' as kernel show KernelDatabase;
 import '../kernel/transaction_coordinator.dart' as kernel show DurabilityClass;
 import '../kernel/database_adapter.dart' show Database;
 import '../kernel/ids.dart' show generateRecordId;
+import '../kernel/sync/sync_backend.dart' show SyncBackendFactory;
 import '../contract/contract.dart';
 import '../runtime/runtime_client.dart';
 import '../schema/store_def.dart';
@@ -65,10 +66,18 @@ final class LocalPocket {
 
   /// Opens a database over a caller-supplied runtime — the seam that lets
   /// the conformance harness prove every facade body over the worker path.
+  ///
+  /// [defaultSyncBackendFactory] is the runtime's own sync backend, used only
+  /// when the caller configured none. It exists so a platform opener can wire
+  /// the canonical backend without leaking the adapter into the api layer or
+  /// forcing callers to import it: native passes the PocketBase factory, web
+  /// wires its own inside the worker. A caller-supplied
+  /// [LocalPocketOptions.syncBackendFactory] always wins.
   static Future<LocalPocket> openWith(
     LocalPocketOptions options,
-    RuntimeClient Function(CommandHandler handler) createRuntime,
-  ) async {
+    RuntimeClient Function(CommandHandler handler) createRuntime, {
+    SyncBackendFactory? defaultSyncBackendFactory,
+  }) async {
     // Whole-db encryption config is validated, never silently ignored: the
     // key must have an engine (the native factory) to be applied against.
     // Web rejects the whole route up front (see open_web.dart) — this is
@@ -124,7 +133,8 @@ final class LocalPocket {
       // clock is in effect (injected or system) so the data-style offset
       // behaves identically on native and on the worker runtime.
       now: _effectiveNow(options),
-      syncBackendFactory: options.syncBackendFactory,
+      syncBackendFactory:
+          options.syncBackendFactory ?? defaultSyncBackendFactory,
       blobStore: options.blobStore,
       groupCommitWindow: options.groupCommitWindow,
       txSessionTtl: options.txSessionTtl,
