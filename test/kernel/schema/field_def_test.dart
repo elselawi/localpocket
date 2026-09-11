@@ -49,6 +49,31 @@ void main() {
           () => _RequiredNullable(), throwsA(isA<SchemaRegistrationError>()));
     });
 
+    test('jsonList rejects an element type JSON cannot decode', () {
+      // A nested shape cannot be satisfied by the per-element cast: it used to
+      // fail on the FIRST READ with an opaque
+      // `type 'List<Object?>' is not a subtype of type 'List<String>'`. It now
+      // fails at declaration, naming the field and the escape hatch.
+      expect(
+        () => Box.store.schema.jsonList<List<String>>('comments'),
+        throwsA(isA<SchemaRegistrationError>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('comments'), contains('jsonList<Object?>')),
+        )),
+      );
+      expect(
+        () => Box.store.schema.jsonList<Map<String, Object?>>('sections'),
+        throwsA(isA<SchemaRegistrationError>()),
+      );
+      // Scalars and the Object? escape hatch stay accepted.
+      expect(Box.store.schema.jsonList<String>('ok_str').name, 'ok_str');
+      expect(Box.store.schema.jsonList<int>('ok_int').name, 'ok_int');
+      expect(Box.store.schema.jsonList<double>('ok_dbl').name, 'ok_dbl');
+      expect(Box.store.schema.jsonList<bool>('ok_bool').name, 'ok_bool');
+      expect(Box.store.schema.jsonList<Object?>('ok_any').name, 'ok_any');
+    });
+
     test('inValues rejects an empty list', () {
       expect(() => Box.count.inValues(const []), throwsArgumentError);
     });

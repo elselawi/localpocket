@@ -648,6 +648,31 @@ void _verifyEnumCodec<E extends Enum>(
   }
 }
 
+/// The element types a `jsonList` can honestly decode.
+///
+/// JSON decoding produces `List<dynamic>` with `Map<String, dynamic>` /
+/// `List<dynamic>` elements, so the per-element cast in [JsonListField.decode]
+/// can only succeed for the JSON scalars and for `Object?` (the escape hatch
+/// that keeps nested lists/maps as decoded). A declaration like
+/// `jsonList<List<String>>` cannot be satisfied by that cast and would fail on
+/// the FIRST READ with an opaque `type 'List<Object?>' is not a subtype of
+/// type 'List<String>'`; rejecting it here fails at declaration instead, naming
+/// the field.
+bool _isDecodableJsonListElement<T>() =>
+    // `null is T` is true exactly for a NULLABLE element type — `Object?`,
+    // `String?`, `dynamic`. Those accept whatever JSON decoded to, so the
+    // per-element cast cannot fail on them.
+    null is T ||
+    const <Type>[Object, String, int, double, num, bool].contains(T);
+
+void _verifyJsonListElementType<T>(String name) {
+  if (_isDecodableJsonListElement<T>()) return;
+  throw SchemaRegistrationError(
+      'JSON list field "$name" declares element type $T, which cannot be '
+      'decoded from JSON. Use jsonList<Object?> for nested values (lists and '
+      'maps), or jsonList<String>/<int>/<double>/<num>/<bool>.');
+}
+
 // ---------------------------------------------------------------------------
 // json / jsonList / ref (no `required` — the engine factories have none)
 // ---------------------------------------------------------------------------
@@ -685,7 +710,9 @@ final class JsonListField<S, T> extends FieldDef<S, List<T>?>
   ///
   /// {@macro localpocket.json_list_field}
   JsonListField(super.owner, super.name, {this.encrypted = false})
-      : super(required: false);
+      : super(required: false) {
+    _verifyJsonListElementType<T>(name);
+  }
 
   /// Whether the value is encrypted at rest.
   final bool encrypted;
