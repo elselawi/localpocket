@@ -86,6 +86,52 @@ void main() {
       expect((await sr(h.pocket, a))!.syncState, SyncState.clean);
     });
 
+    test('a quarantined remote record is visible on the report and the status',
+        () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final good = generateRecordId();
+      final bad = generateRecordId();
+      h.mock.seed(store: 'widgets', data: {'name': 'ok'}, id: good);
+      // Missing the required `name`: map failure -> quarantine.
+      h.mock.seed(store: 'widgets', data: {'qty': 1}, id: bad);
+
+      final statuses = <SyncStatus>[];
+      final sub = h.engine.status.listen(statuses.add);
+      final report = await h.engine.syncNow();
+      await Future<void>.delayed(Duration.zero);
+
+      // The dropped record is counted, not silently skipped: from the app's
+      // perspective the pull used to "succeed" with the data simply absent.
+      expect(report.quarantined, {'widgets': 1});
+      expect(report.pulled['widgets'], 1,
+          reason: 'only the valid record was applied');
+      final last = statuses.last;
+      expect(last.quarantined, 1);
+      expect(last.quarantineError, isNotNull,
+          reason: 'the stored reason is visible without reading lp_sync_row');
+      expect(last.quarantineError, contains('name'),
+          reason: 'the reason names the offending field');
+      expect((await sr(h.pocket, bad))!.syncState, SyncState.quarantine);
+      expect((await sr(h.pocket, good))!.syncState, SyncState.clean);
+      await sub.cancel();
+    });
+
+    test('a quarantined record does not park the engine in backoff', () async {
+      final h = await EngineHarness.create();
+      addTearDown(h.close);
+      final bad = generateRecordId();
+      h.mock.seed(store: 'widgets', data: {'qty': 1}, id: bad);
+
+      final report = await h.engine.syncNow();
+
+      expect(report.hadError, isFalse,
+          reason: 'a quarantine is a per-record outcome, not a cycle error');
+      expect(h.engine.state, isNot(SyncEngineState.backoff),
+          reason: 'a permanently malformed record must not wedge the engine');
+      expect(report.quarantined, {'widgets': 1});
+    });
+
     test('lastSuccessfulSyncAt only advances on error-free cycles', () async {
       // A controllable clock keeps every cycle's completion instant distinct
       // (wall-clock runs can land two cycles in the same millisecond).

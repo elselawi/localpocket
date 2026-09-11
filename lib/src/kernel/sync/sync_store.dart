@@ -146,14 +146,29 @@ class SyncStore {
       0;
 
   /// All status counters in one query.
-  Future<({int pending, int conflicts, int hidden, int blocked})>
-      countAllStatus() async {
+  ///
+  /// `quarantineError` is the stored reason for the most recent quarantined
+  /// record, so a rejected remote record is visible from status alone —
+  /// without reading `lp_sync_row` directly.
+  Future<
+      ({
+        int pending,
+        int conflicts,
+        int hidden,
+        int blocked,
+        int quarantined,
+        String? quarantineError,
+      })> countAllStatus() async {
     final rows = await pocket.db.rawQuery('''
       SELECT
         SUM(CASE WHEN sync_state IN ('dirty', 'in_flight') THEN 1 ELSE 0 END) AS pending,
         SUM(CASE WHEN sync_state = 'conflict' THEN 1 ELSE 0 END) AS conflicts,
         SUM(CASE WHEN access_state = 'hidden' THEN 1 ELSE 0 END) AS hidden,
-        SUM(CASE WHEN sync_state = 'blocked' THEN 1 ELSE 0 END) AS blocked
+        SUM(CASE WHEN sync_state = 'blocked' THEN 1 ELSE 0 END) AS blocked,
+        SUM(CASE WHEN sync_state = 'quarantine' THEN 1 ELSE 0 END) AS quarantined,
+        (SELECT last_error FROM lp_sync_row
+          WHERE sync_state = 'quarantine' AND last_error IS NOT NULL
+          ORDER BY local_rev DESC, rowid DESC LIMIT 1) AS quarantine_error
       FROM lp_sync_row
     ''');
     final row = rows.isEmpty ? const <String, Object?>{} : rows.first;
@@ -162,6 +177,10 @@ class SyncStore {
       conflicts: (row['conflicts'] as int?) ?? 0,
       hidden: (row['hidden'] as int?) ?? 0,
       blocked: (row['blocked'] as int?) ?? 0,
+      quarantined: (row['quarantined'] as int?) ?? 0,
+      quarantineError: row['quarantine_error'] is String
+          ? row['quarantine_error']! as String
+          : null,
     );
   }
 }

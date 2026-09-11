@@ -8,7 +8,8 @@ part of 'contract.dart';
 
 /// {@template localpocket.sync_status_data}
 /// The engine status snapshot: the state machine position, the
-/// pending/conflict/hidden/blocked counters, and the sync timestamps.
+/// pending/conflict/hidden/blocked/quarantine counters, and the sync
+/// timestamps.
 ///
 /// {@template localpocket.sync_status}
 /// Current synchronization status suitable for a status indicator.
@@ -22,7 +23,9 @@ final class SyncStatusData {
     required this.conflicts,
     required this.hidden,
     this.blocked = 0,
+    this.quarantined = 0,
     this.lastError,
+    this.quarantineError,
     this.lastSyncAt,
     this.lastSuccessfulSyncAt,
   });
@@ -37,7 +40,10 @@ final class SyncStatusData {
         conflicts: _int(json['conflicts']),
         hidden: _int(json['hidden']),
         blocked: _int(json['blocked']),
+        quarantined: _int(json['quarantined']),
         lastError: _optWireString(json['lastError'], 'lastError'),
+        quarantineError:
+            _optWireString(json['quarantineError'], 'quarantineError'),
         lastSyncAt: _optWireDateTime(json['lastSyncAt'], 'lastSyncAt'),
         lastSuccessfulSyncAt: _optWireDateTime(
             json['lastSuccessfulSyncAt'], 'lastSuccessfulSyncAt'),
@@ -66,8 +72,19 @@ final class SyncStatusData {
   /// Operations parked in the recoverable `blocked` state.
   final int blocked;
 
+  /// Remote records the engine rejected and set aside instead of applying
+  /// (malformed payloads, foreign ids). A non-zero count means data the
+  /// server holds is NOT in the local store — the reason for the most recent
+  /// one is [quarantineError].
+  final int quarantined;
+
   /// Description of the most recent engine error.
   final String? lastError;
+
+  /// The stored reason the most recent quarantined record was set aside
+  /// (`lp_sync_row.last_error`), so a blocked ingest is visible without
+  /// reading internal tables.
+  final String? quarantineError;
 
   /// Time of the most recent completed sync cycle (an attempt).
   final DateTime? lastSyncAt;
@@ -82,7 +99,9 @@ final class SyncStatusData {
         'conflicts': conflicts,
         'hidden': hidden,
         'blocked': blocked,
+        'quarantined': quarantined,
         if (lastError != null) 'lastError': lastError,
+        if (quarantineError != null) 'quarantineError': quarantineError,
         if (lastSyncAt != null) 'lastSyncAt': lastSyncAt,
         if (lastSuccessfulSyncAt != null)
           'lastSuccessfulSyncAt': lastSuccessfulSyncAt,
@@ -90,9 +109,9 @@ final class SyncStatusData {
 }
 
 /// {@template localpocket.sync_report_data}
-/// One-cycle report (pulled/swept per store, pushed, dead-letter, blocked,
-/// discarded, error flag). COMPLETE by contract: every field survives the
-/// codec.
+/// One-cycle report (pulled/swept/quarantined per store, pushed, dead-letter,
+/// blocked, discarded, error flag). COMPLETE by contract: every field survives
+/// the codec.
 ///
 /// {@template localpocket.sync_report}
 /// Result of one manual/triggered sync cycle.
@@ -103,6 +122,7 @@ final class SyncReportData {
   const SyncReportData({
     this.pulled = const {},
     this.swept = const {},
+    this.quarantined = const {},
     this.pushed = 0,
     this.deadLettered = 0,
     this.blocked = 0,
@@ -116,6 +136,7 @@ final class SyncReportData {
   factory SyncReportData.fromJson(Map<String, Object?> json) => SyncReportData(
         pulled: _intMap(json['pulled']),
         swept: _intMap(json['swept']),
+        quarantined: _intMap(json['quarantined']),
         pushed: _int(json['pushed']),
         deadLettered: _int(json['deadLettered']),
         blocked: _int(json['blocked']),
@@ -124,11 +145,22 @@ final class SyncReportData {
         hadError: _optWireBool(json['hadError'], 'hadError', false),
       );
 
-  /// Records pulled by store.
+  /// Records applied from remote during this cycle, by store.
+  ///
+  /// This counts records WRITTEN, not candidates read: a re-delivered record
+  /// the engine recognizes as already applied, and a record applied by the
+  /// realtime fast path before the cycle started, are both `skipped` and do
+  /// not appear here.
   final Map<String, int> pulled;
 
   /// Records scanned by the sweep, by store.
   final Map<String, int> swept;
+
+  /// Remote records the engine set aside instead of applying, by store
+  /// (malformed payloads, foreign ids). Non-zero means the server holds data
+  /// the local store does not — check `SyncStatus.quarantineError` for the
+  /// stored reason.
+  final Map<String, int> quarantined;
 
   /// Successfully pushed records.
   final int pushed;
@@ -147,14 +179,15 @@ final class SyncReportData {
 
   @override
   String toString() =>
-      'SyncReport(pulled: $pulled, swept: $swept, pushed: $pushed, '
-      'deadLettered: $deadLettered, blocked: $blocked, '
+      'SyncReport(pulled: $pulled, swept: $swept, quarantined: $quarantined, '
+      'pushed: $pushed, deadLettered: $deadLettered, blocked: $blocked, '
       'discarded: $discarded, hadError: $hadError)';
 
   /// Serializes the report into its wire map.
   Map<String, Object?> toJson() => {
         'pulled': pulled,
         'swept': swept,
+        'quarantined': quarantined,
         'pushed': pushed,
         'deadLettered': deadLettered,
         'blocked': blocked,

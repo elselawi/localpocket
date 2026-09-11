@@ -274,12 +274,16 @@ class SyncEngine {
     int conflicts = 0;
     int hidden = 0;
     int blocked = 0;
+    int quarantined = 0;
+    String? quarantineError;
     try {
       final counts = await syncStore.countAllStatus();
       pending = counts.pending;
       conflicts = counts.conflicts;
       hidden = counts.hidden;
       blocked = counts.blocked;
+      quarantined = counts.quarantined;
+      quarantineError = counts.quarantineError;
     } catch (_) {
       // The status snapshot is best-effort: a failed count query must never
       // poison the status chain or crash the engine.
@@ -291,7 +295,9 @@ class SyncEngine {
         conflicts: conflicts,
         hidden: hidden,
         blocked: blocked,
+        quarantined: quarantined,
         lastError: _lastError,
+        quarantineError: quarantineError,
         lastSyncAt: _lastSyncAt,
         lastSuccessfulSyncAt: _lastSuccessfulSyncAt,
       ));
@@ -512,6 +518,10 @@ class SyncEngine {
 
     final pulled = <String, int>{};
     final swept = <String, int>{};
+    // Per-store quarantine counts, only for stores that actually dropped
+    // records (a rejected remote record is otherwise invisible: the pull
+    // "succeeds" and the data simply is not there).
+    final quarantined = <String, int>{};
     var hadError = false;
     // A push is only safe against freshly-pulled remote state; a failed
     // pull defers the push to the next fully-pulled cycle.
@@ -526,6 +536,7 @@ class SyncEngine {
       try {
         final pr = await puller.pullStore(store);
         pulled[store] = pr.applied;
+        if (pr.quarantined > 0) quarantined[store] = pr.quarantined;
         if (pr.hitPageLimit && pr.applied > 0) hitLimitStores.add(store);
       } on AuthError {
         _onAuthError();
@@ -620,6 +631,7 @@ class SyncEngine {
     lastReport = SyncReport(
       pulled: pulled,
       swept: swept,
+      quarantined: quarantined,
       pushed: pushReport.pushed,
       deadLettered: pushReport.deadLettered,
       blocked: pushReport.blocked,

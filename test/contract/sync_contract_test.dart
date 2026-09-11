@@ -15,7 +15,9 @@ void main() {
       conflicts: 2,
       hidden: 1,
       blocked: 3,
+      quarantined: 4,
       lastError: 'boom',
+      quarantineError: 'invalid remote record id',
       lastSyncAt: null,
     );
     final decoded = contract.ContractCodec.decodeResult(
@@ -29,7 +31,9 @@ void main() {
     expect(decoded.status.conflicts, 2);
     expect(decoded.status.hidden, 1);
     expect(decoded.status.blocked, 3);
+    expect(decoded.status.quarantined, 4);
     expect(decoded.status.lastError, 'boom');
+    expect(decoded.status.quarantineError, 'invalid remote record id');
   });
 
   test('SyncReportData rejects a present-but-wrong-typed hadError flag', () {
@@ -48,6 +52,7 @@ void main() {
     const report = contract.SyncReportData(
       pulled: {'tasks': 4},
       swept: {'tasks': 9},
+      quarantined: {'tasks': 2},
       pushed: 5,
       deadLettered: 1,
       blocked: 2,
@@ -62,6 +67,7 @@ void main() {
     ) as contract.SyncReportResult;
     expect(decoded.report.pulled, {'tasks': 4});
     expect(decoded.report.swept, {'tasks': 9});
+    expect(decoded.report.quarantined, {'tasks': 2});
     expect(decoded.report.pushed, 5);
     expect(decoded.report.deadLettered, 1);
     expect(decoded.report.blocked, 2);
