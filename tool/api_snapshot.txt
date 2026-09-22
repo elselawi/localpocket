@@ -3,6 +3,7 @@
 
 === lib/localpocket.dart ===
 export 'src/api/api.dart';
+export 'src/api/blob_store_platform.dart' show NativeBlobStore;
 export 'src/api/limits.dart';
 export 'src/api/writes.dart';
 export 'src/kernel/change_bus.dart' show ChangeAction, ChangeOrigin;

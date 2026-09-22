@@ -1,3 +1,20 @@
+## Unreleased
+
+- Native opens now default to durable attachment storage. With no `blobStore`,
+  `LocalPocket.open` installs the content-addressed `NativeBlobStore` rooted
+  beside the database file (`<database file name>.blobs`, so two databases in
+  one directory never share bytes): `files.attach` works without importing
+  anything from `src/`, and the bytes survive close → reopen. A caller-supplied
+  `blobStore` still wins (and the default root is not even created), and an
+  in-memory database (`:memory:`) keeps failing typed without an explicit store.
+- `NativeBlobStore` is exported from the package barrel, so apps that want a
+  non-default root (one directory per tenant, say) no longer need an
+  `implementation_imports` ignore pinned to an internal path. The export is
+  conditional — the class stays native-only and a web build still never pulls
+  `dart:io`.
+- README: the native storage seam now names the concrete store per platform
+  instead of deferring to "a persistent `BlobStore`".
+
 ## 0.3.1
 
 - Fixed: a field promoted out of `extra` could never be cleared. The migration

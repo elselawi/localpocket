@@ -1914,22 +1914,44 @@ On web platforms, `bootstrap` configures custom asset paths and timeout threshol
 
 ### Storage and sync seams on native
 
-On native platforms, custom storage and sync backend implementations can be passed directly to `LocalPocketOptions`:
+Both seams have a platform default on native, so neither must be configured —
+and neither defaults to a test double:
 
-- **`blobStore`**: Where attachment bytes are stored. Use a persistent `BlobStore` in production, or `MemoryBlobStore` for testing.
-- **`syncBackendFactory`**: Provides a custom `SyncBackend` implementation for `attachPocketBaseSync`.
+- **`blobStore`**: Where attachment bytes are stored. A native open installs the
+  durable `NativeBlobStore` — content-addressed by SHA-256, sharded, atomic
+  rename publish — rooted in a sibling directory of the database file:
+  `<database file name>.blobs` (`app.db` → `app.db.blobs/`), so two databases in
+  one directory never share bytes. Pass your own `BlobStore` to choose a
+  different root or backend; a supplied store always wins and the default is
+  never built. An in-memory database (`:memory:`) has NO default — there is no
+  file for a root to sit beside; pass `MemoryBlobStore()` there (a volatile
+  store requires the per-attach `allowVolatileBlobs` opt-in).
+- **`syncBackendFactory`**: Provides a custom `SyncBackend` implementation for
+  `attachPocketBaseSync`; without one the canonical PocketBase backend is used.
 
 ```dart
-  final nativeDb = await LocalPocket.open(
+  // Nothing to configure: a durable blob store beside the database file.
+  final defaultedNativeDb = await LocalPocket.open(
+    LocalPocketOptions(path: 'native-default.db', stores: [Tasks.store]),
+  );
+  await defaultedNativeDb.close();
+
+  // A non-default blob root (e.g. one directory per tenant/clinic):
+  final customRootNativeDb = await LocalPocket.open(
     LocalPocketOptions(
-      path: 'native.db',
+      path: 'apexo-clinic-42.db',
       stores: [Tasks.store],
-      blobStore: MemoryBlobStore(),
+      blobStore: NativeBlobStore('apexo-clinic-42/'),
       // syncBackendFactory: MySyncBackendFactory(),
     ),
   );
-  await nativeDb.close();
+  await customRootNativeDb.close();
 ```
+
+On web the worker owns storage instead: it builds its own OPFS-backed store, and
+a `blobStore` passed to `LocalPocketOptions` is rejected with a typed error (a
+store object cannot cross the worker boundary). Host a custom store on the page
+with `PageCallbacks.blobStore`, or pass `MemoryBlobStore` in tests.
 
 ### Runtime diagnostics: `db.capabilities`
 

@@ -102,6 +102,43 @@ export 'a.dart';
     expect(inventory, contains('lib/b.dart::B'));
   });
 
+  test('publicInventory traverses both branches of a conditional export', () {
+    final temp = Directory.systemTemp.createTempSync('api_inventory_cond_');
+    addTearDown(() {
+      if (temp.existsSync()) {
+        temp.deleteSync(recursive: true);
+      }
+    });
+
+    final libDir = Directory('${temp.path}${Platform.pathSeparator}lib');
+    libDir.createSync(recursive: true);
+    File('${libDir.path}${Platform.pathSeparator}entry.dart')
+        .writeAsStringSync('''
+export 'native.dart'
+    if (dart.library.js_interop) 'web.dart' show Shared;
+''');
+    File('${libDir.path}${Platform.pathSeparator}native.dart').writeAsStringSync('''
+class Shared {}
+
+class NativeOnly {}
+''');
+    File('${libDir.path}${Platform.pathSeparator}web.dart').writeAsStringSync('''
+class Shared {}
+
+class WebOnly {}
+''');
+
+    final inventory = publicInventory(temp, 'lib/entry.dart');
+
+    // The name an application can actually name exists on BOTH targets, so
+    // both branches are part of the inventory.
+    expect(inventory, contains('lib/native.dart::Shared'));
+    expect(inventory, contains('lib/web.dart::Shared'));
+    // The show clause still filters each branch.
+    expect(inventory, isNot(contains('lib/native.dart::NativeOnly')));
+    expect(inventory, isNot(contains('lib/web.dart::WebOnly')));
+  });
+
   test('repository gates pass end to end', () async {
     for (final script in [
       'tool/raw_api_gate.dart',

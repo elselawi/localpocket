@@ -9,6 +9,7 @@ library;
 import '../kernel/local_pocket.dart' as kernel show KernelDatabase;
 import '../kernel/transaction_coordinator.dart' as kernel show DurabilityClass;
 import '../kernel/database_adapter.dart' show Database;
+import '../kernel/files/blob_store.dart' show BlobStore;
 import '../kernel/ids.dart' show generateRecordId;
 import '../kernel/sync/sync_backend.dart' show SyncBackendFactory;
 import '../contract/contract.dart';
@@ -73,10 +74,21 @@ final class LocalPocket {
   /// forcing callers to import it: native passes the PocketBase factory, web
   /// wires its own inside the worker. A caller-supplied
   /// [LocalPocketOptions.syncBackendFactory] always wins.
+  ///
+  /// [defaultBlobStoreFactory] is the runtime's own blob store, built only
+  /// when the caller configured none, and returning `null` when the runtime has
+  /// no default for this database (an in-memory path has no directory to store
+  /// bytes in). It exists for the same reason as
+  /// [defaultSyncBackendFactory]: the platform opener — the only layer allowed
+  /// to touch `dart:io` — wires a durable store without leaking platform code
+  /// into the api layer or forcing callers to import it from `src/`. A
+  /// caller-supplied [LocalPocketOptions.blobStore] always wins, and the
+  /// factory is not called in that case.
   static Future<LocalPocket> openWith(
     LocalPocketOptions options,
     RuntimeClient Function(CommandHandler handler) createRuntime, {
     SyncBackendFactory? defaultSyncBackendFactory,
+    BlobStore? Function()? defaultBlobStoreFactory,
   }) async {
     // Whole-db encryption config is validated, never silently ignored: the
     // key must have an engine (the native factory) to be applied against.
@@ -135,7 +147,7 @@ final class LocalPocket {
       now: _effectiveNow(options),
       syncBackendFactory:
           options.syncBackendFactory ?? defaultSyncBackendFactory,
-      blobStore: options.blobStore,
+      blobStore: options.blobStore ?? defaultBlobStoreFactory?.call(),
       groupCommitWindow: options.groupCommitWindow,
       txSessionTtl: options.txSessionTtl,
     );

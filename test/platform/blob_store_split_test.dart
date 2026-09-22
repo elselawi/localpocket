@@ -7,10 +7,13 @@ import 'package:test/test.dart';
 ///
 /// After the files-layer collapse the native filesystem store lives at
 /// `platform/native/blob_store.dart` (dart:io) and the web store at
-/// `platform/web/worker/blob_store.dart` (pure Dart, OPFS). There is no web
-/// `NativeBlobStore` placeholder and no conditional export anymore — web
-/// applications inject a `WebBlobStore`, native applications a
-/// `NativeBlobStore`.
+/// `platform/web/worker/blob_store.dart` (pure Dart, OPFS): web applications
+/// inject a `WebBlobStore`, native applications get a `NativeBlobStore` (the
+/// native opener's default).
+///
+/// The barrel re-exports `NativeBlobStore` through the api layer's conditional
+/// seam (`lib/src/api/blob_store_platform.dart`), which resolves to a
+/// non-constructible web stub — the barrel itself must stay free of `dart:io`.
 void main() {
   group('platform blob-store split', () {
     test('native blob store is the real dart:io store on VM', () async {
@@ -38,6 +41,36 @@ void main() {
           isFalse);
       expect(
           File('lib/src/files/native_blob_store.dart').existsSync(), isFalse);
+    });
+
+    test('the barrel reaches NativeBlobStore through the conditional seam', () {
+      // The barrel must export the seam, never the dart:io file directly (a
+      // plain export would break every web build), and the seam's web branch
+      // must be pure Dart.
+      final barrel = File('lib/localpocket.dart').readAsStringSync();
+      expect(
+          barrel.contains("export 'src/api/blob_store_platform.dart'"), isTrue,
+          reason: 'the barrel exports NativeBlobStore through the seam');
+      expect(barrel.contains('platform/native/blob_store.dart'), isFalse,
+          reason: 'the barrel must not reference the dart:io store directly');
+
+      final seam =
+          File('lib/src/api/blob_store_platform.dart').readAsStringSync();
+      expect(
+          seam.contains("export '../platform/native/blob_store.dart'"), isTrue,
+          reason: 'the seam conditionally exports the native store');
+      expect(
+          seam.contains(
+              "if (dart.library.js_interop) '../platform/web/native_blob_store_stub.dart'"),
+          isTrue,
+          reason: 'the seam swaps in the web stub on the JS target');
+
+      final stub = File('lib/src/platform/web/native_blob_store_stub.dart')
+          .readAsStringSync();
+      expect(stub.contains("import 'dart:io'"), isFalse,
+          reason: 'the web stub must stay pure Dart');
+      expect(stub.contains('class NativeBlobStore'), isTrue,
+          reason: 'the stub keeps the shown name resolvable on web');
     });
   });
 }

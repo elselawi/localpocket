@@ -76,6 +76,7 @@ void main(List<String> args) {
     'Files',
     'BlobStore',
     'MemoryBlobStore',
+    'NativeBlobStore',
     'ChangeNotification',
     'StoreConflicts',
   ];

@@ -147,39 +147,77 @@ Set<String> exportedOwners(Directory root, String entrypoint) {
       owners.add(name);
     }
 
-    final exportPattern = RegExp(
-      r"export\s+'([^']+)'\s*((?:show|hide)\s+[^;]+)?;",
-      multiLine: true,
-    );
     final parent = normalized.contains('/')
         ? normalized.substring(0, normalized.lastIndexOf('/'))
         : '';
-    for (final match in exportPattern.allMatches(source)) {
-      final target = _normalizePath('$parent/${match.group(1)!}');
-      final clause = match.group(2) ?? '';
-      Set<String>? childShow;
-      Set<String>? childHide;
-      final clauseMatch =
-          RegExp(r'\b(show|hide)\s+(.+)$').firstMatch(clause.trim());
-      if (clauseMatch != null) {
-        final names = clauseMatch
-            .group(2)!
-            .split(',')
-            .map((value) => value.trim())
-            .where((value) => value.isNotEmpty)
-            .toSet();
-        if (clauseMatch.group(1) == 'show') {
-          childShow = names;
-        } else {
-          childHide = names;
-        }
+    for (final directive in exportDirectives(source)) {
+      for (final target in directive.targets) {
+        visit(_normalizePath('$parent/$target'),
+            show: directive.show, hide: directive.hide);
       }
-      visit(target, show: childShow, hide: childHide);
     }
   }
 
   visit(entrypoint);
   return owners;
+}
+
+/// One `export` directive, resolved for inventory purposes.
+///
+/// A plain `export 'a.dart' show X;` has one target; the conditional form
+/// `export 'a.dart' if (cond) 'b.dart' show X;` has TWO — and on the platform
+/// that picks the second, `X` comes from there. Both targets are traversed, so
+/// a name an application can name through either branch appears in the
+/// inventory (see `publicInventory`).
+final class ExportDirective {
+  const ExportDirective(this.targets, this.show, this.hide);
+
+  /// Every file this directive can re-export from.
+  final List<String> targets;
+
+  /// Names the directive shows, or `null` when it shows everything.
+  final Set<String>? show;
+
+  /// Names the directive hides, or `null` when it hides nothing.
+  final Set<String>? hide;
+}
+
+final RegExp _exportPattern = RegExp(
+  r"export\s+'([^']+)'\s*(?:if\s*\([^)]*\)\s*'([^']+)'\s*)?"
+  r'((?:show|hide)\s+[^;]+)?;',
+  multiLine: true,
+);
+
+/// Parses every `export` directive in [source], conditional exports included.
+Iterable<ExportDirective> exportDirectives(String source) sync* {
+  for (final match in _exportPattern.allMatches(source)) {
+    final clause = match.group(3) ?? '';
+    Set<String>? show;
+    Set<String>? hide;
+    final clauseMatch =
+        RegExp(r'\b(show|hide)\s+(.+)$').firstMatch(clause.trim());
+    if (clauseMatch != null) {
+      final names = clauseMatch
+          .group(2)!
+          .split(',')
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toSet();
+      if (clauseMatch.group(1) == 'show') {
+        show = names;
+      } else {
+        hide = names;
+      }
+    }
+    yield ExportDirective(
+      [
+        for (final target in [match.group(1), match.group(2)])
+          if (target != null) target,
+      ],
+      show,
+      hide,
+    );
+  }
 }
 
 /// Index just after the previous top-of-body terminator (`;` or `}`) before
@@ -457,34 +495,14 @@ List<String> publicInventory(Directory root, String entrypoint) {
       addDecl(m.group(1)!);
     }
 
-    final exportPattern = RegExp(
-      r"export\s+'([^']+)'\s*((?:show|hide)\s+[^;]+)?;",
-      multiLine: true,
-    );
     final parent = normalized.contains('/')
         ? normalized.substring(0, normalized.lastIndexOf('/'))
         : '';
-    for (final match in exportPattern.allMatches(source)) {
-      final target = _normalizePath('$parent/${match.group(1)!}');
-      final clause = match.group(2) ?? '';
-      Set<String>? childShow;
-      Set<String>? childHide;
-      final clauseMatch =
-          RegExp(r'\b(show|hide)\s+(.+)$').firstMatch(clause.trim());
-      if (clauseMatch != null) {
-        final names = clauseMatch
-            .group(2)!
-            .split(',')
-            .map((value) => value.trim())
-            .where((value) => value.isNotEmpty)
-            .toSet();
-        if (clauseMatch.group(1) == 'show') {
-          childShow = names;
-        } else {
-          childHide = names;
-        }
+    for (final directive in exportDirectives(source)) {
+      for (final target in directive.targets) {
+        visit(_normalizePath('$parent/$target'),
+            show: directive.show, hide: directive.hide);
       }
-      visit(target, show: childShow, hide: childHide);
     }
   }
 

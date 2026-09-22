@@ -38,10 +38,14 @@ export 'src/kernel/sync/status.dart'
     show SyncEngineState, SyncReport, SyncStatus;
 
 // The blob-store types the facade's file configuration names
-// (`LocalPocketOptions.blobStore`): the interface plus the in-memory store
-// that backs native demos and tests. Real applications inject their own
-// platform store here — or host their store on the web page through
-// `PageCallbacks.blobStore`, which the worker reaches via a proxy.
+// (`LocalPocketOptions.blobStore`): the platform-neutral interface, the
+// in-memory store that backs demos and tests, and the durable native store the
+// native opener installs as the default. `NativeBlobStore` is re-exported
+// through the api layer's conditional seam (`src/api/blob_store_platform.dart`)
+// so a web build never pulls `dart:io`: on web that seam resolves to a
+// non-constructible stub, because the worker owns blob storage (OPFS, or a
+// store the page hosts through `PageCallbacks.blobStore`).
+export 'src/api/blob_store_platform.dart' show NativeBlobStore;
 export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
 
 // The Database adapter type `LocalPocketOptions.nativeDatabaseFactory`

@@ -127,14 +127,23 @@ final class LocalPocketOptions {
   /// the page and reaches the worker as a proxy over the callback channel.
   final SyncBackendFactory? syncBackendFactory;
 
-  /// The blob store holding attachment bytes for this database, or `null`
-  /// when files are not used.
+  /// The blob store holding attachment bytes for this database, or `null` to
+  /// use the platform default.
   ///
-  /// On web the worker resolves its own store (OPFS with a volatile fallback)
+  /// NATIVE: the open path installs `NativeBlobStore` — a durable,
+  /// content-addressed filesystem store — rooted in a sibling directory of the
+  /// database file (`<database file name>.blobs`, so two databases in one
+  /// directory never share bytes). Supply your own [BlobStore] for a different
+  /// root or backend; a supplied store always wins and the default is never
+  /// built. An in-memory database (`:memory:`) has NO default (there is no file
+  /// to sit beside): file operations fail with a `StateError` until a store is
+  /// supplied — pass `MemoryBlobStore` and opt in per attach.
+  ///
+  /// WEB: the worker resolves its own store (OPFS with a volatile fallback)
   /// unless a page-hosted store is supplied through [PageCallbacks.blobStore]
-  /// (the bytes then cross chunked over the callback channel); natively this
-  /// is the storage adapter. Without one, file operations fail with a
-  /// `StateError`.
+  /// (the bytes then cross chunked over the callback channel). A store passed
+  /// HERE fails the web open with a typed error: the store object, and its
+  /// bytes, cannot cross the worker boundary.
   final BlobStore? blobStore;
 
   /// Page callbacks that executable schema features resolve to on the

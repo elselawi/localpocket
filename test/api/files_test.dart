@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:localpocket/src/api/api.dart';
@@ -9,6 +10,7 @@ import 'package:localpocket/src/kernel/errors.dart'
 import 'package:localpocket/src/kernel/files/blob_store.dart'
     show MemoryBlobStore;
 import 'package:localpocket/src/api/writes.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/mock_pb_server.dart';
@@ -296,6 +298,78 @@ void main() {
         final after = (await files.list(recordId: id)).single;
         expect(after.state, 'synced');
         expect(after.hash, sha256.convert(bytes).toString());
+      });
+    });
+
+    group('native default blob store', () {
+      Directory tempDir() {
+        final dir = Directory.systemTemp.createTempSync('lp_default_blobs_');
+        addTearDown(() {
+          if (dir.existsSync()) dir.deleteSync(recursive: true);
+        });
+        return dir;
+      }
+
+      test(
+          'a file-backed open with no blobStore defaults to durable storage '
+          'rooted beside the database file', () async {
+        final dir = tempDir();
+        final dbPath = p.join(dir.path, 'app.db');
+
+        // No blobStore: the native opener installs the durable default.
+        final db = await LocalPocket.open(
+            LocalPocketOptions(path: dbPath, stores: [Tasks.store]));
+        addTearDown(db.close);
+        final files = db.store(Tasks.store).files;
+        expect(await files.isBlobStorageDurable, isTrue,
+            reason: 'the native default is the durable NativeBlobStore');
+
+        final id =
+            (await db.store(Tasks.store).put([Tasks.title.set('durable')])).id;
+        final payload = utf8.encode('durable attachment bytes');
+        // A durable store attaches without the volatile opt-in.
+        final ref = await files.attach(
+          recordId: id,
+          source: FileSource.bytes(payload, name: 'note.txt'),
+        );
+
+        // The default root is a sibling of the database file, named after it
+        // (`<database file name>.blobs`), content-addressed under `blobs/`.
+        final blobFile = File(p.join(dir.path, 'app.db.blobs', 'blobs',
+            ref.hash.substring(0, 2), ref.hash));
+        expect(blobFile.existsSync(), isTrue,
+            reason: 'bytes landed under the documented default root');
+        expect(blobFile.readAsBytesSync(), payload);
+
+        await db.close();
+
+        // Close -> reopen -> open streams the same bytes back.
+        final reopened = await LocalPocket.open(
+            LocalPocketOptions(path: dbPath, stores: [Tasks.store]));
+        addTearDown(reopened.close);
+        final stream = await reopened.store(Tasks.store).files.open(ref);
+        final roundTripped = await stream
+            .fold<List<int>>(<int>[], (acc, chunk) => acc..addAll(chunk));
+        expect(roundTripped, payload);
+      });
+
+      test('an explicit blobStore wins and the default root is never built',
+          () async {
+        final dir = tempDir();
+        final dbPath = p.join(dir.path, 'app.db');
+
+        final db = await LocalPocket.open(LocalPocketOptions(
+          path: dbPath,
+          stores: [Tasks.store],
+          blobStore: MemoryBlobStore(),
+        ));
+        addTearDown(db.close);
+        final files = db.store(Tasks.store).files;
+        expect(await files.isBlobStorageDurable, isFalse,
+            reason: 'the supplied MemoryBlobStore overrides the default');
+        expect(Directory('$dbPath.blobs').existsSync(), isFalse,
+            reason: 'the default store is not even constructed when the '
+                'caller supplied one');
       });
     });
   });
