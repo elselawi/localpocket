@@ -67,6 +67,8 @@ lib/src/api/local_pocket.dart::LocalPocket.analyze
 lib/src/api/local_pocket.dart::LocalPocket.attachPocketBaseSync
 lib/src/api/local_pocket.dart::LocalPocket.capabilities
 lib/src/api/local_pocket.dart::LocalPocket.changes
+lib/src/api/local_pocket.dart::LocalPocket.claimSingleInstance
+lib/src/api/local_pocket.dart::LocalPocket.claimSingleInstancePlatform
 lib/src/api/local_pocket.dart::LocalPocket.close
 lib/src/api/local_pocket.dart::LocalPocket.compact
 lib/src/api/local_pocket.dart::LocalPocket.generateRecordId

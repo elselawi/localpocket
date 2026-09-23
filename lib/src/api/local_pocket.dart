@@ -19,6 +19,7 @@ import 'events.dart';
 import 'open_platform.dart';
 import 'options.dart';
 import 'row.dart';
+import 'single_instance_platform.dart';
 import 'store.dart';
 import 'sync.dart';
 import 'transaction.dart';
@@ -59,6 +60,19 @@ final class LocalPocket {
   /// assigns one when the caller omits it — without reaching into engine
   /// internals.
   static String newRecordId() => generateRecordId();
+
+  /// {@template localpocket.claim_single_instance}
+  /// Attempts to claim exclusive use of the database at [path] for this
+  /// document. Returns false if another live document already holds it.
+  /// The claim is held until the document goes away.
+  ///
+  /// On web, this uses the Web Locks API (`navigator.locks`) to prevent
+  /// multiple tabs on the same origin from opening the same OPFS database
+  /// file concurrently. On non-web platforms, this returns `true`
+  /// unconditionally.
+  /// {@endtemplate}
+  static Future<bool> claimSingleInstance(String path) =>
+      claimSingleInstancePlatform(path);
 
   /// Opens a database on the current platform: the direct in-process runtime
   /// on native targets, the typed contract over the dedicated worker on web.

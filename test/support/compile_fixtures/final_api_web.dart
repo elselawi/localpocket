@@ -66,6 +66,9 @@ Future<LocalPocket> _open() async {
 }
 
 Future<void> exerciseAll() async {
+  if (!await LocalPocket.claimSingleInstance('app.db')) {
+    return;
+  }
   final db = await _open();
   final tasks = db.store(Tasks.store);
 

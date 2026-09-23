@@ -44,6 +44,7 @@ final class _SmokeNotes extends StoreDef<_SmokeNotes> {
 /// Retains representative typed CRUD/query/search/watch calls in both web
 /// compiler outputs. It is not executed by the compile-only smoke.
 Future<void> _retainTypedWebSurface(LocalPocket pocket) async {
+  await LocalPocket.claimSingleInstance('typed_smoke');
   final notes = pocket.store(_SmokeNotes.store);
   const id = 'typedcompile001';
   await notes.put([

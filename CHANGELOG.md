@@ -1,3 +1,14 @@
+## 0.3.5
+
+- Added: `LocalPocket.claimSingleInstance(String path)` cross-tab single-instance
+  claim. On web, uses the Web Locks API (`navigator.locks`) with `ifAvailable: true`
+  to atomically claim exclusive access to the database at `path` for the current
+  document, preventing multiple tabs on the same origin from concurrently opening
+  the same OPFS database file and wedging the origin. The claim is held until the
+  document goes away (including crashes and kills) with no app-side cleanup needed.
+  Importable unconditionally across native, web, and Wasm targets with no caller
+  conditional imports; non-web platforms return `true` unconditionally.
+
 ## 0.3.4
 
 - Fixed: `Row.archived` threw `ValidationException` when accessed on a row

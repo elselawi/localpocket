@@ -24,7 +24,7 @@ Add `localpocket` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  localpocket: ^0.3.4
+  localpocket: ^0.3.5
 ```
 
 ---
@@ -1766,6 +1766,22 @@ final class MyBlobStore extends BlobStore {
   );
   await proxiedDb.close();
 ```
+
+### Cross-tab single-instance claim on web
+
+On web, an origin shares a single OPFS storage quota. Opening the same database path across multiple tabs concurrently can lead to contention on OPFS file handles. LocalPocket provides an atomic, cross-tab single-instance claim via the Web Locks API:
+
+```dart
+  if (!await LocalPocket.claimSingleInstance('posts.db')) {
+    // Another tab already holds the database; inform the user or refuse to open
+    return;
+  }
+```
+
+- **Atomic claim:** Uses `navigator.locks` with `ifAvailable: true` to claim exclusive access for the current document.
+- **Crash/kill safe:** The browser releases the claim automatically if the tab crashes, is killed, or navigates away — no manual cleanup is needed.
+- **Keyed by database path:** Two different database paths on the same origin can each have their own live holder.
+- **Unconditionally importable:** Compiles on every target (mobile, desktop, web, Wasm) with no conditional imports. Non-web platforms return `true` unconditionally.
 
 ### Resetting local state: `wipe()`
 

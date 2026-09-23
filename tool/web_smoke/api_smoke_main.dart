@@ -28,6 +28,13 @@ final class Notes extends StoreDef<Notes> {
 }
 
 Future<void> main() async {
+  globalContext.setProperty(
+    '__claimSingleInstance'.toJS,
+    ((JSString path) =>
+            LocalPocket.claimSingleInstance(path.toDart).then((v) => v.toJS).toJS)
+        .toJS,
+  );
+
   var stage = 'start';
   void report(String status, [String? detail]) {
     globalContext.setProperty('__api_smoke'.toJS, status.toJS);
@@ -52,6 +59,24 @@ Future<void> main() async {
   }
 
   try {
+    // 0. Single instance claim before open.
+    mark('claim');
+    final claimed = await LocalPocket.claimSingleInstance('api_smoke_db_v1');
+    if (!claimed) {
+      throw StateError('Expected single-instance claim to succeed on first call');
+    }
+    final claimedAgain =
+        await LocalPocket.claimSingleInstance('api_smoke_db_v1');
+    if (!claimedAgain) {
+      throw StateError(
+          'Expected repeated claim for same path to succeed in same tab');
+    }
+    final claimedOther = await LocalPocket.claimSingleInstance('other_db');
+    if (!claimedOther) {
+      throw StateError(
+          'Expected claim for different path on same origin to succeed');
+    }
+
     // 1. Open the destination facade: the kernel boots in the worker from the
     //    serialized open options; nothing opens in-process.
     mark('open');
