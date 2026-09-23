@@ -171,6 +171,48 @@ void main() {
       }
     });
 
+    test('store.changes is identity-stable and remains broadcast', () async {
+      final tasks = db.store(Tasks.store);
+      final stream = tasks.changes;
+      expect(identical(stream, tasks.changes), isTrue);
+      expect(identical(stream, db.store(Tasks.store).changes), isTrue);
+      await db.transaction((tx) async {
+        expect(identical(stream, tx.store(Tasks.store).changes), isTrue);
+      });
+
+      final firstListener = <StoreRecordChange<Tasks>>[];
+      final secondListener = <StoreRecordChange<Tasks>>[];
+      final firstSubscription = stream.listen(firstListener.add);
+      final secondSubscription =
+          db.store(Tasks.store).changes.listen(secondListener.add);
+      addTearDown(firstSubscription.cancel);
+      addTearDown(secondSubscription.cancel);
+
+      final row = await tasks.put([Tasks.title.set('before')]);
+      await tasks.patch(row.id, [Tasks.title.set('after')]);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(firstListener.map((event) => event.action).toList(), [
+        ChangeAction.create,
+        ChangeAction.update,
+      ]);
+      expect(secondListener.map((event) => event.action).toList(), [
+        ChangeAction.create,
+        ChangeAction.update,
+      ]);
+      expect(firstListener.map((event) => event.id),
+          secondListener.map((event) => event.id));
+    });
+
+    test('store.changes identity ends when its database closes', () async {
+      final oldStream = db.store(Tasks.store).changes;
+      await db.close();
+      db = await LocalPocket.open(options());
+
+      expect(identical(oldStream, db.store(Tasks.store).changes), isFalse);
+    });
+
     test(
         'pattern matching discriminates between different stores on db.changes',
         () async {

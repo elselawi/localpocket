@@ -1,3 +1,8 @@
+## 0.3.6
+
+- Changed: `Store.changes` is now identity-stable for the lifetime of its
+  database, including across newly obtained store and transaction facades.
+
 ## 0.3.5
 
 - Added: `LocalPocket.claimSingleInstance(String path)` cross-tab single-instance

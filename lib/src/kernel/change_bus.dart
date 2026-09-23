@@ -293,15 +293,17 @@ class ChangeBus {
       StreamController<ChangeSet>.broadcast();
   final StreamController<RecordChangeEvent> _eventController =
       StreamController<RecordChangeEvent>.broadcast();
+  late final Stream<ChangeSet> _stream = _controller.stream;
+  late final Stream<RecordChangeEvent> _events = _eventController.stream;
 
   /// number of pending events to buffer before dropping them
   static const int maxPendingEvents = 10000;
 
   /// Stream of committed change notifications (coarse, store+ids).
-  Stream<ChangeSet> get stream => _controller.stream;
+  Stream<ChangeSet> get stream => _stream;
 
   /// Stream of detailed record change events (old vs new, origin, action, changedFields).
-  Stream<RecordChangeEvent> get events => _eventController.stream;
+  Stream<RecordChangeEvent> get events => _events;
 
   /// Whether there are active listeners on either stream.
   bool get hasListener =>

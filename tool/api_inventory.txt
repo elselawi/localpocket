@@ -140,7 +140,6 @@ lib/src/api/store.dart::Store.get
 lib/src/api/store.dart::Store.getAll
 lib/src/api/store.dart::Store.ids
 lib/src/api/store.dart::Store.internal
-lib/src/api/store.dart::Store.map
 lib/src/api/store.dart::Store.max
 lib/src/api/store.dart::Store.min
 lib/src/api/store.dart::Store.name
@@ -156,7 +155,6 @@ lib/src/api/store.dart::Store.sum
 lib/src/api/store.dart::Store.upsert
 lib/src/api/store.dart::Store.upsertAll
 lib/src/api/store.dart::Store.watch
-lib/src/api/store.dart::Store.where
 lib/src/api/sync.dart::PocketBaseSync
 lib/src/api/sync.dart::PocketBaseSync.authRequired
 lib/src/api/sync.dart::PocketBaseSync.internal

@@ -348,21 +348,32 @@ final class Store<S extends StoreDef<S>> {
 
   /// Committed changes to this store: one notification per committed record
   /// change, with old/new payloads, origin, action, and touched fields.
-  Stream<StoreRecordChange<S>> get changes => _runtime.events
-      .where((event) => event is CommittedChange)
-      .cast<CommittedChange>()
-      .where((event) => event.store == name)
-      .map((event) => StoreRecordChange<S>(
-            id: event.id,
-            storeName: event.store,
-            origin: event.origin,
-            action: event.action,
-            oldRecord:
-                event.oldRecord == null ? null : Row<S>(def, event.oldRecord!),
-            newRecord:
-                event.newRecord == null ? null : Row<S>(def, event.newRecord!),
-            changedFields: Set.of(event.changedFields),
-          ));
+  /// The same stream object is returned for the life of the database, so it
+  /// is safe to hold and compare by identity.
+  Stream<StoreRecordChange<S>> get changes {
+    final storeName = name;
+    final storeDef = def;
+    return _runtime.cachedStoreChanges(
+      storeName,
+      () => _runtime.events
+          .where((event) => event is CommittedChange)
+          .cast<CommittedChange>()
+          .where((event) => event.store == storeName)
+          .map((event) => StoreRecordChange<S>(
+                id: event.id,
+                storeName: event.store,
+                origin: event.origin,
+                action: event.action,
+                oldRecord: event.oldRecord == null
+                    ? null
+                    : Row<S>(storeDef, event.oldRecord!),
+                newRecord: event.newRecord == null
+                    ? null
+                    : Row<S>(storeDef, event.newRecord!),
+                changedFields: Set.of(event.changedFields),
+              )),
+    );
+  }
 
   // -- internals ------------------------------------------------------------
 

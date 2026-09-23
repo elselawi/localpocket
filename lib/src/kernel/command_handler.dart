@@ -124,6 +124,7 @@ class KernelCommandHandler implements CommandHandler {
   final KernelContext context;
 
   final _events = StreamController<Event>.broadcast();
+  late final Stream<Event> _eventStream = _events.stream;
   late final StreamSubscription<RecordChangeEvent> _changeSub;
   final _sessions = <String, _TxSession>{};
   Timer? _txSweepTimer;
@@ -142,7 +143,7 @@ class KernelCommandHandler implements CommandHandler {
   int _counter = 0;
 
   @override
-  Stream<Event> get events => _events.stream;
+  Stream<Event> get events => _eventStream;
 
   @override
   Future<Result> handle(Request request) => switch (request) {

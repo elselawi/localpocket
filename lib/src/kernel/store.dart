@@ -64,6 +64,7 @@ class Collection with ChangeBusAwareStore {
 
   final LocalPocket _pocket;
   final StoreTable _table;
+  late final Stream<RecordChangeEvent> _recordEvents = _pocket.events;
 
   /// Operations run through this context: root for outer handles, the
   /// transaction context for stores from a [Tx] (never fall back to the
@@ -79,7 +80,7 @@ class Collection with ChangeBusAwareStore {
   String get name => _schema.name;
 
   @override
-  Stream<RecordChangeEvent> get recordEvents => _pocket.events;
+  Stream<RecordChangeEvent> get recordEvents => _recordEvents;
 
   void _ensureWritable() {
     if (_tx != null && _tx!.readOnly) {

@@ -12,8 +12,28 @@ abstract interface class RuntimeClient {
   /// Committed facts and watch snapshots emitted by the kernel.
   Stream<Event> get events;
 
+  /// Returns the lazily created change stream cached for [storeName].
+  ///
+  /// The cache is owned by this runtime and expires with the database.
+  Stream<T> cachedStoreChanges<T>(
+      String storeName, Stream<T> Function() create);
+
   /// Shuts the runtime down. Pending requests and streams fail afterwards.
   Future<void> close();
+}
+
+/// Per-runtime cache for typed store change streams.
+final class StoreChangeStreamCache {
+  final _streams = <String, Stream<dynamic>>{};
+
+  /// Returns the stream for [storeName], creating it on first access.
+  Stream<T> get<T>(String storeName, Stream<T> Function() create) {
+    final cached = _streams[storeName];
+    if (cached != null) return cached as Stream<T>;
+    final stream = create();
+    _streams[storeName] = stream;
+    return stream;
+  }
 }
 
 /// {@template localpocket.local_runtime_client}
@@ -27,6 +47,8 @@ final class LocalRuntimeClient implements RuntimeClient {
   LocalRuntimeClient(this._handler);
 
   final CommandHandler _handler;
+  final _storeChangeStreams = StoreChangeStreamCache();
+  late final Stream<Event> _events = _handler.events;
 
   @override
   Future<R> send<R extends Result>(Request<R> request) async {
@@ -36,7 +58,12 @@ final class LocalRuntimeClient implements RuntimeClient {
   }
 
   @override
-  Stream<Event> get events => _handler.events;
+  Stream<Event> get events => _events;
+
+  @override
+  Stream<T> cachedStoreChanges<T>(
+          String storeName, Stream<T> Function() create) =>
+      _storeChangeStreams.get(storeName, create);
 
   @override
   Future<void> close() => _handler.close();
@@ -55,6 +82,9 @@ final class LoopbackRuntimeClient implements RuntimeClient {
   LoopbackRuntimeClient(this._handler);
 
   final CommandHandler _handler;
+  final _storeChangeStreams = StoreChangeStreamCache();
+  late final Stream<Event> _events = _handler.events
+      .map((e) => ContractCodec.decodeEvent(ContractCodec.encodeEvent(e)));
 
   @override
   Future<R> send<R extends Result>(Request<R> request) async {
@@ -80,8 +110,12 @@ final class LoopbackRuntimeClient implements RuntimeClient {
   }
 
   @override
-  Stream<Event> get events => _handler.events
-      .map((e) => ContractCodec.decodeEvent(ContractCodec.encodeEvent(e)));
+  Stream<Event> get events => _events;
+
+  @override
+  Stream<T> cachedStoreChanges<T>(
+          String storeName, Stream<T> Function() create) =>
+      _storeChangeStreams.get(storeName, create);
 
   @override
   Future<void> close() => _handler.close();

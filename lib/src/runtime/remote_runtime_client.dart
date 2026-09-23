@@ -40,6 +40,8 @@ final class RemoteRuntimeClient implements RuntimeClient {
 
   late final WebSender _sender;
   final _events = StreamController<Event>.broadcast();
+  final _storeChangeStreams = StoreChangeStreamCache();
+  late final Stream<Event> _eventStream = _events.stream;
 
   /// Feeds one worker event envelope into the event stream (called by the
   /// transport embedder). Non-contract envelopes are ignored (not-yet-cutover
@@ -121,7 +123,12 @@ final class RemoteRuntimeClient implements RuntimeClient {
   }
 
   @override
-  Stream<Event> get events => _events.stream;
+  Stream<Event> get events => _eventStream;
+
+  @override
+  Stream<T> cachedStoreChanges<T>(
+          String storeName, Stream<T> Function() create) =>
+      _storeChangeStreams.get(storeName, create);
 
   @override
   Future<void> close() async {
