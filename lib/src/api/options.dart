@@ -139,11 +139,15 @@ final class LocalPocketOptions {
   /// to sit beside): file operations fail with a `StateError` until a store is
   /// supplied — pass `MemoryBlobStore` and opt in per attach.
   ///
-  /// WEB: the worker resolves its own store (OPFS with a volatile fallback)
-  /// unless a page-hosted store is supplied through [PageCallbacks.blobStore]
-  /// (the bytes then cross chunked over the callback channel). A store passed
-  /// HERE fails the web open with a typed error: the store object, and its
-  /// bytes, cannot cross the worker boundary.
+  /// WEB: the worker resolves its own durable store (OPFS with a volatile
+  /// fallback). `NativeBlobStore` — the native spelling of "the durable store,
+  /// rooted here" — is DROPPED here, so shared application code can pass it
+  /// unconditionally: the bytes are durable either way and only the native
+  /// filesystem root is meaningless in a browser. Any OTHER supplied store
+  /// fails the web open with a typed error, because ignoring it would change a
+  /// guarantee (a `MemoryBlobStore` would silently become durable) or land
+  /// bytes in a store the caller cannot reach. Host a custom store on the page
+  /// with [PageCallbacks.blobStore] instead.
   final BlobStore? blobStore;
 
   /// Page callbacks that executable schema features resolve to on the

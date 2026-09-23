@@ -13,6 +13,7 @@ import '../../kernel/page_callbacks.dart'
     show encodeStorePolicies, resolvePageCallbacks;
 import '../../runtime/remote_runtime_client.dart';
 import 'crypto.dart';
+import 'native_blob_store_stub.dart' show NativeBlobStore;
 import 'page/assets.dart';
 import 'page/callback_server.dart';
 import 'page/connector.dart';
@@ -70,15 +71,24 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   // [LocalPocketOptions.clockOffsetMs], a plain integer applied on top of
   // the worker's system clock (carried in openArgs below), so
   // deterministic-clock configs behave identically on web and native.
-  // Same for a caller-provided blob store: the worker builds its own
-  // OPFS-backed store, and a caller store object (with its methods) cannot
-  // cross the boundary. Failing typed keeps attachment bytes where the caller
-  // expects them instead of silently landing in a store it cannot reach.
-  if (options.blobStore != null) {
+  //
+  // A caller-provided blob store is code + bytes and cannot cross the
+  // boundary either: the worker builds its own OPFS-backed store. ONE supplied
+  // store is nevertheless accepted, `NativeBlobStore` — the platform-neutral
+  // spelling of "the durable store, rooted here" that shared app code can name
+  // on every target. Dropping it does not weaken what the caller asked for
+  // (durable attachment bytes: the worker's store is durable); only the native
+  // filesystem root is meaningless in a browser, so it is dropped and the
+  // worker keeps its own store. Any OTHER store is rejected typed: ignoring a
+  // MemoryBlobStore would silently GRANT durability, and a custom store's bytes
+  // would land in a store the caller cannot reach.
+  if (options.blobStore != null && options.blobStore is! NativeBlobStore) {
     throw ValidationException(
         'A caller-provided blobStore cannot cross the web worker boundary: '
-        'the worker builds its own OPFS-backed store. Omit the option on web '
-        '(or run on a native runtime for a custom blob store).');
+        'the worker builds its own OPFS-backed store. Omit the option on web, '
+        'host a custom store with pageCallbacks.blobStore (it runs on the '
+        'page), or pass NativeBlobStore — the native spelling of "the durable '
+        'store", which is dropped here in favour of the worker\'s store.');
   }
 
   final schemas = [

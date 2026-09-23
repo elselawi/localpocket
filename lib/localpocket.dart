@@ -42,9 +42,10 @@ export 'src/kernel/sync/status.dart'
 // in-memory store that backs demos and tests, and the durable native store the
 // native opener installs as the default. `NativeBlobStore` is re-exported
 // through the api layer's conditional seam (`src/api/blob_store_platform.dart`)
-// so a web build never pulls `dart:io`: on web that seam resolves to a
-// non-constructible stub, because the worker owns blob storage (OPFS, or a
-// store the page hosts through `PageCallbacks.blobStore`).
+// so a web build never pulls `dart:io` — which also means shared app code can
+// name `NativeBlobStore` unconditionally: on web the web open drops it and the
+// worker keeps its own OPFS-backed store, and any OTHER caller store still
+// fails the web open typed.
 export 'src/api/blob_store_platform.dart' show NativeBlobStore;
 export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
 

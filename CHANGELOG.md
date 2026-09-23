@@ -10,8 +10,12 @@
 - `NativeBlobStore` is exported from the package barrel, so apps that want a
   non-default root (one directory per tenant, say) no longer need an
   `implementation_imports` ignore pinned to an internal path. The export is
-  conditional — the class stays native-only and a web build still never pulls
-  `dart:io`.
+  conditional — a web build still never pulls `dart:io`.
+- `NativeBlobStore` can be passed on every platform without a conditional
+  import: a web open drops it and keeps the worker's own OPFS store (durable
+  either way — only a native filesystem root has no meaning in a browser). Any
+  OTHER supplied store still fails the web open typed, because ignoring it
+  would change a guarantee (a `MemoryBlobStore` would silently become durable).
 - README: the native storage seam now names the concrete store per platform
   instead of deferring to "a persistent `BlobStore`".
 

@@ -1948,10 +1948,14 @@ and neither defaults to a test double:
   await customRootNativeDb.close();
 ```
 
-On web the worker owns storage instead: it builds its own OPFS-backed store, and
-a `blobStore` passed to `LocalPocketOptions` is rejected with a typed error (a
-store object cannot cross the worker boundary). Host a custom store on the page
-with `PageCallbacks.blobStore`, or pass `MemoryBlobStore` in tests.
+On web the worker owns storage instead: it builds its own OPFS-backed store. The
+same `blobStore: NativeBlobStore(...)` line is accepted there and DROPPED — a
+browser has no filesystem root, and the worker's own OPFS store is the durable
+store — so shared app code needs no conditional import. Any OTHER supplied store
+still fails the web open with a typed error, because ignoring it would change a
+guarantee (`MemoryBlobStore` would silently become durable) or strand bytes in a
+store the page cannot reach. Host a custom store with `PageCallbacks.blobStore`
+(it executes on the page); in tests, `MemoryBlobStore` is the native stand-in.
 
 ### Runtime diagnostics: `db.capabilities`
 

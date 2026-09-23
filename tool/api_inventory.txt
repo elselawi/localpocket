@@ -501,6 +501,14 @@ lib/src/platform/native/blob_store.dart::NativeBlobStore.put
 lib/src/platform/native/blob_store.dart::NativeBlobStore.size
 lib/src/platform/web/native_blob_store_stub.dart::NativeBlobStore
 lib/src/platform/web/native_blob_store_stub.dart::NativeBlobStore.NativeBlobStore
+lib/src/platform/web/native_blob_store_stub.dart::NativeBlobStore.cleanTmp
+lib/src/platform/web/native_blob_store_stub.dart::NativeBlobStore.delete
+lib/src/platform/web/native_blob_store_stub.dart::NativeBlobStore.exists
+lib/src/platform/web/native_blob_store_stub.dart::NativeBlobStore.isDurable
+lib/src/platform/web/native_blob_store_stub.dart::NativeBlobStore.listHashes
+lib/src/platform/web/native_blob_store_stub.dart::NativeBlobStore.open
+lib/src/platform/web/native_blob_store_stub.dart::NativeBlobStore.put
+lib/src/platform/web/native_blob_store_stub.dart::NativeBlobStore.size
 lib/src/schema/cond.dart::AllCond
 lib/src/schema/cond.dart::AllCond.AllCond
 lib/src/schema/cond.dart::AnyCond

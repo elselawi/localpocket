@@ -7,6 +7,12 @@
             "browserMatrix": true
         },
         {
+            "html": "web_blob_default_smoke.html",
+            "main": "blob_default_smoke_main.dart",
+            "signal": "__blob_default_smoke",
+            "browserMatrix": true
+        },
+        {
             "html": "web_blob_smoke.html",
             "main": "blob_smoke_main.dart",
             "signal": "__blob_smoke",

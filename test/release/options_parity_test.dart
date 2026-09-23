@@ -27,6 +27,9 @@ void main() async {
           .readAsString();
   final controllerSource =
       await File('lib/src/platform/web/worker/controller.dart').readAsString();
+  final stubSource =
+      await File('lib/src/platform/web/native_blob_store_stub.dart')
+          .readAsString();
 
   /// Every constructor parameter the [LocalPocketOptions] constructor
   /// declares (`this.<name>`), extracted from the source so the list below
@@ -61,8 +64,11 @@ void main() async {
     'syncBackendFactory': Parity.rejectedTyped(
         note: 'the worker configures the canonical PocketBase factory '
             'itself; only that const instance is accepted'),
-    'blobStore': Parity.rejectedTyped(
-        note: 'the worker builds its own OPFS-backed store'),
+    'blobStore': Parity.ignoredNativeOnly(
+        note: 'the worker builds its own OPFS-backed store; `NativeBlobStore` '
+            'is the platform-neutral spelling of "the durable store" and is '
+            'dropped (durable either way), while any other store is rejected '
+            'typed — ignoring it would change a guarantee'),
     'pageCallbacks': Parity.pageExecutes(
         channel: 'callback_rpc',
         note: 'the PageCallbacks container: `stores` entries (auto-collected '
@@ -127,6 +133,25 @@ void main() async {
       test('${entry.key} executes on the page via "${p.channel}"', () {
         expect(openWebSource, contains('PageCallbackServer'),
             reason: 'the page must serve the callback channel');
+      });
+    }
+  });
+
+  group('IGNORED-NATIVE-ONLY entries are dropped, never reinterpreted', () {
+    for (final entry in parity.entries) {
+      final p = entry.value;
+      if (p is! _IgnoredNativeOnly) continue;
+      test('${entry.key} drops NativeBlobStore and rejects any other store',
+          () {
+        expect(openWebSource, contains('options.${entry.key}'),
+            reason: 'the web open must inspect options.${entry.key}');
+        expect(openWebSource, contains('is! NativeBlobStore'),
+            reason: 'the native-only value must be recognized and dropped');
+        expect(openWebSource, contains('ValidationException'),
+            reason: 'a store the drop does NOT cover must still fail typed');
+        expect(stubSource, contains('class NativeBlobStore extends BlobStore'),
+            reason: 'web code must be able to CONSTRUCT the value it passes, '
+                'so the app needs no conditional import');
       });
     }
   });
@@ -228,6 +253,12 @@ sealed class Parity {
   /// A supplied value fails the web open with a typed error.
   const factory Parity.rejectedTyped({String note}) = _RejectedTyped;
 
+  /// A native-only value the web open DROPS instead of rejecting, because the
+  /// web resolution satisfies the same platform-independent intent (the caller
+  /// asked for a durable store; the worker's OPFS store is durable). Values
+  /// whose intent would change if ignored must stay [Parity.rejectedTyped].
+  const factory Parity.ignoredNativeOnly({String note}) = _IgnoredNativeOnly;
+
   /// Not fixable on web: documented platform constraint.
   const factory Parity.platformConstraint({String note}) = _PlatformConstraint;
 }
@@ -246,6 +277,11 @@ final class _PageExecutes extends Parity {
 
 final class _RejectedTyped extends Parity {
   const _RejectedTyped({this.note = ''});
+  final String note;
+}
+
+final class _IgnoredNativeOnly extends Parity {
+  const _IgnoredNativeOnly({this.note = ''});
   final String note;
 }
 
