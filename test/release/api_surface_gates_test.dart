@@ -117,12 +117,14 @@ export 'a.dart';
 export 'native.dart'
     if (dart.library.js_interop) 'web.dart' show Shared;
 ''');
-    File('${libDir.path}${Platform.pathSeparator}native.dart').writeAsStringSync('''
+    File('${libDir.path}${Platform.pathSeparator}native.dart')
+        .writeAsStringSync('''
 class Shared {}
 
 class NativeOnly {}
 ''');
-    File('${libDir.path}${Platform.pathSeparator}web.dart').writeAsStringSync('''
+    File('${libDir.path}${Platform.pathSeparator}web.dart')
+        .writeAsStringSync('''
 class Shared {}
 
 class WebOnly {}
