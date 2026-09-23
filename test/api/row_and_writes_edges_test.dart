@@ -117,6 +117,27 @@ void main() {
       });
       expect(row.extra, {'label': 'keep'});
     });
+
+    test('archived treats omitted or null as false, and preserves true', () {
+      final omitted = Row(Alpha.store, {'id': 'a1', 'name': 'x'});
+      expect(omitted.archived, isFalse);
+
+      final withFalse =
+          Row(Alpha.store, {'id': 'a1', 'name': 'x', 'archived': false});
+      expect(withFalse.archived, isFalse);
+
+      final withTrue =
+          Row(Alpha.store, {'id': 'a1', 'name': 'x', 'archived': true});
+      expect(withTrue.archived, isTrue);
+
+      final invalid =
+          Row(Alpha.store, {'id': 'a1', 'name': 'x', 'archived': 'bad'});
+      expect(
+        () => invalid.archived,
+        throwsA(isA<ValidationException>()
+            .having((e) => e.field, 'field', 'archived')),
+      );
+    });
   });
 
   group('system field descriptors', () {

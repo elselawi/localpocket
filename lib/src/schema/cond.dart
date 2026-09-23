@@ -179,6 +179,13 @@ base mixin NullableFieldCond<S, V> on FieldDef<S, V> {
   /// SQL `IS NULL`.
   FieldCond<S> isNull() =>
       FieldCond<S>(owner, name, 'isNull', const <Object?>[]);
+
+  /// Matches rows where this field equals [value] or is `NULL`.
+  ///
+  /// Useful for optional fields where absent/unset values represent the same
+  /// logical state as a default value (e.g. `isDone.eqOrNull(false)` matches
+  /// both rows explicitly set to `false` and rows where the column is unset).
+  Cond<S> eqOrNull(V value) => eq(value) | isNull();
 }
 
 /// Kind-scoped comparison operators mixed into integer, real, date, and

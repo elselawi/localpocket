@@ -63,6 +63,34 @@ void main() {
       expect(changes.first.changedFields, contains('title'));
     });
 
+    test(
+        'change event for not-archived record reads archived as false, and archived as true',
+        () async {
+      final tasks = db.store(Tasks.store);
+      final changes = <DatabaseRecordChange>[];
+      final sub = db.changes.listen(changes.add);
+      addTearDown(sub.cancel);
+
+      final row = await tasks.put([Tasks.title.set('work')]);
+      await tasks.archive(row.id);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(changes, hasLength(2));
+
+      // Put / create event: outbox payload omits archived flag
+      final createEvent = changes[0];
+      expect(createEvent.action, ChangeAction.create);
+      expect(createEvent.newRecord, isNotNull);
+      expect(createEvent.newRecord!.archived, isFalse);
+
+      // Archive event: outbox payload has archived = true
+      final archiveEvent = changes[1];
+      expect(archiveEvent.action, ChangeAction.archive);
+      expect(archiveEvent.newRecord, isNotNull);
+      expect(archiveEvent.newRecord!.archived, isTrue);
+    });
+
     test('db.changes supports pattern matching on oldRecord and newRecord',
         () async {
       final tasks = db.store(Tasks.store);

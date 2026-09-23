@@ -48,7 +48,23 @@ final class Row<S extends StoreDef<S>> {
   String get id => _readSystem<String>('id');
 
   /// Whether the record is archived (system column).
-  bool get archived => _readSystem<bool>('archived');
+  ///
+  /// Evaluates to `true` when the record is archived. When the record was
+  /// decoded from a payload where unarchived records omit the flag (such as
+  /// an outbox payload on a change event), absence defaults to `false`.
+  bool get archived {
+    final projected = _projected;
+    if (projected != null && !projected.contains('archived')) {
+      throw FieldNotSelectedError('archived');
+    }
+    final value = _map['archived'];
+    if (value == null) return false;
+    if (value is bool) return value;
+    throw ValidationException(
+      'Record has no valid archived value.',
+      field: 'archived',
+    );
+  }
 
   /// A defensive snapshot of the undeclared keys stored in `extra`, excluding
   /// the declared fields and the system columns.

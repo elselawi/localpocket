@@ -1,3 +1,18 @@
+## 0.3.4
+
+- Fixed: `Row.archived` threw `ValidationException` when accessed on a row
+  decoded from a change event payload (such as unpushed local mutations from
+  the outbox encoding). The outbox encoding canonically omits `archived`
+  when false; `Row.archived` now treats absence as `false`, matching the
+  field's defined default and the kernel's own decoder.
+- Added: `eqOrNull(V value)` helper on `NullableFieldCond` (`Cond<S> eqOrNull(V value) => eq(value) | isNull()`),
+  allowing queries on optional fields to match both explicit values and unset/NULL
+  columns in a single readable condition.
+- Docs: documented that `DatabaseRecordChange.oldRecord`/`newRecord` and
+  `StoreRecordChange.oldRecord`/`newRecord` are decoded from committed change
+  payloads rather than re-queried complete rows, and default-valued system
+  columns like `archived` default to `false` when omitted.
+
 ## 0.3.3
 
 - Fixed: the typed `open` handshake on web ignored `OpenRequest.storePolicies`,

@@ -121,6 +121,25 @@ void main() {
           .query(QuerySpec(limit: 50, where: [Sandbox.price.lt(1000)]));
       expect(page.items.map((r) => r(Sandbox.title)), ['alpha', 'beta']);
     });
+
+    test('eqOrNull matches explicit value and NULL rows', () async {
+      // active is true on alpha, null on beta and gamma
+      final activeOrNull = await sandbox
+          .query(QuerySpec(limit: 50, where: [Sandbox.active.eqOrNull(true)]));
+      expect(activeOrNull.items.map((r) => r(Sandbox.title)),
+          containsAll(['alpha', 'beta', 'gamma']));
+
+      // active is false nowhere, but null on beta and gamma
+      final falseOrNull = await sandbox
+          .query(QuerySpec(limit: 50, where: [Sandbox.active.eqOrNull(false)]));
+      expect(falseOrNull.items.map((r) => r(Sandbox.title)), ['beta', 'gamma']);
+
+      // price is 1.5 on alpha, 2.5 on beta, null on gamma
+      final priceOrNull = await sandbox
+          .query(QuerySpec(limit: 50, where: [Sandbox.price.eqOrNull(1.5)]));
+      expect(
+          priceOrNull.items.map((r) => r(Sandbox.title)), ['alpha', 'gamma']);
+    });
   });
 
   group('boolean tree composition', () {

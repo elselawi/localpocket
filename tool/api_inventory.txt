@@ -525,6 +525,8 @@ lib/src/schema/cond.dart::FieldCond.FieldCond
 lib/src/schema/cond.dart::NotCond
 lib/src/schema/cond.dart::NotCond.NotCond
 lib/src/schema/cond.dart::NullableFieldCond
+lib/src/schema/cond.dart::NullableFieldCond.eq
+lib/src/schema/cond.dart::NullableFieldCond.eqOrNull
 lib/src/schema/cond.dart::NullableFieldCond.isNull
 lib/src/schema/cond.dart::OrderTerm
 lib/src/schema/cond.dart::OrderTerm.OrderTerm

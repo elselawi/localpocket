@@ -55,6 +55,12 @@ abstract base class _RecordChange {
 /// [oldRecord] is the previous logical state (null for creates) and
 /// [newRecord] the state after the commit (null for hard purges), decoded as
 /// immutable typed [Row] snapshots.
+///
+/// Note that [oldRecord] and [newRecord] are decoded from the committed change
+/// payload (such as the canonical outbox encoding for local mutations), which
+/// may be a partial payload rather than a complete logical row re-queried from
+/// the database. System columns like [Row.archived] default to `false` when
+/// omitted from the payload.
 /// {@endtemplate}
 final class DatabaseRecordChange extends _RecordChange {
   /// {@macro localpocket.change_notification}
@@ -69,9 +75,15 @@ final class DatabaseRecordChange extends _RecordChange {
   });
 
   /// Previous logical state before this change (null if newly created).
+  ///
+  /// Note that this is decoded from the change payload, not re-queried from
+  /// the database, and may reflect a partial payload for certain operations.
   final Row<dynamic>? oldRecord;
 
   /// New logical state after this change (null if hard-purged).
+  ///
+  /// Note that this is decoded from the change payload, not re-queried from
+  /// the database, and may reflect a partial payload for certain operations.
   final Row<dynamic>? newRecord;
 
   @override
@@ -86,6 +98,12 @@ final class DatabaseRecordChange extends _RecordChange {
 /// Delivered through `Store<S>.events`. [oldRecord] and [newRecord] are
 /// immutable [Row] snapshots decoded against the store's definition — a
 /// create carries a null [oldRecord], a purge a null [newRecord].
+///
+/// Note that [oldRecord] and [newRecord] are decoded from the committed change
+/// payload (such as the canonical outbox encoding for local mutations), which
+/// may be a partial payload rather than a complete logical row re-queried from
+/// the database. System columns like [Row.archived] default to `false` when
+/// omitted from the payload.
 /// {@endtemplate}
 final class StoreRecordChange<S extends StoreDef<S>> extends _RecordChange {
   /// {@macro localpocket.record_change}
@@ -100,9 +118,15 @@ final class StoreRecordChange<S extends StoreDef<S>> extends _RecordChange {
   });
 
   /// Previous typed snapshot before this change (null if newly created).
+  ///
+  /// Note that this is decoded from the change payload, not re-queried from
+  /// the database, and may reflect a partial payload for certain operations.
   final Row<S>? oldRecord;
 
   /// New typed snapshot after this change (null if hard-purged).
+  ///
+  /// Note that this is decoded from the change payload, not re-queried from
+  /// the database, and may reflect a partial payload for certain operations.
   final Row<S>? newRecord;
 
   @override
