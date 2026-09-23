@@ -5,11 +5,17 @@ import 'package:localpocket/src/kernel/command_handler.dart';
 import 'package:localpocket/src/kernel/files/blob_store.dart'
     show MemoryBlobStore;
 import 'package:localpocket/src/kernel/local_pocket.dart' as kernel;
+import 'package:localpocket/src/kernel/page_callbacks.dart'
+    show encodeStorePolicies;
 import 'package:localpocket/src/kernel/schema.dart'
-    show CollectionSchema, Field;
+    show CollectionSchema, Field, MissingRemotePolicy;
+import 'package:localpocket/src/kernel/schema_manifest.dart'
+    show SchemaManifest;
+import 'package:localpocket/src/kernel/sync/merge.dart' show RemoteWinsResolver;
 import 'package:test/test.dart';
 
 import '../support/fixtures/tasks_store.dart';
+import '../support/helpers.dart' show policyStoreSchema;
 
 /// The command dispatcher's interactive-transaction surface, driven directly
 /// through [kernel.KernelDatabase.commands] — the same requests the web
@@ -614,6 +620,47 @@ void main() {
         commands.handle(OpenRequest(
           stores: [drifted.toJson()],
           manifestFingerprints: {'other-store': 'mismatched'},
+        )),
+        throwsA(isA<SchemaRegistrationError>()),
+      );
+    });
+
+    test('the store-policy envelope is attached before registration', () async {
+      final schema = policyStoreSchema();
+      final envelope = encodeStorePolicies([schema], null);
+      final fingerprint = SchemaManifest.compile(schema).fingerprint;
+
+      Future<Result> open() => commands.handle(OpenRequest(
+            stores: [schema.toJson()],
+            manifestFingerprints: {'expenses': fingerprint},
+            storePolicies: envelope,
+          ));
+
+      // The wire form omits the policy, so this only registers ('expenses'
+      // is new here) when the envelope is attached BEFORE registerStore.
+      await open();
+      final registered = db.requireTable('expenses').schema;
+      expect(registered.conflictPolicy.missingRemote,
+          MissingRemotePolicy.recreate);
+      expect(registered.conflictPolicy.fieldOverrides.keys, ['cost']);
+      expect(registered.conflictPolicy.fieldOverrides['cost'],
+          isA<RemoteWinsResolver>());
+
+      // Re-opening drives the comparison path against that registered
+      // schema: compiling the raw wire form there (default policy, no field
+      // overrides) is what rejected every web open whose policy was not the
+      // default.
+      await open();
+    });
+
+    test('the fingerprint check stays strict with the envelope attached',
+        () async {
+      final schema = policyStoreSchema();
+      await expectLater(
+        commands.handle(OpenRequest(
+          stores: [schema.toJson()],
+          manifestFingerprints: {'expenses': 'deadbeef'},
+          storePolicies: encodeStorePolicies([schema], null),
         )),
         throwsA(isA<SchemaRegistrationError>()),
       );

@@ -24,7 +24,7 @@ Add `localpocket` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  localpocket: ^0.3.2
+  localpocket: ^0.3.3
 ```
 
 ---

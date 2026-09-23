@@ -8,6 +8,7 @@ import 'package:localpocket/src/kernel/local_pocket.dart'
     show LocalPocket, TestHooks;
 import 'package:localpocket/src/kernel/schema.dart';
 import 'package:localpocket/src/kernel/files/blob_store.dart' show BlobStore;
+import 'package:localpocket/src/kernel/sync/merge.dart' show RemoteWinsResolver;
 import 'package:path/path.dart' as p;
 
 const String inMemoryDatabasePath = ':memory:';
@@ -64,6 +65,24 @@ CollectionSchema<Object?> widgetsSchema({
       keepUnsyncedArchives: keepUnsyncedArchives,
       documentMigrations: documentMigrations ?? const {},
       fts: fts,
+    );
+
+/// A store whose conflict policy departs from the default in BOTH the
+/// collection envelope ([MissingRemotePolicy.recreate]) and its field
+/// overrides — the shape that must cross the worker boundary in the
+/// store-policy envelope rather than the plain schema JSON.
+CollectionSchema<Object?> policyStoreSchema({
+  String name = 'expenses',
+  MissingRemotePolicy missingRemote = MissingRemotePolicy.recreate,
+}) =>
+    CollectionSchema(
+      name: name,
+      version: 1,
+      fields: [Field.text('title', required: true), Field.real('cost')],
+      conflictPolicy: ConflictPolicy(
+        missingRemote: missingRemote,
+        fieldOverrides: const {'cost': RemoteWinsResolver()},
+      ),
     );
 
 Future<LocalPocket> openPocket({

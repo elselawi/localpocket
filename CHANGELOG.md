@@ -1,3 +1,15 @@
+## 0.3.3
+
+- Fixed: the typed `open` handshake on web ignored `OpenRequest.storePolicies`,
+  so a store whose `conflictPolicy` departed from the default could not be
+  opened at all — the worker compiled the plain wire schema (default policy,
+  no field overrides) and that manifest fingerprint can never match the page's
+  full definition. The envelope is now attached before the worker registers or
+  fingerprints a schema, so the registered policy is the one the page declared
+  (`missingRemote`, per-field resolvers and hooks included) instead of a
+  silently downgraded default. The fingerprint check stays strict; it simply
+  has matching input now.
+
 ## 0.3.2
 
 - Native opens now default to durable attachment storage. With no `blobStore`,

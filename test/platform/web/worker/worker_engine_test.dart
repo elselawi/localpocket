@@ -1267,6 +1267,38 @@ void main() {
     });
   });
 
+  group('WorkerEngine — typed open handshake', () {
+    test('the page store-policy envelope reaches the registered schema',
+        () async {
+      final schema = policyStoreSchema();
+      final envelope = encodeStorePolicies([schema], null);
+      final fingerprint = SchemaManifest.compile(schema).fingerprint;
+      // The harness opened with widgetsSchema() only, so 'expenses' is new:
+      // the typed handshake registers it (the register path).
+      final h = await WorkerHarness.open();
+      addTearDown(h.close);
+
+      Future<contract.OkResult> open() => h.runtime.send(contract.OpenRequest(
+            stores: [schema.toJson()],
+            manifestFingerprints: {'expenses': fingerprint},
+            storePolicies: envelope,
+          ));
+
+      await open();
+      final registered = h.pocket.requireTable('expenses').schema;
+      expect(registered.conflictPolicy.missingRemote,
+          MissingRemotePolicy.recreate);
+      expect(registered.conflictPolicy.fieldOverrides.keys, ['cost']);
+      expect(registered.conflictPolicy.fieldOverrides['cost'],
+          isA<RemoteWinsResolver>());
+
+      // Re-sending drives the COMPARE path against that already-registered
+      // schema — the exact handshake a web open runs after the raw worker
+      // `open` op registered the store with its envelope.
+      await open();
+    });
+  });
+
   group('WorkerEngine — proxy sync backend (page-executed)', () {
     test('sync start drives the page-hosted backend end-to-end', () async {
       final pageFactory = FakeSyncBackendFactory();

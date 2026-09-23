@@ -15,6 +15,7 @@ import 'file_sessions.dart';
 import 'file_service.dart';
 import 'kernel_context.dart';
 import 'local_pocket.dart';
+import 'page_callbacks.dart' show attachStorePolicy;
 import 'query/ir.dart';
 import 'query/query_builder/predicate_tree.dart';
 import 'query/query_builder/query_builder.dart';
@@ -145,10 +146,12 @@ class KernelCommandHandler implements CommandHandler {
 
   @override
   Future<Result> handle(Request request) => switch (request) {
-        OpenRequest(:final stores, :final manifestFingerprints) => _open(
-            stores,
-            manifestFingerprints,
-          ),
+        OpenRequest(
+          :final stores,
+          :final manifestFingerprints,
+          :final storePolicies,
+        ) =>
+          _open(stores, manifestFingerprints, storePolicies),
         CapabilitiesRequest() => Future.value(_capabilities()),
         HealthRequest() => Future.value(
             HealthResult(
@@ -403,9 +406,21 @@ class KernelCommandHandler implements CommandHandler {
   Future<Result> _open(
     List<Map<String, Object?>> stores,
     Map<String, String> fingerprints,
+    Map<String, Object?>? storePolicies,
   ) async {
     for (final raw in stores) {
-      final schema = CollectionSchema<Object?>.fromJson(raw);
+      // The wire form of a schema never carries code: resolvers, validators,
+      // and migration hooks travel in the store-policy envelope instead.
+      // Attach it BEFORE the schema is registered or manifest-compiled —
+      // decoding the plain form yields the DEFAULT conflict policy, so
+      // registering it would enforce behavior the page never declared, and
+      // its fingerprint could never agree with the page's full definition.
+      final parsed = CollectionSchema<Object?>.fromJson(raw);
+      final schema = attachStorePolicy(
+        parsed,
+        storePolicies?[parsed.name],
+        invoker: context.callbackInvoker,
+      );
       if (!context.database.storeNames.contains(schema.name)) {
         await context.database.schemaService.registerStore(schema);
       } else {
