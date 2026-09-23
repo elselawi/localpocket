@@ -1,4 +1,4 @@
-## Unreleased
+## 0.3.2
 
 - Native opens now default to durable attachment storage. With no `blobStore`,
   `LocalPocket.open` installs the content-addressed `NativeBlobStore` rooted
