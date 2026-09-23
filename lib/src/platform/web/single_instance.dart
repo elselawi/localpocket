@@ -60,24 +60,26 @@ Future<bool> _acquireClaim(String path) async {
   final lockName = 'localpocket:single_instance:$path';
   final options = web.LockOptions(ifAvailable: true);
 
-  unawaited(locks.request(
-    lockName,
-    options,
-    ((web.Lock? lock) {
-      if (lock == null) {
-        if (!granted.isCompleted) granted.complete(false);
-        return null;
-      }
-      _heldClaims.add(path);
-      _heldLocks[path] = holdLock;
-      if (!granted.isCompleted) granted.complete(true);
-      return holdLock.future.toJS;
-    }).toJS,
-  ).toDart.catchError((Object error) {
+  unawaited(locks
+      .request(
+        lockName,
+        options,
+        ((web.Lock? lock) {
+          if (lock == null) {
+            if (!granted.isCompleted) granted.complete(false);
+            return null;
+          }
+          _heldClaims.add(path);
+          _heldLocks[path] = holdLock;
+          if (!granted.isCompleted) granted.complete(true);
+          return holdLock.future.toJS;
+        }).toJS,
+      )
+      .toDart
+      .catchError((Object error) {
     if (!granted.isCompleted) granted.complete(false);
     return null;
   }));
 
   return granted.future;
 }
-

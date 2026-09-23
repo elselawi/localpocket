@@ -45,8 +45,8 @@ void main() {
     });
 
     test('native implementation stays clean of web SDKs and dart:io', () {
-      final nativeImpl =
-          File('lib/src/platform/native/single_instance.dart').readAsStringSync();
+      final nativeImpl = File('lib/src/platform/native/single_instance.dart')
+          .readAsStringSync();
       expect(nativeImpl.contains("import 'dart:io'"), isFalse,
           reason: 'native single_instance does not need dart:io');
       expect(nativeImpl.contains('package:web'), isFalse,

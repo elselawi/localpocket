@@ -30,9 +30,9 @@ final class Notes extends StoreDef<Notes> {
 Future<void> main() async {
   globalContext.setProperty(
     '__claimSingleInstance'.toJS,
-    ((JSString path) =>
-            LocalPocket.claimSingleInstance(path.toDart).then((v) => v.toJS).toJS)
-        .toJS,
+    ((JSString path) => LocalPocket.claimSingleInstance(path.toDart)
+        .then((v) => v.toJS)
+        .toJS).toJS,
   );
 
   var stage = 'start';
@@ -63,7 +63,8 @@ Future<void> main() async {
     mark('claim');
     final claimed = await LocalPocket.claimSingleInstance('api_smoke_db_v1');
     if (!claimed) {
-      throw StateError('Expected single-instance claim to succeed on first call');
+      throw StateError(
+          'Expected single-instance claim to succeed on first call');
     }
     final claimedAgain =
         await LocalPocket.claimSingleInstance('api_smoke_db_v1');

@@ -48,8 +48,8 @@ async function testSingleInstance(name, browserType) {
 
         console.log(`${name}: PASS cross-tab single-instance claim`);
     } finally {
-        await context.close().catch(() => {});
-        await browser.close().catch(() => {});
+        await context.close().catch(() => { });
+        await browser.close().catch(() => { });
     }
 }
 
