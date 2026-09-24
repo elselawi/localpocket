@@ -200,6 +200,39 @@ void main() {
       }
     });
 
+    test('database localOnly purges journals for every store on open',
+        () async {
+      final db = await tempDbPath();
+      addTearDown(db.cleanup);
+      final stores = [
+        widgetsSchema(name: 'database_private_a'),
+        widgetsSchema(name: 'database_private_b'),
+      ];
+      final before = await openPocket(path: db.path, stores: stores);
+      for (final store in ['database_private_a', 'database_private_b']) {
+        await before.collection(store).put(
+            record(id: generateRecordId(), name: 'retained-$store', qty: 1));
+      }
+      await before.close();
+
+      final after = await openPocket(
+        path: db.path,
+        stores: stores,
+        localOnly: true,
+      );
+      addTearDown(after.close);
+      for (final store in ['database_private_a', 'database_private_b']) {
+        expect(await after.collection(store).query().count(), 1,
+            reason: 'database-level localOnly preserves $store rows');
+        for (final table in ['lp_outbox', 'lp_sync_row']) {
+          final rows = await after.db.rawQuery(
+              'SELECT COUNT(*) AS c FROM $table WHERE store = ?', [store]);
+          expect(firstInt(rows), 0,
+              reason: '$table for $store is removed during localOnly open');
+        }
+      }
+    });
+
     test('a version BUMP with an additive migration is accepted', () async {
       final db = await tempDbPath();
       addTearDown(db.cleanup);

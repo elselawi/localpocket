@@ -120,7 +120,9 @@ class SchemaService {
     // Persist the manifest so the NEXT open can compare behavior, not just
     // version numbers.
     await _persistSchemaManifest(schema.name, manifest);
-    if (schema.localOnly) await _purgeLocalOnlyJournals(schema.name);
+    if (!context.database.shouldJournal(schema.name)) {
+      await _purgeLocalOnlyJournals(schema.name);
+    }
   }
 
   Future<void> _purgeLocalOnlyJournals(String store) async {

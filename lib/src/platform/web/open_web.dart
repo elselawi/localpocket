@@ -179,6 +179,7 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
   // name (it sees only the fixed in-VFS path `/database`).
   final openArgs = {
     'stores': [for (final s in schemas) s.toJson()],
+    if (options.localOnly) 'localOnly': true,
     'maxDocBytes': options.maxDocumentBytes,
     'destructiveBackup': true,
     'backupDbName': options.path,
@@ -297,6 +298,8 @@ Future<LocalPocket> openPlatform(LocalPocketOptions options) async {
     return LocalPocket.internal(
       runtime,
       stores: options.stores,
+      localOnly: options.localOnly,
+      databaseName: options.path,
       onClose: () async {
         await connectResult.database.dispose();
         if (workerResolved.fetched) revokeObjectUrl(workerResolved.url);

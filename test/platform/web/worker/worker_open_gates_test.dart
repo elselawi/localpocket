@@ -7,7 +7,7 @@ import 'package:localpocket/src/platform/web/page/protocol.dart';
 import 'package:localpocket/src/platform/web/worker/open_options.dart';
 import 'package:test/test.dart';
 
-import '../../../support/helpers.dart' show widgetsSchema;
+import '../../../support/helpers.dart' show firstInt, widgetsSchema;
 import '../../../support/worker_harness.dart';
 
 /// The worker `open` handler's registration gates: encrypted-store cipher
@@ -49,6 +49,28 @@ void main() {
 
       expect(result, {'ok': true});
       expect(h.pocket.requireTable(schema.name).schema.localOnly, isTrue);
+    });
+
+    test('database localOnly parsed from open options reaches worker writes',
+        () async {
+      final parsed = parseOpenOptions(const {'localOnly': true});
+      final h = await WorkerHarness.open(
+        localOnly: parsed['localOnly']! as bool,
+      );
+      addTearDown(h.close);
+      final id = 'workerlocalonly';
+
+      await h.put('widgets', {'name': 'worker local', 'qty': 1}, id: id);
+
+      final outbox = await h.pocket.db.rawQuery(
+          'SELECT COUNT(*) AS c FROM lp_outbox WHERE store = ? AND record_id = ?',
+          ['widgets', id]);
+      final syncRows = await h.pocket.db.rawQuery(
+          'SELECT COUNT(*) AS c FROM lp_sync_row WHERE store = ? AND record_id = ?',
+          ['widgets', id]);
+      expect(firstInt(outbox), 0);
+      expect(firstInt(syncRows), 0);
+      expect((await h.get('widgets', id))?['name'], 'worker local');
     });
 
     test('a page fingerprint mismatch fails before any registration', () async {
@@ -203,6 +225,8 @@ void main() {
     test('absent keys are omitted, present keys pass through', () {
       expect(parseOpenOptions(null), isEmpty);
       expect(parseOpenOptions(const {}), isEmpty);
+      expect(parseOpenOptions(const {'localOnly': true}),
+          containsPair('localOnly', true));
       expect(
         parseOpenOptions({
           'stores': [widgetsSchema().toJson()],
@@ -219,6 +243,8 @@ void main() {
       expect(() => parseOpenOptions(const {'maxDocBytes': 'big'}),
           throwsA(isA<ProtocolEnvelopeException>()));
       expect(() => parseOpenOptions(const {'destructiveBackup': 'yes'}),
+          throwsA(isA<ProtocolEnvelopeException>()));
+      expect(() => parseOpenOptions(const {'localOnly': 'yes'}),
           throwsA(isA<ProtocolEnvelopeException>()));
       expect(() => parseOpenOptions('not-a-map'),
           throwsA(isA<ProtocolEnvelopeException>()));

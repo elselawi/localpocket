@@ -758,6 +758,7 @@ Future<void> vanishRecordMetadata(
   String store,
   String recordId, {
   bool deleteSyncAndOutbox = false,
+  bool journaled = true,
 }) async {
   final refs = await exec.query('lp_file_refs',
       columns: ['ref_id', 'hash'],
@@ -772,13 +773,15 @@ Future<void> vanishRecordMetadata(
     }
   }
 
-  await exec.delete('lp_conflicts',
-      where: 'store = ? AND record_id = ?', whereArgs: [store, recordId]);
-  await exec.update('lp_op_queue', {'state': 'done'},
-      where: "store = ? AND record_id = ? AND state IN ('pending','failed')",
-      whereArgs: [store, recordId]);
+  if (journaled) {
+    await exec.delete('lp_conflicts',
+        where: 'store = ? AND record_id = ?', whereArgs: [store, recordId]);
+    await exec.update('lp_op_queue', {'state': 'done'},
+        where: "store = ? AND record_id = ? AND state IN ('pending','failed')",
+        whereArgs: [store, recordId]);
+  }
 
-  if (deleteSyncAndOutbox) {
+  if (deleteSyncAndOutbox && journaled) {
     await exec.delete('lp_outbox',
         where: 'store = ? AND record_id = ?', whereArgs: [store, recordId]);
     await exec.delete('lp_sync_row',

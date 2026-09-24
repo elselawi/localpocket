@@ -24,7 +24,7 @@ Add `localpocket` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  localpocket: ^0.3.7
+  localpocket: ^0.3.8
 ```
 
 ---
@@ -1311,7 +1311,12 @@ LocalPocket supports two separate encryption layers:
    `encrypted: true` and open the database with
    `EncryptionConfig.aesGcm256(key: keyBytes)`. LocalPocket stores each field's
    value as AES-256-GCM ciphertext with a fresh random nonce, and decrypts it
-   transparently when a row is read back.
+    transparently when a row is read back. This protects the declared SQLite
+    column only: synced records may also have plaintext copies in pending sync
+    journals. Use `LocalPocketOptions.localOnly: true` for a database, or
+    `StoreDef.localOnly => true` for one store, to keep its values out of those
+    journals. For a synced store, a settled push removes the active outbox/base
+    copy, but retained conflicts or dead letters may still contain plaintext.
 2. **Database-level encryption (native only)** — whole-file at-rest encryption provided by
   the database engine supplied by the application (such as SQLCipher). Configured through
   `LocalPocketOptions.nativeDatabaseFactory` and `LocalPocketOptions.databaseEncryption`.
@@ -1350,6 +1355,7 @@ then define a cipher key and open the database with encryption enabled:
     LocalPocketOptions(
       path: ':memory:',
       stores: [Vault.store],
+      localOnly: true,
       encryption: EncryptionConfig.aesGcm256(key: keyBytes),
     ),
   );
@@ -1376,9 +1382,10 @@ then define a cipher key and open the database with encryption enabled:
 
 **Key Points:**
 
-1. **Encrypted at rest:** Field encryption seals individual field values. Structural metadata (table name, record IDs) remains unencrypted.
-2. **Stable key required:** The 32-byte AES key must be securely stored in your app keystore and supplied on open.
-3. **Query restrictions:** Because ciphertext is stored, encrypted fields cannot be queried via `where`, sorted via `orderBy`, or included in indexes or FTS specs. Store filterable values in separate, unencrypted fields.
+1. **Encrypted column:** Field encryption seals the declared SQLite column, but not plaintext copies in sync journals. Use `LocalPocketOptions(localOnly: true)` for every store in a database, or override `StoreDef.localOnly` for one store. The database flag takes precedence, applies on every open, rejects sync attachment, and keeps attachments local.
+2. **Journal copies:** For synced stores, pending payloads and dirty bases may contain plaintext. Once a push settles, the active outbox/base is removed, but a retained conflict or dead-letter may still contain a copy.
+3. **Stable key required:** The 32-byte AES key must be securely stored in your app keystore and supplied on open.
+4. **Query restrictions:** Because ciphertext is stored, encrypted fields cannot be queried via `where`, sorted via `orderBy`, or included in indexes or FTS specs. Store filterable values in separate, unencrypted fields.
 
 
 ### Database-level (Native Only)
@@ -1456,7 +1463,7 @@ Pass your custom factory and passphrase configuration to `LocalPocket.open`:
 | **Configuration** | `encrypted: true` on field + `EncryptionConfig.aesGcm256` at open | `nativeDatabaseFactory` + `DatabaseEncryptionConfig` at open |
 | **Supported platforms** | All platforms (mobile, desktop, web) | Native only (mobile, desktop) |
 | **Querying & indexing** | Encrypted fields cannot be filtered or indexed | All query, filter, sort, and index features work normally |
-| **File exposure** | Schema and unencrypted fields are readable; marked fields are ciphertext | Entire file is ciphertext with no readable data or metadata |
+| **File exposure** | Marked columns are ciphertext. Plaintext may also be present in sync journals unless the store/database is local-only or its push has settled with no retained conflict/dead-letter. | Entire file is ciphertext with no readable data or metadata |
 | **Dependencies** | Built-in, no external dependencies | Requires cipher build hook in `pubspec.yaml` |
 
 - **Choose field-level** when you only need to protect specific sensitive attributes, or when deploying to the web.

@@ -1,10 +1,12 @@
 import 'dart:async';
 
-import 'package:localpocket/localpocket.dart' show FieldDef, StoreDef;
+import 'package:localpocket/localpocket.dart'
+    show DirectSqliteDatabase, FieldDef, FieldSet, StoreDef, Writes;
 import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
 import 'package:localpocket/src/api/api.dart';
 import 'package:localpocket/src/kernel/errors.dart' show ValidationException;
+import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
 import '../support/fixtures/tasks_store.dart';
@@ -123,28 +125,80 @@ void main() {
       expect(sync.isRunning, isFalse);
     });
 
-    test('a localOnly StoreDef rejects sync start with its store name',
+    test('a localOnly StoreDef rejects sync attachment with its store name',
         () async {
       final db = await LocalPocket.open(LocalPocketOptions(
         path: ':memory:',
         stores: [LocalVault.store],
       ));
       addTearDown(db.close);
-      final sync = db.attachPocketBaseSync(PocketBaseSyncOptions(
-        baseUrl: Uri.parse('http://127.0.0.1:8099'),
-        tokenProvider: _FakeTokens('jwt'),
-        identity: 'local-only-test',
-      ));
 
-      await expectLater(
-        sync.start(),
+      expect(
+        () => db.attachPocketBaseSync(PocketBaseSyncOptions(
+          baseUrl: Uri.parse('http://127.0.0.1:8099'),
+          tokenProvider: _FakeTokens('jwt'),
+          identity: 'local-only-test',
+        )),
         throwsA(isA<ValidationException>().having(
           (error) => error.message,
           'message',
           allOf(contains('local_vault'), contains('localOnly')),
         )),
       );
-      expect(sync.isRunning, isFalse);
+    });
+
+    test('a localOnly database rejects sync attachment by database name',
+        () async {
+      final db = await LocalPocket.open(LocalPocketOptions(
+        path: ':memory:',
+        stores: [Tasks.store],
+        localOnly: true,
+      ));
+      addTearDown(db.close);
+
+      expect(
+        () => db.attachPocketBaseSync(PocketBaseSyncOptions(
+          baseUrl: Uri.parse('http://127.0.0.1:8099'),
+          tokenProvider: _FakeTokens('jwt'),
+          identity: 'local-only-db-test',
+        )),
+        throwsA(isA<ValidationException>().having(
+          (error) => error.message,
+          'message',
+          allOf(contains(':memory:'), contains('tasks'), contains('localOnly')),
+        )),
+      );
+    });
+
+    test('LocalPocketOptions.localOnly reaches every native store', () async {
+      final database = DirectSqliteDatabase(sqlite.sqlite3.openInMemory());
+      final statements = <String>[];
+      database.onQuery = (sql, _) => statements.add(sql);
+      database.onExecute = (sql, _) => statements.add(sql);
+      final db = await LocalPocket.open(LocalPocketOptions(
+        path: ':memory:',
+        stores: [Tasks.store],
+        localOnly: true,
+        nativeDatabaseFactory: (_) => database,
+      ));
+      addTearDown(db.close);
+
+      final store = db.store(Tasks.store);
+      final id = LocalPocket.newRecordId();
+      await store.put([
+        Writes.id(id),
+        Tasks.title.set('database-local'),
+        Tasks.priority.set(1),
+      ]);
+      statements.clear();
+
+      await store.patch(id, [Tasks.priority.set(2)]);
+
+      expect(
+        statements.where(
+            (sql) => sql.contains('lp_sync_row') || sql.contains('lp_outbox')),
+        isEmpty,
+      );
     });
 
     test('status pushes snapshots and authRequired fires on a 401 server',

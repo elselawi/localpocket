@@ -7,6 +7,7 @@ export 'src/api/blob_store_platform.dart' show NativeBlobStore;
 export 'src/api/limits.dart';
 export 'src/api/writes.dart';
 export 'src/kernel/change_bus.dart' show ChangeAction, ChangeOrigin;
+export 'src/kernel/cipher.dart' show FieldCipher;
 export 'src/kernel/database_adapter.dart' show Database, DirectSqliteDatabase;
 export 'src/kernel/errors.dart';
 export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;

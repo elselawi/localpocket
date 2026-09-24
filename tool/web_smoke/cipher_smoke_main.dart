@@ -36,9 +36,6 @@ final class Vault extends StoreDef<Vault> {
 
   @override
   FtsSpec? get fts => null;
-
-  @override
-  bool get localOnly => true;
 }
 
 final class _SmokeTokens implements TokenProvider {
@@ -71,6 +68,7 @@ Future<void> main() async {
         LocalPocketOptions(
           path: path,
           stores: [Vault.store],
+          localOnly: true,
           encryption:
               EncryptionConfig.aesGcm256(key: Uint8List.fromList(keyBytes)),
           bootstrap: const BootstrapOptions(
@@ -114,23 +112,22 @@ Future<void> main() async {
       throw StateError('Encrypted JSON field mismatch: $meta');
     }
 
-    // The schema flag must cross the open envelope: only the worker can
-    // produce this typed store-specific rejection on the web path.
+    // The database-wide policy is carried in the worker open options; the
+    // facade must reject sync attachment for a local-only database.
     mark('local-only-sync-guard');
-    final sync = pocket.attachPocketBaseSync(PocketBaseSyncOptions(
-      baseUrl: Uri.parse('http://127.0.0.1:1'),
-      tokenProvider: _SmokeTokens(),
-      identity: 'cipher-smoke',
-    ));
     var syncRejected = false;
     try {
-      await sync.start();
+      pocket.attachPocketBaseSync(PocketBaseSyncOptions(
+        baseUrl: Uri.parse('http://127.0.0.1:1'),
+        tokenProvider: _SmokeTokens(),
+        identity: 'cipher-smoke',
+      ));
     } on ValidationException catch (error) {
-      syncRejected = error.message.contains('vault') &&
+      syncRejected = error.message.contains('database') &&
           error.message.contains('localOnly');
     }
     if (!syncRejected) {
-      throw StateError('Worker did not reject sync for localOnly store vault.');
+      throw StateError('Local-only database did not reject sync attachment.');
     }
     await pocket.close();
     // Let the OPFS storage lock settle before reopening the same path; the

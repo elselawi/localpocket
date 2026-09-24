@@ -46,6 +46,9 @@ void main() async {
         wireKey: 'stores',
         note: 'schema JSON; executable members ride '
             'storePolicies'),
+    'localOnly': Parity.crosses(
+        wireKey: 'localOnly',
+        note: 'database-wide journal policy strict-parsed by the worker'),
     'encryption': Parity.crosses(
         wireKey: 'fieldCipher', note: 'AES-256-GCM key envelope'),
     'databaseEncryption': Parity.platformConstraint(
@@ -165,12 +168,14 @@ void main() async {
         'txSessionTtlMs': 0,
         'clockOffsetMs': -5000,
         'callbackTimeoutMs': 4500,
+        'localOnly': true,
       });
       expect(parsed, {
         'groupCommitWindowMs': 12,
         'txSessionTtlMs': 0,
         'clockOffsetMs': -5000,
         'callbackTimeoutMs': 4500,
+        'localOnly': true,
       });
     });
   });

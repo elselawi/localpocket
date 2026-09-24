@@ -193,6 +193,13 @@ lib/src/api/writes.dart::Write.Write
 lib/src/api/writes.dart::Writes
 lib/src/kernel/change_bus.dart::ChangeAction
 lib/src/kernel/change_bus.dart::ChangeOrigin
+lib/src/kernel/cipher.dart::FieldCipher
+lib/src/kernel/cipher.dart::FieldCipher.batchDecrypt
+lib/src/kernel/cipher.dart::FieldCipher.batchEncrypt
+lib/src/kernel/cipher.dart::FieldCipher.decrypt
+lib/src/kernel/cipher.dart::FieldCipher.decryptAsync
+lib/src/kernel/cipher.dart::FieldCipher.encrypt
+lib/src/kernel/cipher.dart::FieldCipher.encryptAsync
 lib/src/kernel/database_adapter.dart::Database
 lib/src/kernel/database_adapter.dart::Database.Function
 lib/src/kernel/database_adapter.dart::Database.close

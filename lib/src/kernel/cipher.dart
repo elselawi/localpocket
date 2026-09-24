@@ -10,8 +10,10 @@
 /// copies remain plaintext while their journal rows exist. A successful push
 /// clears its outbox/base, but an older dead-letter can remain after a later
 /// successful push until maintenance removes it. Therefore an encrypted field
-/// is the only copy of its value for a `localOnly` store, or for a synced store
-/// after settlement when no retained conflict/dead-letter contains it.
+/// is the only copy of its value for a store covered by
+/// `StoreDef.localOnly` or a database opened with
+/// `LocalPocketOptions.localOnly: true`, or for a synced store after
+/// settlement when no retained conflict/dead-letter contains it.
 /// Local-only attachment bytes remain in the local BlobStore and do not get an
 /// `lp_op_queue` entry.
 ///

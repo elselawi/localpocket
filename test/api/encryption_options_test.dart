@@ -26,6 +26,7 @@ void main() {
     test('arms an AES-GCM field cipher', () {
       final config = EncryptionConfig.aesGcm256(key: _key());
       expect(config.fieldCipher, isA<AesGcmFieldCipher>());
+      expect(config.fieldCipher, isA<FieldCipher>());
     });
 
     test('rejects a key that is not 32 bytes', () {

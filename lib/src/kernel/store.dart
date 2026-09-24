@@ -219,20 +219,22 @@ class Collection with ChangeBusAwareStore {
     final srById = <String, SyncRowState>{};
     final opById = <String, OutboxOp>{};
     final existingIds = existingById.keys.toList();
-    for (var start = 0; start < existingIds.length; start += probePage) {
-      final end = (start + probePage).clamp(0, existingIds.length);
-      final chunk = existingIds.sublist(start, end);
-      final ph = List.filled(chunk.length, '?').join(', ');
-      final args = [name, ...chunk];
-      final srRows = await exec.query('lp_sync_row',
-          where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
-      for (final r in srRows) {
-        srById[r['record_id']! as String] = SyncRowState.fromRow(r);
-      }
-      final opRows = await exec.query('lp_outbox',
-          where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
-      for (final r in opRows) {
-        opById[r['record_id']! as String] = OutboxOp.fromRow(r);
+    if (_pocket.shouldJournal(name)) {
+      for (var start = 0; start < existingIds.length; start += probePage) {
+        final end = (start + probePage).clamp(0, existingIds.length);
+        final chunk = existingIds.sublist(start, end);
+        final ph = List.filled(chunk.length, '?').join(', ');
+        final args = [name, ...chunk];
+        final srRows = await exec.query('lp_sync_row',
+            where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+        for (final r in srRows) {
+          srById[r['record_id']! as String] = SyncRowState.fromRow(r);
+        }
+        final opRows = await exec.query('lp_outbox',
+            where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+        for (final r in opRows) {
+          opById[r['record_id']! as String] = OutboxOp.fromRow(r);
+        }
       }
     }
 
@@ -285,7 +287,13 @@ class Collection with ChangeBusAwareStore {
     _ensureWritable();
     final existing = await _readLogical(id);
     final exec = _tx!.executor;
-    await vanishRecordMetadata(exec, name, id, deleteSyncAndOutbox: true);
+    await vanishRecordMetadata(
+      exec,
+      name,
+      id,
+      deleteSyncAndOutbox: true,
+      journaled: _pocket.shouldJournal(name),
+    );
     await exec.delete(_table.tableName, where: 'id = ?', whereArgs: [id]);
     _tx!.addChange(ChangeSet(name, {id}));
     if (existing != null) {
@@ -312,6 +320,15 @@ class Collection with ChangeBusAwareStore {
       OutboxOp? prefetchedOp}) async {
     _ensureWritable();
     final exec = _ex;
+
+    if (!_pocket.shouldJournal(name)) {
+      assert(prefetchedSr == null && prefetchedOp == null,
+          'Local-only stores must not have prefetched sync state.');
+      await _fallbackPatch(id, changes,
+          prefetchedExisting: prefetchedExisting,
+          coalesceChanges: coalesceChanges);
+      return;
+    }
 
     // Fast path for dirty rows: the outbox payload already holds the full
     // desired state, so patch without re-reading the domain row. Sync-row
@@ -518,6 +535,9 @@ class Collection with ChangeBusAwareStore {
     // Without prefetched state, fetch domain row + sync row + outbox op in
     // one three-way LEFT JOIN.
     Future<Map<String, Object?>?> probeExisting(String recordId) async {
+      if (!_pocket.shouldJournal(name)) {
+        return existingRow = existingRow ?? await _readLogical(recordId);
+      }
       if (existingRow != null ||
           prefetchedSyncRow != null ||
           prefetchedOp != null) {
@@ -595,12 +615,12 @@ class Collection with ChangeBusAwareStore {
 
     // A fresh create cannot have sync/outbox rows (id is the PK): skip the
     // reads. putAll and the combined probe supply prefetched state.
-    final sr = existingRow == null
+    final sr = existingRow == null || !_pocket.shouldJournal(name)
         ? null
         : (prefetchedSyncRow ??
             probedSr ??
             await _pocket.outbox.readSyncRow(_ex, name, recordId));
-    final outboxOp = existingRow == null
+    final outboxOp = existingRow == null || !_pocket.shouldJournal(name)
         ? null
         : (prefetchedOp ??
             probedOp ??
@@ -613,8 +633,9 @@ class Collection with ChangeBusAwareStore {
     }
 
     // Base captured once, on the first dirt of a clean row ("earliest base").
-    final firstDirt =
-        existingRow != null && (sr == null || sr.syncState == SyncState.clean);
+    final firstDirt = _pocket.shouldJournal(name) &&
+        existingRow != null &&
+        (sr == null || sr.syncState == SyncState.clean);
     BaseSnapshot? base;
     if (existingRow != null && firstDirt) {
       final payload = canonicalPayload(_schema, existingRow!);
@@ -819,20 +840,22 @@ class Collection with ChangeBusAwareStore {
     final srById = <String, SyncRowState>{};
     final opById = <String, OutboxOp>{};
     final existingIds = existingById.keys.toList();
-    for (var start = 0; start < existingIds.length; start += probePage) {
-      final end = (start + probePage).clamp(0, existingIds.length);
-      final chunk = existingIds.sublist(start, end);
-      final ph = List.filled(chunk.length, '?').join(', ');
-      final args = [name, ...chunk];
-      final srRows = await exec.query('lp_sync_row',
-          where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
-      for (final r in srRows) {
-        srById[r['record_id']! as String] = SyncRowState.fromRow(r);
-      }
-      final opRows = await exec.query('lp_outbox',
-          where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
-      for (final r in opRows) {
-        opById[r['record_id']! as String] = OutboxOp.fromRow(r);
+    if (_pocket.shouldJournal(name)) {
+      for (var start = 0; start < existingIds.length; start += probePage) {
+        final end = (start + probePage).clamp(0, existingIds.length);
+        final chunk = existingIds.sublist(start, end);
+        final ph = List.filled(chunk.length, '?').join(', ');
+        final args = [name, ...chunk];
+        final srRows = await exec.query('lp_sync_row',
+            where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+        for (final r in srRows) {
+          srById[r['record_id']! as String] = SyncRowState.fromRow(r);
+        }
+        final opRows = await exec.query('lp_outbox',
+            where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+        for (final r in opRows) {
+          opById[r['record_id']! as String] = OutboxOp.fromRow(r);
+        }
       }
     }
 
@@ -904,6 +927,7 @@ class Collection with ChangeBusAwareStore {
   Future<void> _putAllBatchCreateDirect(DatabaseExecutor exec,
       List<(String, Map<String, Object?>)> records) async {
     final schema = _schema;
+    final journals = _pocket.shouldJournal(name);
     final now = _pocket.now();
     final db = _ex as DirectSqliteDatabase;
 
@@ -958,7 +982,7 @@ class Collection with ChangeBusAwareStore {
             archived: logical['archived'] == true,
             cipher: _pocket.fieldCipher,
             cryptoProvider: _pocket.cryptoProvider);
-        if (!schema.localOnly) {
+        if (journals) {
           final opId = _pocket.outbox.generateOpId();
           appendOutboxValues(outboxVals,
               store: name,
@@ -988,7 +1012,7 @@ class Collection with ChangeBusAwareStore {
                 '$domainSqlPrefix${valuesTemplate(domainCols.length, chunkLen)}')
             .execute(domainVals);
         domainDone = true;
-        if (!schema.localOnly) {
+        if (journals) {
           db
               .getPreparedStatement(
                   '$outboxSqlPrefix${valuesTemplate(outboxColumns.length, chunkLen)}')
@@ -1045,6 +1069,7 @@ class Collection with ChangeBusAwareStore {
       Map<String, Object?> record,
       int now) async {
     final schema = _schema;
+    final journals = _pocket.shouldJournal(name);
     final logical = _logicalFromRecord(record, rid);
     final payloadBuffer = StringBuffer();
     final payloadBytes = canonicalizePayloadInto(payloadBuffer, schema, logical,
@@ -1061,7 +1086,7 @@ class Collection with ChangeBusAwareStore {
       cipher: _pocket.fieldCipher,
       cryptoProvider: _pocket.cryptoProvider,
     );
-    final opId = schema.localOnly ? null : _pocket.outbox.generateOpId();
+    final opId = journals ? _pocket.outbox.generateOpId() : null;
     final outboxRow = opId == null
         ? null
         : buildOutboxRow(
@@ -1137,7 +1162,7 @@ class Collection with ChangeBusAwareStore {
     if (ids.isEmpty) return;
     final ph = List.filled(ids.length, '?').join(', ');
     await exec.delete(_table.tableName, where: 'id IN ($ph)', whereArgs: ids);
-    if (!_schema.localOnly) {
+    if (_pocket.shouldJournal(name)) {
       final args = [name, ...ids];
       await exec.delete('lp_outbox',
           where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
@@ -1262,7 +1287,7 @@ class Collection with ChangeBusAwareStore {
     }
 
     final List<Map<String, Object?>> rows;
-    if (_schema.version > 1) {
+    if (_schema.version > 1 && _pocket.shouldJournal(name)) {
       rows = await _ex.rawQuery(
           'SELECT w.*, s.schema_ver AS lp_schema_ver '
           'FROM ${_table.tableName} w '

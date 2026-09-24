@@ -34,6 +34,13 @@ Map<String, Object?> parseOpenOptions(Object? data) {
     }
     result['stores'] = [for (final s in stores) parseSchema(s)];
   }
+  final localOnly = stringMap['localOnly'];
+  if (localOnly != null) {
+    if (localOnly is! bool) {
+      throw ProtocolEnvelopeException('"localOnly" must be a bool.');
+    }
+    result['localOnly'] = localOnly;
+  }
   final maxDocBytes = stringMap['maxDocBytes'];
   if (maxDocBytes != null) {
     if (maxDocBytes is! int) {

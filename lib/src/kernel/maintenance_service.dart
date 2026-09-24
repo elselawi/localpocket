@@ -84,6 +84,7 @@ class MaintenanceService {
   /// unsynced data and leave a dangling `op_id`. [maxEntries] is kept for
   /// API compatibility but not enforced.
   Future<int> pruneOutbox({int maxEntries = 10000}) async {
+    if (!context.database.shouldJournal(null)) return 0;
     var pruned = 0;
     await context.database.transaction((tx) async {
       final exec = tx.executor;
@@ -130,6 +131,7 @@ class MaintenanceService {
   /// than [deadLetterRetention].
   Future<void> gcSyncHousekeeping(
       {Duration deadLetterRetention = const Duration(days: 90)}) async {
+    if (!context.database.shouldJournal(null)) return;
     await context.database.transaction((tx) async {
       final exec = tx.executor;
       await exec.delete('lp_op_queue', where: "state = 'done'");
@@ -144,6 +146,7 @@ class MaintenanceService {
   /// and drops their file refs and blob refcounts.
   Future<int> compact(String store,
       {required Duration olderThan, int? nowMs}) async {
+    if (!context.database.shouldJournal(store)) return 0;
     final current = nowMs ?? context.now();
     final cutoff = current - olderThan.inMilliseconds;
     var count = 0;

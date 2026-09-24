@@ -126,6 +126,7 @@ class Outbox {
   /// Reads the outbox op for a record, or null when none is queued.
   Future<OutboxOp?> readOp(
       DatabaseExecutor exec, String store, String id) async {
+    if (!pocket.shouldJournal(store)) return null;
     final rows = await exec.query('lp_outbox',
         where: 'store = ? AND record_id = ?', whereArgs: [store, id], limit: 1);
     return rows.isEmpty ? null : OutboxOp.fromRow(rows.first);
@@ -135,6 +136,7 @@ class Outbox {
   /// synced.
   Future<SyncRowState?> readSyncRow(
       DatabaseExecutor exec, String store, String id) async {
+    if (!pocket.shouldJournal(store)) return null;
     final rows = await exec.query('lp_sync_row',
         where: 'store = ? AND record_id = ?', whereArgs: [store, id], limit: 1);
     return rows.isEmpty ? null : SyncRowState.fromRow(rows.first);
@@ -164,10 +166,11 @@ class Outbox {
   }) async {
     final store = table.schema.name;
     final schema = table.schema;
+    final journals = pocket.shouldJournal(store);
 
-    assert(!schema.localOnly || syncRow == null,
+    assert(journals || syncRow == null,
         'Local-only store "$store" must not have a sync row.');
-    assert(!schema.localOnly || outboxOp == null,
+    assert(journals || outboxOp == null,
         'Local-only store "$store" must not have an outbox operation.');
 
     // A conflict blocks local edits until resolved.
@@ -180,13 +183,15 @@ class Outbox {
     // The outbox payload always carries the (client-generated) id so
     // settle-time hash comparisons against decodeDbRow and normalizeRemote
     // are consistent — otherwise a fresh create could never be ACKed clean.
-    final payloadJson = precomputedPayload ??
-        canonicalPayload(schema, {...logical, if (id.isNotEmpty) 'id': id});
+    final payloadJson = journals
+        ? precomputedPayload ??
+            canonicalPayload(schema, {...logical, if (id.isNotEmpty) 'id': id})
+        : '';
 
     var opKind = outboxOp?.kind;
     bool vanish = false;
 
-    if (schema.localOnly) {
+    if (!journals) {
       vanish = action == MutationAction.archive &&
           oldRow != null &&
           (base == null || base.baseUpdated == null) &&
@@ -236,7 +241,7 @@ class Outbox {
 
     if (vanish) {
       // Vanish rule: never existed remotely → no network op at all.
-      if (!schema.localOnly) {
+      if (journals) {
         await exec.delete('lp_outbox',
             where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
         await exec.delete('lp_sync_row',
@@ -247,7 +252,7 @@ class Outbox {
       return const LocalWriteResult(vanished: true);
     }
 
-    if (schema.localOnly) {
+    if (!journals) {
       return const LocalWriteResult(vanished: false);
     }
 
@@ -372,7 +377,13 @@ class Outbox {
 
   Future<void> _vanishFileRefs(
       DatabaseExecutor exec, String store, String id) async {
-    await vanishRecordMetadata(exec, store, id, deleteSyncAndOutbox: false);
+    await vanishRecordMetadata(
+      exec,
+      store,
+      id,
+      deleteSyncAndOutbox: false,
+      journaled: pocket.shouldJournal(store),
+    );
   }
 
   // -------------------------------------------------------------- draining --
@@ -385,6 +396,8 @@ class Outbox {
   /// whose `next_retry_at` is in the future are deferred (persisted backoff).
   Future<List<OutboxOp>> drain(
       {String? store, int limit = 25, int? now}) async {
+    if (store != null && !pocket.shouldJournal(store)) return const [];
+    if (store == null && !pocket.shouldJournal(null)) return const [];
     final n = now ?? pocket.now();
     final where = StringBuffer(
         "s.sync_state NOT IN ('error','quarantine','conflict','blocked') "

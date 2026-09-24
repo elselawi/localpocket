@@ -28,6 +28,7 @@ final class LocalPocketOptions {
   const LocalPocketOptions({
     required this.path,
     this.stores = const [],
+    this.localOnly = false,
     this.encryption,
     this.databaseEncryption,
     this.nativeDatabaseFactory,
@@ -48,6 +49,14 @@ final class LocalPocketOptions {
   /// instance per store — declaring the same store name twice, or rebinding
   /// a name to a different definition instance, is rejected.
   final List<StoreDef<Object?>> stores;
+
+  /// Whether every store in this database is local-only and must not create
+  /// sync journals. When true, it applies regardless of each store's
+  /// [StoreDef.localOnly] value. Attachments stay in local blob storage, and
+  /// attaching PocketBase sync is rejected. This is per-open configuration
+  /// and must be supplied on every open; [StoreDef.localOnly] applies the same
+  /// policy to one store instead.
+  final bool localOnly;
 
   /// Field-level encryption configuration, or `null` for plaintext storage.
   final EncryptionConfig? encryption;
@@ -177,7 +186,12 @@ final class LocalPocketOptions {
 }
 
 /// {@template localpocket.encryption_config}
-/// At-rest encryption for record fields.
+/// At-rest encryption for declared SQLite field columns.
+///
+/// This does not encrypt plaintext copies in sync journals. Use
+/// [LocalPocketOptions.localOnly] or [StoreDef.localOnly] to keep a value out
+/// of those journals; for a synced store, the field is the only copy after its
+/// push settles only when no retained conflict or dead-letter contains it.
 /// {@endtemplate}
 final class EncryptionConfig {
   const EncryptionConfig._(this.fieldCipher);

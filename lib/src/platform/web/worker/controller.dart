@@ -90,6 +90,7 @@ final class LocalPocketDatabaseController extends DatabaseController {
       // Parse options (pure-Dart parser in `open_options.dart`).
       final options = parseOpenOptions(additionalData?.dartify());
       final stores = (options['stores'] as List<CollectionSchema>?) ?? [];
+      final localOnly = (options['localOnly'] as bool?) ?? false;
       final maxDocBytes = (options['maxDocBytes'] as int?) ?? 1900000;
       final destructiveBackup = (options['destructiveBackup'] as bool?) ?? true;
       final storePolicies =
@@ -160,6 +161,7 @@ final class LocalPocketDatabaseController extends DatabaseController {
         platform: PlatformProfile.web,
         blobStore: blobStore,
         fieldCipher: fieldCipher,
+        localOnly: localOnly,
         maxDocBytes: maxDocBytes,
         destructiveBackup: destructiveBackup,
         groupCommitWindow: groupCommitWindowMs == null

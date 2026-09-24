@@ -1,4 +1,15 @@
 
+## 0.3.8
+
+- Added: `LocalPocketOptions.localOnly` makes every store in a database
+  local-only; PocketBase sync attachment is rejected and local writes skip
+  sync journal reads and writes. The existing `StoreDef.localOnly` remains
+  available for per-store policy. Both scopes keep attachments local.
+- Added: exported the `FieldCipher` interface so callers can name
+  `EncryptionConfig.fieldCipher`.
+- Docs: clarified that field encryption protects declared columns, not
+  plaintext retained in sync journals.
+
 ## 0.3.7
 
 - Added: `StoreDef.localOnly` keeps record and attachment operations out of

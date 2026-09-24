@@ -206,7 +206,7 @@ class LocalPocketFiles {
       );
     }
     final resolvedField = _fieldFor(store, field);
-    final localOnly = _pocket.tableOrNull(store)?.schema.localOnly ?? false;
+    final journals = _pocket.shouldJournal(store);
     final hash = await bs.put(
       bytes,
       expectedSha256: expectedSha256,
@@ -259,7 +259,7 @@ class LocalPocketFiles {
         limit: 1,
       );
       String? dependsOnOp;
-      if (!localOnly &&
+      if (journals &&
           outboxRows.isNotEmpty &&
           outboxRows.first['base_updated'] == null) {
         dependsOnOp = outboxRows.first['op_id'] as String?;
@@ -289,7 +289,7 @@ class LocalPocketFiles {
           conflictAlgorithm: ConflictAlgorithm.replace);
 
       // 3. Enqueue file_upload in lp_op_queue
-      if (!localOnly) {
+      if (journals) {
         await exec.insert('lp_op_queue', {
           'op_id': generateRecordId(),
           'store': store,
@@ -390,13 +390,13 @@ class LocalPocketFiles {
         ? refs.firstWhere((r) => r.refId == refId,
             orElse: () => throw StateError('FileRef $refId not found'))
         : refs[index];
-    final localOnly = _pocket.tableOrNull(store)?.schema.localOnly ?? false;
+    final journals = _pocket.shouldJournal(store);
 
     await _pocket.transaction((tx) async {
       final exec = tx.executor;
       final now = _pocket.now();
 
-      if (localOnly ||
+      if (!journals ||
           (ref.state == 'pending_upload' && ref.remoteName == null)) {
         // Never uploaded remotely -> vanish immediately: drop the ref,
         // release the blob, and neutralize the pending upload op.
@@ -406,7 +406,7 @@ class LocalPocketFiles {
           'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
           [ref.hash],
         );
-        if (!localOnly) {
+        if (journals) {
           await exec.update(
             'lp_op_queue',
             {'state': 'done'},
@@ -486,12 +486,14 @@ class LocalPocketFiles {
             'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
             [hash],
           );
-          await exec.update(
-            'lp_op_queue',
-            {'state': 'done'},
-            where: 'payload_json LIKE ?',
-            whereArgs: ['%"ref_id":"$refId"%'],
-          );
+          if (_pocket.shouldJournal(store)) {
+            await exec.update(
+              'lp_op_queue',
+              {'state': 'done'},
+              where: 'payload_json LIKE ?',
+              whereArgs: ['%"ref_id":"$refId"%'],
+            );
+          }
           count++;
         }
       }

@@ -45,8 +45,16 @@ final class LocalPocket {
   LocalPocket.internal(
     this._runtime, {
     Iterable<StoreDef<Object?>> stores = const [],
+    bool localOnly = false,
+    String? databaseName,
     Future<void> Function()? onClose,
-  })  : _onClose = onClose,
+  })  : _localOnly = localOnly,
+        _databaseName = databaseName,
+        _localOnlyStores = {
+          for (final store in stores)
+            if (localOnly || store.localOnly) store.name,
+        },
+        _onClose = onClose,
         _decoders = {
           for (final s in stores)
             s.name: s.accept(
@@ -155,6 +163,7 @@ final class LocalPocket {
       stores: schemas,
       fieldCipher: options.encryption?.fieldCipher,
       maxDocBytes: options.maxDocumentBytes,
+      localOnly: options.localOnly,
       // The injected closure wins; [clockOffsetMs] shifts whichever base
       // clock is in effect (injected or system) so the data-style offset
       // behaves identically on native and on the worker runtime.
@@ -169,6 +178,8 @@ final class LocalPocket {
       return LocalPocket.internal(
         createRuntime(db.commands),
         stores: options.stores,
+        localOnly: options.localOnly,
+        databaseName: options.path,
       );
     } catch (e, st) {
       try {
@@ -193,6 +204,9 @@ final class LocalPocket {
   }
 
   final RuntimeClient _runtime;
+  final bool _localOnly;
+  final String? _databaseName;
+  final Set<String> _localOnlyStores;
   final Map<String, Row<dynamic> Function(Map<String, Object?>)> _decoders;
   final Future<void> Function()? _onClose;
   bool _closed = false;
@@ -281,6 +295,18 @@ final class LocalPocket {
   /// throws a [StateError].
   PocketBaseSync attachPocketBaseSync(PocketBaseSyncOptions options) {
     _ensureOpen();
+    if (_localOnly) {
+      final store = _localOnlyStores.isEmpty
+          ? '<no registered stores>'
+          : _localOnlyStores.first;
+      throw ValidationException('Cannot attach PocketBase sync: database '
+          '"${_databaseName ?? '<unknown>'}" is localOnly (store "$store").');
+    }
+    if (_localOnlyStores.isNotEmpty) {
+      final store = _localOnlyStores.first;
+      throw ValidationException(
+          'Cannot attach PocketBase sync: store "$store" is localOnly.');
+    }
     final existing = _syncHost;
     if (existing != null) {
       if (existing.options.baseUrl != options.baseUrl ||

@@ -22,21 +22,6 @@ library;
 // The destination public API: the facade barrel plus the schema declaration
 // layer (typed descriptors ARE the destination schema source).
 export 'src/api/api.dart';
-export 'src/schema/cond.dart';
-export 'src/schema/field_def.dart';
-export 'src/api/limits.dart';
-export 'src/schema/schema_helpers.dart';
-export 'src/schema/store_def.dart';
-export 'src/api/writes.dart';
-
-// The sync attachment surfaces the engine's status/report models through the
-// same import (`PocketBaseSync.status` emits SyncStatus, `syncNow` returns a
-// SyncReport), so the public sync surface is usable from the one barrel. The
-// names are type aliases of the one codec-backed class per concept
-// (`SyncStatusData` / `SyncReportData` in the contract layer).
-export 'src/kernel/sync/status.dart'
-    show SyncEngineState, SyncReport, SyncStatus;
-
 // The blob-store types the facade's file configuration names
 // (`LocalPocketOptions.blobStore`): the platform-neutral interface, the
 // in-memory store that backs demos and tests, and the durable native store the
@@ -47,14 +32,27 @@ export 'src/kernel/sync/status.dart'
 // worker keeps its own OPFS-backed store, and any OTHER caller store still
 // fails the web open typed.
 export 'src/api/blob_store_platform.dart' show NativeBlobStore;
-export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
-
+export 'src/api/limits.dart';
+export 'src/api/writes.dart';
+// The committed-change vocabulary: origins and actions ride the public
+// change/event notifications.
+export 'src/kernel/change_bus.dart' show ChangeAction, ChangeOrigin;
+export 'src/kernel/cipher.dart' show FieldCipher;
 // The Database adapter type `LocalPocketOptions.nativeDatabaseFactory`
 // builds: apps supplying a whole-file-encrypted engine (SQLCipher-style)
 // implement it by wrapping their cipher-enabled `package:sqlite3`
 // connection. The kernel internals behind the adapter stay internal.
 export 'src/kernel/database_adapter.dart' show Database, DirectSqliteDatabase;
-
+// The typed error hierarchy: the public API throws these (Row.get throws
+// FieldNotSelectedError, stale cursors throw StaleCursorError, unsupported
+// schema features throw UnsupportedSchemaFeatureError), so applications must
+// be able to name and catch them from the one import.
+export 'src/kernel/errors.dart';
+export 'src/kernel/files/blob_store.dart' show BlobStore, MemoryBlobStore;
+// The page-callback registry: on the worker runtime, executable schema
+// features (custom resolvers, validators, document migrations, backfill
+// transforms) resolve to these per-store declarations.
+export 'src/kernel/page_callbacks.dart' show PageCallbacks, StorePageCallbacks;
 // The schema helper types store declarations name. The raw schema types
 // (CollectionSchema, Field, ...) are kernel-internal and not exported.
 export 'src/kernel/schema.dart'
@@ -66,7 +64,6 @@ export 'src/kernel/schema.dart'
         IndexSpec,
         MissingRemotePolicy,
         StoreMigration;
-
 // The conflict-resolution vocabulary store declarations name
 // (`StoreDef.conflictPolicy`): the merge context/result a resolver sees,
 // the resolver interface, the five built-in resolvers, and the custom
@@ -88,18 +85,14 @@ export 'src/kernel/sync/merge.dart'
         MergeResult,
         RemoteWinsResolver,
         SetUnionWithDeletionWinsResolver;
-
-// The page-callback registry: on the worker runtime, executable schema
-// features (custom resolvers, validators, document migrations, backfill
-// transforms) resolve to these per-store declarations.
-export 'src/kernel/page_callbacks.dart' show PageCallbacks, StorePageCallbacks;
-
-// The typed error hierarchy: the public API throws these (Row.get throws
-// FieldNotSelectedError, stale cursors throw StaleCursorError, unsupported
-// schema features throw UnsupportedSchemaFeatureError), so applications must
-// be able to name and catch them from the one import.
-export 'src/kernel/errors.dart';
-
-// The committed-change vocabulary: origins and actions ride the public
-// change/event notifications.
-export 'src/kernel/change_bus.dart' show ChangeAction, ChangeOrigin;
+// The sync attachment surfaces the engine's status/report models through the
+// same import (`PocketBaseSync.status` emits SyncStatus, `syncNow` returns a
+// SyncReport), so the public sync surface is usable from the one barrel. The
+// names are type aliases of the one codec-backed class per concept
+// (`SyncStatusData` / `SyncReportData` in the contract layer).
+export 'src/kernel/sync/status.dart'
+    show SyncEngineState, SyncReport, SyncStatus;
+export 'src/schema/cond.dart';
+export 'src/schema/field_def.dart';
+export 'src/schema/schema_helpers.dart';
+export 'src/schema/store_def.dart';

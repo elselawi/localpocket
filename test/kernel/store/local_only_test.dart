@@ -2,8 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:localpocket/src/kernel/change_bus.dart' show ChangeSet;
+import 'package:localpocket/src/kernel/change_bus.dart'
+    show ChangeAction, ChangeSet, RecordChangeEvent;
 import 'package:localpocket/src/kernel/cipher.dart' show AesGcmFieldCipher;
+import 'package:localpocket/src/kernel/database_adapter.dart'
+    show DirectSqliteDatabase;
 import 'package:localpocket/src/kernel/errors.dart' show ValidationException;
 import 'package:localpocket/src/kernel/files/blob_store.dart'
     show MemoryBlobStore;
@@ -14,12 +17,179 @@ import 'package:localpocket/src/kernel/schema.dart'
     show CollectionSchema, Field;
 import 'package:localpocket/src/kernel/sync/sync_tables.dart' show OpQueueKind;
 import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
 
 void main() {
+  test('patch SQL count skips sync bookkeeping only for local-only stores',
+      () async {
+    Future<List<String>> patchStatements({required bool localOnly}) async {
+      final database = DirectSqliteDatabase(sqlite.sqlite3.openInMemory());
+      final statements = <String>[];
+      database.onQuery = (sql, _) => statements.add(sql);
+      database.onExecute = (sql, _) => statements.add(sql);
+      final pocket = await openPocket(
+        database: database,
+        stores: [
+          widgetsSchema(
+            name: 'statement_count',
+            localOnly: localOnly,
+          ),
+        ],
+      );
+      final collection = pocket.collection('statement_count');
+      final id = generateRecordId();
+      await collection.put(record(id: id, name: 'before', qty: 1));
+      statements.clear();
+
+      await collection.patch(id, {'qty': 2});
+      final executed = List<String>.of(statements);
+      await pocket.close();
+      return executed;
+    }
+
+    // Before optimization on 0.3.7 the measured counts were 7 local-only and
+    // 6 normal, including transaction begin and commit.
+    final localStatements = await patchStatements(localOnly: true);
+    final normalStatements = await patchStatements(localOnly: false);
+    expect(localStatements, hasLength(4));
+    expect(
+      localStatements.where(
+          (sql) => sql.contains('lp_sync_row') || sql.contains('lp_outbox')),
+      isEmpty,
+    );
+    expect(normalStatements, hasLength(6));
+    expect(
+      normalStatements.any((sql) => sql.contains('lp_sync_row')),
+      isTrue,
+    );
+  });
+
+  test('patchAll and versioned get skip sync-table probes', () async {
+    final database = DirectSqliteDatabase(sqlite.sqlite3.openInMemory());
+    final statements = <String>[];
+    database.onQuery = (sql, _) => statements.add(sql);
+    database.onExecute = (sql, _) => statements.add(sql);
+    final pocket = await openPocket(
+      database: database,
+      stores: [
+        widgetsSchema(
+          name: 'local_versioned',
+          version: 2,
+          localOnly: true,
+        ),
+      ],
+    );
+    addTearDown(pocket.close);
+    final store = pocket.collection('local_versioned');
+    final firstId = generateRecordId();
+    final secondId = generateRecordId();
+    await store.putAll([
+      record(id: firstId, name: 'first', qty: 1),
+      record(id: secondId, name: 'second', qty: 2),
+    ]);
+
+    statements.clear();
+    await store.patchAll({
+      firstId: {'qty': 3},
+      secondId: {'qty': 4},
+    });
+    expect(
+      statements.where(
+          (sql) => sql.contains('lp_sync_row') || sql.contains('lp_outbox')),
+      isEmpty,
+    );
+
+    statements.clear();
+    expect((await store.get(firstId))?['qty'], 3);
+    expect(statements, hasLength(1));
+    expect(statements.single, isNot(contains('lp_sync_row')));
+  });
+
+  test('local-only explicit purge skips all sync-table statements', () async {
+    final database = DirectSqliteDatabase(sqlite.sqlite3.openInMemory());
+    final statements = <String>[];
+    database.onQuery = (sql, _) => statements.add(sql);
+    database.onExecute = (sql, _) => statements.add(sql);
+    final pocket = await openPocket(
+      database: database,
+      stores: [widgetsSchema(name: 'local_purge', localOnly: true)],
+    );
+    addTearDown(pocket.close);
+    final store = pocket.collection('local_purge');
+    final id = generateRecordId();
+    await store.put(record(id: id, name: 'delete me', qty: 1));
+    statements.clear();
+
+    await store.purge(id);
+
+    expect(
+      statements.where((sql) => sql.contains(RegExp(
+          r'lp_(?:sync_row|outbox|conflicts|op_queue|dead_letter|sync_state)'))),
+      isEmpty,
+    );
+  });
+
+  test('local-only versioned get applies document migrations without sync rows',
+      () async {
+    final pocket = await openPocket(
+      stores: [
+        widgetsSchema(
+          name: 'local_versioned_document',
+          version: 2,
+          localOnly: true,
+          documentMigrations: {
+            2: (document) => {...document, 'migration_ran': true},
+          },
+        ),
+      ],
+    );
+    addTearDown(pocket.close);
+    final store = pocket.collection('local_versioned_document');
+    final id = generateRecordId();
+    await store.put(record(id: id, name: 'current schema', qty: 1));
+
+    final row = await store.get(id);
+    expect(row?['name'], 'current schema');
+    expect(row?['migration_ran'], isTrue);
+  });
+
   group('localOnly record writes', () {
+    test('database localOnly applies to stores without a per-store flag',
+        () async {
+      final pocket = await openPocket(
+        localOnly: true,
+        stores: [
+          widgetsSchema(name: 'database_local_only'),
+          widgetsSchema(name: 'database_local_only_other'),
+        ],
+      );
+      addTearDown(pocket.close);
+      final store = pocket.collection('database_local_only');
+      final otherStore = pocket.collection('database_local_only_other');
+      final id = generateRecordId();
+      final bulkId = generateRecordId();
+      final otherId = generateRecordId();
+
+      await store.putAll([
+        record(id: id, name: 'local', qty: 1),
+        record(id: bulkId, name: 'bulk local', qty: 3),
+      ]);
+      await store.patch(id, {'qty': 2});
+      await store.patchAll({
+        bulkId: {'qty': 4}
+      });
+      await otherStore.put(record(id: otherId, name: 'other', qty: 5));
+
+      expect((await store.get(id))?['qty'], 2);
+      expect((await store.get(bulkId))?['qty'], 4);
+      expect((await otherStore.get(otherId))?['qty'], 5);
+      await _expectEmptyJournals(pocket, 'database_local_only');
+      await _expectEmptyJournals(pocket, 'database_local_only_other');
+    });
+
     test('put and patch keep encrypted values out of every database file',
         () async {
       const firstSecret = 'local-only-original-secret-1a2b3c';
@@ -142,8 +312,17 @@ void main() {
       final changes = <ChangeSet>[];
       final subscription = pocket.changes.listen(changes.add);
       addTearDown(subscription.cancel);
+      final recordEvents = <RecordChangeEvent>[];
+      final recordSubscription = pocket.changeBus.events
+          .where((event) => event.store == 'local_everything')
+          .listen(recordEvents.add);
+      addTearDown(recordSubscription.cancel);
       final id = generateRecordId();
       final store = pocket.collection('local_everything');
+      final watchSnapshots = <List<String>>[];
+      final watchSubscription = store.query().limit(10).watch().listen((rows) =>
+          watchSnapshots.add([for (final row in rows) row['id'] as String]));
+      addTearDown(watchSubscription.cancel);
 
       await store.put(_record(id, secret));
       await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -161,20 +340,30 @@ void main() {
       expect(row['tags'], ['local-only', 'round-trip']);
       expect(row['owner_id'], 'owner-$id');
       expect(row['token'], secret);
+      expect(watchSnapshots.any((ids) => ids.contains(id)), isTrue);
       expect(
         changes.any((change) =>
             change.store == 'local_everything' && change.ids.contains(id)),
         isTrue,
       );
+
+      await store.patch(id, {'qty': 8});
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect((await store.get(id))?['qty'], 8);
+      final updateEvent = recordEvents
+          .singleWhere((event) => event.action == ChangeAction.update);
+      expect(updateEvent.changedFields, {'qty'});
       await _expectEmptyJournals(pocket, 'local_everything');
 
       await store.archive(id);
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(await store.get(id), isNull);
+      expect(watchSnapshots.last, isEmpty);
+      expect(recordEvents.last.action, ChangeAction.purge);
       expect(
         changes.where((change) =>
             change.store == 'local_everything' && change.ids.contains(id)),
-        hasLength(2),
+        hasLength(3),
       );
       await _expectEmptyJournals(pocket, 'local_everything');
     });
@@ -183,8 +372,9 @@ void main() {
         () async {
       final blobStore = MemoryBlobStore();
       final pocket = await openPocket(
-        stores: [widgetsSchema(name: 'local_files', localOnly: true)],
+        stores: [widgetsSchema(name: 'local_files')],
         blobStore: blobStore,
+        localOnly: true,
       );
       addTearDown(pocket.close);
       final id = generateRecordId();
@@ -209,6 +399,8 @@ void main() {
       }
       expect(bytes, [65, 66, 67]);
       expect(await _countRows(pocket, 'lp_op_queue', 'local_files'), 0);
+      expect(await pocket.opQueue.drain(store: 'local_files'), isEmpty);
+      expect(await pocket.outbox.drain(store: 'local_files'), isEmpty);
       expect(
         () => pocket.opQueue.enqueue(
           store: 'local_files',

@@ -1103,8 +1103,13 @@ class KernelCommandHandler implements CommandHandler {
     if (baseUrl.isEmpty) {
       throw ValidationException('syncStart requires baseUrl.');
     }
+    if (!context.database.shouldJournal(null)) {
+      throw ValidationException(
+          'Cannot start PocketBase sync: database "${context.database.path}" '
+          'is localOnly.');
+    }
     for (final store in context.database.storeNames) {
-      if (context.database.requireTable(store).schema.localOnly) {
+      if (!context.database.shouldJournal(store)) {
         throw ValidationException(
             'Cannot start PocketBase sync: store "$store" is localOnly.');
       }

@@ -227,6 +227,7 @@ class KernelDatabase with ChangeBusAwareLP {
     required this.capabilities,
     required this.maxDocBytes,
     required this.destructiveBackup,
+    required this.localOnly,
     required this.now,
     this.testHooks,
     this.blobStore,
@@ -317,6 +318,9 @@ class KernelDatabase with ChangeBusAwareLP {
 
   /// Whether destructive migrations may create their backup copy.
   final bool destructiveBackup;
+
+  /// Whether the whole database is local-only, regardless of store schema.
+  final bool localOnly;
 
   /// The adapter-supplied sync backend factory, or null when no sync adapter
   /// is configured (sync start commands fail typed). Depends only on the
@@ -416,6 +420,7 @@ class KernelDatabase with ChangeBusAwareLP {
     CryptoProvider? cryptoProvider,
     int maxDocBytes = 1900000,
     bool destructiveBackup = true,
+    bool localOnly = false,
     TestHooks? testHooks,
     BlobStore? blobStore,
     int Function()? now,
@@ -446,6 +451,7 @@ class KernelDatabase with ChangeBusAwareLP {
         capabilities: caps,
         maxDocBytes: maxDocBytes,
         destructiveBackup: destructiveBackup,
+        localOnly: localOnly,
         now: now ?? _defaultNow,
         testHooks: testHooks,
         blobStore: blobStore,
@@ -513,6 +519,11 @@ class KernelDatabase with ChangeBusAwareLP {
 
   /// Returns the registered table for [name], or `null` when it is unknown.
   StoreTable? tableOrNull(String name) => _tables[name];
+
+  /// Whether sync journals should be written for [store]. Passing `null`
+  /// checks only the database-wide policy.
+  bool shouldJournal(String? store) =>
+      !localOnly && (store == null || _tables[store]?.schema.localOnly != true);
 
   /// Names of all registered collections.
   ///

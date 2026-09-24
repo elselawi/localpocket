@@ -27,7 +27,7 @@ class OpQueue {
     required Map<String, Object?> payload,
     String? dependsOnOp,
   }) {
-    if (pocket.tableOrNull(store)?.schema.localOnly == true) {
+    if (!pocket.shouldJournal(store)) {
       throw ValidationException(
           'Cannot enqueue sync work for localOnly store "$store".');
     }
@@ -49,6 +49,8 @@ class OpQueue {
   /// Retryable `failed` ops whose `next_retry_at` passed are selected too,
   /// so a transiently-failed op is retried with backoff, never lost.
   Future<List<OpQueueRow>> drain({String? store, int limit = 25}) async {
+    if (store != null && !pocket.shouldJournal(store)) return const [];
+    if (store == null && !pocket.shouldJournal(null)) return const [];
     final now = pocket.now();
     final rows = await pocket.db.query('lp_op_queue',
         where: "state IN ('pending','failed') AND next_retry_at <= ?"

@@ -271,8 +271,9 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   FutureOr<List<String>> Function(Map<String, Object?> record)? get validator =>
       null;
 
-  /// Whether this store is never synchronized. Its record and attachment
-  /// payloads stay local and are not written to sync journals.
+  /// Whether this store is never synchronized. Record payloads are not written
+  /// to sync journals, and attachment bytes stay in the local BlobStore without
+  /// upload or removal operations being queued.
   bool get localOnly => false;
 
   /// Whether archived records that were never synced stay archived locally
