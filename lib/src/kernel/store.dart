@@ -958,24 +958,26 @@ class Collection with ChangeBusAwareStore {
             archived: logical['archived'] == true,
             cipher: _pocket.fieldCipher,
             cryptoProvider: _pocket.cryptoProvider);
-        final opId = _pocket.outbox.generateOpId();
-        appendOutboxValues(outboxVals,
-            store: name,
-            recordId: rid,
-            kind: OutboxKind.upsert,
-            payloadJson: payloadJson,
-            dirtyFieldsJson: kAllDirtyFieldsJson,
-            opId: opId,
-            createdAt: now,
-            updatedAt: now);
-        appendSyncRowValues(syncVals,
-            store: name,
-            recordId: rid,
-            syncState: SyncState.dirty,
-            dirtyFieldsJson: kAllDirtyFieldsJson,
-            localRev: 1,
-            opId: opId,
-            schemaVer: schema.version);
+        if (!schema.localOnly) {
+          final opId = _pocket.outbox.generateOpId();
+          appendOutboxValues(outboxVals,
+              store: name,
+              recordId: rid,
+              kind: OutboxKind.upsert,
+              payloadJson: payloadJson,
+              dirtyFieldsJson: kAllDirtyFieldsJson,
+              opId: opId,
+              createdAt: now,
+              updatedAt: now);
+          appendSyncRowValues(syncVals,
+              store: name,
+              recordId: rid,
+              syncState: SyncState.dirty,
+              dirtyFieldsJson: kAllDirtyFieldsJson,
+              localRev: 1,
+              opId: opId,
+              schemaVer: schema.version);
+        }
         allLogicals?.add((rid, logical));
       }
       var domainDone = false;
@@ -986,15 +988,17 @@ class Collection with ChangeBusAwareStore {
                 '$domainSqlPrefix${valuesTemplate(domainCols.length, chunkLen)}')
             .execute(domainVals);
         domainDone = true;
-        db
-            .getPreparedStatement(
-                '$outboxSqlPrefix${valuesTemplate(outboxColumns.length, chunkLen)}')
-            .execute(outboxVals);
-        outboxDone = true;
-        db
-            .getPreparedStatement(
-                '$syncSqlPrefix${valuesTemplate(syncRowColumns.length, chunkLen)}')
-            .execute(syncVals);
+        if (!schema.localOnly) {
+          db
+              .getPreparedStatement(
+                  '$outboxSqlPrefix${valuesTemplate(outboxColumns.length, chunkLen)}')
+              .execute(outboxVals);
+          outboxDone = true;
+          db
+              .getPreparedStatement(
+                  '$syncSqlPrefix${valuesTemplate(syncRowColumns.length, chunkLen)}')
+              .execute(syncVals);
+        }
       } on SqliteException {
         // Remove exactly what this attempt inserted (prior chunks plus the
         // tables that landed before the failure); the conflicting pre-existing
@@ -1057,26 +1061,30 @@ class Collection with ChangeBusAwareStore {
       cipher: _pocket.fieldCipher,
       cryptoProvider: _pocket.cryptoProvider,
     );
-    final opId = _pocket.outbox.generateOpId();
-    final outboxRow = buildOutboxRow(
-      store: name,
-      recordId: rid,
-      kind: OutboxKind.upsert,
-      payloadJson: payloadJson,
-      dirtyFieldsJson: kAllDirtyFieldsJson,
-      opId: opId,
-      createdAt: now,
-      updatedAt: now,
-    );
-    final syncRow = buildSyncRow(
-      store: name,
-      recordId: rid,
-      syncState: SyncState.dirty,
-      dirtyFieldsJson: kAllDirtyFieldsJson,
-      localRev: 1,
-      opId: opId,
-      schemaVer: schema.version,
-    );
+    final opId = schema.localOnly ? null : _pocket.outbox.generateOpId();
+    final outboxRow = opId == null
+        ? null
+        : buildOutboxRow(
+            store: name,
+            recordId: rid,
+            kind: OutboxKind.upsert,
+            payloadJson: payloadJson,
+            dirtyFieldsJson: kAllDirtyFieldsJson,
+            opId: opId,
+            createdAt: now,
+            updatedAt: now,
+          );
+    final syncRow = opId == null
+        ? null
+        : buildSyncRow(
+            store: name,
+            recordId: rid,
+            syncState: SyncState.dirty,
+            dirtyFieldsJson: kAllDirtyFieldsJson,
+            localRev: 1,
+            opId: opId,
+            schemaVer: schema.version,
+          );
     var domainDone = false;
     var outboxDone = false;
     try {
@@ -1087,23 +1095,27 @@ class Collection with ChangeBusAwareStore {
             'INSERT INTO "${_table.tableName}" ($cols) VALUES ($ph)';
         db.getPreparedStatement(domainSql).execute(row.values.toList());
         domainDone = true;
-        db
-            .getPreparedStatement('INSERT INTO lp_outbox '
-                '(${quotedColumnList(outboxColumns)}) '
-                'VALUES (${placeholders(outboxColumns.length)})')
-            .execute(rowValuesInOrder(outboxRow, outboxColumns));
-        outboxDone = true;
-        db
-            .getPreparedStatement('INSERT INTO lp_sync_row '
-                '(${quotedColumnList(syncRowColumns)}) '
-                'VALUES (${placeholders(syncRowColumns.length)})')
-            .execute(rowValuesInOrder(syncRow, syncRowColumns));
+        if (opId != null) {
+          db
+              .getPreparedStatement('INSERT INTO lp_outbox '
+                  '(${quotedColumnList(outboxColumns)}) '
+                  'VALUES (${placeholders(outboxColumns.length)})')
+              .execute(rowValuesInOrder(outboxRow!, outboxColumns));
+          outboxDone = true;
+          db
+              .getPreparedStatement('INSERT INTO lp_sync_row '
+                  '(${quotedColumnList(syncRowColumns)}) '
+                  'VALUES (${placeholders(syncRowColumns.length)})')
+              .execute(rowValuesInOrder(syncRow!, syncRowColumns));
+        }
       } else {
         await exec.insert(_table.tableName, row);
         domainDone = true;
-        await exec.insert('lp_outbox', outboxRow);
-        outboxDone = true;
-        await exec.insert('lp_sync_row', syncRow);
+        if (opId != null) {
+          await exec.insert('lp_outbox', outboxRow!);
+          outboxDone = true;
+          await exec.insert('lp_sync_row', syncRow!);
+        }
       }
     } catch (e) {
       if (domainDone) {
@@ -1125,11 +1137,13 @@ class Collection with ChangeBusAwareStore {
     if (ids.isEmpty) return;
     final ph = List.filled(ids.length, '?').join(', ');
     await exec.delete(_table.tableName, where: 'id IN ($ph)', whereArgs: ids);
-    final args = [name, ...ids];
-    await exec.delete('lp_outbox',
-        where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
-    await exec.delete('lp_sync_row',
-        where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+    if (!_schema.localOnly) {
+      final args = [name, ...ids];
+      await exec.delete('lp_outbox',
+          where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+      await exec.delete('lp_sync_row',
+          where: 'store = ? AND record_id IN ($ph)', whereArgs: args);
+    }
   }
 
   Map<String, Object?> _logicalFromRecord(

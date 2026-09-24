@@ -5,8 +5,10 @@
 library;
 
 import 'dart:convert';
+import 'dart:developer' as developer;
 
-import 'package:collection/collection.dart' show ListEquality;
+import 'package:collection/collection.dart'
+    show DeepCollectionEquality, ListEquality;
 
 import 'capabilities.dart' show PlatformProfile;
 import 'database_adapter.dart' show DirectSqliteDatabase;
@@ -20,9 +22,9 @@ import 'errors.dart'
         UnsupportedSchemaFeatureError;
 import 'fts_normalizer.dart';
 import 'kernel_context.dart';
-import 'page_callbacks.dart' show executableFeaturesSupported;
 import 'local_pocket.dart' show StoreTable;
 import 'migrator.dart';
+import 'page_callbacks.dart' show executableFeaturesSupported;
 import 'schema.dart';
 import 'schema_manifest.dart';
 
@@ -118,6 +120,36 @@ class SchemaService {
     // Persist the manifest so the NEXT open can compare behavior, not just
     // version numbers.
     await _persistSchemaManifest(schema.name, manifest);
+    if (schema.localOnly) await _purgeLocalOnlyJournals(schema.name);
+  }
+
+  Future<void> _purgeLocalOnlyJournals(String store) async {
+    final (outbox, syncRows, conflicts, deadLetters, fileOps, cursors) =
+        await context.database.transaction((tx) async {
+      final exec = tx.executor;
+      return (
+        await exec.delete('lp_outbox', where: 'store = ?', whereArgs: [store]),
+        await exec
+            .delete('lp_sync_row', where: 'store = ?', whereArgs: [store]),
+        await exec
+            .delete('lp_conflicts', where: 'store = ?', whereArgs: [store]),
+        await exec
+            .delete('lp_dead_letter', where: 'store = ?', whereArgs: [store]),
+        await exec
+            .delete('lp_op_queue', where: 'store = ?', whereArgs: [store]),
+        await exec
+            .delete('lp_sync_state', where: 'store = ?', whereArgs: [store]),
+      );
+    });
+    if (outbox + syncRows + conflicts + deadLetters + fileOps + cursors > 0) {
+      developer.log(
+        'Purged local-only journals for "$store": '
+        '$outbox outbox, $syncRows sync, $conflicts conflict, '
+        '$deadLetters dead-letter, $fileOps file operations, '
+        '$cursors cursors.',
+        name: 'localpocket.schema',
+      );
+    }
   }
 
   /// The persisted manifest key for [store].
@@ -142,6 +174,14 @@ class SchemaService {
     }
     if (persisted.version != schema.version) return; // version change: legal
     if (persisted.fingerprint != manifest.fingerprint) {
+      final oldDefinition = Map<String, Object?>.of(persisted.definition)
+        ..remove('localOnly');
+      final newDefinition = Map<String, Object?>.of(manifest.definition)
+        ..remove('localOnly');
+      if (schema.localOnly &&
+          const DeepCollectionEquality().equals(oldDefinition, newDefinition)) {
+        return;
+      }
       throw SchemaRegistrationError(
           'Store "${schema.name}" changed behavior at the SAME schema '
           'version ${schema.version}. Bump the store version and provide a '

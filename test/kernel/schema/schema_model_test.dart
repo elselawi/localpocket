@@ -115,6 +115,7 @@ void main() {
     test('round-trips name, version, fields, indexes, keepUnsyncedArchives',
         () {
       final schema = widgetsSchema(
+        localOnly: true,
         keepUnsyncedArchives: true,
         indexes: const [
           IndexSpec(['name', 'qty']),
@@ -138,6 +139,7 @@ void main() {
       expect(rt.indexes, hasLength(3));
       expect(rt.indexes[1].unique, isTrue);
       expect(rt.indexes[2].scope, IndexScope.notArchived);
+      expect(rt.localOnly, isTrue);
       expect(rt.keepUnsyncedArchives, isTrue);
     });
 
@@ -150,6 +152,7 @@ void main() {
           IndexSpec(['title'])
         ],
         conflictPolicy: const ConflictPolicy(editsUnarchive: true),
+        localOnly: true,
         prefetchFiles: true,
         keepUnsyncedArchives: true,
         fts: const FtsSpec(['title']),
@@ -164,6 +167,7 @@ void main() {
       expect(json['version'], 3);
       expect(json.containsKey('fields'), isTrue);
       expect(json.containsKey('indexes'), isTrue);
+      expect(json['localOnly'], true);
       expect(json['keepUnsyncedArchives'], true);
       // `fts` is plain data (a list of field names) and IS serialized so FTS
       // stores can cross the web worker boundary (§ Task 3).
@@ -182,6 +186,18 @@ void main() {
       expect(json['prefetchFiles'], true,
           reason: 'prefetchFiles is a plain bool and IS serialized so the '
               'file-lane prefetch policy crosses the web worker boundary');
+      final defaultSchema = CollectionSchema<Object?>(
+        name: 'defaults',
+        version: 1,
+        fields: [Field.text('title')],
+      );
+      expect(defaultSchema.localOnly, isFalse);
+      expect(defaultSchema.toJson().containsKey('localOnly'), isFalse,
+          reason: 'default schemas keep their legacy JSON bytes');
+      expect(
+        CollectionSchema<Object?>.fromJson(defaultSchema.toJson()).localOnly,
+        isFalse,
+      );
       expect(json.containsKey('conflictPolicy'), isFalse);
       expect(json.containsKey('documentMigrations'), isFalse);
       expect(json.containsKey('validator'), isFalse);

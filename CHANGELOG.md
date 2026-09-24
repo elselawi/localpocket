@@ -1,3 +1,13 @@
+
+## 0.3.7
+
+- Added: `StoreDef.localOnly` keeps record and attachment operations out of
+  sync journals. Enabling it on an existing database purges stale sync
+  bookkeeping while preserving local records; database-wide PocketBase sync
+  is rejected with the store name.
+- Docs: clarified that field encryption does not cover sync journals and that
+  retained conflict/dead-letter payloads can outlive a successful push.
+
 ## 0.3.6
 
 - Changed: `Store.changes` is now identity-stable for the lifetime of its

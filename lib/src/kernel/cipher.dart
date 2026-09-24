@@ -1,9 +1,21 @@
 /// Field-level encryption and cipher abstractions.
 ///
 /// ## Threat model
-/// Field-level encryption protects values **at rest** (inside the SQLite file
-/// or its backups) against a casual reader who can open the raw database file.
-/// It is *not* full-database encryption: schema, row ids, `extra` JSON keys,
+/// Field-level encryption protects the value stored in its declared SQLite
+/// column; it does not encrypt plaintext copies in sync journals. A synced
+/// mutation can also place its logical JSON in `lp_outbox` and, while dirty,
+/// `lp_sync_row.base_json`. A permanent push failure retains its operation
+/// payload in `lp_dead_letter` until the dead-letter retention cleanup; an
+/// unresolved conflict can retain local/base JSON in `lp_conflicts`. These
+/// copies remain plaintext while their journal rows exist. A successful push
+/// clears its outbox/base, but an older dead-letter can remain after a later
+/// successful push until maintenance removes it. Therefore an encrypted field
+/// is the only copy of its value for a `localOnly` store, or for a synced store
+/// after settlement when no retained conflict/dead-letter contains it.
+/// Local-only attachment bytes remain in the local BlobStore and do not get an
+/// `lp_op_queue` entry.
+///
+/// This is *not* full-database encryption: schema, row ids, `extra` JSON keys,
 /// and the set of encrypted fields remain visible. On native it does not
 /// defend against a local attacker who can read the process's memory (the key
 /// must be supplied by the app on every open).

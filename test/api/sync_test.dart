@@ -1,13 +1,14 @@
 import 'dart:async';
 
-import 'package:localpocket/src/api/api.dart';
+import 'package:localpocket/localpocket.dart' show FieldDef, StoreDef;
 import 'package:localpocket/src/adapters/pocketbase/backend.dart'
     show PocketBaseSyncBackendFactory;
+import 'package:localpocket/src/api/api.dart';
 import 'package:localpocket/src/kernel/errors.dart' show ValidationException;
 import 'package:test/test.dart';
 
-import '../support/mock_pb_server.dart';
 import '../support/fixtures/tasks_store.dart';
+import '../support/mock_pb_server.dart';
 
 class _FakeTokens implements TokenProvider {
   _FakeTokens(this._value);
@@ -18,6 +19,19 @@ class _FakeTokens implements TokenProvider {
   Future<Token> refreshToken(Token current) async => Token(_value);
   @override
   String get identity => 'sync-test';
+}
+
+final class LocalVault extends StoreDef<LocalVault> {
+  LocalVault._() : super(name: 'local_vault', version: 1);
+  static final LocalVault store = LocalVault._();
+
+  static final token = store.schema.text('token');
+
+  @override
+  List<FieldDef<LocalVault, Object?>> get fields => [token];
+
+  @override
+  bool get localOnly => true;
 }
 
 /// The PocketBase sync attachment on the destination facade over the direct
@@ -105,6 +119,30 @@ void main() {
         sync.start(),
         throwsA(isA<ValidationException>().having((e) => e.message, 'message',
             contains('requires a stable per-account identity'))),
+      );
+      expect(sync.isRunning, isFalse);
+    });
+
+    test('a localOnly StoreDef rejects sync start with its store name',
+        () async {
+      final db = await LocalPocket.open(LocalPocketOptions(
+        path: ':memory:',
+        stores: [LocalVault.store],
+      ));
+      addTearDown(db.close);
+      final sync = db.attachPocketBaseSync(PocketBaseSyncOptions(
+        baseUrl: Uri.parse('http://127.0.0.1:8099'),
+        tokenProvider: _FakeTokens('jwt'),
+        identity: 'local-only-test',
+      ));
+
+      await expectLater(
+        sync.start(),
+        throwsA(isA<ValidationException>().having(
+          (error) => error.message,
+          'message',
+          allOf(contains('local_vault'), contains('localOnly')),
+        )),
       );
       expect(sync.isRunning, isFalse);
     });

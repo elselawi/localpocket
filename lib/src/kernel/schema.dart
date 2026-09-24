@@ -695,6 +695,7 @@ class CollectionSchema<T> {
     required this.fields,
     this.indexes = const [],
     this.conflictPolicy = const ConflictPolicy(),
+    this.localOnly = false,
     this.prefetchFiles = false,
     this.keepUnsyncedArchives = true,
     this.fts,
@@ -719,6 +720,7 @@ class CollectionSchema<T> {
             for (final ix in (j['indexes']! as List))
               IndexSpec.fromJson(ix as Map<String, Object?>),
           ],
+          localOnly: j['localOnly'] == true,
           keepUnsyncedArchives: j['keepUnsyncedArchives'] == true,
           prefetchFiles: j['prefetchFiles'] == true,
           attachmentField: j['attachmentField'] is String
@@ -748,6 +750,9 @@ class CollectionSchema<T> {
 
   /// Conflict resolution policy for this collection.
   final ConflictPolicy conflictPolicy;
+
+  /// Whether this store is never synchronized or journaled.
+  final bool localOnly;
 
   /// Whether remote file references should be prefetched.
   final bool prefetchFiles;
@@ -803,6 +808,7 @@ class CollectionSchema<T> {
         'version': version,
         'fields': [for (final f in fields) f.toJson()],
         'indexes': [for (final ix in indexes) ix.toJson()],
+        if (localOnly) 'localOnly': true,
         'keepUnsyncedArchives': keepUnsyncedArchives,
         'prefetchFiles': prefetchFiles,
         if (attachmentField != null) 'attachmentField': attachmentField,

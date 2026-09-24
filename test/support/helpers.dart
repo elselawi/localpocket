@@ -39,6 +39,7 @@ CollectionSchema<Object?> widgetsSchema({
     IndexSpec(['name', 'qty'])
   ],
   List<StoreMigration> migrations = const [],
+  bool localOnly = false,
   bool keepUnsyncedArchives = false,
   Map<int, DocumentMigration>? documentMigrations,
   FtsSpec? fts,
@@ -62,6 +63,7 @@ CollectionSchema<Object?> widgetsSchema({
       ],
       indexes: indexes,
       migrations: migrations,
+      localOnly: localOnly,
       keepUnsyncedArchives: keepUnsyncedArchives,
       documentMigrations: documentMigrations ?? const {},
       fts: fts,

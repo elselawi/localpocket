@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import '../../kernel/local_pocket.dart';
+import '../errors.dart';
 import 'sync_tables.dart';
 
 /// {@template localpocket.op_queue}
@@ -25,19 +26,24 @@ class OpQueue {
     required OpQueueKind kind,
     required Map<String, Object?> payload,
     String? dependsOnOp,
-  }) =>
-      pocket.transaction((tx) async {
-        await tx.executor.insert('lp_op_queue', {
-          'op_id': _newOpId(),
-          'store': store,
-          'record_id': recordId,
-          'kind': kind.name,
-          'payload_json': jsonEncode(payload),
-          'state': 'pending',
-          'depends_on_op': dependsOnOp,
-          'created_at': pocket.now(),
-        });
+  }) {
+    if (pocket.tableOrNull(store)?.schema.localOnly == true) {
+      throw ValidationException(
+          'Cannot enqueue sync work for localOnly store "$store".');
+    }
+    return pocket.transaction((tx) async {
+      await tx.executor.insert('lp_op_queue', {
+        'op_id': _newOpId(),
+        'store': store,
+        'record_id': recordId,
+        'kind': kind.name,
+        'payload_json': jsonEncode(payload),
+        'state': 'pending',
+        'depends_on_op': dependsOnOp,
+        'created_at': pocket.now(),
       });
+    });
+  }
 
   /// Returns ops ready to run, FIFO by seq, skipping blocked ones.
   /// Retryable `failed` ops whose `next_retry_at` passed are selected too,

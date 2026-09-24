@@ -693,6 +693,7 @@ lib/src/schema/store_def.dart::StoreDef.ftsSpec
 lib/src/schema/store_def.dart::StoreDef.indexSpec
 lib/src/schema/store_def.dart::StoreDef.indexes
 lib/src/schema/store_def.dart::StoreDef.keepUnsyncedArchives
+lib/src/schema/store_def.dart::StoreDef.localOnly
 lib/src/schema/store_def.dart::StoreDef.migrations
 lib/src/schema/store_def.dart::StoreDef.prefetchFiles
 lib/src/schema/store_def.dart::StoreDef.validator

@@ -28,6 +28,29 @@ void main() {
       expect(result, {'ok': true});
     });
 
+    test('localOnly survives the schema in the worker open envelope', () async {
+      final h = await WorkerHarness.open();
+      addTearDown(h.close);
+      final schema = CollectionSchema<Object?>(
+        name: 'local_vault',
+        version: 1,
+        fields: [Field.text('token')],
+        localOnly: true,
+      );
+      final wireSchema = schema.toJson();
+      expect(wireSchema['localOnly'], isTrue);
+
+      final result = await h.sendOk(h.req(WireOp.open, args: {
+        'stores': [wireSchema],
+        'manifestFingerprints': {
+          schema.name: SchemaManifest.compile(schema).fingerprint,
+        },
+      }));
+
+      expect(result, {'ok': true});
+      expect(h.pocket.requireTable(schema.name).schema.localOnly, isTrue);
+    });
+
     test('a page fingerprint mismatch fails before any registration', () async {
       final h = await WorkerHarness.open();
       addTearDown(h.close);

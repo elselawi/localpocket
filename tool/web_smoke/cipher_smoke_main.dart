@@ -36,6 +36,20 @@ final class Vault extends StoreDef<Vault> {
 
   @override
   FtsSpec? get fts => null;
+
+  @override
+  bool get localOnly => true;
+}
+
+final class _SmokeTokens implements TokenProvider {
+  @override
+  Future<Token> currentToken() async => Token('cipher-smoke-token');
+
+  @override
+  Future<Token> refreshToken(Token current) async => current;
+
+  @override
+  String get identity => 'cipher-smoke';
 }
 
 Future<void> main() async {
@@ -98,6 +112,25 @@ Future<void> main() async {
     final meta = doc(Vault.meta);
     if (meta == null || meta['heartRate'] != 72 || meta['bp'] != '120/80') {
       throw StateError('Encrypted JSON field mismatch: $meta');
+    }
+
+    // The schema flag must cross the open envelope: only the worker can
+    // produce this typed store-specific rejection on the web path.
+    mark('local-only-sync-guard');
+    final sync = pocket.attachPocketBaseSync(PocketBaseSyncOptions(
+      baseUrl: Uri.parse('http://127.0.0.1:1'),
+      tokenProvider: _SmokeTokens(),
+      identity: 'cipher-smoke',
+    ));
+    var syncRejected = false;
+    try {
+      await sync.start();
+    } on ValidationException catch (error) {
+      syncRejected = error.message.contains('vault') &&
+          error.message.contains('localOnly');
+    }
+    if (!syncRejected) {
+      throw StateError('Worker did not reject sync for localOnly store vault.');
     }
     await pocket.close();
     // Let the OPFS storage lock settle before reopening the same path; the

@@ -84,7 +84,9 @@ final class PocketBaseSync {
       .map((event) {});
 
   /// Starts the sync engine (and its realtime connection). Idempotent and
-  /// restartable: calling it again after [stop] re-opens fresh streams.
+  /// restartable: calling it again after [stop] re-opens fresh streams. A
+  /// database-wide sync start fails with a typed validation error naming any
+  /// registered `localOnly` store.
   Future<void> start() async {
     if (_started) return;
     final token = await _options.tokenProvider.currentToken();

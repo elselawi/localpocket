@@ -3,8 +3,9 @@ import 'package:localpocket/src/kernel/errors.dart';
 import 'package:localpocket/src/kernel/hashing.dart';
 import 'package:localpocket/src/kernel/ids.dart';
 import 'package:localpocket/src/kernel/schema.dart';
-import 'package:localpocket/src/kernel/sync/merge.dart';
 import 'package:localpocket/src/kernel/schema_manifest.dart';
+import 'package:localpocket/src/kernel/sync/merge.dart';
+import 'package:localpocket/src/kernel/sync/sync_tables.dart' show OpQueueKind;
 import 'package:test/test.dart';
 
 import '../../support/helpers.dart';
@@ -142,6 +143,61 @@ void main() {
       final p2 = await openPocket(path: db.path, stores: [schema]);
       addTearDown(p2.close);
       expect((await p2.collection('stable').get(id))?['name'], 'row');
+    });
+
+    test('same-version localOnly opt-in purges previous sync journals',
+        () async {
+      final db = await tempDbPath();
+      addTearDown(db.cleanup);
+
+      final before = await openPocket(
+        path: db.path,
+        stores: [widgetsSchema(name: 'private_notes')],
+      );
+      final id = generateRecordId();
+      await before
+          .collection('private_notes')
+          .put(record(id: id, name: 'kept locally', qty: 1));
+      await before.outbox.markDeadLetter(
+        store: 'private_notes',
+        id: id,
+        kind: 'validation_push',
+        error: 'legacy failure',
+        payloadJson: '{"token":"legacy-dead-letter-secret"}',
+      );
+      await before.opQueue.enqueue(
+        store: 'private_notes',
+        recordId: id,
+        kind: OpQueueKind.fileUpload,
+        payload: const {'token': 'legacy-file-operation-secret'},
+      );
+      await before.db.insert('lp_sync_state', {
+        'scope': 'legacy-scope',
+        'store': 'private_notes',
+      });
+      await before.close();
+
+      final after = await openPocket(
+        path: db.path,
+        stores: [widgetsSchema(name: 'private_notes', localOnly: true)],
+      );
+      addTearDown(after.close);
+
+      expect((await after.collection('private_notes').get(id))?['name'],
+          'kept locally');
+      for (final table in [
+        'lp_outbox',
+        'lp_sync_row',
+        'lp_conflicts',
+        'lp_dead_letter',
+        'lp_op_queue',
+        'lp_sync_state',
+      ]) {
+        final rows = await after.db.rawQuery(
+            'SELECT COUNT(*) AS c FROM $table WHERE store = ?',
+            ['private_notes']);
+        expect(firstInt(rows), 0, reason: '$table must be purged on open');
+      }
     });
 
     test('a version BUMP with an additive migration is accepted', () async {

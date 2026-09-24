@@ -271,6 +271,10 @@ abstract base class StoreDef<S extends StoreDef<S>> {
   FutureOr<List<String>> Function(Map<String, Object?> record)? get validator =>
       null;
 
+  /// Whether this store is never synchronized. Its record and attachment
+  /// payloads stay local and are not written to sync journals.
+  bool get localOnly => false;
+
   /// Whether archived records that were never synced stay archived locally
   /// (soft archive) instead of vanishing on [Collection.archive].
   ///
@@ -348,6 +352,7 @@ abstract base class StoreDef<S extends StoreDef<S>> {
       migrations: migrations,
       documentMigrations: documentMigrations,
       validator: validator,
+      localOnly: localOnly,
       keepUnsyncedArchives: keepUnsyncedArchives,
       prefetchFiles: prefetchFiles,
       attachmentField: attachmentField,

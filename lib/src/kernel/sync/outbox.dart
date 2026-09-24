@@ -165,6 +165,11 @@ class Outbox {
     final store = table.schema.name;
     final schema = table.schema;
 
+    assert(!schema.localOnly || syncRow == null,
+        'Local-only store "$store" must not have a sync row.');
+    assert(!schema.localOnly || outboxOp == null,
+        'Local-only store "$store" must not have an outbox operation.');
+
     // A conflict blocks local edits until resolved.
     if (syncRow != null && syncRow.syncState == SyncState.conflict) {
       throw ConflictBlockedError(
@@ -181,7 +186,12 @@ class Outbox {
     var opKind = outboxOp?.kind;
     bool vanish = false;
 
-    if (outboxOp == null) {
+    if (schema.localOnly) {
+      vanish = action == MutationAction.archive &&
+          oldRow != null &&
+          (base == null || base.baseUpdated == null) &&
+          !schema.keepUnsyncedArchives;
+    } else if (outboxOp == null) {
       // A fresh op. With a captured base this is an update-path op whose kind
       // reflects the intent; without a base (never remote) it is a create.
       opKind = switch (action) {
@@ -226,13 +236,19 @@ class Outbox {
 
     if (vanish) {
       // Vanish rule: never existed remotely → no network op at all.
-      await exec.delete('lp_outbox',
-          where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
-      await exec.delete('lp_sync_row',
-          where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+      if (!schema.localOnly) {
+        await exec.delete('lp_outbox',
+            where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+        await exec.delete('lp_sync_row',
+            where: 'store = ? AND record_id = ?', whereArgs: [store, id]);
+      }
       await _vanishFileRefs(exec, store, id);
       await exec.delete(table.tableName, where: 'id = ?', whereArgs: [id]);
       return const LocalWriteResult(vanished: true);
+    }
+
+    if (schema.localOnly) {
+      return const LocalWriteResult(vanished: false);
     }
 
     final now = pocket.now();

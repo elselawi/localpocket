@@ -118,6 +118,7 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
         for (final m in s.migrations)
           if (m.transform != null) m.toVersion,
       ]..sort(),
+      'localOnly': s.localOnly,
       'keepUnsyncedArchives': s.keepUnsyncedArchives,
     };
   }
@@ -162,6 +163,7 @@ mixin WorkerCrudHandlers on WorkerEngineHost {
       'documentMigrationVersions': versions,
       'hasTransform': transforms.isNotEmpty,
       'transformVersions': transforms,
+      'localOnly': rawSchema.localOnly,
       'keepUnsyncedArchives': rawSchema.keepUnsyncedArchives,
     };
   }

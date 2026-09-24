@@ -178,7 +178,9 @@ class LocalPocketFiles {
   ///
   /// The input stream is hashed and stored in the BlobStore, then a durable
   /// file ref (`pending_upload`) and a `file_upload` op are created; the op
-  /// depends on the record's create op so the record syncs first.
+  /// depends on the record's create op so the record syncs first. On a
+  /// `localOnly` store, the bytes stay in local blob storage and no op is
+  /// queued.
   ///
   /// Throws a [StateError] before any bytes are stored when the blob store is
   /// volatile ([isBlobStorageDurable] is `false`) unless [allowVolatileBlobs]
@@ -204,6 +206,7 @@ class LocalPocketFiles {
       );
     }
     final resolvedField = _fieldFor(store, field);
+    final localOnly = _pocket.tableOrNull(store)?.schema.localOnly ?? false;
     final hash = await bs.put(
       bytes,
       expectedSha256: expectedSha256,
@@ -256,7 +259,9 @@ class LocalPocketFiles {
         limit: 1,
       );
       String? dependsOnOp;
-      if (outboxRows.isNotEmpty && outboxRows.first['base_updated'] == null) {
+      if (!localOnly &&
+          outboxRows.isNotEmpty &&
+          outboxRows.first['base_updated'] == null) {
         dependsOnOp = outboxRows.first['op_id'] as String?;
       }
 
@@ -284,21 +289,23 @@ class LocalPocketFiles {
           conflictAlgorithm: ConflictAlgorithm.replace);
 
       // 3. Enqueue file_upload in lp_op_queue
-      await exec.insert('lp_op_queue', {
-        'op_id': generateRecordId(),
-        'store': store,
-        'record_id': recordId,
-        'kind': OpQueueKind.fileUpload.name,
-        'payload_json': jsonEncode({
-          'ref_id': refId,
-          'field': resolvedField,
-          'hash': hash,
-          'name': name ?? '$hash.bin',
-        }),
-        'state': 'pending',
-        'depends_on_op': dependsOnOp,
-        'created_at': now,
-      });
+      if (!localOnly) {
+        await exec.insert('lp_op_queue', {
+          'op_id': generateRecordId(),
+          'store': store,
+          'record_id': recordId,
+          'kind': OpQueueKind.fileUpload.name,
+          'payload_json': jsonEncode({
+            'ref_id': refId,
+            'field': resolvedField,
+            'hash': hash,
+            'name': name ?? '$hash.bin',
+          }),
+          'state': 'pending',
+          'depends_on_op': dependsOnOp,
+          'created_at': now,
+        });
+      }
 
       tx.addChange(ChangeSet(store, {recordId}));
 
@@ -383,12 +390,14 @@ class LocalPocketFiles {
         ? refs.firstWhere((r) => r.refId == refId,
             orElse: () => throw StateError('FileRef $refId not found'))
         : refs[index];
+    final localOnly = _pocket.tableOrNull(store)?.schema.localOnly ?? false;
 
     await _pocket.transaction((tx) async {
       final exec = tx.executor;
       final now = _pocket.now();
 
-      if (ref.state == 'pending_upload' && ref.remoteName == null) {
+      if (localOnly ||
+          (ref.state == 'pending_upload' && ref.remoteName == null)) {
         // Never uploaded remotely -> vanish immediately: drop the ref,
         // release the blob, and neutralize the pending upload op.
         await exec.delete('lp_file_refs',
@@ -397,12 +406,17 @@ class LocalPocketFiles {
           'UPDATE lp_blobs SET refcount = MAX(refcount - 1, 0) WHERE hash = ?',
           [ref.hash],
         );
-        await exec.update(
-          'lp_op_queue',
-          {'state': 'done'},
-          where: 'kind = ? AND payload_json LIKE ?',
-          whereArgs: [OpQueueKind.fileUpload.name, '%"ref_id":"${ref.refId}"%'],
-        );
+        if (!localOnly) {
+          await exec.update(
+            'lp_op_queue',
+            {'state': 'done'},
+            where: 'kind = ? AND payload_json LIKE ?',
+            whereArgs: [
+              OpQueueKind.fileUpload.name,
+              '%"ref_id":"${ref.refId}"%'
+            ],
+          );
+        }
       } else {
         // Mark pending_remove and queue file_remove
         await exec.update(

@@ -635,6 +635,7 @@ CollectionSchema<Object?> attachStorePolicy(
     fields: schema.fields,
     indexes: schema.indexes,
     conflictPolicy: policy,
+    localOnly: schema.localOnly,
     prefetchFiles: schema.prefetchFiles,
     keepUnsyncedArchives: schema.keepUnsyncedArchives,
     fts: schema.fts,
